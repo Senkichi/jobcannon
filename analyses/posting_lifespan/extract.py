@@ -6,7 +6,7 @@ censored = 'live'. 'inconclusive'/NULL are excluded from the primary estimate
 and available as a censored robustness variant.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlite3 import Connection
 
 import pandas as pd
@@ -47,8 +47,21 @@ EXCLUSION_SQLS = {
 }
 
 
+def _parse_utc_naive(value: str) -> datetime:
+    """Parse an ISO timestamp, normalizing to naive UTC.
+
+    The corpus convention is naive-UTC-only, but a small share of rows carry
+    a UTC offset from a historical write-path bug (docs: store-UTC-render-local
+    invariant). Normalize instead of raising on aware/naive subtraction.
+    """
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
 def _duration_days(first_seen: str, last_seen: str) -> float:
-    delta = datetime.fromisoformat(last_seen) - datetime.fromisoformat(first_seen)
+    delta = _parse_utc_naive(last_seen) - _parse_utc_naive(first_seen)
     return delta.total_seconds() / 86400.0
 
 

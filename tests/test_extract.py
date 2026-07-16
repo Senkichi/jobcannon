@@ -79,6 +79,26 @@ def test_inconclusive_as_censored_variant(tmp_path):
     assert c["observed"].tolist() == [0]
 
 
+def test_mixed_tz_aware_naive_timestamps(tmp_path):
+    # Live corpus has a small number of rows where one of first_seen/last_seen
+    # carries a UTC offset (historical write-path bug) while its pair is naive.
+    # Must normalize instead of raising on aware-vs-naive subtraction.
+    jobs = [
+        {
+            "dedup_key": "g",
+            "company_id": 1,
+            "first_seen": "2026-06-01T00:00:00",
+            "last_seen": "2026-06-08T00:00:00+00:00",
+            "expiry_status": "expired",
+        },
+    ]
+    con = open_readonly(build_fixture_db(tmp_path / "g.db", jobs, COMPANIES))
+    df = load_lifespan_records(con)
+    assert len(df) == 1
+    assert df["duration_days"].tolist() == [7.0]
+    assert df["observed"].tolist() == [1]
+
+
 def test_exclusion_counts(tmp_path):
     counts = load_exclusion_counts(_con(tmp_path))
     assert counts["total"] == 6
