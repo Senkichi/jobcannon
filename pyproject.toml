@@ -26,6 +26,7 @@ dev = [
     "matplotlib>=3.9",
     "lifelines>=0.29",
     "tabulate>=0.9",
+    "jsonschema>=4.0.0",
 ]
 
 [tool.ruff]
