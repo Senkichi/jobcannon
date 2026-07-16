@@ -53,7 +53,9 @@ def normalize_iso_string_to_naive_utc(value: str) -> str:
     """
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, AttributeError):
+        # AttributeError: a None (or other non-str) slipping through must
+        # follow the same pass-through contract, not crash the write path.
         return value
     if dt.tzinfo is None:
         return value

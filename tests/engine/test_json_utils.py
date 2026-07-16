@@ -244,3 +244,9 @@ class TestNormalizeIsoStringToNaiveUtc:
 
     def test_empty_string_passed_through_unchanged(self):
         assert normalize_iso_string_to_naive_utc("") == ""
+
+    def test_none_passed_through_unchanged(self):
+        # Adversarial-review finding on #1229: None must follow the same
+        # pass-through contract (AttributeError caught), not crash the
+        # write path.
+        assert normalize_iso_string_to_naive_utc(None) is None  # type: ignore[arg-type]
