@@ -1,11 +1,9 @@
 """v3.0 ordinal scoring — JobAssessment dataclass + Python-derived classification rule.
 
-Pure rule logic. No DB side-effects. Persistence lives in `_persistence.py`,
-which imports `derive_classification` from this module.
-
-Re-exported via `job_finder.db.__init__` so existing
-`from jobcannon.engine.classification import JobAssessment` / `derive_classification` paths
-continue to work.
+Pure rule logic. No DB side-effects. In the private repo this module lived at
+`job_finder/db/_classification.py` and was re-exported via `job_finder/db/__init__.py`
+for callers that persist assessments; here it is the canonical home, imported
+directly as `jobcannon.engine.classification`.
 """
 
 from __future__ import annotations

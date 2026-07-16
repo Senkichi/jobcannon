@@ -12,7 +12,8 @@ architecture (tracking issue #393). It owns:
 
 Design constraints (binding — see #393):
 
-  * **No imports from ``job_finder.web``.** This module is a leaf dependency that the
+  * **Engine-pure: no imports from any host layer** (enforced by
+    ``tests/engine/test_boundary.py``). This module is a leaf dependency that the
     capture sites (ATS scanners, SERP/feed sources, email parsers) and the existing
     ``salary_extractor`` will delegate to in sibling PRs (#380, #382, #383). It must
     stay importable without pulling in Flask/app state.

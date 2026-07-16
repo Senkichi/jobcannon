@@ -16,6 +16,8 @@ Tests:
 - safe_json_load returns default for malformed JSON
 - safe_json_load default parameter defaults to None
 - safe_json_load caller-supplied default is returned on failure
+- normalize_iso_string_to_naive_utc strips +00:00 / Z / negative-offset suffixes
+- normalize_iso_string_to_naive_utc passes naive and unparseable strings through unchanged
 """
 
 from datetime import datetime
@@ -25,6 +27,7 @@ import pytest
 from jobcannon.engine.json_utils import (
     local_day_utc_window,
     local_today,
+    normalize_iso_string_to_naive_utc,
     safe_json_load,
     utc_now_iso,
 )
@@ -210,3 +213,34 @@ class TestSafeJsonLoad:
     def test_custom_default_integer(self):
         result = safe_json_load(None, default=0)
         assert result == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: normalize_iso_string_to_naive_utc
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeIsoStringToNaiveUtc:
+    def test_strips_utc_offset_suffix(self):
+        assert (
+            normalize_iso_string_to_naive_utc("2026-04-29T08:37:13.924049+00:00")
+            == "2026-04-29T08:37:13.924049"
+        )
+
+    def test_strips_z_suffix(self):
+        assert normalize_iso_string_to_naive_utc("2026-04-09T12:00:00Z") == "2026-04-09T12:00:00"
+
+    def test_converts_negative_offset_to_utc(self):
+        # -08:00 means local clock = UTC - 8h, so UTC = local + 8h
+        assert (
+            normalize_iso_string_to_naive_utc("2026-04-09T12:00:00-08:00") == "2026-04-09T20:00:00"
+        )
+
+    def test_naive_string_passed_through_unchanged(self):
+        assert normalize_iso_string_to_naive_utc("2026-04-09T12:00:00") == "2026-04-09T12:00:00"
+
+    def test_unparseable_string_passed_through_unchanged(self):
+        assert normalize_iso_string_to_naive_utc("not-a-date") == "not-a-date"
+
+    def test_empty_string_passed_through_unchanged(self):
+        assert normalize_iso_string_to_naive_utc("") == ""

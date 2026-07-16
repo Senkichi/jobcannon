@@ -1,8 +1,9 @@
 """Foundation-layer normalization utilities for job dedup keys.
 
-Contains pure normalization functions (no web-layer dependencies) that can be
+Contains pure normalization functions (no host-layer dependencies) that can be
 imported by both jobcannon.engine.models and jobcannon.engine.dedup_normalizer without
-creating an upward dependency from the foundation layer into the web layer.
+creating an upward dependency out of the engine purity boundary (enforced by
+tests/engine/test_boundary.py).
 """
 
 import html
@@ -384,7 +385,8 @@ def derive_dedup_key(company: str, title: str) -> str:
 # THIS job?). Extracted to the foundation layer so the two contracts share ONE
 # stopword set + tokenizer instead of each carrying a private copy (the exact
 # copy-paste the field-contract work is trying to eliminate). Pure functions,
-# no web/db dependency — safe to import from either layer.
+# no host-layer dependency — safe to import from anywhere inside the engine
+# purity boundary.
 # ---------------------------------------------------------------------------
 
 #: Generic title words that carry no matching signal (seniority / level / format).

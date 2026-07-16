@@ -1,4 +1,4 @@
-"""JSON deserialization utilities shared across persistence and web layers."""
+"""JSON deserialization utilities shared across every host layer."""
 
 import json
 import logging
@@ -30,6 +30,34 @@ def to_naive_utc_iso(dt: datetime) -> str:
     if dt.tzinfo is not None:
         dt = dt.astimezone(UTC).replace(tzinfo=None)
     return dt.isoformat()
+
+
+def normalize_iso_string_to_naive_utc(value: str) -> str:
+    """Normalize an ISO 8601 timestamp *string* to naive-UTC storage format.
+
+    Companion to ``to_naive_utc_iso`` for write paths that already hold a
+    stringified timestamp (e.g. a liveness-check ``checked_at`` value
+    threaded through several callers) rather than a ``datetime`` object.
+    tz-aware strings (trailing ``Z`` or an explicit ``+HH:MM`` / ``-HH:MM``
+    offset) are parsed, converted to UTC, and re-serialized without the
+    offset — the same guarantee ``to_naive_utc_iso`` gives datetime callers
+    (#1226: a pre-#361 caller once fed an aware string into
+    ``persist_job_expiry_state``, and since ``expiry_checked_at`` is copied
+    into ``last_seen`` on a 'live' verdict, that leaked the aware suffix
+    into a store-UTC-naive column).
+
+    Naive strings pass through unchanged. Unparseable values also pass
+    through unchanged — this is a write-boundary normalizer, not a
+    validator, so a malformed string still reaches storage as-is for the
+    caller to debug rather than silently vanishing.
+    """
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return value
+    if dt.tzinfo is None:
+        return value
+    return dt.astimezone(UTC).replace(tzinfo=None).isoformat()
 
 
 def local_today() -> str:

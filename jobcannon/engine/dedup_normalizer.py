@@ -34,15 +34,15 @@ def normalize_company(company: str) -> str:
     """Normalize a company name for dedup key generation.
 
     Thin delegating wrapper around ``jobcannon.engine.normalizers.normalize_company``,
-    the single source of truth for company normalization. The web layer cannot
-    be imported by the foundation layer, but it CAN import from it, so the merge
-    engine (``run_retroactive_dedup`` / ``derive_dedup_key``) computes the exact
-    same key as ``Job.dedup_key`` and the upsert path. This eliminates the
-    pre-existing drift where the web copy skipped HTML-entity decode, HTML-tag
-    strip, leading-numeric-junk strip, and internal whitespace collapse — a
-    latent dedup-correctness hole (architectural-debt-B, canonical-field
-    ownership). See the cross-copy parity assertions in
-    tests/test_dedup_normalizer.py.
+    the single source of truth for company normalization. Both modules live inside
+    the engine purity boundary (``tests/engine/test_boundary.py``), so
+    ``derive_dedup_key`` here computes the exact same key as ``Job.dedup_key`` and
+    the upsert path. This eliminates the pre-existing drift where this module's
+    earlier standalone copy skipped HTML-entity decode, HTML-tag strip,
+    leading-numeric-junk strip, and internal whitespace collapse — a latent
+    dedup-correctness hole (architectural-debt-B, canonical-field ownership). See
+    the cross-copy parity assertions in the private repo's
+    tests/test_dedup_normalizer.py (ported subset: tests/engine/test_dedup_normalizer.py).
 
     Args:
         company: Raw company name string.
@@ -63,10 +63,9 @@ def normalize_title(title: str) -> str:
     ``normalize_company`` above. Previously this was a byte-for-byte COPY of the
     foundation implementation (guarded only by a parity test); delegating closes
     the drift window where a future edit to one copy would silently change
-    dedup_key derivation in only one path. The foundation layer cannot import
-    web, but web CAN import foundation, so the merge engine
-    (``run_retroactive_dedup`` / ``derive_dedup_key``) computes the exact same
-    key as ``Job.dedup_key`` and the upsert path.
+    dedup_key derivation in only one path. Both modules live inside the engine
+    purity boundary (``tests/engine/test_boundary.py``), so ``derive_dedup_key``
+    here computes the exact same key as ``Job.dedup_key`` and the upsert path.
 
     Args:
         title: Raw job title string.
@@ -80,11 +79,11 @@ def normalize_title(title: str) -> str:
 
 
 def derive_dedup_key(company: str, title: str) -> str:
-    """Derive the current-version dedup_key using the web-layer normalizers.
+    """Derive the current-version dedup_key using this module's delegating normalizers.
 
-    Web-layer twin of ``jobcannon.engine.normalizers.derive_dedup_key``. Both
+    Sibling of ``jobcannon.engine.normalizers.derive_dedup_key``. Both
     ``normalize_company`` and ``normalize_title`` now delegate directly to the
-    foundation copies (the single source of truth), so the merge engine produces
+    foundation copies (the single source of truth), so this function produces
     the same key as ``Job.dedup_key`` and the upsert path. See D-8 and
     ``NORMALIZER_VERSION`` in ``jobcannon.engine.normalizers``.
 
