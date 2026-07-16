@@ -9,7 +9,14 @@ description = "Job Cannon - the honest job feed. Public-track repo."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-dependencies = []
+dependencies = [
+    "beautifulsoup4>=4.12",
+    "requests>=2.31",
+    "pycountry>=24.0",
+    "geonamescache>=2.0",
+    "markupsafe>=2.1",
+    "trafilatura>=2.0,<3",
+]
 
 [dependency-groups]
 dev = [
@@ -26,3 +33,6 @@ line-length = 100
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["jobcannon"]
