@@ -1,4 +1,5 @@
-"""Tests for job_finder/constants.py.
+"""Tests for jobcannon.engine.constants, ported from the private repo's
+tests/test_constants.py.
 
 Verifies that pipeline status constants are internally consistent and conform
 to the conventions relied upon by validation logic throughout the codebase.

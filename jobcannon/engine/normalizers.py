@@ -23,10 +23,13 @@ import re
 # algorithm (#212/#238 added the digit<->letter boundary split at line ~249).
 #
 # BUMP THIS whenever normalize_company / normalize_title semantics change so
-# that the same (company, title) could map to a different dedup_key. Bumping it
-# re-arms the standing re-key operation (`_run_rekey_if_stale` in
-# job_finder/web/migrations/_post_hooks.py), which re-derives every row's key
-# under the new version on next startup. The canary test in
+# that the same (company, title) could map to a different dedup_key. In the
+# private source repo, bumping it re-arms a standing startup hook
+# (`_run_rekey_if_stale` in job_finder/web/migrations/_post_hooks.py) that
+# re-derives every stored row's key under the new version. jobcannon ships no
+# such hook — it is a pure library with no persistence of its own — so an
+# embedding host that persists dedup keys is responsible for re-deriving them
+# on a version bump. The canary test in the private repo's
 # tests/test_dedup_normalizer.py fails loudly ("normalizer semantics changed --
 # bump NORMALIZER_VERSION") if the functions drift without a bump — this is the
 # enforcement that #238's once-ever-sentinel gap can never recur.

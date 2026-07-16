@@ -1,5 +1,6 @@
 """Engine purity guard: jobcannon.* must be host-agnostic."""
 
+import ast
 import pathlib
 import re
 
@@ -37,45 +38,184 @@ def test_every_engine_module_imports():
     assert not failures, "engine modules failed to import:\n" + "\n".join(failures)
 
 
-# jobcannon.engine, optionally followed by more dotted segments, with a word
-# boundary right after "engine" so "jobcannon.engineFoo" (a different,
-# hypothetical top-level name) can never be mistaken for a match.
-_JOBCANNON_ENGINE_IMPORT = re.compile(
-    r"^\s*(?:"
-    r"from\s+(jobcannon\.engine\b(?:\.\w+)*)\s+import\b"
-    r"|"
-    r"import\s+(jobcannon\.engine\b(?:\.\w+)*)\b"
-    r")",
-    re.M,
-)
+# ---------------------------------------------------------------------------
+# Static any-indentation phantom-import/-name scan
+# ---------------------------------------------------------------------------
+#
+# test_every_engine_module_imports above only executes module-LEVEL code: it
+# cannot see a phantom jobcannon.engine.* reference inside a function body or
+# an `if TYPE_CHECKING:` block, because those statements are never reached by
+# a bare `import_module()` call. The scan below parses every file under
+# jobcannon/ with `ast` (so it sees import statements at ANY nesting depth —
+# function bodies, conditionals, TYPE_CHECKING guards — without ever
+# executing them) and resolves every jobcannon.engine-referencing import
+# against the filesystem:
+#
+#   * `import jobcannon.engine.foo.bar [as x]` — the dotted module path must
+#     resolve to a real module file or package.
+#   * `from jobcannon.engine.foo import a, b as c` — the module path must
+#     resolve, AND when it resolves to a PACKAGE, each imported NAME (the
+#     original name, not its `as` alias) must resolve to one of: a submodule
+#     file, a subpackage, or a top-level symbol actually defined/assigned/
+#     imported in the package's __init__.py (parsed with `ast`, never
+#     imported/executed). When the module resolves to a plain module FILE
+#     (not a package), imported names are NOT individually verified — that
+#     would require parsing arbitrary top-level statements in every engine
+#     module, which is out of scope here (documented residual limit).
+#
+# `from jobcannon.engine.foo import *` cannot be resolved statically (its
+# exported names depend on executing the module), so rather than silently
+# skip it this scanner treats any star-import under jobcannon/ as an
+# offender in its own right — i.e. it asserts one never appears.
+#
+# Everything below is derived from the filesystem/AST at test time; nothing
+# is hardcoded.
 
 
-def _resolves_to_real_module(dotted: str, repo_root: pathlib.Path) -> bool:
-    """True if *dotted* (e.g. 'jobcannon.engine.foo.bar') exists on disk as
-    either a module file ('foo/bar.py') or a package ('foo/bar/__init__.py')."""
-    candidate = repo_root.joinpath(*dotted.split("."))
-    return candidate.with_suffix(".py").is_file() or (candidate / "__init__.py").is_file()
+def _resolve_import_target(dotted: str, root: pathlib.Path) -> tuple[str, pathlib.Path | None]:
+    """Resolve a dotted module path against *root*.
+
+    Returns ("module", path) for a plain .py file, ("package", init_path) for
+    a package directory, or ("missing", None) if neither exists.
+    """
+    candidate = root.joinpath(*dotted.split("."))
+    module_file = candidate.with_suffix(".py")
+    if module_file.is_file():
+        return "module", module_file
+    init_file = candidate / "__init__.py"
+    if init_file.is_file():
+        return "package", init_file
+    return "missing", None
+
+
+def _package_top_level_symbols(init_py: pathlib.Path) -> set[str]:
+    """Parse a package's __init__.py with `ast` (never imported/executed) and
+    return every name it defines, assigns, or imports at module top level."""
+    tree = ast.parse(init_py.read_text(encoding="utf-8"), filename=str(init_py))
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+                elif isinstance(target, ast.Tuple | ast.List):
+                    names.update(elt.id for elt in target.elts if isinstance(elt, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+        elif isinstance(node, ast.Import):
+            names.update((alias.asname or alias.name).split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            names.update(alias.asname or alias.name for alias in node.names if alias.name != "*")
+    return names
+
+
+def _is_engine_ref(dotted: str | None) -> bool:
+    return dotted is not None and (
+        dotted == "jobcannon.engine" or dotted.startswith("jobcannon.engine.")
+    )
+
+
+def _scan_file_for_phantom_imports(py_path: pathlib.Path, root: pathlib.Path) -> list[str]:
+    """Return offender strings for phantom jobcannon.engine references in
+    *py_path*, resolved against *root*. See module comment above for the
+    exact forms this catches and its documented residual limit."""
+    tree = ast.parse(py_path.read_text(encoding="utf-8"), filename=str(py_path))
+    rel = py_path.relative_to(root)
+    offenders: list[str] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if not _is_engine_ref(alias.name):
+                    continue
+                kind, _ = _resolve_import_target(alias.name, root)
+                if kind == "missing":
+                    offenders.append(f"{rel}:{node.lineno}: import {alias.name} -> no such module")
+
+        elif isinstance(node, ast.ImportFrom):
+            if node.level or not _is_engine_ref(node.module):
+                continue  # relative import, or not a jobcannon.engine reference
+            kind, target = _resolve_import_target(node.module, root)
+            if kind == "missing":
+                offenders.append(
+                    f"{rel}:{node.lineno}: from {node.module} import ... -> no such module"
+                )
+                continue
+            for alias in node.names:
+                if alias.name == "*":
+                    offenders.append(
+                        f"{rel}:{node.lineno}: from {node.module} import * -> star-imports are "
+                        "not statically resolvable; not allowed under jobcannon/"
+                    )
+                    continue
+                if kind == "module":
+                    continue  # plain module file: name-level check out of scope, see module comment
+                sub_kind, _ = _resolve_import_target(f"{node.module}.{alias.name}", root)
+                if sub_kind != "missing":
+                    continue  # submodule or subpackage of the target package
+                if alias.name in _package_top_level_symbols(target):
+                    continue  # defined/assigned/imported at __init__.py top level
+                offenders.append(
+                    f"{rel}:{node.lineno}: from {node.module} import {alias.name} -> "
+                    "no such submodule, subpackage, or __init__.py symbol"
+                )
+    return offenders
 
 
 def test_no_phantom_jobcannon_engine_imports_at_any_indentation():
-    """Static-scan phantom-module guard covering what importlib can't see.
+    """Static-scan phantom-module/-name guard covering what importlib can't see.
 
-    test_every_engine_module_imports above only executes module-level code:
-    it cannot detect a phantom jobcannon.engine.* path minted by the blanket
-    rewrite inside a function body or an `if TYPE_CHECKING:` block, because
-    those statements are never reached by a bare `import_module()` call. This
-    scan instead greps every from/import statement referencing the
-    jobcannon.engine namespace at ANY indentation and resolves each dotted
-    path against the filesystem directly — no hardcoded module list, so it
-    stays correct as modules are added or removed.
+    See the module comment above _resolve_import_target for the exact forms
+    covered and the documented residual limit (module-file targets don't get
+    per-name validation).
     """
     pkg = REPO_ROOT / "jobcannon"
     offenders = []
     for py in sorted(pkg.rglob("*.py")):
-        text = py.read_text(encoding="utf-8")
-        for match in _JOBCANNON_ENGINE_IMPORT.finditer(text):
-            dotted = match.group(1) or match.group(2)
-            if not _resolves_to_real_module(dotted, REPO_ROOT):
-                rel = py.relative_to(REPO_ROOT)
-                offenders.append(f"{rel}: {match.group(0).strip()!r} -> no such module {dotted!r}")
+        offenders.extend(_scan_file_for_phantom_imports(py, REPO_ROOT))
     assert not offenders, "phantom jobcannon.engine imports:\n" + "\n".join(offenders)
+
+
+def test_phantom_import_scanner_catches_synthetic_name_gap(tmp_path):
+    """Negative self-test for the gap this scanner exists to close: a
+    `from jobcannon.engine import nonexistent_name` inside a function body,
+    where jobcannon.engine resolves via its own (here, empty) __init__.py so
+    the OLD module-path-only check would have passed it silently."""
+    engine_dir = tmp_path / "jobcannon" / "engine"
+    engine_dir.mkdir(parents=True)
+    (tmp_path / "jobcannon" / "__init__.py").write_text("", encoding="utf-8")
+    (engine_dir / "__init__.py").write_text("", encoding="utf-8")
+    (engine_dir / "real_module.py").write_text("REAL = 1\n", encoding="utf-8")
+
+    caller = engine_dir / "caller.py"
+    caller.write_text(
+        "def f():\n"
+        "    from jobcannon.engine import nonexistent_name\n"
+        "    return nonexistent_name\n",
+        encoding="utf-8",
+    )
+
+    offenders = _scan_file_for_phantom_imports(caller, tmp_path)
+    assert any("nonexistent_name" in o for o in offenders), offenders
+
+
+def test_phantom_import_scanner_accepts_real_submodule_and_init_symbol(tmp_path):
+    """Companion positive case: a real submodule name, an aliased real
+    submodule name, and a name actually defined in __init__.py must all be
+    accepted — the scanner must not false-positive on legitimate imports."""
+    engine_dir = tmp_path / "jobcannon" / "engine"
+    engine_dir.mkdir(parents=True)
+    (tmp_path / "jobcannon" / "__init__.py").write_text("", encoding="utf-8")
+    (engine_dir / "__init__.py").write_text("EXPORTED = 1\n", encoding="utf-8")
+    (engine_dir / "real_module.py").write_text("REAL = 1\n", encoding="utf-8")
+
+    caller = engine_dir / "caller.py"
+    caller.write_text(
+        "if True:\n    from jobcannon.engine import real_module as rm, EXPORTED\n",
+        encoding="utf-8",
+    )
+
+    offenders = _scan_file_for_phantom_imports(caller, tmp_path)
+    assert offenders == []
