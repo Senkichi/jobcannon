@@ -16,6 +16,12 @@ dependencies = [
     "geonamescache>=2.0",
     "markupsafe>=2.1",
     "trafilatura>=2.0,<3",
+    "defusedxml>=0.7,<0.8",
+]
+
+[project.optional-dependencies]
+playwright = [
+    "playwright>=1.40",
 ]
 
 [dependency-groups]
