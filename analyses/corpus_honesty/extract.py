@@ -74,8 +74,10 @@ import pandas as pd
 #     f"portal_{name}" - a structural convention, not an enumerated list, so
 #     a new portal fetcher is picked up automatically.
 #   AGGREGATOR_EXTRA_LABELS: search-engine-mediated aggregator sources with
-#     no "portal_" prefix (job_finder/sources/dataforseo_source.py,
-#     serpapi_source.py, google_cse_source.py), plus "thordata" - a scraping
+#     no "portal_" prefix (job_finder/sources/dataforseo_source.py writes
+#     source="dataforseo"; serpapi_source.py writes source="serpapi";
+#     google_cse_source.py is NOT here - it writes source="portal_serp_cse",
+#     caught by the prefix rule), plus "thordata" - a scraping
 #     source whose module was deleted from the private pipeline (see that
 #     repo's project memory: "Thordata DELETED"); the tag survives only on
 #     legacy rows ingested before removal and is kept here so those rows
@@ -144,9 +146,7 @@ EMAIL_ALERT_LABELS: frozenset[str] = frozenset(
 DIRECT_CRAWL_LABELS: frozenset[str] = frozenset({"careers_crawl", "careers_page"})
 
 AGGREGATOR_PREFIX = "portal_"
-AGGREGATOR_EXTRA_LABELS: frozenset[str] = frozenset(
-    {"dataforseo", "serpapi", "google_cse", "thordata"}
-)
+AGGREGATOR_EXTRA_LABELS: frozenset[str] = frozenset({"dataforseo", "serpapi", "thordata"})
 
 META_LABELS: frozenset[str] = frozenset({"manual", "off_platform_email", "primary_source_llm"})
 
