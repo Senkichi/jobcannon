@@ -12,6 +12,20 @@ GOOD_JD = (
     "experience with batch and streaming systems at scale."
 )
 
+# >=200 chars (clears the I-13 density gate) but shares ZERO content stems
+# with "Staff Data Engineer" — trips the I-17 title-zero-overlap signal
+# (jd_content_reject's title cross-field reject) instead of I-13. Verified
+# via a REPL check: _is_jd_junk(...) is False, jd_content_reject(..., "Staff
+# Data Engineer") returns ("jd_full_offsite", "title_zero_overlap").
+TITLE_ZERO_OVERLAP_JD = (
+    "We regret to inform you that this job posting is no longer available. "
+    "The hiring team has closed this requisition after filling the role "
+    "with a strong internal candidate last month. Please check back for "
+    "future openings that may match your interests and background, and "
+    "thank you for your continued interest in joining our growing team "
+    "here at the company over the next several quarters ahead."
+)
+
 
 @pytest.fixture()
 def posting(db_conn):
@@ -56,3 +70,22 @@ def test_rejects_empty(db_conn, posting):
 
     assert set_jd_full(_svc_conn(db_conn), posting, "", source="test") is False
     assert set_jd_full(_svc_conn(db_conn), posting, None, source="test") is False
+
+
+def test_rejects_title_zero_overlap_content(db_conn, posting):
+    """I-17 content-contract rejection (jd_content_reject), distinct from
+    the I-13 short-junk gate covered by test_rejects_short_junk above."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    result = set_jd_full(
+        _svc_conn(db_conn),
+        posting,
+        TITLE_ZERO_OVERLAP_JD,
+        source="test",
+        title="Staff Data Engineer",
+    )
+    assert result is False
+    row = db_conn.execute(
+        "SELECT jd_full FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["jd_full"] is None

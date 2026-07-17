@@ -35,6 +35,12 @@ MIGRATION = Migration(
             CHECK (ats_probe_status <> 'hit' OR (ats_platform IS NOT NULL AND ats_slug IS NOT NULL))
         )
         """,
+        # Case-insensitive uniqueness guard (Wave-1 scope; full name
+        # normalization + denylist identity work is Phase-2 — see
+        # _companies.py module docstring). Coexists with the plain
+        # UNIQUE(name) above: an exact-case duplicate violates both, a
+        # case-variant duplicate ('Acme' vs 'ACME') violates only this one.
+        "CREATE UNIQUE INDEX companies_name_ci_uq ON companies (lower(name))",
         """
         CREATE TABLE postings (
             id                        bigserial PRIMARY KEY,

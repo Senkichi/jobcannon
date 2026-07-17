@@ -64,9 +64,10 @@ def get_pool() -> ConnectionPool:
 class EngineCompatConnection:
     """sqlite3.Connection-shaped facade over a pooled psycopg connection.
 
-    ONLY the surface engine code actually uses: execute / commit / rollback /
-    close (close is a no-op — pool owns the lifecycle). Host code should use
-    the raw psycopg connection (`.raw`) and psycopg placeholders.
+    ONLY the surface engine code actually uses: execute / executemany /
+    commit / rollback / close (close is a no-op — pool owns the lifecycle).
+    Host code should use the raw psycopg connection (`.raw`) and psycopg
+    placeholders.
     """
 
     def __init__(self, conn: psycopg.Connection):
@@ -74,6 +75,11 @@ class EngineCompatConnection:
 
     def execute(self, sql: str, params: Any = ()) -> psycopg.Cursor:
         return self.raw.execute(engine_sql_to_host(sql), params)
+
+    def executemany(self, sql: str, params_seq: Any) -> None:
+        # psycopg.Connection has no executemany shorthand (only Cursor does),
+        # unlike its execute() shorthand used above — route through a cursor.
+        self.raw.cursor().executemany(engine_sql_to_host(sql), params_seq)
 
     def commit(self) -> None:
         self.raw.commit()

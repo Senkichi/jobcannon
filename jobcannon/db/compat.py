@@ -15,9 +15,32 @@ Table rewrite: the engine's inline SQL (verified 2026-07-17) addresses a
                 ats_refreshed_at) WHERE dedup_key = ?
 but the hosted schema's postings table is named `postings` (m0001). All four
 sites are covered by a single (FROM|UPDATE|INTO|JOIN) jobs -> postings
-rewrite; no other engine-authored SQL diverges from Postgres dialect once the
-table name and qmark placeholders are translated (verified empirically via
-the Step 11 contract test driving _upsert_one_ats_api_job end to end).
+rewrite.
+
+KNOWN-UNSUPPORTED (Wave-2 / scan-orchestration PR work — recorded here so
+this shim's coverage claim stays honest). qmark translation and the table
+rewrite make engine SQL *parse* against Postgres, but the following engine
+surfaces are NOT yet runnable on the hosted schema even after translation,
+because they depend on SQLite-only functions or on columns m0001 does not
+carry:
+  (a) `run_ats_scan`'s eligibility clauses in `ats_scanner/_run.py` —
+      `_dormancy_gate_clause` (:233-237) uses SQLite's
+      `datetime('now', '-' || ? || ' days')`, and
+      `_high_score_history_gate_clause` (:189-207) uses `json_extract(...)`
+      against `sub_scores_json`, a column the hosted `postings` schema does
+      not carry (structural axes live in `structural_axes` instead).
+  (b) `stale_detector.py`'s audit-trail writes (:295, :400) INSERT into
+      `pipeline_events`, a table with no hosted equivalent in m0001.
+  (c) prober/Playwright company columns referenced across
+      `ats_scanner/_probe.py` (:277-358), `ats_scanner/_run.py` (:193-293),
+      and `ats_scanner/_run_playwright.py` (:250, :298) — `name_raw`,
+      `retry_after`, `miss_reason`, `ats_probe_attempted_at`,
+      `jobs_found_total` — none of which m0001's `companies` table defines.
+
+What IS verified end-to-end on Postgres: the `_upsert_one_ats_api_job` write
+path (INSERT/UPDATE against `postings`, including the translated
+`jobs`->`postings` qmark SQL above), exercised by the Step 11 contract test
+driving it through a live connection (tests/host/test_scan_services_contract.py).
 """
 
 from __future__ import annotations
