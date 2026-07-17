@@ -6,13 +6,14 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import pkgutil
+import re
 
 from jobcannon.db.migrations.types import Migration
 
 MIGRATIONS: list[Migration] = []
 
 for _info in pkgutil.iter_modules(__path__):
-    if not _info.name.startswith("m"):
+    if not re.match(r"^m\d+_", _info.name):
         continue
     _mod = importlib.import_module(f"{__name__}.{_info.name}")
     _mig = dataclasses.replace(_mod.MIGRATION, name=_info.name)
