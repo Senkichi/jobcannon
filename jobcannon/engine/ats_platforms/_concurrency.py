@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import Final
 
+from jobcannon.engine.runtime_config import get_runtime_config
+
 DEFAULT_PAGE_FETCH_CONCURRENCY: Final = 4
 _MIN_PAGE_FETCH_CONCURRENCY: Final = 1
 _MAX_PAGE_FETCH_CONCURRENCY: Final = 6
@@ -61,15 +63,13 @@ def get_page_fetch_concurrency() -> int:
         two knobs sharing a ceiling is a shared-resource budget, not a
         same-phase overlap.
 
-        Falls back to :data:`DEFAULT_PAGE_FETCH_CONCURRENCY` when there is
-        no Flask app context (e.g. called from a script or test outside a
-        request) or the configured value is not a valid int.
+        Falls back to :data:`DEFAULT_PAGE_FETCH_CONCURRENCY` when no host
+        runtime-config provider is registered (e.g. called from a script or
+        test) or the configured value is not a valid int.
     """
     try:
-        from flask import current_app
-
         concurrency = (
-            current_app.config.get("JF_CONFIG", {})
+            get_runtime_config()
             .get("ats", {})
             .get("page_fetch_concurrency", DEFAULT_PAGE_FETCH_CONCURRENCY)
         )
@@ -78,20 +78,20 @@ def get_page_fetch_concurrency() -> int:
             min(_MAX_PAGE_FETCH_CONCURRENCY, int(concurrency)),
         )
     except (RuntimeError, AttributeError, TypeError, ValueError):
-        # No app context or invalid config: use default
+        # No provider registered or invalid config: use default
         return DEFAULT_PAGE_FETCH_CONCURRENCY
 
 
 def get_scan_concurrency(config: dict) -> int:
     """Read Phase A board-level scan concurrency from config, clamped to range.
 
-    Unlike :func:`get_page_fetch_concurrency` (which reads via Flask's
-    ``current_app`` because the platform-scanner modules that call it have no
-    ``config`` dict threaded into their call chain), ``run_ats_scan`` already
-    receives an explicit ``config`` dict as a parameter — so this takes one
-    directly rather than adding a Flask-app-context dependency to a code path
-    that doesn't otherwise need one (it also runs from the scheduler outside
-    any request context).
+    Unlike :func:`get_page_fetch_concurrency` (which reads via the host's
+    injected runtime-config provider because the platform-scanner modules
+    that call it have no ``config`` dict threaded into their call chain),
+    ``run_ats_scan`` already receives an explicit ``config`` dict as a
+    parameter — so this takes one directly rather than adding a runtime-
+    config-provider dependency to a code path that doesn't otherwise need
+    one (it also runs from the scheduler outside any request context).
 
     Args:
         config: Application config dict (same one ``run_ats_scan`` receives).

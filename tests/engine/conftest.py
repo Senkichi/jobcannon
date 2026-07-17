@@ -4,6 +4,37 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def reset_scan_memo(monkeypatch):
+    """Clear the run_platform_scan raw-postings memo and in-flight locks before every test.
+
+    ``_scan_memo`` is a plain module-level dict in ``ats_platforms._registry``
+    keyed only on ``(scanner.name, slug, max_pages)`` — NOT on scanner object
+    identity — so tests that reuse a name/slug pair (e.g. "test"/"test-slug")
+    across different fake scanners leak cached raw postings between them
+    without this reset.
+    """
+    monkeypatch.setattr("jobcannon.engine.ats_platforms._registry._scan_memo", {})
+    monkeypatch.setattr("jobcannon.engine.ats_platforms._registry._scan_memo_inflight", {})
+
+
+@pytest.fixture(autouse=True)
+def reset_runtime_config_provider():
+    """Clear the host-injected runtime-config provider before/after every test.
+
+    Same leakage risk as ``_scan_memo`` above: ``runtime_config._provider`` is
+    a plain module-level global, so a test that registers a provider without
+    this reset would leak it into whichever test runs next.
+    """
+    from jobcannon.engine import runtime_config
+
+    runtime_config.set_config_provider(None)
+    yield
+    runtime_config.set_config_provider(None)
+
 
 @dataclass
 class FakeModelResult:
