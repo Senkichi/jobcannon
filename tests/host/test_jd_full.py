@@ -35,7 +35,9 @@ def test_writes_good_jd(db_conn, posting):
     from jobcannon.db._jd_full import set_jd_full
 
     assert set_jd_full(_svc_conn(db_conn), posting, GOOD_JD, source="test") is True
-    row = db_conn.execute("SELECT jd_full FROM postings WHERE dedup_key = %s", (posting,)).fetchone()
+    row = db_conn.execute(
+        "SELECT jd_full FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
     assert row["jd_full"] == GOOD_JD
 
 
@@ -43,7 +45,9 @@ def test_rejects_short_junk(db_conn, posting):
     from jobcannon.db._jd_full import set_jd_full
 
     assert set_jd_full(_svc_conn(db_conn), posting, "Sign in to view", source="test") is False
-    row = db_conn.execute("SELECT jd_full FROM postings WHERE dedup_key = %s", (posting,)).fetchone()
+    row = db_conn.execute(
+        "SELECT jd_full FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
     assert row["jd_full"] is None
 
 

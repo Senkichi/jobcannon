@@ -5,15 +5,25 @@ from tests.host.conftest import requires_postgres
 pytestmark = requires_postgres
 
 
-def _parsed(title="Staff Data Engineer", company="Acme", source="ashby",
-            source_url="https://jobs.ashbyhq.com/acme/1", **meta):
+def _parsed(
+    title="Staff Data Engineer",
+    company="Acme",
+    source="ashby",
+    source_url="https://jobs.ashbyhq.com/acme/1",
+    **meta,
+):
     from jobcannon.engine.models import Job
     from jobcannon.engine.parsed_job import ParsedJob
 
     # Job's required fields verified against jobcannon/engine/models.py:21-26
     # (source and source_url have NO defaults — they are required).
-    job = Job(title=title, company=company, location=meta.pop("location", "Remote"),
-              source=source, source_url=source_url)
+    job = Job(
+        title=title,
+        company=company,
+        location=meta.pop("location", "Remote"),
+        source=source,
+        source_url=source_url,
+    )
     parsed = ParsedJob.from_job(job, source_meta=meta or None)
     assert isinstance(parsed, ParsedJob), f"clean inputs came back unresolved: {parsed}"
     return parsed

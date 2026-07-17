@@ -15,11 +15,16 @@ recomputed at ingest, not invalidated here). Revisit when owner-fit scoring
 lands (Phase 2).
 
 Transaction-boundary note (recorded port deviation, matches _companies.py /
-_jobs.py): the write is wrapped in `with raw.transaction():` rather than a
+_jobs.py): the write commits via pool.commit_unless_nested() rather than a
 bare raw.commit() call, so this also works when `conn` is already inside an
 ambient `with conn.transaction():` block (tests/host/conftest.py's db_conn
-fixture) — psycopg3 forbids explicit commit() there; nesting degrades to a
-savepoint automatically.
+fixture) — psycopg3 forbids explicit commit() there. See that helper's
+docstring for why a naive `with raw.transaction():` wrapper does NOT
+substitute for a real commit here (verified empirically: it degrades to a
+savepoint whenever the connection already carries an open, non-Transaction-
+managed transaction from an earlier bare statement — the common case, since
+this is called right after the engine's own bare
+`SELECT jd_full FROM jobs ...` read in _run.py).
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ import logging
 import re
 from typing import Any
 
+from jobcannon.db.pool import commit_unless_nested
 from jobcannon.engine.description_formatter import strip_html_to_text
 from jobcannon.engine.jd_content_contract import _is_jd_junk, jd_content_reject
 
@@ -56,9 +62,12 @@ def set_jd_full(
     if rejection is not None:
         logger.warning(
             "set_jd_full: content-gated [source=%s] reason=%s signal=%s prefix=%r",
-            source, rejection[0], rejection[1], text.strip()[:60],
+            source,
+            rejection[0],
+            rejection[1],
+            text.strip()[:60],
         )
         return False
-    with raw.transaction():
-        raw.execute("UPDATE postings SET jd_full = %s WHERE dedup_key = %s", (text, dedup_key))
+    raw.execute("UPDATE postings SET jd_full = %s WHERE dedup_key = %s", (text, dedup_key))
+    commit_unless_nested(raw)
     return True
