@@ -276,8 +276,8 @@ def run_platform_scan(
             into the memo so downstream consumers can share it. This is the
             discovery-freshness invariant used by ``ats_scan``.
         conn: Optional DB connection.  When provided the raw pre-filter
-            API response is recorded via ``record_extraction`` with
-            ``detect=True`` so an empty response on a previously-productive
+            API response is recorded via ``extraction_health.record(...)``
+            with ``detect=True`` so an empty response on a previously-productive
             platform is detected as a true break.  The ~19 callers in
             ``ats_platforms/__init__.py`` and ``ats_reconciler.py`` omit
             this argument (``conn=None``) and are unaffected.
