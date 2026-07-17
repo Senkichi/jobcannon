@@ -309,9 +309,7 @@ def _scan_one_company_via_playwright(
             try:
                 _handle_scan_error(conn, company_id, company_name, str(company_err), now)
             except Exception as retry_err:
-                logger.warning(
-                    "Failed to update retry state for '%s': %s", company_name, retry_err
-                )
+                logger.warning("Failed to update retry state for '%s': %s", company_name, retry_err)
 
         try:
             conn.execute(

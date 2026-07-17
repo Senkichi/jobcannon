@@ -341,9 +341,7 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
                 (config or {}).get("direct_link", {}).get("resolver", {}).get("max_attempts", 3)
             )
             grace_cutoff = (now_naive_utc - timedelta(days=unverifiable_grace_days)).isoformat()
-            ceiling_cutoff = (
-                now_naive_utc - timedelta(days=unverifiable_ceiling_days)
-            ).isoformat()
+            ceiling_cutoff = (now_naive_utc - timedelta(days=unverifiable_ceiling_days)).isoformat()
 
             unverifiable_rows = conn.execute(
                 "SELECT j.dedup_key, j.pipeline_status, j.sources, j.source_urls, "

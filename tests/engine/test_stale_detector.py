@@ -483,9 +483,7 @@ class TestUnverifiableArchivalBranches:
         _insert_unverifiable_job(conn, "b1|old", first_seen=_days_ago(20), company_id=None)
         result = run_stale_detection(db_path, _CONFIG)
         assert result["unverifiable_archived"] == 1
-        row = conn.execute(
-            "SELECT pipeline_status FROM jobs WHERE dedup_key = 'b1|old'"
-        ).fetchone()
+        row = conn.execute("SELECT pipeline_status FROM jobs WHERE dedup_key = 'b1|old'").fetchone()
         assert row["pipeline_status"] == "archived"
 
     def test_branch1_no_company_id_not_yet_within_grace(self, db):
@@ -731,9 +729,7 @@ class TestIssue1077DecayClockFix:
 
         result = run_stale_detection(db_path, _CONFIG)
 
-        row = conn.execute(
-            "SELECT is_stale FROM jobs WHERE dedup_key = 'mixed_rescued'"
-        ).fetchone()
+        row = conn.execute("SELECT is_stale FROM jobs WHERE dedup_key = 'mixed_rescued'").fetchone()
         assert row["is_stale"] == 0
         assert result["stale_cleared"] == 1
 

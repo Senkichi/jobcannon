@@ -596,7 +596,9 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
                     0
                     if (
                         svc.owner_identity_passes is not None
-                        and svc.owner_identity_passes(company_name_norm, company_name, None, hit_slug)
+                        and svc.owner_identity_passes(
+                            company_name_norm, company_name, None, hit_slug
+                        )
                     )
                     else 1
                 )

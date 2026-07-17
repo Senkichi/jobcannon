@@ -723,9 +723,7 @@ def _scan_one_company_worker(
 
             if _is_transient_error(company_err):
                 try:
-                    _handle_scan_error(
-                        worker_conn, company_id, company_name, str(company_err), now
-                    )
+                    _handle_scan_error(worker_conn, company_id, company_name, str(company_err), now)
                 except Exception as retry_err:
                     logger.warning(
                         "Failed to update retry state for '%s': %s", company_name, retry_err
@@ -1002,9 +1000,7 @@ def _scan_one_company_via_ats_api(
         else:
             scanner = _PLATFORM_SCANNERS.get(platform)
             if scanner is None:
-                logger.warning(
-                    "Unknown ATS platform '%s' for company '%s'", platform, company_name
-                )
+                logger.warning("Unknown ATS platform '%s' for company '%s'", platform, company_name)
                 job_dicts = []
                 raw_job_dicts = []
                 skipped_title_filter = 0
@@ -1120,9 +1116,7 @@ def _scan_one_company_via_ats_api(
             try:
                 _handle_scan_error(conn, company_id, company_name, str(company_err), now)
             except Exception as retry_err:
-                logger.warning(
-                    "Failed to update retry state for '%s': %s", company_name, retry_err
-                )
+                logger.warning("Failed to update retry state for '%s': %s", company_name, retry_err)
 
         # Still log the failed scan attempt
         try:

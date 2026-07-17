@@ -166,13 +166,9 @@ def test_run_ats_scan_wires_and_restores_prober_extensions():
     services.set_services(svc)
     try:
         with (
-            patch(
-                "jobcannon.engine.ats_scanner._run._count_phase_a_eligible", return_value=0
-            ),
+            patch("jobcannon.engine.ats_scanner._run._count_phase_a_eligible", return_value=0),
             patch("jobcannon.engine.ats_scanner._run.count_playwright_eligible", return_value=0),
-            patch(
-                "jobcannon.engine.ats_scanner._run._count_phase_c_eligible", return_value=0
-            ),
+            patch("jobcannon.engine.ats_scanner._run._count_phase_c_eligible", return_value=0),
             patch(
                 "jobcannon.engine.ats_scanner._run._run_ats_api_scan",
                 side_effect=fake_run_ats_api_scan,

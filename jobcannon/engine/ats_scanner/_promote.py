@@ -34,7 +34,9 @@ def promote_ats_from_source_urls(db_path: str, config: dict) -> dict:
     """
     svc = get_services()
     if svc.promote_ats_scheduler_batch is None:
-        logger.info("promote_ats_from_source_urls: no promote_ats_scheduler_batch service configured — skip")
+        logger.info(
+            "promote_ats_from_source_urls: no promote_ats_scheduler_batch service configured — skip"
+        )
         return {"checked": 0, "promoted": 0, "skipped": "promote_ats_scheduler_batch_unavailable"}
     summary = svc.promote_ats_scheduler_batch(db_path, config)
     logger.info(
