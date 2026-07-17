@@ -22,6 +22,23 @@ def reset_scan_memo(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def reset_scan_services():
+    """Clear the host-injected ScanServices bundle before/after every test.
+
+    Same leakage risk as ``_scan_memo`` / ``runtime_config._provider`` above:
+    ``jobcannon.engine.services._active`` is a plain module-level global, so
+    a test that registers services without cleaning up (e.g. an assertion
+    failure before its own ``clear_services()``) would leak them into
+    whichever test runs next.
+    """
+    from jobcannon.engine import services
+
+    services.clear_services()
+    yield
+    services.clear_services()
+
+
+@pytest.fixture(autouse=True)
 def reset_runtime_config_provider():
     """Clear the host-injected runtime-config provider before/after every test.
 
