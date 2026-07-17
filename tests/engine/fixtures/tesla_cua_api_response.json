@@ -1,0 +1,96 @@
+{
+  "lookup": {
+    "regions": {
+      "1": "Africa",
+      "2": "Asia Pacific",
+      "3": "Europe",
+      "4": "Middle East",
+      "5": "North America",
+      "6": "South America"
+    },
+    "departments": {
+      "10": "Charging",
+      "6": "Construction & Facilities",
+      "12": "Design",
+      "4": "Energy - Solar & Storage",
+      "20": "Energy Engineering",
+      "7": "Engineering & Information Technology",
+      "15": "Environmental, Health, Safety & Security",
+      "9": "Finance",
+      "13": "Legal & Government Affairs",
+      "1": "Manufacturing",
+      "11": "Operations & Business Support",
+      "16": "People",
+      "3": "Sales & Customer Support",
+      "14": "Supply Chain",
+      "17": "Terafab",
+      "5": "Tesla AI",
+      "2": "Vehicle Service",
+      "8": "Vehicle Software"
+    },
+    "types": {
+      "1": "fulltime",
+      "2": "parttime",
+      "3": "intern",
+      "4": "seasonal"
+    },
+    "locations": {
+      "406264": "Roma",
+      "58568": "Naples, Florida",
+      "401022": "Palo Alto, California",
+      "3012": "Draper, Utah"
+    }
+  },
+  "listings": [
+    {
+      "id": "224501",
+      "t": "AI Engineer, Manipulation, Optimus",
+      "dp": "5",
+      "f": "74",
+      "l": "401022",
+      "y": 1,
+      "sp": 1,
+      "pu": null
+    },
+    {
+      "id": "269398",
+      "t": "Service Technician Traineeship - Rome",
+      "dp": "2",
+      "f": "76",
+      "l": "406264",
+      "y": 3,
+      "sp": 132,
+      "pu": null
+    },
+    {
+      "id": "271513",
+      "t": "Seasonal Energy Advisor, Residential Energy",
+      "dp": "4",
+      "f": "1",
+      "l": "3012",
+      "y": 4,
+      "sp": 195,
+      "pu": null
+    },
+    {
+      "id": "274960",
+      "t": "Customer Experience Specialist",
+      "dp": "3",
+      "f": "68",
+      "l": "58568",
+      "y": 2,
+      "sp": 204,
+      "pu": null
+    },
+    {
+      "id": "239069",
+      "t": "Delivery Advisor",
+      "dp": "3",
+      "f": "68",
+      "l": "31322",
+      "y": 1,
+      "sp": 1663,
+      "pu": null
+    }
+  ]
+}

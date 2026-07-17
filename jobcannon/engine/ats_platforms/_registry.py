@@ -36,11 +36,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import requests
-from flask import current_app
 
 from jobcannon.engine import extraction_health
 from jobcannon.engine.ats_platforms._http_session import get_session
 from jobcannon.engine.ats_prober import _PROBE_TIMEOUT
+from jobcannon.engine.runtime_config import get_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +69,9 @@ _SCAN_MEMO_TTL_SECONDS = 28800
 def _auth_block_statuses() -> frozenset[int]:
     """Return the set of HTTP statuses treated as auth/anti-bot walls.
 
-    Reads from ``health.auth_block_statuses`` in the app config when available
-    (scanners run under the scheduler which pushes an app context). Falls back
-    to the default ``{401, 403, 429}`` when no app context or key is present.
+    Reads from ``health.auth_block_statuses`` via the host's injected runtime-
+    config provider when one is registered. Falls back to the default
+    ``{401, 403, 429}`` when no provider is registered or the key is absent.
 
     Returns:
         Frozenset of HTTP status codes that should log at WARNING instead of
@@ -79,30 +79,27 @@ def _auth_block_statuses() -> frozenset[int]:
     """
     try:
         return frozenset(
-            current_app.config.get("JF_CONFIG", {})
-            .get("health", {})
-            .get("auth_block_statuses", [401, 403, 429])
+            get_runtime_config().get("health", {}).get("auth_block_statuses", [401, 403, 429])
         )
     except (RuntimeError, AttributeError):
-        # No app context (e.g. tests) or key missing: use default
+        # No provider registered (e.g. tests) or key missing: use default
         return frozenset({401, 403, 429})
 
 
 def _get_scan_memo_ttl_seconds() -> int:
     """Return the scan memo TTL in seconds.
 
-    Reads from ``config.ats.scan_memo_ttl_s`` when an app context is present,
-    otherwise falls back to ``_SCAN_MEMO_TTL_SECONDS``. Invalid values are
-    ignored and the default is used.
+    Reads from ``config.ats.scan_memo_ttl_s`` via the host's injected runtime-
+    config provider when one is registered, otherwise falls back to
+    ``_SCAN_MEMO_TTL_SECONDS``. Invalid values are ignored and the default is
+    used.
     """
     try:
         return int(
-            current_app.config.get("JF_CONFIG", {})
-            .get("ats", {})
-            .get("scan_memo_ttl_s", _SCAN_MEMO_TTL_SECONDS)
+            get_runtime_config().get("ats", {}).get("scan_memo_ttl_s", _SCAN_MEMO_TTL_SECONDS)
         )
     except (RuntimeError, AttributeError, TypeError, ValueError):
-        # No app context, missing key, or non-integer value: use default
+        # No provider registered, missing key, or non-integer value: use default
         return _SCAN_MEMO_TTL_SECONDS
 
 
@@ -382,16 +379,12 @@ def run_platform_scan(
 
         # Read concurrency bound from config (default 4, range 1-6)
         try:
-            concurrency = (
-                current_app.config.get("JF_CONFIG", {})
-                .get("ats", {})
-                .get("detail_fetch_concurrency", 4)
-            )
+            concurrency = get_runtime_config().get("ats", {}).get("detail_fetch_concurrency", 4)
             # Clamp to sane range (floor 1, not 4 — operators must be able to
             # throttle to 1 during vendor rate-limit incidents)
             concurrency = max(1, min(6, int(concurrency)))
         except (RuntimeError, AttributeError, TypeError, ValueError):
-            # No app context or invalid config: use default
+            # No provider registered or invalid config: use default
             concurrency = 4
 
         # Fetch details in parallel, preserving input order
