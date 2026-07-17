@@ -55,7 +55,15 @@ def run_migrations(dsn: str) -> None:
         with conn.transaction():
             conn.execute(_LEDGER_DDL)
 
-        applied = applied_versions(conn)
+        # Read inside its own transaction so the connection returns to IDLE
+        # afterward. A bare execute() would leave an implicit transaction open
+        # (psycopg autocommit=False), and every subsequent per-migration
+        # `with conn.transaction():` in _apply_migration would then be
+        # downgraded to a SAVEPOINT of that one lingering transaction —
+        # committing (or rolling back) the whole run atomically at connection
+        # exit instead of one migration at a time.
+        with conn.transaction():
+            applied = applied_versions(conn)
         known = {m.version for m in MIGRATIONS}
         orphans = applied - known
         if orphans:

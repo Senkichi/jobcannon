@@ -1,4 +1,12 @@
-"""Migration 1 — Wave-1 hosted schema (1B spec §3.3, corrected; pgvector deferred to Wave 2)."""
+"""Migration 1 — Wave-1 hosted schema (1B spec §3.3, corrected; pgvector deferred to Wave 2).
+
+byo_key_credentials carries ENABLE + FORCE ROW LEVEL SECURITY with zero
+policies defined. That is deliberate default-deny for ALL roles, including
+the table owner — FORCE closes the normal RLS owner-bypass, and superusers
+aside (who always bypass RLS regardless of FORCE), nothing can read or
+write this table until the Phase-2 BYO-key feature adds the user-scoped
+policies that carve out access.
+"""
 
 from __future__ import annotations
 
@@ -23,7 +31,8 @@ MIGRATION = Migration(
             consecutive_empty_scans integer NOT NULL DEFAULT 0,
             created_at        timestamptz NOT NULL DEFAULT now(),
             updated_at        timestamptz NOT NULL DEFAULT now(),
-            UNIQUE (ats_platform, ats_slug)
+            UNIQUE (ats_platform, ats_slug),
+            CHECK (ats_probe_status <> 'hit' OR (ats_platform IS NOT NULL AND ats_slug IS NOT NULL))
         )
         """,
         """
@@ -114,7 +123,7 @@ MIGRATION = Migration(
             company_id  bigint REFERENCES companies(id),
             notes       text,
             created_at  timestamptz NOT NULL DEFAULT now(),
-            CHECK (posting_id IS NOT NULL OR company_id IS NOT NULL)
+            CHECK ((posting_id IS NOT NULL)::int + (company_id IS NOT NULL)::int = 1)
         )
         """,
         "CREATE UNIQUE INDEX watchlists_user_posting_uq ON watchlists(user_id, posting_id) WHERE posting_id IS NOT NULL",
@@ -157,6 +166,7 @@ MIGRATION = Migration(
         )
         """,
         "ALTER TABLE byo_key_credentials ENABLE ROW LEVEL SECURITY",
+        "ALTER TABLE byo_key_credentials FORCE ROW LEVEL SECURITY",
         """
         CREATE TABLE company_scan_log (
             id                   bigserial PRIMARY KEY,
