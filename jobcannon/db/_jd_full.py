@@ -25,6 +25,13 @@ savepoint whenever the connection already carries an open, non-Transaction-
 managed transaction from an earlier bare statement — the common case, since
 this is called right after the engine's own bare
 `SELECT jd_full FROM jobs ...` read in _run.py).
+
+The UPDATE itself is additionally wrapped in its own `with raw.transaction():`
+block purely for SAVEPOINT-based recovery (matches _jobs.py / _companies.py):
+if the write raises, that block's __exit__ rolls back to the savepoint and
+re-raises, leaving the connection usable for the caller's next statement
+instead of stuck in Postgres's aborted-transaction state. commit_unless_nested()
+still runs immediately after the block, unchanged.
 """
 
 from __future__ import annotations
@@ -68,6 +75,7 @@ def set_jd_full(
             text.strip()[:60],
         )
         return False
-    raw.execute("UPDATE postings SET jd_full = %s WHERE dedup_key = %s", (text, dedup_key))
+    with raw.transaction():
+        raw.execute("UPDATE postings SET jd_full = %s WHERE dedup_key = %s", (text, dedup_key))
     commit_unless_nested(raw)
     return True

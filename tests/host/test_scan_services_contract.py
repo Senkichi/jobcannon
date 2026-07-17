@@ -32,20 +32,20 @@ def wired_services():
     from jobcannon.engine import services
 
     dsn, db_name = create_throwaway_db("jobcannon_contract")
-    run_migrations(dsn)
-    pool_mod.open_pool(dsn)
-    services.set_services(
-        services.ScanServices(
-            connection_factory=pool_mod.connection_factory,
-            upsert_job=_jobs.upsert_job,
-            set_jd_full=_jd_full.set_jd_full,
-            upsert_company=_companies.upsert_company,
-            config={},
-            get_secret=lambda name, *, config=None: None,
-            jd_storage_max_chars=50_000,
-        )
-    )
     try:
+        run_migrations(dsn)
+        pool_mod.open_pool(dsn)
+        services.set_services(
+            services.ScanServices(
+                connection_factory=pool_mod.connection_factory,
+                upsert_job=_jobs.upsert_job,
+                set_jd_full=_jd_full.set_jd_full,
+                upsert_company=_companies.upsert_company,
+                config={},
+                get_secret=lambda name, *, config=None: None,
+                jd_storage_max_chars=50_000,
+            )
+        )
         yield services.get_services()
     finally:
         services.clear_services()

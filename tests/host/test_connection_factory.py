@@ -1,19 +1,34 @@
 import pytest
 
-from tests.host.conftest import requires_postgres
+from tests.host.conftest import create_throwaway_db, drop_throwaway_db, requires_postgres
 
 pytestmark = requires_postgres
 
 
 @pytest.fixture()
-def opened_pool(postgres_test_dsn):
-    from jobcannon.db import pool as pool_mod
+def opened_pool():
+    """Own throwaway database, NOT the shared session-scoped postgres_test_dsn.
 
-    pool_mod.open_pool(postgres_test_dsn)
+    This module's tests do real, durable conn.commit() calls directly
+    against the pooled connection (not the rollback-isolated db_conn
+    fixture other tests/host/ modules use), so they must not leak committed
+    rows ('factory-co', 'sync-co', ...) into the shared session database —
+    mirrors tests/host/test_scan_services_contract.py's wired_services
+    fixture. run_migrations is inside the try (mirrors
+    tests/host/conftest.py's postgres_test_dsn) so a setup failure still
+    reaches drop_throwaway_db.
+    """
+    from jobcannon.db import pool as pool_mod
+    from jobcannon.db.migrate import run_migrations
+
+    dsn, db_name = create_throwaway_db("jobcannon_factory")
     try:
+        run_migrations(dsn)
+        pool_mod.open_pool(dsn)
         yield pool_mod
     finally:
         pool_mod.close_pool()
+        drop_throwaway_db(db_name)
 
 
 def test_zero_arg_call_yields_working_wrapped_connection(opened_pool):
@@ -46,3 +61,19 @@ def test_synchronous_normal_sets_session_then_resets(opened_pool):
     with connection_factory() as conn:
         val = conn.execute("SHOW synchronous_commit").fetchone()
         assert val[0] == "on"
+
+
+def test_executemany_translates_qmarks(opened_pool):
+    from jobcannon.db.pool import connection_factory
+
+    with connection_factory() as conn:
+        conn.executemany(
+            "INSERT INTO companies (name) VALUES (?)",
+            [("many-co-1",), ("many-co-2",)],
+        )
+        conn.commit()
+        rows = conn.execute(
+            "SELECT name FROM companies WHERE name IN (?, ?)",
+            ("many-co-1", "many-co-2"),
+        ).fetchall()
+    assert {row["name"] for row in rows} == {"many-co-1", "many-co-2"}
