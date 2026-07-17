@@ -3,14 +3,36 @@ on:
   push:
     branches: [main]
   pull_request:
+
+# Cancel superseded PR runs; pushes to main keep one run per commit (the
+# group keys on the unique SHA, so nothing groups or cancels). This matters
+# with a single self-hosted runner serving the whole queue.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # SELF-HOSTED (2026-07-16): GitHub-hosted runners are billing-blocked
+    # account-wide, so CI runs on the operator's Windows box (runner
+    # jcpub-9800x3d-1, same fleet pattern as the private repo). Restore a
+    # hosted ubuntu leg for Linux coverage once billing is fixed.
+    # SECURITY: this MUST move off self-hosted before the repo flips public —
+    # fork PRs would otherwise execute arbitrary code on the operator's machine.
+    runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+          # GitHub-cache mode adds a post-job `uv cache prune --ci` that can
+          # corrupt sibling jobs sharing this machine's local uv cache
+          # (observed on the private repo's fleet 2026-07-08). The local disk
+          # cache is persistent and already warm; network caching is overhead.
+          enable-cache: false
       - run: uv sync --dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
