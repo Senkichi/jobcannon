@@ -36,4 +36,12 @@ jobs:
       - run: uv sync --dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      # POSTGRES_ADMIN_DSN reaches pytest from the self-hosted runner's .env
+      # (local PostgreSQL Windows service): runner-process env flows to step
+      # processes automatically. Do NOT add an `env:` pass-through with
+      # ${{ env.POSTGRES_ADMIN_DSN }} — the expression context cannot see
+      # runner-machine variables, so it evaluates empty and BLANKS the var
+      # (observed: run 29614164172, host tests silently skipped). A future
+      # hosted-Linux leg should set it explicitly from a services: container.
+      # Without the variable, tests/host/ skips gracefully.
       - run: uv run pytest -q --tb=short
