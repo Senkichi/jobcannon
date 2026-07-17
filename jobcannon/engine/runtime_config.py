@@ -6,10 +6,19 @@ Flask; a host injects a zero-arg provider returning the same nested
 mapping shape (e.g. ``{"ats": {...}, "health": {...}}``). With no
 provider registered, ``get_runtime_config()`` returns ``{}`` so every
 reader's hardcoded default applies — the same behavior the private code
-has outside an app context. ``get_runtime_config()`` deliberately does
-NOT catch provider exceptions: each reader keeps its own historical
-``try/except`` (``RuntimeError`` mirrors Flask's no-app-context error),
-so a raising provider degrades to defaults exactly as before.
+has outside an app context.
+
+``get_runtime_config()`` catches ANY exception the host-supplied provider
+raises and returns ``{}`` at this layer — an arbitrary host callable can
+raise anything (``OSError`` reading a config file, ``KeyError`` from a
+bespoke mapping, custom exceptions), not just Flask's narrow
+``RuntimeError``/``AttributeError`` failure modes. A raising or
+misbehaving provider therefore degrades to defaults *here*, before it
+ever reaches a reader. Readers may keep their own historical
+``try/except`` around the returned mapping as defense-in-depth against
+invalid *values* (not provider exceptions), but must not rely on a
+provider exception propagating out of ``get_runtime_config()`` — it never
+does.
 """
 
 from __future__ import annotations
