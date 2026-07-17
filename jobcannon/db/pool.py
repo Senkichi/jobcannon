@@ -21,7 +21,7 @@ from typing import Any
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from jobcannon.db.compat import qmark_to_format
+from jobcannon.db.compat import engine_sql_to_host
 from jobcannon.db.rows import hybrid_row
 
 _pool: ConnectionPool | None = None
@@ -73,7 +73,7 @@ class EngineCompatConnection:
         self.raw = conn
 
     def execute(self, sql: str, params: Any = ()) -> psycopg.Cursor:
-        return self.raw.execute(qmark_to_format(sql), params)
+        return self.raw.execute(engine_sql_to_host(sql), params)
 
     def commit(self) -> None:
         self.raw.commit()
@@ -93,3 +93,24 @@ def connection_factory(*, synchronous: str = "FULL"):
             with conn.transaction():
                 conn.execute("SET SESSION synchronous_commit = off")
         yield EngineCompatConnection(conn)
+
+
+def commit_unless_nested(raw: psycopg.Connection) -> None:
+    """Best-effort commit shared by _companies.py / _jobs.py / _jd_full.py.
+
+    Those modules are called BOTH through a bare pooled connection (no
+    ambient transaction — a real .commit() is required here, mirroring the
+    sqlite3-autocommit=False model the engine's own call sites use) AND
+    directly against tests/host/conftest.py's `db_conn` fixture, which wraps
+    the whole test in `with conn.transaction():` for rollback-based
+    isolation. psycopg3 raises ProgrammingError on an explicit .commit() (or
+    .rollback()) while a `Transaction()` context is active on the connection
+    — verified empirically 2026-07-17 against psycopg 3.3.4 — and tracks
+    that via the connection's own `_num_transactions` counter (the same
+    counter psycopg3's `_commit_gen`/`_rollback_gen` guard against). When
+    nested inside one, the ambient context owns the commit/rollback boundary
+    (and read-your-own-writes within that same connection already works
+    without an explicit commit), so this is a no-op there.
+    """
+    if getattr(raw, "_num_transactions", 0) == 0:
+        raw.commit()
