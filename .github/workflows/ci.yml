@@ -36,4 +36,10 @@ jobs:
       - run: uv sync --dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      # POSTGRES_ADMIN_DSN comes from the self-hosted runner's .env (local
+      # PostgreSQL Windows service). Passed through explicitly so a future
+      # hosted-Linux leg can supply the same variable from a services:
+      # container. Without it, tests/host/ skips gracefully.
       - run: uv run pytest -q --tb=short
+        env:
+          POSTGRES_ADMIN_DSN: ${{ env.POSTGRES_ADMIN_DSN }}
