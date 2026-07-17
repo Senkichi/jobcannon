@@ -3,7 +3,7 @@
 This module is the single source of truth for the v3.0 scoring prompt.
 It is imported by:
   - scripts/v3_shootout.py (Phase 33 Plan 2) — the model shootout
-  - job_finder/web/job_scorer.py (Phase 34 Plan 1) — the production scorer
+  - jobcannon/engine/job_scorer.py (Phase 34 Plan 1) — the production scorer
 
 DO NOT mutate V3_SCORING_PROMPT, JOB_ASSESSMENT_SCHEMA, FEWSHOT_EXAMPLES,
 or FIELD_REINFORCEMENT after Plan 2 begins. Any change invalidates all
