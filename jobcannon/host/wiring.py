@@ -24,7 +24,10 @@ def build_scan_services(host_config: HostConfig) -> services.ScanServices:
         upsert_job=_jobs.upsert_job,
         set_jd_full=_jd_full.set_jd_full,
         upsert_company=_companies.upsert_company,
-        config=dict(host_config.runtime),
+        # Deliberately the SAME object runtime_config.set_config_provider below
+        # hands back (not a copy) — one source of truth, so the services
+        # snapshot and the live provider can never drift apart.
+        config=host_config.runtime,
         get_secret=lambda name, *, config=None: (
             None
         ),  # operational secrets: Render env vars, resolved per-name in later waves
