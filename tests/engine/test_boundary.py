@@ -4,20 +4,37 @@ import ast
 import pathlib
 import re
 
-FORBIDDEN = re.compile(r"^\s*(?:from|import)\s+(job_finder|flask|apscheduler)\b", re.M)
+ENGINE_FORBIDDEN = re.compile(
+    r"^\s*(?:from|import)\s+(job_finder|flask|apscheduler|psycopg)\b", re.M
+)
+HOST_FORBIDDEN = re.compile(r"^\s*(?:from|import)\s+(job_finder|apscheduler)\b", re.M)
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 def test_engine_has_no_private_or_host_imports():
-    pkg = REPO_ROOT / "jobcannon"
-    assert pkg.is_dir(), "jobcannon package missing"
+    engine = REPO_ROOT / "jobcannon" / "engine"
+    assert engine.is_dir(), "jobcannon.engine package missing"
     offenders = []
-    for py in sorted(pkg.rglob("*.py")):
-        m = FORBIDDEN.search(py.read_text(encoding="utf-8"))
+    for py in sorted(engine.rglob("*.py")):
+        m = ENGINE_FORBIDDEN.search(py.read_text(encoding="utf-8"))
         if m:
             offenders.append(f"{py.relative_to(REPO_ROOT)}: {m.group(0).strip()}")
     assert not offenders, "engine boundary violations:\n" + "\n".join(offenders)
+
+
+def test_host_has_no_private_or_scheduler_imports():
+    """Host packages (db/, host/, web/) may import flask/psycopg, but NEVER
+    job_finder (private repo) or apscheduler (retired scheduler)."""
+    engine = REPO_ROOT / "jobcannon" / "engine"
+    offenders = []
+    for py in sorted((REPO_ROOT / "jobcannon").rglob("*.py")):
+        if engine in py.parents:
+            continue
+        m = HOST_FORBIDDEN.search(py.read_text(encoding="utf-8"))
+        if m:
+            offenders.append(f"{py.relative_to(REPO_ROOT)}: {m.group(0).strip()}")
+    assert not offenders, "host boundary violations:\n" + "\n".join(offenders)
 
 
 def test_every_engine_module_imports():
