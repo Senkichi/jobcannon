@@ -188,12 +188,14 @@ def _run_playwright_scan(
         config.get("ats", {}).get("icims_max_load_more_clicks", _DEFAULT_MAX_LOAD_MORE)
     )
 
-    # Lazy attribute access triggers careers_crawler's PEP-562 hook, which
-    # raises ImportError with install instructions when playwright is absent.
-    import jobcannon.engine.careers_crawler as _cc
-
+    # Playwright is an optional heavy dependency (see module docstring). The
+    # private repo resolved this via careers_crawler's PEP-562 __getattr__
+    # hook; the engine's careers_crawler package ports only _title_contract/
+    # _title_filters (Task 1) and has no such hook, so importing it directly
+    # here (matching ats_prober.py's static_fallthrough tier4 pattern) is the
+    # only correct form.
     try:
-        sync_playwright = _cc.sync_playwright
+        from playwright.sync_api import sync_playwright
     except ImportError as exc:
         logger.warning("Playwright not installed — skipping iCIMS scan phase: %s", exc)
         return
