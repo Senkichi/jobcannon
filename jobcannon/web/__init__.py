@@ -10,7 +10,7 @@ from flask import Flask, abort, g, request
 
 logger = logging.getLogger(__name__)
 
-PUBLIC_PATHS = frozenset({"/healthz"})
+PUBLIC_PATHS = frozenset({"/healthz", "/demo"})
 
 
 def _resolve_consent(identity) -> bool:
@@ -73,13 +73,17 @@ def create_app(config: dict | None = None) -> Flask:
 
     @app.before_request
     def clerk_auth():
-        # Routing-based exemption: Flask resolves routing before
-        # before_request runs, so request.blueprint is already populated for
-        # any matched route (a 404 never reaches before_request at all). A
-        # string-prefix check on request.path is comparatively fragile —
-        # e.g. it would also exempt an unrelated /webhooks/-prefixed route
-        # registered outside this blueprint.
-        if request.path in PUBLIC_PATHS or request.blueprint == "webhooks":
+        # before_request runs for EVERY request regardless of routing
+        # outcome — Flask raises the routing exception later, in dispatch —
+        # so an unmatched path still hits this gate and 401s before it ever
+        # gets a chance to 404 (deliberate fail-closed). URL-rule matching
+        # HAS already run by this point for matched routes, though, which is
+        # what the request.blueprint == "webhooks" exemption relies on. The
+        # public-path exemption rests solely on the normalized-path
+        # membership check below: request.path is compared with a trailing
+        # slash stripped (falling back to "/") because /demo is registered
+        # strict_slashes=False, so both /demo and /demo/ must match.
+        if (request.path.rstrip("/") or "/") in PUBLIC_PATHS or request.blueprint == "webhooks":
             g.clerk_user = None
             g.consent_granted = False
             return None
@@ -95,4 +99,8 @@ def create_app(config: dict | None = None) -> Flask:
     from jobcannon.web.webhooks import webhooks_bp
 
     app.register_blueprint(webhooks_bp)
+
+    from jobcannon.web.pages import pages_bp
+
+    app.register_blueprint(pages_bp)
     return app

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Feed — Job Cannon{% endblock %}
+{% block content %}
+{% if not profile %}
+  <h1 class="text-2xl font-semibold mb-3">Your feed isn't wired up yet</h1>
+  <p class="text-neutral-400">Job Cannon is in its corpus-building phase. Profiles and the ranked feed arrive in the next release — the scanner is already filling the shared corpus below.</p>
+{% elif stats.postings == 0 %}
+  <h1 class="text-2xl font-semibold mb-3">The corpus is warming up</h1>
+  <p class="text-neutral-400">No postings scanned yet. Once the first scan cycle completes, live counts appear here.</p>
+{% else %}
+  {# Structurally unreachable in 1B: profiles have no authed-user writer yet
+     (only the guest_demo seed calls upsert_profile), so an authed Clerk
+     user's profile is always None until 1C ships onboarding. Rendered
+     defensively rather than left undefined — reuses the same live-corpus
+     block demo.html shows, the most factually-accurate copy available. #}
+  <h1 class="text-2xl font-semibold mb-3">The live corpus</h1>
+  <p class="text-neutral-400">
+    <strong class="text-neutral-100">{{ stats.postings }}</strong> live postings across
+    <strong class="text-neutral-100">{{ stats.companies }}</strong> companies
+    {%- if stats.freshest_last_seen %} · freshest signal {{ stats.freshest_last_seen.strftime("%Y-%m-%d %H:%M") }} UTC{% endif %}
+  </p>
+{% endif %}
+{% endblock %}
