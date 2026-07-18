@@ -1,23 +1,50 @@
-"""Engine purity guard: jobcannon.* must be host-agnostic."""
+"""Boundary guards for jobcannon's engine/host split.
+
+Two enforcement functions live here: test_engine_has_no_private_or_host_imports
+asserts jobcannon.engine is host-agnostic (no job_finder/flask/apscheduler/
+psycopg imports at module level); test_host_has_no_private_or_scheduler_imports
+asserts the surrounding host packages (jobcannon.db/host/web) may import
+flask/psycopg but must never import job_finder (private repo) or apscheduler
+(retired scheduler). The remaining tests below are phantom-import/-name
+scanners that catch jobcannon.engine references the two import-boundary
+checks above cannot see (function bodies, TYPE_CHECKING blocks, star-imports).
+"""
 
 import ast
 import pathlib
 import re
 
-FORBIDDEN = re.compile(r"^\s*(?:from|import)\s+(job_finder|flask|apscheduler)\b", re.M)
+ENGINE_FORBIDDEN = re.compile(
+    r"^\s*(?:from|import)\s+(job_finder|flask|apscheduler|psycopg)\b", re.M
+)
+HOST_FORBIDDEN = re.compile(r"^\s*(?:from|import)\s+(job_finder|apscheduler)\b", re.M)
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 def test_engine_has_no_private_or_host_imports():
-    pkg = REPO_ROOT / "jobcannon"
-    assert pkg.is_dir(), "jobcannon package missing"
+    engine = REPO_ROOT / "jobcannon" / "engine"
+    assert engine.is_dir(), "jobcannon.engine package missing"
     offenders = []
-    for py in sorted(pkg.rglob("*.py")):
-        m = FORBIDDEN.search(py.read_text(encoding="utf-8"))
+    for py in sorted(engine.rglob("*.py")):
+        m = ENGINE_FORBIDDEN.search(py.read_text(encoding="utf-8"))
         if m:
             offenders.append(f"{py.relative_to(REPO_ROOT)}: {m.group(0).strip()}")
     assert not offenders, "engine boundary violations:\n" + "\n".join(offenders)
+
+
+def test_host_has_no_private_or_scheduler_imports():
+    """Host packages (db/, host/, web/) may import flask/psycopg, but NEVER
+    job_finder (private repo) or apscheduler (retired scheduler)."""
+    engine = REPO_ROOT / "jobcannon" / "engine"
+    offenders = []
+    for py in sorted((REPO_ROOT / "jobcannon").rglob("*.py")):
+        if engine in py.parents:
+            continue
+        m = HOST_FORBIDDEN.search(py.read_text(encoding="utf-8"))
+        if m:
+            offenders.append(f"{py.relative_to(REPO_ROOT)}: {m.group(0).strip()}")
+    assert not offenders, "host boundary violations:\n" + "\n".join(offenders)
 
 
 def test_every_engine_module_imports():
