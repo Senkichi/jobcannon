@@ -36,9 +36,9 @@ from __future__ import annotations
 
 from flask import g, has_app_context
 
-from jobcannon.db import _events
+from jobcannon.db import _events, events_schema
 from jobcannon.db.pool import commit_unless_nested, connection_factory
-from jobcannon.host import events_schema, posthog_client
+from jobcannon.host import posthog_client
 
 
 def log_event(

@@ -25,7 +25,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from jobcannon.host import events_schema, posthog_client
+from jobcannon.db import events_schema
+from jobcannon.host import posthog_client
 
 
 @pytest.fixture(autouse=True)
@@ -181,3 +182,28 @@ def test_posthog_failure_does_not_propagate_and_insert_already_happened(
     log_event("posting_saved", user_id="user_1", consent_granted=True)  # must not raise
 
     assert order == ["insert", "capture_attempted"]
+
+
+# ---- record_consent: payload validation --------------------------------
+
+
+def test_record_consent_rejects_oversized_value():
+    """record_consent must run the payload through the SAME events_schema
+    validator log_event uses, and it must do so BEFORE issuing any write —
+    an oversized/illegal value aborts the whole write, not just the event
+    insert."""
+    from jobcannon.db import _events
+
+    class _FakeConn:
+        def execute(self, *a, **k):
+            raise AssertionError("must not write when validation fails")
+
+    with pytest.raises(ValueError):
+        _events.record_consent(
+            _FakeConn(),
+            user_id="u1",
+            consent_type="analytics",
+            granted=True,
+            consent_version="v" * 5000,  # exceeds the 200-char cap
+            consented_at="2026-07-17T00:00:00Z",
+        )

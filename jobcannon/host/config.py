@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 class HostConfig:
     database_url: str
     runtime: dict = field(default_factory=dict)
+    posthog_api_key: str | None = None
+    posthog_host: str | None = None
 
 
 def _put_int(mapping: dict, section: str, key: str, env_var: str) -> None:
@@ -52,4 +54,11 @@ def load_host_config() -> HostConfig:
                 f"Invalid value for JC_AUTH_BLOCK_STATUSES: {statuses!r} "
                 "(expected comma-separated integers)"
             ) from exc
-    return HostConfig(database_url=database_url, runtime=runtime)
+    posthog_api_key = os.environ.get("POSTHOG_API_KEY") or None
+    posthog_host = os.environ.get("POSTHOG_HOST") or None
+    return HostConfig(
+        database_url=database_url,
+        runtime=runtime,
+        posthog_api_key=posthog_api_key,
+        posthog_host=posthog_host,
+    )
