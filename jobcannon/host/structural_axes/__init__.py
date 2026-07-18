@@ -17,7 +17,6 @@ from typing import Any, Mapping
 
 from psycopg.types.json import Jsonb
 
-from jobcannon.db.pool import commit_unless_nested
 from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
 from jobcannon.host.structural_axes.freshness import score_freshness
 from jobcannon.host.structural_axes.jd_quality import score_jd_quality
@@ -78,29 +77,35 @@ def score_pending_structural_axes(conn: Any, config: Any, *, batch_size: int = 5
     sibling-JD subquery below keeps its own `jd_full IS NOT NULL` filter —
     those rows feed `jd_quality`'s boilerplate comparison, which needs JD text
     to compare against.
+
+    Concurrency semantics change (PR-6 debt, same shape as
+    jobcannon.host.embeddings.embed_pending_postings): the whole claim+score+
+    write cycle is now ONE batch transaction with `FOR UPDATE SKIP LOCKED` row
+    claiming, so concurrent sweeps (N>1 workers) PARTITION the pending
+    backlog instead of racing to double-score or blocking on each other's
+    rows. Commit is batch-atomic — a crash mid-batch loses at most that
+    batch's work, and the versioned re-sweep self-heals it next run.
     """
     raw = conn.raw if hasattr(conn, "raw") else conn
-    pending = raw.execute(
-        "SELECT id, title, jd_full, salary_min, salary_max, posted_date, "
-        "posted_date_precision, is_stale, expiry_status, company_id, last_seen "
-        "FROM postings WHERE structural_scoring_method IS DISTINCT FROM %s LIMIT %s",
-        (STRUCTURAL_SCORING_METHOD_V1, batch_size),
-    ).fetchall()
-
-    n = 0
-    for row in pending:
-        siblings = raw.execute(
-            "SELECT jd_full FROM postings WHERE company_id = %s AND id <> %s "
-            "AND jd_full IS NOT NULL ORDER BY last_seen DESC LIMIT 5",
-            (row["company_id"], row["id"]),
+    with raw.transaction():
+        pending = raw.execute(
+            "SELECT id, title, jd_full, salary_min, salary_max, posted_date, "
+            "posted_date_precision, is_stale, expiry_status, company_id, last_seen "
+            "FROM postings WHERE structural_scoring_method IS DISTINCT FROM %s "
+            "ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED",
+            (STRUCTURAL_SCORING_METHOD_V1, batch_size),
         ).fetchall()
-        axes = score_posting(row, [s["jd_full"] for s in siblings])
-        with raw.transaction():
+
+        for row in pending:
+            siblings = raw.execute(
+                "SELECT jd_full FROM postings WHERE company_id = %s AND id <> %s "
+                "AND jd_full IS NOT NULL ORDER BY last_seen DESC LIMIT 5",
+                (row["company_id"], row["id"]),
+            ).fetchall()
+            axes = score_posting(row, [s["jd_full"] for s in siblings])
             raw.execute(
                 "UPDATE postings SET structural_axes = %s, structural_scoring_method = %s, "
                 "structural_scored_at = now() WHERE id = %s",
                 (Jsonb(axes), STRUCTURAL_SCORING_METHOD_V1, row["id"]),
             )
-        commit_unless_nested(raw)
-        n += 1
-    return n
+    return len(pending)

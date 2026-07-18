@@ -79,3 +79,50 @@ def db_conn(postgres_test_dsn: str):
             raise Rollback(tx)
     finally:
         conn.close()
+
+
+@pytest.fixture
+def db_conn_pair(postgres_test_dsn):
+    """Two INDEPENDENT psycopg connections to the same test DB — real
+    cross-session lock contention for SKIP LOCKED tests. Cleanup: rollback
+    + close both."""
+    a = psycopg.connect(postgres_test_dsn, row_factory=dict_row)
+    b = psycopg.connect(postgres_test_dsn, row_factory=dict_row)
+    try:
+        yield a, b
+    finally:
+        for c in (a, b):
+            try:
+                c.rollback()
+                c.close()
+            except Exception:
+                pass
+
+
+@pytest.fixture
+def seeded_pending_postings(db_conn_pair):
+    """One company + 4 postings (distinct dedup_key, non-empty jd_full,
+    embedding_model_version NULL) COMMITTED so both connections see them.
+    Returns the 4 posting ids. Cleanup DELETEs + commits (the sweeps under
+    test commit for real — rollback isolation does not cover this fixture)."""
+    a, _ = db_conn_pair
+    cid = a.execute(
+        "INSERT INTO companies (name, name_raw, ats_platform, ats_slug, ats_probe_status) "
+        "VALUES ('SweepCo', 'SweepCo', 'jobvite', 'sweepco', 'hit') RETURNING id"
+    ).fetchone()["id"]
+    ids = [
+        a.execute(
+            "INSERT INTO postings (dedup_key, company_id, title, company, jd_full) "
+            "VALUES (%s, %s, 'Engineer', 'SweepCo', %s) RETURNING id",
+            (f"sweep-{i}", cid, f"jd body number {i} with real words"),
+        ).fetchone()["id"]
+        for i in range(4)
+    ]
+    a.commit()
+    try:
+        yield ids
+    finally:
+        a.rollback()
+        a.execute("DELETE FROM postings WHERE company_id = %s", (cid,))
+        a.execute("DELETE FROM companies WHERE id = %s", (cid,))
+        a.commit()
