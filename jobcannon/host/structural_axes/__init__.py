@@ -69,13 +69,21 @@ def score_pending_structural_axes(conn: Any, config: Any, *, batch_size: int = 5
     the same versioned re-sweep idiom used elsewhere in this codebase
     (JD_CONTENT_VERSION), so a future `STRUCTURAL_SCORING_METHOD` bump
     re-arms scoring for the whole corpus without a separate backfill path.
+
+    The outer pending SELECT carries NO `jd_full IS NOT NULL` gate — every
+    not-yet-scored posting is eligible, JD or no JD. `freshness` and
+    `seniority_clarity` are derived from `title`/dates that are always present
+    on the row; `comp_transparency` and `jd_quality` degrade gracefully to
+    their no-JD verdict (`False` / `0.0`) rather than requiring one. Only the
+    sibling-JD subquery below keeps its own `jd_full IS NOT NULL` filter —
+    those rows feed `jd_quality`'s boilerplate comparison, which needs JD text
+    to compare against.
     """
     raw = conn.raw if hasattr(conn, "raw") else conn
     pending = raw.execute(
         "SELECT id, title, jd_full, salary_min, salary_max, posted_date, "
         "posted_date_precision, is_stale, expiry_status, company_id, last_seen "
-        "FROM postings WHERE jd_full IS NOT NULL "
-        "AND structural_scoring_method IS DISTINCT FROM %s LIMIT %s",
+        "FROM postings WHERE structural_scoring_method IS DISTINCT FROM %s LIMIT %s",
         (STRUCTURAL_SCORING_METHOD_V1, batch_size),
     ).fetchall()
 
