@@ -79,7 +79,8 @@ _SINGLE_FIGURE_RE = re.compile(
 )
 
 _EXCLUSION_TRAP_RE = re.compile(
-    r"401\(?k\)?|sign[- ]on bonus|signing bonus|relocation (?:bonus|assistance|package)"
+    r"401\(?k\)?|\bbonus(?:es)?\b|\bcommission\b|sign[- ]on bonus|signing bonus"
+    r"|relocation (?:bonus|assistance|package)"
     r"|equity|RSUs?|stock options?|\bARR\b|annual revenue|revenue growth"
     r"|series [a-e]\b|\bstipend\b|per diem",
     re.IGNORECASE,
@@ -95,7 +96,7 @@ _BASE_PAY_ANCHOR_RE = re.compile(
     re.IGNORECASE,
 )
 
-_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n\s*\n")
 
 
 def _single_figure_disclosed(sentence: str) -> bool:
