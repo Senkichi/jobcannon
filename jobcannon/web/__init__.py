@@ -1,12 +1,42 @@
-"""Flask app factory for the hosted skeleton (Wave 1: health + auth + webhooks)."""
+"""Flask app factory for the hosted skeleton (Wave 1: health + auth + webhooks;
+Wave 2 PR 8 adds per-request consent resolution for the log_event chokepoint)."""
 
 from __future__ import annotations
 
+import logging
 import os
 
 from flask import Flask, abort, g, request
 
+logger = logging.getLogger(__name__)
+
 PUBLIC_PATHS = frozenset({"/healthz"})
+
+
+def _resolve_consent(identity) -> bool:
+    """One DB read per authenticated request, resolving the log_event
+    chokepoint's consent gate (jobcannon/host/events.py) up front so route
+    handlers never have to think about it.
+
+    Fail-closed on any error (missing/unopened connection pool — e.g. a
+    TESTING config that never calls init_engine_seams, same as
+    tests/host/test_auth.py's lightweight identity-only tests — or a genuine
+    DB outage): defaulting to "no consent" is the privacy-safe direction and
+    must never turn into a 500 on an otherwise-successful request.
+    """
+    from jobcannon.db import _events
+    from jobcannon.db.pool import connection_factory
+
+    try:
+        with connection_factory() as conn:
+            return _events.read_consent_state(conn.raw, identity.user_id)
+    except Exception:
+        logger.warning(
+            "consent lookup failed for user %s (defaulting to no consent)",
+            identity.user_id,
+            exc_info=True,
+        )
+        return False
 
 
 def create_app(config: dict | None = None) -> Flask:
@@ -51,6 +81,7 @@ def create_app(config: dict | None = None) -> Flask:
         # registered outside this blueprint.
         if request.path in PUBLIC_PATHS or request.blueprint == "webhooks":
             g.clerk_user = None
+            g.consent_granted = False
             return None
         identity = app.config["VERIFY_REQUEST"](request)
         # Set g.clerk_user BEFORE the possible abort(401): any error handler
@@ -58,6 +89,7 @@ def create_app(config: dict | None = None) -> Flask:
         g.clerk_user = identity
         if identity is None:
             abort(401)
+        g.consent_granted = _resolve_consent(identity)
         return None
 
     from jobcannon.web.webhooks import webhooks_bp

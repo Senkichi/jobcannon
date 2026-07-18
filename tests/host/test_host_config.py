@@ -94,3 +94,20 @@ def test_malformed_auth_block_statuses_raises_named_error(monkeypatch):
     monkeypatch.setenv("JC_AUTH_BLOCK_STATUSES", "401,abc")
     with pytest.raises(RuntimeError, match="JC_AUTH_BLOCK_STATUSES"):
         load_host_config()
+
+
+@pytest.mark.parametrize("value", ["", " "])
+@pytest.mark.parametrize("var", ["POSTHOG_API_KEY", "POSTHOG_HOST"])
+def test_empty_and_whitespace_posthog_var_is_absent(monkeypatch, var, value):
+    """Same absent-not-empty semantics as the JC_* knobs above: a whitespace-only
+    POSTHOG_API_KEY/POSTHOG_HOST must not become a truthy-but-blank string."""
+    from jobcannon.host.config import load_host_config
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x@localhost/db")
+    monkeypatch.delenv("POSTHOG_API_KEY", raising=False)
+    monkeypatch.delenv("POSTHOG_HOST", raising=False)
+    monkeypatch.setenv(var, value)
+
+    cfg = load_host_config()
+    assert cfg.posthog_api_key is None
+    assert cfg.posthog_host is None
