@@ -68,6 +68,50 @@ def test_comp_transparency_none_jd_full():
     assert result == {"value": False, "method": "regex_grammar"}
 
 
+def test_comp_transparency_bare_numeric_range_is_not_salary():
+    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
+
+    # No currency anywhere — headcount/scale prose, not pay (finding 1).
+    jd = "The team supports 200-500 users across the platform daily."
+    assert score_comp_transparency(None, None, jd) == {"value": False, "method": "regex_grammar"}
+
+
+def test_comp_transparency_bare_k_range_headcount_is_not_salary():
+    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
+
+    jd = "Our platform serves 100K-500K users every single day."
+    assert score_comp_transparency(None, None, jd) == {"value": False, "method": "regex_grammar"}
+
+
+def test_comp_transparency_base_salary_with_benefits_is_transparent():
+    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
+
+    # Explicit base-salary label -> the trailing equity/401k mention must NOT
+    # make the labeled base range ambiguous (finding 2).
+    jd = "The base salary range for this role is $120,000 to $150,000, plus equity and 401k match."
+    result = score_comp_transparency(None, None, jd)
+    assert result["value"] is True
+    assert result["method"] == "regex_grammar"
+
+
+def test_comp_transparency_single_figure_salary_is_transparent():
+    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
+
+    # A lone currency-anchored figure is a real disclosure (finding 3).
+    jd = "This role pays a base salary of $120,000 per year, plus full benefits."
+    result = score_comp_transparency(None, None, jd)
+    assert result["value"] is True
+    assert result["method"] == "regex_grammar"
+
+
+def test_comp_transparency_single_figure_requires_currency():
+    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
+
+    # A lone number with no currency is not pay (guards the single-figure path).
+    jd = "This role supports 120,000 daily active users."
+    assert score_comp_transparency(None, None, jd) == {"value": False, "method": "regex_grammar"}
+
+
 # ---------------------------------------------------------------------------
 # freshness
 # ---------------------------------------------------------------------------
@@ -120,6 +164,9 @@ def test_freshness_no_usable_date_falls_back_to_flat_default():
         ("Software Engineer", False),
         ("Team Leader", False),  # word boundary, not a 'Lead' substring
         ("Sr. Software Engineer", True),
+        ("Lead Generation Specialist", False),  # 'lead generation' is not a level
+        ("Lead Engineer", True),
+        ("Lead", True),
     ],
 )
 def test_seniority_clarity(title, expected):
@@ -275,3 +322,36 @@ def test_score_pending_structural_axes_integration(db_conn, company_id):
         "value": True,
         "method": "structured",
     }
+
+
+@requires_postgres
+def test_score_pending_scores_jd_less_posting(db_conn, company_id):
+    from jobcannon.host.structural_axes import score_pending_structural_axes
+
+    # A posting whose jd_full never arrived must still get its JD-independent
+    # axes (freshness, seniority) scored — it must not be silently dropped
+    # (finding 4: the old jd_full IS NOT NULL eligibility gate excluded it).
+    db_conn.execute(
+        "INSERT INTO postings (dedup_key, company_id, title, company) VALUES (%s, %s, %s, %s)",
+        ("jdless-1", company_id, "Senior Data Scientist", "Structural Axes Co"),
+    )
+    scored = score_pending_structural_axes(_svc_conn(db_conn), {})
+    assert scored == 1
+    row = db_conn.execute(
+        "SELECT structural_scoring_method, structural_axes FROM postings "
+        "WHERE dedup_key = 'jdless-1'"
+    ).fetchone()
+    assert row["structural_scoring_method"] == "rules_v1"
+    assert set(row["structural_axes"]) == {
+        "freshness",
+        "seniority_clarity",
+        "comp_transparency",
+        "jd_quality",
+    }
+    # seniority is derivable from the title even with no JD.
+    assert row["structural_axes"]["seniority_clarity"]["value"] is True
+    assert row["structural_axes"]["comp_transparency"] == {
+        "value": False,
+        "method": "regex_grammar",
+    }
+    assert row["structural_axes"]["jd_quality"]["value"] == 0.0
