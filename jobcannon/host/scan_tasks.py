@@ -25,33 +25,36 @@ def run_scan_task(company_names: list[str] | None = None) -> dict[str, Any]:
     embedding pulls a heavy native runtime (fastembed/onnxruntime) plus a
     first-run model download and no consumer reads embeddings yet, so an
     embedding-infra hiccup must not fail an otherwise-successful scan — it is
-    logged and surfaced as postings_embedded=None, and the versioned re-sweep
-    re-embeds the still-pending rows next scan.
+    logged and surfaced as postings_embedded=None AND embedding_error=<message>,
+    and the versioned re-sweep re-embeds the still-pending rows next scan.
     """
     config = _runtime_config()
     summary = run_ats_scan("__hosted__", config, company_names=company_names)
     with connection_factory() as conn:
         structural_scored = score_pending_structural_axes(conn, config)
-        embedded = _embed_pending_best_effort(conn, config)
+        embedded, embedding_error = _embed_pending_best_effort(conn, config)
     return {
         **summary,
         "structural_axes_scored": structural_scored,
         "postings_embedded": embedded,
+        "embedding_error": embedding_error,
     }
 
 
-def _embed_pending_best_effort(conn: Any, config: Any) -> int | None:
+def _embed_pending_best_effort(conn: Any, config: Any) -> tuple[int | None, str | None]:
     """Run the embed tail, swallowing (but loudly logging) any failure so an
-    embedding-infra hiccup never fails a successful scan. Returns the count
-    embedded, or None if the tail errored (postings stay pending; the next
-    scan's versioned re-sweep retries them). psycopg's transaction() context in
-    embed_pending_postings guarantees rollback of any half-applied write, so the
-    connection is left clean for pool reuse."""
+    embedding-infra hiccup never fails a successful scan. Returns (count, None)
+    on success, or (None, message) if the tail errored — the message is threaded
+    into the run summary as `embedding_error` so the swallow is observable to
+    monitoring, not silent, and the versioned re-sweep retries the still-pending
+    rows next scan. The connection is returned to the pool afterward and reset
+    before reuse; each per-row write is individually transactional (rolled back
+    on error), so a swallowed failure leaves no half-applied write behind."""
     try:
-        return embed_pending_postings(conn, config)
-    except Exception:
+        return embed_pending_postings(conn, config), None
+    except Exception as exc:
         logger.exception("embedding tail failed; postings remain pending for the next scan")
-        return None
+        return None, str(exc)
 
 
 def run_expiry_check_task() -> None:

@@ -72,15 +72,16 @@ def embed_pending_postings(conn: Any, config: Any, *, batch_size: int = 500) -> 
 
     Pending predicate mirrors the structural versioned re-sweep (IS DISTINCT
     FROM, so NULL/never-embedded and stale-version rows are both picked up) but
-    ADDS a jd_full-presence gate (btrim <> '') — an empty JD is not embeddable,
-    and excluding such rows from the candidate set (rather than leaving them
+    ADDS a jd_full-presence gate (jd_full ~ '\\S' — at least one non-whitespace
+    char, so NULL, empty, and tab/newline-only text are all excluded), and
+    excluding such rows from the candidate set (rather than leaving them
     perpetually NULL-and-reselected) keeps them from occupying batch slots
     every scan.
     """
     raw = conn.raw if hasattr(conn, "raw") else conn
     pending = raw.execute(
         "SELECT id, jd_full FROM postings "
-        "WHERE jd_full IS NOT NULL AND btrim(jd_full) <> '' "
+        "WHERE jd_full IS NOT NULL AND jd_full ~ '\\S' "
         "AND embedding_model_version IS DISTINCT FROM %s LIMIT %s",
         (EMBEDDING_MODEL_VERSION, batch_size),
     ).fetchall()
