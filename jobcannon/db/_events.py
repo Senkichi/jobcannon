@@ -29,6 +29,8 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
+from jobcannon.db import events_schema
+
 
 def insert_event(
     conn: Any,
@@ -81,21 +83,23 @@ def record_consent(
     audit event against the SAME connection, so both writes land in one
     transaction under the caller's commit boundary (mirrors _companies.py /
     _jobs.py: no commit here — the caller wraps this in connection_factory()
-    + pool.commit_unless_nested(), or a test's rollback-isolated db_conn)."""
+    + pool.commit_unless_nested(), or a test's rollback-isolated db_conn).
+
+    The payload is validated against events_schema's PII allowlist + 200-char
+    cap BEFORE either write is issued — the same validation every log_event
+    write gets — so an oversized/illegal value aborts the whole write, not
+    just the event insert."""
+    payload = {
+        "consent_type": consent_type,
+        "granted": granted,
+        "consent_version": consent_version,
+        "consented_at": consented_at,
+    }
+    events_schema.validate_payload("consent_recorded", payload)
     raw = conn.raw if hasattr(conn, "raw") else conn
     raw.execute(
         "UPDATE users SET analytics_consent = %s, analytics_consent_updated_at = now() "
         "WHERE id = %s",
         (granted, user_id),
     )
-    insert_event(
-        raw,
-        event_type="consent_recorded",
-        user_id=user_id,
-        payload={
-            "consent_type": consent_type,
-            "granted": granted,
-            "consent_version": consent_version,
-            "consented_at": consented_at,
-        },
-    )
+    insert_event(raw, event_type="consent_recorded", user_id=user_id, payload=payload)
