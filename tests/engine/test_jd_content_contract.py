@@ -275,3 +275,22 @@ def test_from_job_keeps_clean_jd():
     assert JD_OFFSITE not in p.unresolved_reasons
     assert JD_EXPIRED not in p.unresolved_reasons
     assert p.jd_full is not None
+
+
+# ---------------------------------------------------------------------------
+# has_recognizable_jd_shape — additive public wrapper (1B Wave 2 PR 7)
+# ---------------------------------------------------------------------------
+
+
+def test_has_recognizable_jd_shape_matches_classifier_vocabulary():
+    from jobcannon.engine.jd_content_contract import has_recognizable_jd_shape
+
+    assert has_recognizable_jd_shape("Responsibilities: build things. Qualifications: 5y.")
+    assert not has_recognizable_jd_shape("hello world, nothing job-shaped here")
+
+
+def test_has_recognizable_jd_shape_none_and_empty_return_false():
+    from jobcannon.engine.jd_content_contract import has_recognizable_jd_shape
+
+    assert has_recognizable_jd_shape(None) is False
+    assert has_recognizable_jd_shape("") is False
