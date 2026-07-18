@@ -54,8 +54,8 @@ def load_host_config() -> HostConfig:
                 f"Invalid value for JC_AUTH_BLOCK_STATUSES: {statuses!r} "
                 "(expected comma-separated integers)"
             ) from exc
-    posthog_api_key = os.environ.get("POSTHOG_API_KEY") or None
-    posthog_host = os.environ.get("POSTHOG_HOST") or None
+    posthog_api_key = (os.environ.get("POSTHOG_API_KEY") or "").strip() or None
+    posthog_host = (os.environ.get("POSTHOG_HOST") or "").strip() or None
     return HostConfig(
         database_url=database_url,
         runtime=runtime,

@@ -38,6 +38,11 @@ def validate_payload(event_type: str, payload: dict | None) -> None:
     for key, val in payload.items():
         if key not in allowed:
             raise ValueError(f"illegal payload key {key!r} for {event_type!r}")
+        if val is not None and not isinstance(val, (str, int, float, bool)):
+            raise ValueError(
+                f"payload value for {key!r} must be a scalar "
+                f"(str/int/float/bool/None), got {type(val).__name__}"
+            )
         if isinstance(val, str) and len(val) > _MAX_STR:
             raise ValueError(
                 f"payload value for {key!r} exceeds {_MAX_STR} chars (free text forbidden)"
