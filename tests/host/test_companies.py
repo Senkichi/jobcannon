@@ -83,3 +83,11 @@ def test_case_insensitive_name_dedup(db_conn):
     assert count == 1
     row = db_conn.execute("SELECT name FROM companies WHERE id = %s", (cid1,)).fetchone()
     assert row["name"] == "Acme Robotics"  # first-seen casing wins, never renormalized
+
+
+def test_upsert_company_populates_name_raw(db_conn):
+    from jobcannon.db._companies import upsert_company
+
+    cid = upsert_company(db_conn, "Acme Robotics")
+    row = db_conn.execute("SELECT name, name_raw FROM companies WHERE id = %s", (cid,)).fetchone()
+    assert row["name_raw"] == "Acme Robotics" == row["name"]
