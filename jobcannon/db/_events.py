@@ -2,9 +2,13 @@
 events-table writer (1B Wave 2 PR 8).
 
 No other module may write to `events` or `users.analytics_consent` with raw
-SQL — tests/host/test_events_single_writer.py AST-scans jobcannon/host and
-jobcannon/web for "insert into events" / "update events" literals and fails
-the build if any turn up outside this file. jobcannon/host/events.py
+SQL — tests/host/test_events_single_writer.py AST-scans jobcannon/host,
+jobcannon/web, and jobcannon/db (exempting this file and
+jobcannon/db/migrations) for INSERT/UPDATE literals against those targets and
+fails the build if any turn up outside this file. That scan is a best-effort
+static lint (it cannot see runtime-assembled SQL); the payload allowlist is
+additionally enforced at the write boundary — insert_event calls
+events_schema.validate_payload before every write. jobcannon/host/events.py
 (log_event) is the only intended caller for insert_event; record_consent is
 the single writer for the users.analytics_consent column and is meant to be
 called from a future consent-settings route (not wired to one yet).
