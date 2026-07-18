@@ -22,156 +22,26 @@ from tests.host.conftest import requires_postgres
 def test_comp_transparency_structured_salary_present():
     from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
 
-    result = score_comp_transparency(120000, 150000, None)
-    assert result == {"value": True, "method": "structured"}
+    assert score_comp_transparency(120000, 150000, None) == {
+        "value": True,
+        "method": "structured",
+    }
 
 
-def test_comp_transparency_clean_range_sentence():
+def test_comp_transparency_single_bound_present_is_transparent():
     from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
 
-    jd = (
-        "We build great things. The salary range for this role is $120,000 to "
-        "$150,000 per year. Apply now."
-    )
-    result = score_comp_transparency(None, None, jd)
-    assert result["value"] is True
-    assert result["method"] == "regex_grammar"
+    assert score_comp_transparency(120000, None, None)["value"] is True
+    assert score_comp_transparency(None, 150000, None)["value"] is True
 
 
-def test_comp_transparency_ambiguous_trap_sentence():
+def test_comp_transparency_no_structured_salary_is_false_even_with_salary_text():
     from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
 
-    # A resolvable range that shares a sentence with a non-base-pay dollar
-    # figure (a sign-on bonus, not base salary) must not be scored True.
-    jd = (
-        "Join our growing team. This role comes with a $50,000 - $60,000 "
-        "sign-on bonus paid over two years."
-    )
-    result = score_comp_transparency(None, None, jd)
-    assert result["value"] == "ambiguous"
-    assert result["method"] == "regex_grammar"
-    assert "candidate_sentence" in result
-
-
-def test_comp_transparency_no_range_found():
-    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
-
-    jd = "We are looking for a great engineer to join our growing team. Apply today."
-    result = score_comp_transparency(None, None, jd)
-    assert result == {"value": False, "method": "regex_grammar"}
-
-
-def test_comp_transparency_none_jd_full():
-    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
-
-    result = score_comp_transparency(None, None, None)
-    assert result == {"value": False, "method": "regex_grammar"}
-
-
-def test_comp_transparency_bare_numeric_range_is_not_salary():
-    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
-
-    # No currency anywhere — headcount/scale prose, not pay (finding 1).
-    jd = "The team supports 200-500 users across the platform daily."
-    assert score_comp_transparency(None, None, jd) == {"value": False, "method": "regex_grammar"}
-
-
-def test_comp_transparency_bare_k_range_headcount_is_not_salary():
-    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
-
-    jd = "Our platform serves 100K-500K users every single day."
-    assert score_comp_transparency(None, None, jd) == {"value": False, "method": "regex_grammar"}
-
-
-def test_comp_transparency_base_salary_with_benefits_is_transparent():
-    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
-
-    # Explicit base-salary label -> the trailing equity/401k mention must NOT
-    # make the labeled base range ambiguous (finding 2).
-    jd = "The base salary range for this role is $120,000 to $150,000, plus equity and 401k match."
-    result = score_comp_transparency(None, None, jd)
-    assert result["value"] is True
-    assert result["method"] == "regex_grammar"
-
-
-def test_comp_transparency_single_figure_salary_is_transparent():
-    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
-
-    # A lone currency-anchored figure is a real disclosure (finding 3).
-    jd = "This role pays a base salary of $120,000 per year, plus full benefits."
-    result = score_comp_transparency(None, None, jd)
-    assert result["value"] is True
-    assert result["method"] == "regex_grammar"
-
-
-def test_comp_transparency_single_figure_requires_currency():
-    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
-
-    # A lone number with no currency is not pay (guards the single-figure path).
-    jd = "This role supports 120,000 daily active users."
-    assert score_comp_transparency(None, None, jd) == {"value": False, "method": "regex_grammar"}
-
-
-def test_comp_transparency_revenue_figure_is_not_salary():
-    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
-
-    for jd in (
-        "Our product helps save customers $100,000 annually on cloud costs.",
-        "We generated $2,000,000 in revenue last year.",
-        "The team was awarded a $300,000 annual research grant.",
-        "This role manages a budget of $2,000,000.",
-        "We process $2,000,000 in transactions annually.",
-    ):
-        assert score_comp_transparency(None, None, jd) == {
-            "value": False,
-            "method": "regex_grammar",
-        }, jd
-
-
-def test_comp_transparency_unlabeled_equity_or_bonus_figure_is_not_true():
-    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
-
-    jd1 = (
-        "Salary is not the focus here -- we instead offer $200,000 in equity "
-        "(RSUs) vesting over four years."
-    )
-    jd2 = (
-        "The salary is comparable to similar roles and this role also includes "
-        "a $40,000 signing bonus."
-    )
-    # A lone bonus/equity figure with no base-pay label must NOT read as a
-    # transparent base-pay disclosure.
-    assert score_comp_transparency(None, None, jd1)["value"] is not True
-    assert score_comp_transparency(None, None, jd2)["value"] is not True
-
-
-def test_comp_transparency_spelled_out_currency_range_is_transparent():
-    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
-
-    jd = "Compensation range: 90,000 to 110,000 dollars per year."
-    result = score_comp_transparency(None, None, jd)
-    assert result["value"] is True
-    assert result["method"] == "regex_grammar"
-
-
-def test_comp_transparency_unlabeled_bonus_or_commission_range_is_not_true():
-    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
-
-    jd1 = "This role pays out $30,000 to $50,000 in annual bonuses tied to sales targets."
-    jd2 = "This sales role pays $40,000 to $60,000 in commission on top of a modest draw."
-    # Variable-comp-only ranges with no base-pay label must not read as full transparency.
-    assert score_comp_transparency(None, None, jd1)["value"] is not True
-    assert score_comp_transparency(None, None, jd2)["value"] is not True
-
-
-def test_comp_transparency_label_and_figure_on_separate_lines():
-    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
-
-    # ATS-templated layout: comp label as a heading, figure on the next line.
-    jd1 = "Base Salary Range\n$120,000 - $160,000"
-    jd2 = "The pay range for this role is:\n$120,000 - $150,000 annually."
-    assert score_comp_transparency(None, None, jd1)["value"] is True
-    assert score_comp_transparency(None, None, jd2)["value"] is True
+    # JD-body salary text is deliberately NOT re-parsed here — pay is read from
+    # the structured columns, which the ingest/capture layer populates.
+    jd = "The salary range for this role is $120,000 to $150,000 per year."
+    assert score_comp_transparency(None, None, jd) == {"value": False, "method": "structured"}
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +288,6 @@ def test_score_pending_scores_jd_less_posting(db_conn, company_id):
     assert row["structural_axes"]["seniority_clarity"]["value"] is True
     assert row["structural_axes"]["comp_transparency"] == {
         "value": False,
-        "method": "regex_grammar",
+        "method": "structured",
     }
     assert row["structural_axes"]["jd_quality"]["value"] == 0.0
