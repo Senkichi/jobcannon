@@ -167,44 +167,26 @@ _DEFAULT_HIGH_SCORE_THRESHOLD = 20
 _ALLOWED_RECENCY_COLUMNS = {"last_scanned_at", "careers_crawl_last_at"}
 
 
-def _high_score_history_clause(recency_column: str) -> str:
-    """SQL fragment for the ats_scan high-score-history gate.
+def _high_score_history_clause(recency_column: str) -> str:  # noqa: ARG001
+    """Neutralized owner-fit rescan gate — no multi-tenant target in 1B.
 
-    Companies pass IF either (a) this phase has never run for them
-    (`recency_column` IS NULL), (b) they have no scored jobs yet (bootstrap
-    pass — new companies need a first scan to build history), OR (c) at
-    least one prior job has a v3 sub_score sum >= ?. Use with one bind
-    parameter: the threshold integer (typically 20).
+    The private original summed six per-candidate LLM owner-fit axes from
+    sub_scores_json to decide whether a company was worth rescanning. The hosted
+    shared corpus carries no sub_scores_json column (owner-fit axes are per-user)
+    and 1B runs no LLM scorer, so this gate has no representable form. Its private
+    bootstrap branch ("no scored jobs yet") is the only reachable branch here
+    anyway, i.e. already always-true. Returning TRUE keeps the WHERE structure
+    intact while removing the unrepresentable sub_scores_json reference.
+    recency_column is retained for call-site compatibility and intentionally unused.
 
-    `recency_column` is the phase-specific "last run" timestamp
-    (e.g. ``last_scanned_at`` for Phase A/Playwright,
-    ``careers_crawl_last_at`` for Phase C). It is interpolated as a SQL
-    identifier; callers must pass a hardcoded column name.
-
-    Score-based, not classification-based — the classifier has had
-    reliability issues in the past; sub_scores are the underlying signal.
+    IMPORTANT for callers: this clause used to consume ONE bind parameter (the
+    threshold int). It now consumes ZERO — every call site's `params` list must
+    NOT include the threshold value anymore, or the bind-parameter count will
+    no longer match the SQL's `?`/`%s` placeholder count. See call sites in this
+    module, plus `_run_html.py` and `_run_playwright.py` (both import this
+    function and build their own params lists).
     """
-    if recency_column not in _ALLOWED_RECENCY_COLUMNS:
-        raise ValueError(f"Invalid recency_column for high-score-history gate: {recency_column}")
-    return f"""(
-        {recency_column} IS NULL
-        OR NOT EXISTS (
-            SELECT 1 FROM jobs j
-            WHERE (j.company = companies.name OR j.company = companies.name_raw)
-              AND j.sub_scores_json IS NOT NULL
-        )
-        OR EXISTS (
-            SELECT 1 FROM jobs j
-            WHERE (j.company = companies.name OR j.company = companies.name_raw)
-              AND j.sub_scores_json IS NOT NULL
-              AND (COALESCE(json_extract(j.sub_scores_json, '$.title_fit'), 0) +
-                   COALESCE(json_extract(j.sub_scores_json, '$.location_fit'), 0) +
-                   COALESCE(json_extract(j.sub_scores_json, '$.comp_fit'), 0) +
-                   COALESCE(json_extract(j.sub_scores_json, '$.domain_match'), 0) +
-                   COALESCE(json_extract(j.sub_scores_json, '$.seniority_match'), 0) +
-                   COALESCE(json_extract(j.sub_scores_json, '$.skills_match'), 0)) >= ?
-        )
-    )"""
+    return "TRUE"
 
 
 def _ats_identity_not_null_clause() -> str:
@@ -222,13 +204,26 @@ def _ats_identity_not_null_clause() -> str:
 def _dormancy_gate_clause() -> str:
     """SQL fragment for the ats_scan yield-tiered dormancy cadence gate.
 
+    Written in SQLite dialect on purpose: this engine module is DB-agnostic by
+    design (qmark placeholders, sqlite3.Connection type hints throughout) and
+    tests/engine/ exercises it directly against a bare sqlite3 connection (see
+    tests/engine/test_dormancy_cadence.py) with no translation layer. The ONLY
+    Postgres-translation seam is jobcannon/db/compat.py's engine_sql_to_host(),
+    which every hosted call routes through via EngineCompatConnection — it
+    rewrites this exact `datetime('now', '-' || ? || ' days')` shape to
+    Postgres's `now() - make_interval(days => ?)` (see compat.py's
+    _DATETIME_REWRITES). Do NOT hand-roll Postgres-only syntax here; it would
+    silently break every tests/engine/ fixture that calls this function against
+    SQLite (verified empirically: `make_interval(days => ?)`'s `=>` token is a
+    SQLite parse error, not just a missing function).
+
+    Use with two bind parameters: threshold (int) and interval_days (int).
+
     Companies are skipped when they have exceeded the consecutive empty scan
     threshold AND were scanned recently (within the dormancy interval). This
     implements yield-tiered cadence: dormant boards are scanned less frequently
     but never permanently disabled. A non-zero yield resets the counter
     (instant promotion back to every-scan cadence).
-
-    Use with two bind parameters: threshold (int) and interval_days (int).
     """
     return """(
         consecutive_empty_scans <= ?
@@ -244,9 +239,14 @@ def _count_phase_a_eligible(
     dormancy_interval_days: int,
     company_names: list[str] | None = None,
 ) -> int:
-    """Count Phase A companies (hit OR retry-eligible error) subject to the gate."""
+    """Count Phase A companies (hit OR retry-eligible error) subject to the gate.
+
+    `threshold` is accepted for call-site parity with the private source but is
+    unused here: `_high_score_history_clause` is neutralized to TRUE (see its
+    docstring) and no longer consumes a bind parameter.
+    """
     company_filter = ""
-    params = [threshold, dormancy_threshold, dormancy_interval_days]
+    params = [dormancy_threshold, dormancy_interval_days]
     if company_names:
         placeholders = ",".join("?" * len(company_names))
         company_filter = f"AND name_raw IN ({placeholders})"
@@ -255,9 +255,9 @@ def _count_phase_a_eligible(
     row = conn.execute(
         f"""SELECT COUNT(*) FROM companies
            WHERE (
-               (ats_probe_status = 'hit' AND scan_enabled = 1)
+               (ats_probe_status = 'hit' AND scan_enabled = TRUE)
                OR
-               (ats_probe_status = 'error' AND scan_enabled = 1
+               (ats_probe_status = 'error' AND scan_enabled = TRUE
                 AND (retry_after IS NULL OR retry_after < datetime('now')))
            )
            AND {playwright_platform_exclusion_clause()}
@@ -287,7 +287,9 @@ def _count_phase_c_eligible(
     )
 
     company_filter = ""
-    params = [*non_scannable, threshold]
+    # threshold is accepted for call-site parity but no longer bound: see
+    # _high_score_history_clause's docstring (neutralized to TRUE, zero params).
+    params = [*non_scannable]
     if company_names:
         company_placeholders = ",".join("?" * len(company_names))
         company_filter = f"AND name_raw IN ({company_placeholders})"
@@ -300,7 +302,7 @@ def _count_phase_c_eligible(
                {non_scannable_clause}
            )
              AND homepage_url IS NOT NULL
-             AND scan_enabled = 1
+             AND scan_enabled = TRUE
              AND {_high_score_history_clause("careers_crawl_last_at")}
              {company_filter}""",
         tuple(params),
@@ -320,7 +322,7 @@ def run_ats_scan(
     TESTING guard: returns early when config.get('TESTING') is True.
 
     Flow:
-    1. Query companies WHERE ats_probe_status='hit' AND scan_enabled=1
+    1. Query companies WHERE ats_probe_status='hit' AND scan_enabled=TRUE
     2. For each company, call scan_lever/scan_greenhouse/scan_ashby
     3. Apply keyword filter using config profile.target_titles and exclusions
     4. For each matched job, create Job object and call upsert_job
@@ -700,7 +702,7 @@ def _scan_one_company_worker(
                     """UPDATE companies
                        SET ats_probe_status = 'miss',
                            miss_reason = 'platform_slug_gone',
-                           scan_enabled = 0,
+                           scan_enabled = FALSE,
                            last_scanned_at = ?,
                            updated_at = ?
                        WHERE id = ?""",
@@ -778,7 +780,9 @@ def _run_ats_api_scan(
     # Also gated by the dormancy clause: skip companies with consecutive empty
     # scans above threshold within the dormancy interval.
     company_filter = ""
-    params = [high_score_threshold, dormancy_threshold, dormancy_interval_days]
+    # high_score_threshold is accepted for call-site parity but no longer bound:
+    # see _high_score_history_clause's docstring (neutralized to TRUE, zero params).
+    params = [dormancy_threshold, dormancy_interval_days]
     if company_names:
         placeholders = ",".join("?" * len(company_names))
         company_filter = f"AND name_raw IN ({placeholders})"
@@ -788,9 +792,9 @@ def _run_ats_api_scan(
         f"""SELECT id, name_raw, ats_platform, ats_slug
            FROM companies
            WHERE (
-               (ats_probe_status = 'hit' AND scan_enabled = 1)
+               (ats_probe_status = 'hit' AND scan_enabled = TRUE)
                OR
-               (ats_probe_status = 'error' AND scan_enabled = 1
+               (ats_probe_status = 'error' AND scan_enabled = TRUE
                 AND (retry_after IS NULL OR retry_after < datetime('now')))
            )
            AND {playwright_platform_exclusion_clause()}
@@ -1089,7 +1093,7 @@ def _scan_one_company_via_ats_api(
                 """UPDATE companies
                    SET ats_probe_status = 'miss',
                        miss_reason = 'platform_slug_gone',
-                       scan_enabled = 0,
+                       scan_enabled = FALSE,
                        last_scanned_at = ?,
                        updated_at = ?
                    WHERE id = ?""",
