@@ -78,9 +78,7 @@ def test_demo_is_public_and_renders_corpus_stats(app_client_unauthed, monkeypatc
         "corpus_stats",
         lambda conn: {"postings": 3, "companies": 2, "freshest_last_seen": None},
     )
-    monkeypatch.setattr(
-        pages, "get_profile", lambda conn, user_id: {"seniority_level": "senior"}
-    )
+    monkeypatch.setattr(pages, "get_profile", lambda conn, user_id: {"seniority_level": "senior"})
 
     response = app_client_unauthed.get("/demo")
     html = response.get_data(as_text=True)
