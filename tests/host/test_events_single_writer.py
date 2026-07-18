@@ -17,7 +17,7 @@ import ast
 import pathlib
 import re
 
-ROOTS = ["jobcannon/host", "jobcannon/web", "jobcannon/db"]
+ROOTS = ["jobcannon/host", "jobcannon/web", "jobcannon/db", "jobcannon/worker"]
 _EXEMPT_SUBSTRINGS = ("jobcannon/db/_events.py", "/migrations/")
 
 
