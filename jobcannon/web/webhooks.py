@@ -36,7 +36,7 @@ def clerk_webhook():
     payload = request.get_data()
     try:
         event = Webhook(current_app.config["WEBHOOK_SECRET"]).verify(payload, request.headers)
-    except (WebhookVerificationError, ValueError):
+    except (WebhookVerificationError, ValueError, RuntimeError):
         # ValueError covers the underlying standardwebhooks/svix reference
         # implementation's un-wrapped failures on attacker-controlled input:
         # base64.b64decode() raises binascii.Error (a ValueError subclass)
@@ -45,8 +45,14 @@ def clerk_webhook():
         # signature over a non-JSON body surfaces as json.JSONDecodeError
         # (also a ValueError subclass) from verify()'s own json.loads(data)
         # call — both are untrusted-input failures that must map to 400,
-        # never bubble up as an unhandled 500. Verified empirically against
-        # svix 1.98.0 / standardwebhooks 1.0.1 2026-07-17.
+        # never bubble up as an unhandled 500. RuntimeError covers the other
+        # untrusted-config edge: Webhook(secret) itself raises a bare
+        # RuntimeError("Secret can't be empty.") when WEBHOOK_SECRET resolves
+        # to "" (e.g. a TESTING config that injects a blank secret) — that
+        # construction happens on this same line, inside this try, so it
+        # must degrade to 400 too rather than an unhandled 500. Verified
+        # empirically against svix 1.98.0 / standardwebhooks 1.0.1
+        # 2026-07-17.
         return ("", 400)
 
     event_type = event.get("type")
@@ -61,7 +67,7 @@ def clerk_webhook():
         with connection_factory() as conn:
             conn.raw.execute(
                 "INSERT INTO users (id, email) VALUES (%s, %s) "
-                "ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email",
+                "ON CONFLICT (id) DO UPDATE SET email = COALESCE(EXCLUDED.email, users.email)",
                 (user_id, _primary_email(data)),
             )
             commit_unless_nested(conn.raw)

@@ -25,9 +25,26 @@ def build_clerk_verifier() -> Callable[[Any], ClerkIdentity | None]:
 
     sdk = Clerk(bearer_auth=os.environ["CLERK_SECRET_KEY"])
     jwt_key = os.environ.get("CLERK_JWT_KEY")
+    if not jwt_key:
+        # An unset key silently falls back to a per-request JWKS network
+        # fetch (breaking the networkless RS256 guarantee this module's
+        # docstring promises) whose non-TokenVerificationError exceptions
+        # propagate uncaught. Fail fast at startup instead.
+        raise RuntimeError(
+            "CLERK_JWT_KEY is required (networkless RS256 verification; unset forces "
+            "per-request JWKS fetch)"
+        )
     authorized_parties = [
         p for p in os.environ.get("CLERK_AUTHORIZED_PARTIES", "").split(",") if p.strip()
     ]
+    if not authorized_parties:
+        # Unset/blank -> `authorized_parties or None` below -> None -> the SDK
+        # skips the azp (cross-origin token-replay) check silently. Fail fast
+        # at startup instead of leaving that defense quietly disabled.
+        raise RuntimeError(
+            "CLERK_AUTHORIZED_PARTIES is required (comma-separated allowed origins; "
+            "azp replay defense)"
+        )
 
     def verify(request) -> ClerkIdentity | None:
         state = sdk.authenticate_request(
