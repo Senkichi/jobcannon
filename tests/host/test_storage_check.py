@@ -55,7 +55,7 @@ def test_db_storage_check_task_reports_through_the_recorder(monkeypatch):
 
     result = tasks.db_storage_check(0)
 
-    assert result == {"used_bytes": 1, "limit_mb": 256, "used_pct": 0.01, "alert": False}
+    assert result == {"used_bytes": 1, "limit_mb": 5120, "used_pct": 0.01, "alert": False}
     assert len(calls) == 1
     assert calls[0]["source"] == "db_storage_check"
     assert calls[0]["used_bytes"] == 1
