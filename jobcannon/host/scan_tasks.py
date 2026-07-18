@@ -48,8 +48,14 @@ def _embed_pending_best_effort(conn: Any, config: Any) -> tuple[int | None, str 
     into the run summary as `embedding_error` so the swallow is observable to
     monitoring, not silent, and the versioned re-sweep retries the still-pending
     rows next scan. The connection is returned to the pool afterward and reset
-    before reuse; each per-row write is individually transactional (rolled back
-    on error), so a swallowed failure leaves no half-applied write behind."""
+    before reuse; the embed batch is one atomic transaction (rolled back on
+    error), so a swallowed failure leaves no half-applied write behind.
+
+    `embeddings._get_model`'s negative-cache backoff (JC_EMBED_RETRY_BACKOFF_S,
+    default 1h) means a broken/absent onnxruntime raises EmbeddingUnavailable
+    Error fast on every scan within the backoff window rather than re-paying
+    an expensive doomed model construction each time — this call site's swallow
+    now catches a cheap failure, not a slow one."""
     try:
         return embed_pending_postings(conn, config), None
     except Exception as exc:
