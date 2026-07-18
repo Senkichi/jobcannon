@@ -1,4 +1,14 @@
-"""Engine purity guard: jobcannon.* must be host-agnostic."""
+"""Boundary guards for jobcannon's engine/host split.
+
+Two enforcement functions live here: test_engine_has_no_private_or_host_imports
+asserts jobcannon.engine is host-agnostic (no job_finder/flask/apscheduler/
+psycopg imports at module level); test_host_has_no_private_or_scheduler_imports
+asserts the surrounding host packages (jobcannon.db/host/web) may import
+flask/psycopg but must never import job_finder (private repo) or apscheduler
+(retired scheduler). The remaining tests below are phantom-import/-name
+scanners that catch jobcannon.engine references the two import-boundary
+checks above cannot see (function bodies, TYPE_CHECKING blocks, star-imports).
+"""
 
 import ast
 import pathlib
