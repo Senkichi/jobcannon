@@ -48,13 +48,34 @@ def _embed_pending_best_effort(conn: Any, config: Any) -> tuple[int | None, str 
     into the run summary as `embedding_error` so the swallow is observable to
     monitoring, not silent, and the versioned re-sweep retries the still-pending
     rows next scan. The connection is returned to the pool afterward and reset
-    before reuse; each per-row write is individually transactional (rolled back
-    on error), so a swallowed failure leaves no half-applied write behind."""
+    before reuse; the embed batch is one atomic transaction (rolled back on
+    error), so a swallowed failure leaves no half-applied write behind.
+
+    `embeddings._get_model`'s negative-cache backoff (JC_EMBED_RETRY_BACKOFF_S,
+    default 1h) means a broken/absent onnxruntime raises EmbeddingUnavailable
+    Error fast on every scan within the backoff window rather than re-paying
+    an expensive doomed model construction each time — this call site's swallow
+    now catches a cheap failure, not a slow one."""
     try:
         return embed_pending_postings(conn, config), None
     except Exception as exc:
         logger.exception("embedding tail failed; postings remain pending for the next scan")
         return None, str(exc)
+
+
+def _due_company_names(conn: Any, *, interval_hours: int) -> list[str]:
+    """Companies eligible for a periodic scan enqueue: scan-enabled and not
+    scanned within the interval. Cheap approximation only — run_ats_scan's own
+    Phase-A gates (dormancy, retry_after, probe status) remain the authority,
+    so over-enqueueing is safe; the queueing_lock dedupes repeat ticks."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    rows = raw.execute(
+        "SELECT name FROM companies WHERE scan_enabled "
+        "AND (last_scanned_at IS NULL OR last_scanned_at < now() - make_interval(hours => %s)) "
+        "ORDER BY last_scanned_at ASC NULLS FIRST, name ASC",
+        (interval_hours,),
+    ).fetchall()
+    return [r["name"] for r in rows]
 
 
 def run_expiry_check_task() -> None:
