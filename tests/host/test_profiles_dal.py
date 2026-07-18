@@ -5,6 +5,9 @@ REFERENCES users(id) (m0001), so every test seeds a users row first."""
 
 from __future__ import annotations
 
+import psycopg.errors
+import pytest
+
 
 def _seed_user(conn, user_id):
     conn.execute("INSERT INTO users (id, plan_tier) VALUES (%s, 'free')", (user_id,))
@@ -14,6 +17,19 @@ def test_get_profile_returns_none_for_missing_user(db_conn):
     from jobcannon.db._profiles import get_profile
 
     assert get_profile(db_conn, "nobody") is None
+
+
+def test_upsert_profile_fails_loud_on_missing_user(db_conn):
+    """profiles.user_id REFERENCES users(id) (m0001) with no ON CONFLICT
+    fallback for a missing parent row: upsert_profile must fail loud
+    (ForeignKeyViolation), not silently no-op. Locks the fail-loud contract
+    scripts/seed_guest_demo.py's insert-user-first ordering depends on —
+    reversing that order would previously have failed just as loudly but
+    without a regression test pinning it."""
+    from jobcannon.db._profiles import upsert_profile
+
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        upsert_profile(db_conn, "nonexistent-user", skills=["x"])
 
 
 def test_upsert_profile_then_get_profile_roundtrip(db_conn):

@@ -5,6 +5,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
+from tests.host.conftest import create_throwaway_db, drop_throwaway_db, requires_postgres
+
+pytestmark = requires_postgres
+
 
 def _seed_company(conn, name):
     return conn.execute(
@@ -47,3 +53,44 @@ def test_corpus_stats_with_data_returns_counts_and_freshest(db_conn):
     assert stats["postings"] == 3
     assert stats["companies"] == 2
     assert stats["freshest_last_seen"] == freshest
+
+
+@pytest.fixture()
+def opened_pool():
+    """Own throwaway database, pool-backed — needed to exercise pool.py's
+    actual `configure` hook (the UTC session-timezone pin). The
+    rollback-isolated `db_conn` fixture other tests in this module use is a
+    raw psycopg.connect(), never routed through
+    jobcannon.db.pool.ConnectionPool, so it would not pick up the pin.
+    Mirrors tests/host/test_connection_factory.py's fixture of the same
+    name/shape."""
+    from jobcannon.db import pool as pool_mod
+    from jobcannon.db.migrate import run_migrations
+
+    dsn, db_name = create_throwaway_db("jobcannon_stats_tz")
+    try:
+        run_migrations(dsn)
+        pool_mod.open_pool(dsn)
+        yield pool_mod
+    finally:
+        pool_mod.close_pool()
+        drop_throwaway_db(db_name)
+
+
+def test_corpus_stats_freshest_last_seen_is_utc(opened_pool):
+    """Pins pool.py's `_configure` hook (SET TIME ZONE 'UTC' on every new
+    pooled connection): the local Postgres service here defaults its
+    session TimeZone GUC to America/Los_Angeles, so without the pin this
+    would come back with a non-zero utcoffset — silently contradicting the
+    hardcoded " UTC" suffix feed.html/demo.html render next to this value."""
+    from jobcannon.db._stats import corpus_stats
+    from jobcannon.db.pool import connection_factory
+
+    with connection_factory() as conn:
+        company_id = _seed_company(conn.raw, "Acme")
+        _seed_posting(conn.raw, "tz-check", company_id, datetime.now(timezone.utc))
+        stats = corpus_stats(conn)
+
+    freshest = stats["freshest_last_seen"]
+    assert freshest.tzinfo is not None
+    assert freshest.utcoffset() == timedelta(0)

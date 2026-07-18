@@ -58,6 +58,7 @@ def test_root_requires_auth(app_client_unauthed):
 def test_root_renders_no_profile_empty_state(app_client_authed, monkeypatch):
     from jobcannon.web import pages
 
+    _patch_connection_factory(monkeypatch)
     monkeypatch.setattr(
         pages,
         "corpus_stats",
@@ -67,6 +68,44 @@ def test_root_renders_no_profile_empty_state(app_client_authed, monkeypatch):
 
     html = app_client_authed.get("/").get_data(as_text=True)
     assert "Your feed isn't wired up yet" in html
+
+
+def test_demo_fail_closed_when_connection_open_fails(app_client_unauthed, monkeypatch):
+    """Proves _read_page_data's except clause actually engages when
+    connection_factory() itself raises (unopened pool / outage) — the
+    companion to the fix above: this is the ONE path the previous
+    (unpatched) test_root_renders_no_profile_empty_state was accidentally
+    exercising and mistaking for coverage of the mocked-DAL path."""
+    from jobcannon.web import pages
+
+    def _raise():
+        raise RuntimeError("pool not opened")
+
+    monkeypatch.setattr(pages, "connection_factory", _raise)
+
+    response = app_client_unauthed.get("/demo")
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "The corpus is warming up" in html
+
+
+def test_demo_fail_closed_when_corpus_stats_raises(app_client_unauthed, monkeypatch):
+    """Proves the except clause also covers errors from the DB reads
+    themselves (corpus_stats/get_profile), not just a failed connection
+    open — connection_factory succeeds here via nullcontext."""
+    from jobcannon.web import pages
+
+    _patch_connection_factory(monkeypatch)
+
+    def _raise(conn):
+        raise RuntimeError("query failed")
+
+    monkeypatch.setattr(pages, "corpus_stats", _raise)
+
+    response = app_client_unauthed.get("/demo")
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "The corpus is warming up" in html
 
 
 def test_demo_is_public_and_renders_corpus_stats(app_client_unauthed, monkeypatch):
@@ -102,3 +141,27 @@ def test_demo_renders_warming_up_when_corpus_empty(app_client_unauthed, monkeypa
     html = response.get_data(as_text=True)
     assert response.status_code == 200
     assert "The corpus is warming up" in html
+
+
+def test_demo_trailing_slash_is_public_not_401(app_client_unauthed, monkeypatch):
+    """Regression test: /demo is registered strict_slashes=False, so /demo/
+    resolves to the same view as /demo, but the public-path gate in
+    jobcannon/web/__init__.py used to compare request.path (== "/demo/")
+    against the exact-string PUBLIC_PATHS set (which only has "/demo") —
+    an unauthenticated GET /demo/ hit abort(401) instead of serving the
+    public page. The gate now strips a trailing slash before the
+    membership check."""
+    from jobcannon.web import pages
+
+    _patch_connection_factory(monkeypatch)
+    monkeypatch.setattr(
+        pages,
+        "corpus_stats",
+        lambda conn: {"postings": 3, "companies": 2, "freshest_last_seen": None},
+    )
+    monkeypatch.setattr(pages, "get_profile", lambda conn, user_id: {"seniority_level": "senior"})
+
+    response = app_client_unauthed.get("/demo/")
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "The live corpus" in html
