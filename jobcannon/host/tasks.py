@@ -1,15 +1,15 @@
 """Procrastinate task-shape declarations for the hosted job taxonomy, plus the
-periodic enqueue tick that fires them.
+periodic enqueue tick and OD-18 storage-check tick that fire on a schedule.
 
-Task shapes (`scan`, `expiry_check`, `stale_detect`) and the periodic enqueue
-tick (`enqueue_due_scans`, declared with `@app.periodic` + `@app.task` below)
-all live here. 'enrich' is intentionally not defined: no enrich hook exists to
-run. Defining the periodic task's SHAPE is not the same as RUNNING it: this
-module still never runs a worker or applies procrastinate's schema at import
-time — `jobcannon.worker.__main__` owns both (it applies procrastinate's
-schema via `_ensure_procrastinate_schema`, then calls `App.run_worker()`),
-and `App.run_worker()` is what actually fires the periodic tick and every
-deferred task on schedule.
+Task shapes (`scan`, `expiry_check`, `stale_detect`) and the two periodics
+(`enqueue_due_scans` and `db_storage_check`, each declared with `@app.periodic`
++ `@app.task` below) all live here. 'enrich' is intentionally not defined: no
+enrich hook exists to run. Defining a periodic task's SHAPE is not the same as
+RUNNING it: this module still never runs a worker or applies procrastinate's
+schema at import time — `jobcannon.worker.__main__` owns both (it applies
+procrastinate's schema via `_ensure_procrastinate_schema`, then calls
+`App.run_worker()`), and `App.run_worker()` is what actually fires every
+periodic tick and deferred task on schedule.
 
 Connector note: PsycopgConnector (procrastinate 3.9.0, the pinned version —
 see pyproject.toml) is the async psycopg3 connector, and it is REQUIRED here
@@ -47,6 +47,7 @@ from jobcannon.host.scan_tasks import (
     run_scan_task,
     run_stale_detect_task,
 )
+from jobcannon.host.storage_check import check_db_storage
 
 app = procrastinate.App(
     connector=procrastinate.PsycopgConnector(conninfo=os.environ.get("DATABASE_URL", ""))
@@ -96,3 +97,22 @@ def enqueue_due_scans(timestamp: int) -> dict:
         except procrastinate_exceptions.AlreadyEnqueued:
             already += 1
     return {"enqueued": enqueued, "already_enqueued": already}
+
+
+@app.periodic(
+    cron=os.environ.get("JC_STORAGE_CHECK_CRON", "17 6 * * *"),
+    periodic_id="db_storage_check",
+)
+@app.task(queue="maintenance", queueing_lock="db_storage_check")
+def db_storage_check(timestamp: int) -> dict:
+    """OD-18 periodic: report the DB storage percentage through the sanctioned
+    scan_health_log recorder so a nearing-tier-limit database shows up
+    alongside every other health signal, not just in Render's own email."""
+    from jobcannon.db import connection_factory
+    from jobcannon.host.health_recorder import record_scan_health
+
+    limit_mb = int(os.environ.get("JC_DB_STORAGE_LIMIT_MB", "256"))
+    with connection_factory() as conn:
+        status = check_db_storage(conn, limit_mb=limit_mb)
+    record_scan_health(source="db_storage_check", **status)
+    return status
