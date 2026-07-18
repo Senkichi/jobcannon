@@ -152,9 +152,16 @@ def upsert_company(
             try:
                 with raw.transaction():
                     row = raw.execute(
-                        "INSERT INTO companies (name, ats_platform, ats_slug, ats_probe_status, homepage_url) "
-                        "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                        (normalized, ats_platform, ats_slug, ats_probe_status, homepage_url),
+                        "INSERT INTO companies (name, name_raw, ats_platform, ats_slug, ats_probe_status, homepage_url) "
+                        "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                        (
+                            normalized,
+                            normalized,
+                            ats_platform,
+                            ats_slug,
+                            ats_probe_status,
+                            homepage_url,
+                        ),
                     ).fetchone()
             except psycopg.errors.UniqueViolation as exc:
                 constraint = getattr(exc.diag, "constraint_name", None)
@@ -195,8 +202,9 @@ def upsert_company(
                 )
                 with raw.transaction():
                     row = raw.execute(
-                        "INSERT INTO companies (name, homepage_url) VALUES (%s, %s) RETURNING id",
-                        (normalized, homepage_url),
+                        "INSERT INTO companies (name, name_raw, homepage_url) "
+                        "VALUES (%s, %s, %s) RETURNING id",
+                        (normalized, normalized, homepage_url),
                     ).fetchone()
             commit_unless_nested(raw)
             return row["id"]
