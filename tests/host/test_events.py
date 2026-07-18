@@ -207,3 +207,25 @@ def test_record_consent_rejects_oversized_value():
             consent_version="v" * 5000,  # exceeds the 200-char cap
             consented_at="2026-07-17T00:00:00Z",
         )
+
+
+def test_insert_event_validates_at_write_boundary():
+    # insert_event validates BEFORE touching the connection, so a dummy conn is
+    # never used when the payload is illegal (finding: boundary enforcement).
+    from jobcannon.db import _events
+
+    with pytest.raises(ValueError):
+        _events.insert_event(
+            None, event_type="posting_saved", user_id="u", payload={"pii": "x@y.com"}
+        )
+    with pytest.raises(ValueError):
+        _events.insert_event(None, event_type="not_a_real_event", user_id="u")
+
+
+def test_validate_payload_rejects_non_scalar_value():
+    from jobcannon.db import events_schema
+
+    with pytest.raises(ValueError):
+        events_schema.validate_payload("user_signed_up", {"channel": {"blob": "x" * 1000}})
+    with pytest.raises(ValueError):
+        events_schema.validate_payload("user_signed_up", {"channel": ["a", "b"]})

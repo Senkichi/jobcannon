@@ -45,6 +45,7 @@ def insert_event(
     interleave_team: str | None = None,
     payload: dict | None = None,
 ) -> None:
+    events_schema.validate_payload(event_type, payload)
     raw = conn.raw if hasattr(conn, "raw") else conn
     raw.execute(
         "INSERT INTO events (user_id, event_type, posting_id, feed_position, ranker_version, "
