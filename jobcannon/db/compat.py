@@ -17,25 +17,51 @@ but the hosted schema's postings table is named `postings` (m0001). All four
 sites are covered by a single (FROM|UPDATE|INTO|JOIN) jobs -> postings
 rewrite.
 
+Date-function rewrite (PR 5b): the engine writes two SQLite-only date-function
+shapes in `ats_scanner/_run.py` / `ats_scanner/_run_playwright.py` — kept in
+SQLite dialect deliberately, since tests/engine/ exercises this exact SQL
+directly against a bare sqlite3 connection with no translation layer (see
+tests/engine/test_dormancy_cadence.py, tests/engine/test_run_playwright.py).
+This is the ONLY place either shape is rewritten for the hosted path:
+  - `datetime('now', '-' || ? || ' days')` (the dormancy gate's interval
+    arithmetic, `_dormancy_gate_clause`) -> `now() - make_interval(days => ?)`
+  - bare `datetime('now')` (the retry-eligibility clauses) -> `now()`
+Host-authored SQL never calls SQLite's datetime(), so both rewrites are a
+no-op for it.
+
 KNOWN-UNSUPPORTED (Wave-2 / scan-orchestration PR work — recorded here so
-this shim's coverage claim stays honest). qmark translation and the table
-rewrite make engine SQL *parse* against Postgres, but the following engine
-surfaces are NOT yet runnable on the hosted schema even after translation,
-because they depend on SQLite-only functions or on columns m0001 does not
-carry:
-  (a) `run_ats_scan`'s eligibility clauses in `ats_scanner/_run.py` —
-      `_dormancy_gate_clause` (:233-237) uses SQLite's
-      `datetime('now', '-' || ? || ' days')`, and
-      `_high_score_history_gate_clause` (:189-207) uses `json_extract(...)`
-      against `sub_scores_json`, a column the hosted `postings` schema does
-      not carry (structural axes live in `structural_axes` instead).
+this shim's coverage claim stays honest). qmark translation, the table
+rewrite, and the date-function rewrite above make engine SQL *parse and run*
+against Postgres, but the following engine surfaces are NOT yet runnable on
+the hosted schema even after translation, because they depend on columns
+m0001 does not carry or on gates with no representable Postgres form:
+  (a) RESOLVED in PR 5b: `run_ats_scan`'s eligibility clauses in
+      `ats_scanner/_run.py` (and the sibling call sites in
+      `ats_scanner/_run_html.py` / `ats_scanner/_run_playwright.py` that
+      import them) — the dormancy gate and retry-eligibility `datetime('now')`
+      calls are now translated by this module's date-function rewrite (above);
+      the high-score-history gate is neutralized to `TRUE` in-engine (no
+      representable multi-tenant sub_scores_json target in 1B — see
+      `_high_score_history_clause`'s docstring in `ats_scanner/_run.py`); and
+      every `scan_enabled = 1`/`= 0` integer literal against the `boolean`
+      `scan_enabled` column (caught live by the Postgres smoke test in
+      tests/host/test_run_scan_once_smoke.py — `operator does not exist:
+      boolean = integer`) is rewritten in-engine to `TRUE`/`FALSE`, which both
+      Postgres and SQLite accept natively (no compat-layer rewrite needed).
   (b) `stale_detector.py`'s audit-trail writes (:295, :400) INSERT into
       `pipeline_events`, a table with no hosted equivalent in m0001.
-  (c) prober/Playwright company columns referenced across
-      `ats_scanner/_probe.py` (:277-358), `ats_scanner/_run.py` (:193-293),
-      and `ats_scanner/_run_playwright.py` (:250, :298) — `name_raw`,
-      `retry_after`, `miss_reason`, `ats_probe_attempted_at`,
-      `jobs_found_total` — none of which m0001's `companies` table defines.
+  (c) `ats_scanner/_probe.py`'s speculative-probe column
+      `ats_probe_attempted_at` (:277-358) is the only remaining
+      `run_ats_scan`-adjacent column gap: m0003 (PR 5a, merged) added the
+      other seven companies columns that `ats_scanner/_run.py` (:193-293)
+      and `ats_scanner/_run_playwright.py` (:250, :298) reference —
+      `name_raw`, `retry_count`, `retry_after`, `miss_reason`,
+      `careers_crawl_last_at`, `jobs_found_total`, `last_scan_postings_json`,
+      `last_scan_cached_at` — and PR 5b (this PR) makes `upsert_company`
+      populate `name_raw` on insert (previously written nowhere, m0003's
+      own docstring flagged this as deferred to "a later PR"). `_probe.py`'s
+      `probe_ats_slugs` is a separate scan orchestrator from `run_ats_scan`
+      and is not exercised by this PR.
 
 What IS verified end-to-end on Postgres: the `_upsert_one_ats_api_job` write
 path (INSERT/UPDATE against `postings`, including the translated
@@ -84,15 +110,38 @@ _TABLE_REWRITES = (
     (re.compile(r"\b(FROM|UPDATE|INTO|JOIN)\s+jobs\b", re.IGNORECASE), r"\1 postings"),
 )
 
+# SQLite-only date-function shapes -> Postgres equivalents (module docstring
+# has the full rationale). Order matters only for readability here: the two
+# patterns can't collide (the interval form's ',' right after 'now' can never
+# match the bare form's required immediate ')'). Both run BEFORE
+# qmark_to_format so the `?` inside the interval form's rewritten output is
+# still a bare qmark when the subsequent qmark_to_format pass converts every
+# remaining `?` (this one plus the clause's own leading `consecutive_empty_
+# scans <= ?`) to `%s` in one consistent left-to-right pass — no reordering
+# of bind parameters relative to the params tuple callers build.
+_DATETIME_REWRITES = (
+    (
+        re.compile(r"datetime\(\s*'now'\s*,\s*'-'\s*\|\|\s*\?\s*\|\|\s*'\s*days'\s*\)"),
+        "now() - make_interval(days => ?)",
+    ),
+    (re.compile(r"datetime\(\s*'now'\s*\)"), "now()"),
+)
+
 
 def engine_sql_to_host(sql: str) -> str:
-    """qmark translation + engine `jobs` -> host `postings` table rewrite.
+    """Date-function rewrite + qmark translation + engine `jobs` -> host
+    `postings` table rewrite.
 
     This is what EngineCompatConnection.execute() actually runs. Host-
     authored SQL naming `postings` directly passes through unchanged (the
-    regex only matches the literal token `jobs`).
+    table regex only matches the literal token `jobs`), and host-authored SQL
+    never calls SQLite's datetime() either, so both rewrites are a no-op for
+    it.
     """
-    out = qmark_to_format(sql)
+    out = sql
+    for pattern, repl in _DATETIME_REWRITES:
+        out = pattern.sub(repl, out)
+    out = qmark_to_format(out)
     for pattern, repl in _TABLE_REWRITES:
         out = pattern.sub(repl, out)
     return out
