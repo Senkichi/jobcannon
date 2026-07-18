@@ -31,6 +31,9 @@ import os
 
 import procrastinate
 
+from procrastinate import exceptions as procrastinate_exceptions
+
+from jobcannon.host import scan_tasks as _scan_tasks
 from jobcannon.host.scan_tasks import (
     run_expiry_check_task,
     run_scan_task,
@@ -55,3 +58,33 @@ def expiry_check() -> None:
 @app.task(queue="maintenance")
 def stale_detect() -> None:
     run_stale_detect_task()
+
+
+def _tick_connection():
+    """Seam for tests: the tick's DB context. Production: the pooled factory."""
+    from jobcannon.db import connection_factory
+
+    return connection_factory()
+
+
+@app.periodic(
+    cron=os.environ.get("JC_SCAN_CRON", "0 */8 * * *"),
+    periodic_id="enqueue_due_scans",
+)
+@app.task(queue="scan", queueing_lock="enqueue_due_scans")
+def enqueue_due_scans(timestamp: int) -> dict:
+    """Periodic enqueue tick (spec §4): one `scan` job per due company, deduped
+    by a per-company queueing lock. Over-enqueueing is safe (engine gates);
+    a lock already held (job still todo) is counted, not an error. The tick
+    itself carries a queueing lock so a slow tick can't stack behind itself."""
+    interval_hours = int(os.environ.get("JC_SCAN_INTERVAL_HOURS", "8"))
+    with _tick_connection() as conn:
+        due = _scan_tasks._due_company_names(conn, interval_hours=interval_hours)
+    enqueued = already = 0
+    for name in due:
+        try:
+            scan.configure(queueing_lock=f"scan:{name}").defer(company_name=name)
+            enqueued += 1
+        except procrastinate_exceptions.AlreadyEnqueued:
+            already += 1
+    return {"enqueued": enqueued, "already_enqueued": already}
