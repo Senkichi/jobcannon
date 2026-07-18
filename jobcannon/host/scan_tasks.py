@@ -3,28 +3,58 @@ are already wired by the caller (scripts/run_scan_once.py or PR-10's worker)."""
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from jobcannon.db import connection_factory
 from jobcannon.engine.ats_scanner import run_ats_scan
+from jobcannon.host.embeddings import embed_pending_postings
 from jobcannon.host.structural_axes import score_pending_structural_axes
+
+logger = logging.getLogger(__name__)
 
 
 def run_scan_task(company_names: list[str] | None = None) -> dict[str, Any]:
-    """Drive one ATS scan, then compute structural axes for any postings not
-    yet scored under the current rules version. db_path is vestigial under the
-    Postgres adapter (connection_factory ignores it); pass a placeholder.
+    """Drive one ATS scan, then compute structural axes AND JD embeddings for
+    any postings not yet processed under the current versions.
 
-    The structural tail runs AFTER run_ats_scan has committed its postings. A
-    failure here propagates (the scan's own writes are already durable, and
-    score_pending_structural_axes is an idempotent versioned re-sweep — a task
-    retry re-scores only the still-pending rows), so we surface it rather than
-    swallow a scoring outage."""
+    The structural tail runs AFTER run_ats_scan has committed its postings and
+    PROPAGATES on failure (pure Python — a failure there is a bug, and its
+    idempotent versioned re-sweep means a task retry re-scores only still-
+    pending rows). The embed tail (_embed_pending_best_effort) is BEST-EFFORT:
+    embedding pulls a heavy native runtime (fastembed/onnxruntime) plus a
+    first-run model download and no consumer reads embeddings yet, so an
+    embedding-infra hiccup must not fail an otherwise-successful scan — it is
+    logged and surfaced as postings_embedded=None AND embedding_error=<message>,
+    and the versioned re-sweep re-embeds the still-pending rows next scan.
+    """
     config = _runtime_config()
     summary = run_ats_scan("__hosted__", config, company_names=company_names)
     with connection_factory() as conn:
         structural_scored = score_pending_structural_axes(conn, config)
-    return {**summary, "structural_axes_scored": structural_scored}
+        embedded, embedding_error = _embed_pending_best_effort(conn, config)
+    return {
+        **summary,
+        "structural_axes_scored": structural_scored,
+        "postings_embedded": embedded,
+        "embedding_error": embedding_error,
+    }
+
+
+def _embed_pending_best_effort(conn: Any, config: Any) -> tuple[int | None, str | None]:
+    """Run the embed tail, swallowing (but loudly logging) any failure so an
+    embedding-infra hiccup never fails a successful scan. Returns (count, None)
+    on success, or (None, message) if the tail errored — the message is threaded
+    into the run summary as `embedding_error` so the swallow is observable to
+    monitoring, not silent, and the versioned re-sweep retries the still-pending
+    rows next scan. The connection is returned to the pool afterward and reset
+    before reuse; each per-row write is individually transactional (rolled back
+    on error), so a swallowed failure leaves no half-applied write behind."""
+    try:
+        return embed_pending_postings(conn, config), None
+    except Exception as exc:
+        logger.exception("embedding tail failed; postings remain pending for the next scan")
+        return None, str(exc)
 
 
 def run_expiry_check_task() -> None:
