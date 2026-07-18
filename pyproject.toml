@@ -24,6 +24,8 @@ dependencies = [
     "svix>=1.96.0,<2.0.0",
     "posthog>=3.7,<4.0",
     "procrastinate>=3.9.0,<4.0",
+    "fastembed>=0.4,<1.0",
+    "pgvector>=0.3,<1.0",
 ]
 
 [project.optional-dependencies]
