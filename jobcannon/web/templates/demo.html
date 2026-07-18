@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Demo — Job Cannon{% endblock %}
+{% block content %}
+{% if stats.postings == 0 %}
+  <h1 class="text-2xl font-semibold mb-3">The corpus is warming up</h1>
+  <p class="text-neutral-400">No postings scanned yet. Once the first scan cycle completes, live counts appear here.</p>
+{% else %}
+  <h1 class="text-2xl font-semibold mb-3">The live corpus</h1>
+  <p class="text-neutral-400">
+    <strong class="text-neutral-100">{{ stats.postings }}</strong> live postings across
+    <strong class="text-neutral-100">{{ stats.companies }}</strong> companies
+    {%- if stats.freshest_last_seen %} · freshest signal {{ stats.freshest_last_seen.strftime("%Y-%m-%d %H:%M") }} UTC{% endif %}
+  </p>
+{% endif %}
+{% endblock %}

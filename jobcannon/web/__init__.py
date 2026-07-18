@@ -10,7 +10,7 @@ from flask import Flask, abort, g, request
 
 logger = logging.getLogger(__name__)
 
-PUBLIC_PATHS = frozenset({"/healthz"})
+PUBLIC_PATHS = frozenset({"/healthz", "/demo"})
 
 
 def _resolve_consent(identity) -> bool:
@@ -95,4 +95,8 @@ def create_app(config: dict | None = None) -> Flask:
     from jobcannon.web.webhooks import webhooks_bp
 
     app.register_blueprint(webhooks_bp)
+
+    from jobcannon.web.pages import pages_bp
+
+    app.register_blueprint(pages_bp)
     return app
