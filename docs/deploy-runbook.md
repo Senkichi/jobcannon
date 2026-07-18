@@ -17,6 +17,10 @@ in this document runs itself.
 - This repo connected to Render, then **New > Blueprint** deploying from
   `render.yaml` at the repo root. Render provisions `jobcannon-db`, then the
   `jobcannon-web` and `jobcannon-worker` services.
+- Both services pin `PYTHON_VERSION` in `render.yaml` so a new deploy never
+  silently inherits Render's current default instead of a version this
+  repo's CI actually exercises — keep that pin in sync if CI's tested
+  Python version(s) change.
 
 ## 2. Secrets to fill
 
@@ -40,17 +44,22 @@ Render dashboard). None of them are committed anywhere in this repo.
 
 `jobcannon/worker/__main__.py` is the **single migration authority** in this
 deploy: `create_app()` never runs migrations. On first boot the worker owns,
-in order: our schema ledger (`run_migrations`), then procrastinate's own
-queue schema (guarded by a `to_regclass('public.procrastinate_jobs')`
-existence probe — see the Two-Schema-Authorities design in the worker's
-module docstring), then the four engine seams, then `run_worker()`.
+in order: our schema ledger (`run_migrations`), then the four engine seams,
+then procrastinate's own queue schema (guarded apply, via a
+`to_regclass('public.procrastinate_jobs')` existence probe — see the
+Two-Schema-Authorities design in the worker's module docstring), then
+`run_worker()`.
 
-Expect these log lines on a fresh database's first worker boot:
+Expect these log lines on a fresh database's first worker boot (the ledger
+`name` column — and therefore the second `%s` migrate.py logs — is the
+migration file's stem, not its description):
 
 ```
-applied migration 1 (initial hosted schema: ...)
-applied migration 2 (scan_health_log table ...)
-...through the current ledger tip...
+applied migration 1 (m0001_initial_schema)
+applied migration 2 (m0002_scan_health_log)
+applied migration 3 (m0003_companies_scan_columns)
+applied migration 4 (m0004_users_consent)
+applied migration 5 (m0005_postings_embedding)
 applying procrastinate schema (first boot)
 ```
 
@@ -129,15 +138,29 @@ Use the report to make two decisions:
 
 `db_storage_check` (a daily periodic on the worker, default `17 6 * * *`
 UTC) reports `pg_database_size` against `JC_DB_STORAGE_LIMIT_MB` (default
-256, matching the `basic-256mb` plan in `render.yaml`) and logs at ERROR
-plus writes a `scan_health_log` row (`payload->>'source' = 'db_storage_check'`)
-once usage crosses 80% of the tier. Render's own managed-Postgres storage
-threshold emails are the belt; this check is the suspenders, surfacing the
-same signal in-app alongside every other health event. Upgrade procedure:
-bump the database's `plan` in `render.yaml` (see the plan-value table in
-Render's dashboard for the next tier up) and raise `JC_DB_STORAGE_LIMIT_MB`
-to match, then deploy — Render Postgres storage upgrades do not require a
-restart.
+5120, derived from `jobcannon-db`'s `diskSizeGB: 5` in `render.yaml` — 5GB *
+1024MB; `tests/host/test_render_config.py` guards the two values against
+drift) on **every** daily tick, via a `scan_health_log` row
+(`payload->>'source' = 'db_storage_check'`) — by design, so the block report
+can read these rows as a liveness signal even when usage is nowhere near the
+limit. Once usage crosses 80% of the limit, that same tick additionally logs
+at ERROR. Render's own managed-Postgres storage threshold emails are the
+belt; this check is the suspenders, surfacing the same signal in-app
+alongside every other health event.
+
+Upgrade procedure depends on what's actually under pressure — `plan`
+(RAM/compute) and `diskSizeGB` (disk) are decoupled, and bumping one does
+not by itself change the other:
+
+- **Storage pressure:** raise `diskSizeGB` in `render.yaml` (keep
+  `JC_DB_STORAGE_LIMIT_MB` at `diskSizeGB * 1024`, the relationship the
+  drift guard enforces), then deploy. This is a genuinely no-downtime
+  change.
+- **Compute pressure:** bump the database's `plan` in `render.yaml` (see the
+  plan-value table in Render's dashboard for the next tier up), then
+  deploy. Expect a few minutes of database unavailability while Render
+  spins up the new instance for this path — unlike the storage-only path
+  above, a plan change is NOT no-restart.
 
 ### Orphaned `doing` jobs
 
@@ -160,6 +183,10 @@ proper reclaim maintenance task is tracked as jobcannon issue #19 — until
 that lands, this is a manual operator step.
 
 ## 9. Guest demo
+
+**Requires the demo-shell PR (jobcannon #20 — guest demo + empty states);
+skip this step if `scripts/seed_guest_demo.py` is not yet present in your
+deploy.**
 
 Once the corpus has live postings (after step 6 or 7):
 

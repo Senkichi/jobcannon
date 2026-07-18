@@ -55,6 +55,34 @@ def test_health_check_path_is_a_registered_db_free_route():
     assert web["healthCheckPath"] in paths
 
 
+def test_health_check_path_responds_200_unauthenticated():
+    """url_map membership alone doesn't prove the route is reachable without
+    auth — an auth-gated /healthz would still pass that check and then fail
+    Render's checker with 401. VERIFY_REQUEST here always returns None (i.e.
+    would 401 any non-exempt route), so a 200 here proves /healthz never
+    reaches the before_request auth gate at all."""
+    bp = _blueprint()
+    web = next(s for s in bp["services"] if s["type"] == "web")
+    from jobcannon.web import create_app
+
+    app = create_app({"TESTING": True, "VERIFY_REQUEST": lambda r: None, "WEBHOOK_SECRET": "x"})
+    resp = app.test_client().get(web["healthCheckPath"])
+    assert resp.status_code == 200
+
+
+def test_storage_limit_env_matches_disk_size():
+    """OD-18 drift guard: JC_DB_STORAGE_LIMIT_MB (jobcannon-worker) must stay
+    derived from jobcannon-db's diskSizeGB (5GB * 1024 = 5120MB), never a
+    stale/hand-edited figure that silently diverges from real disk capacity."""
+    bp = _blueprint()
+    db = next(d for d in bp["databases"] if d["name"] == "jobcannon-db")
+    worker = next(s for s in bp["services"] if s["type"] == "worker")
+    limit_mb = next(
+        int(e["value"]) for e in worker["envVars"] if e["key"] == "JC_DB_STORAGE_LIMIT_MB"
+    )
+    assert limit_mb == db["diskSizeGB"] * 1024
+
+
 def test_every_required_env_var_is_declared_on_both_services():
     bp = _blueprint()
     required = {

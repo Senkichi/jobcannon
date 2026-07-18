@@ -2,11 +2,11 @@
 
 Startup owns BOTH schema authorities (Global Constraints: Two-Schema-
 Authorities ruling): our applied-set ledger via run_migrations (idempotent by
-construction), then procrastinate's own queue schema guarded by a
-to_regclass existence probe (apply_schema is plain CREATEs — NOT idempotent;
-procrastinate's own `procrastinate migrate` owns its upgrades, a runbook
-step when the pin moves). Then the four engine seams, then run_worker —
-which opens the async connector itself (do NOT wrap it in app.open()).
+construction), then the four engine seams, then procrastinate's own queue
+schema guarded by a to_regclass existence probe (apply_schema is plain
+CREATEs — NOT idempotent; procrastinate's own `procrastinate migrate` owns
+its upgrades, a runbook step when the pin moves). Then run_worker — which
+opens the async connector itself (do NOT wrap it in app.open()).
 
 Signal handling: run_worker's default install_signal_handlers=True turns
 SIGTERM (Render redeploy) into a graceful stop — a job already running when

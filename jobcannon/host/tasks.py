@@ -111,7 +111,7 @@ def db_storage_check(timestamp: int) -> dict:
     from jobcannon.db import connection_factory
     from jobcannon.host.health_recorder import record_scan_health
 
-    limit_mb = int(os.environ.get("JC_DB_STORAGE_LIMIT_MB", "256"))
+    limit_mb = int(os.environ.get("JC_DB_STORAGE_LIMIT_MB", "5120"))
     with connection_factory() as conn:
         status = check_db_storage(conn, limit_mb=limit_mb)
     record_scan_health(source="db_storage_check", **status)
