@@ -7,24 +7,33 @@ as a READ-ONLY classifier — this module NEVER writes ``salary_min``/
 
 A structured salary already present on the row wins outright (``"structured"``
 method, unambiguous ``True``). Otherwise the JD body is scanned sentence-by-
-sentence. A sentence is only considered a pay disclosure when it carries an
-explicit **currency anchor** (a ``$``/``£``/``€``/``₹`` symbol or a
-``USD``/``GBP``/... code): a bare numeric range with no currency ("supports
-200-500 users daily", "serves 100K-500K users") is headcount/scale prose, not
-pay, and the underlying range grammar — whose currency prefix is optional —
-would otherwise misread it as a salary once an unrelated period word
-("daily") lets the salvage ladder annualize it into the plausibility window.
+sentence, and a sentence must clear THREE gates before it counts as a pay
+disclosure:
 
-Within a currency-anchored sentence we accept either a resolvable *range* (via
-the same parser/normalizer the engine uses for real salary capture) or a lone
-currency-anchored *figure* ("base salary of $120,000 per year"), so a
-single-value disclosure is not silently missed. A disclosed figure whose
-sentence ALSO quotes a non-base-pay trap keyword (401k, sign-on/relocation
-bonus, equity, revenue/ARR, funding round, stipend/per-diem) is flagged
-``"ambiguous"`` rather than ``True`` — UNLESS the sentence explicitly anchors
-the figure as base pay ("base salary", "salary range", ...), in which case a
-trailing benefits mention ("$120k-$150k, plus equity and 401k match") does not
-make the base-pay range itself ambiguous.
+  1. Currency anchor (``_CURRENCY_ANCHOR_RE``): a ``$``/``£``/``€``/``₹``
+     symbol, an ISO code, or a spelled-out currency word ("dollars"). A bare
+     numeric range with no currency ("supports 200-500 users daily") is
+     headcount prose, not pay.
+  2. Pay context (``_PAY_CONTEXT_RE``): the sentence must actually be ABOUT
+     compensation (salary / compensation / wage / pay / OTE / ...), not merely
+     contain a dollar amount. This is what separates "base salary of $120,000"
+     from "$2,000,000 in revenue", "$300,000 research grant", "manages a
+     $2,000,000 budget", or "save customers $100,000 annually". Bare period
+     cues ("annually", "per year") are deliberately NOT pay context — they
+     attach to non-pay figures just as readily.
+  3. A resolvable disclosure: EITHER a resolvable salary *range* (via the same
+     parser/normalizer the engine uses for real salary capture), OR a lone
+     *figure* that is additionally labeled as base pay (``_BASE_PAY_ANCHOR_RE``).
+     A bare currency figure without a base-pay label is too easily a bonus /
+     equity / funding / budget number, so a single figure is trusted only when
+     the sentence explicitly labels it ("base salary of $120,000").
+
+A disclosed figure whose sentence ALSO quotes a non-base-pay trap keyword
+(401k, sign-on/relocation bonus, equity, revenue/ARR, funding round, stipend/
+per-diem) is flagged ``"ambiguous"`` rather than ``True`` — UNLESS the sentence
+carries a base-pay label, in which case a trailing benefits mention
+("base salary $120k-$150k, plus equity and 401k") does not make the labeled
+base range ambiguous.
 """
 
 from __future__ import annotations
@@ -41,15 +50,28 @@ from jobcannon.engine.salary_normalizer import (
     parse_salary_text,
 )
 
-# A sentence discloses pay only if it carries an explicit currency indicator.
-# Bare numeric ranges ("200-500 users") and bare magnitudes ("100K-500K users")
-# are NOT pay — requiring a currency symbol/code is the single anchor that keeps
-# the optional-currency range grammar from minting salaries out of scale prose.
-_CURRENCY_ANCHOR_RE = re.compile(r"[$£€₹]|\b(?:USD|CAD|EUR|GBP|AUD|SGD|INR)\b", re.IGNORECASE)
+# Gate 1: an explicit currency indicator (symbol, ISO code, or spelled-out
+# word). Keeps the optional-currency range grammar from minting salaries out of
+# bare numeric prose.
+_CURRENCY_ANCHOR_RE = re.compile(
+    r"[$£€₹]|\b(?:USD|CAD|EUR|GBP|AUD|SGD|INR|dollars?|euros?|pounds?)\b",
+    re.IGNORECASE,
+)
 
-# A lone currency-anchored figure ("$120,000 per year", "$120K annually"). The
-# currency prefix is REQUIRED here (unlike the engine range grammar) so a bare
-# single number can never register as pay.
+# Gate 2: positive compensation vocabulary. Bare period cues (annually / per
+# year) are intentionally excluded — they co-occur with revenue/budget/savings
+# figures too. Pay verbs (pay/paid/pays) ARE included for recall of phrasings
+# like "this role pays $120k to $150k".
+_PAY_CONTEXT_RE = re.compile(
+    r"\b(?:salary|salaries|compensation|comp|remuneration|wage|wages"
+    r"|base\s+pay|pay\s+range|pay\s+rate|hourly\s+rate|hourly\s+pay"
+    r"|ote|on[-\s]target\s+earnings|pay|pays|paid|paying)\b",
+    re.IGNORECASE,
+)
+
+# A lone currency-anchored figure ("$120,000 per year", "$120K"). Currency
+# prefix REQUIRED so a bare number never registers. Used only when the sentence
+# also carries a base-pay label (see _classify_sentence).
 _SINGLE_FIGURE_RE = re.compile(
     r"(?:[$£€₹]|\b(?:USD|CAD|EUR|GBP|AUD|SGD|INR)\b)\s*"
     r"(?P<amt>\d[\d,]*\.?\d*)\s*(?P<unit>[KkMm])?(?![A-Za-z])",
@@ -63,11 +85,13 @@ _EXCLUSION_TRAP_RE = re.compile(
     re.IGNORECASE,
 )
 
-# When the sentence explicitly frames the figure as base pay, a trailing
-# benefits mention does not make it ambiguous — the range IS the base salary.
+# A base-pay LABEL that ties a figure to base salary. Deliberately narrow: only
+# noun phrases that genuinely label a figure as base pay — NOT a bare "salary
+# is" / "salary of", which fire on "salary is not the focus ... $200k equity"
+# and would wrongly exempt the trap / mint a single-figure disclosure.
 _BASE_PAY_ANCHOR_RE = re.compile(
-    r"\b(base (?:salary|pay|compensation)|salary range|salary of|annual salary"
-    r"|starting salary|pay range|compensation range|salary is)\b",
+    r"\b(?:base\s+(?:salary|pay|compensation)|salary\s+range|annual\s+salary"
+    r"|starting\s+salary|compensation\s+range|pay\s+range)\b",
     re.IGNORECASE,
 )
 
@@ -94,13 +118,17 @@ def _single_figure_disclosed(sentence: str) -> bool:
 
 def _classify_sentence(sentence: str) -> dict | None:
     """Classify one currency-anchored sentence; None when it discloses no pay."""
-    obs = parse_salary_text(sentence, provenance="jd_regex")
-    disclosed = obs is not None and normalize_observation(obs).resolution in RESOLVED_RESOLUTIONS
-    if not disclosed:
-        disclosed = _single_figure_disclosed(sentence)
-    if not disclosed:
+    if not _PAY_CONTEXT_RE.search(sentence):
         return None
-    if _EXCLUSION_TRAP_RE.search(sentence) and not _BASE_PAY_ANCHOR_RE.search(sentence):
+    has_label = bool(_BASE_PAY_ANCHOR_RE.search(sentence))
+    obs = parse_salary_text(sentence, provenance="jd_regex")
+    range_disclosed = (
+        obs is not None and normalize_observation(obs).resolution in RESOLVED_RESOLUTIONS
+    )
+    single_disclosed = has_label and _single_figure_disclosed(sentence)
+    if not (range_disclosed or single_disclosed):
+        return None
+    if _EXCLUSION_TRAP_RE.search(sentence) and not has_label:
         return {
             "value": "ambiguous",
             "method": "regex_grammar",
