@@ -40,3 +40,31 @@ def test_upsert_profile_updates_in_place_and_preserves_unspecified_fields(db_con
     row = get_profile(db_conn, "u2")
     assert row["seniority_level"] == "staff"
     assert row["skills"] == ["sql", "python"]
+
+
+def test_seed_guest_demo_is_idempotent(db_conn):
+    """scripts/seed_guest_demo.py's seed(conn): running it twice must leave
+    exactly one users row and one current profile row (OD-5), unchanged by
+    the second call (users insert is ON CONFLICT DO NOTHING; upsert_profile
+    is itself an upsert)."""
+    from jobcannon.db._profiles import GUEST_USER_ID, get_profile
+    from scripts import seed_guest_demo
+
+    seed_guest_demo.seed(db_conn)
+    first = get_profile(db_conn, GUEST_USER_ID)
+    assert first is not None
+    assert first["seniority_level"] == "senior"
+
+    seed_guest_demo.seed(db_conn)
+    second = get_profile(db_conn, GUEST_USER_ID)
+    assert second == first
+
+    user_count = db_conn.execute(
+        "SELECT COUNT(*) AS n FROM users WHERE id = %s", (GUEST_USER_ID,)
+    ).fetchone()["n"]
+    assert user_count == 1
+
+    profile_count = db_conn.execute(
+        "SELECT COUNT(*) AS n FROM profiles WHERE user_id = %s", (GUEST_USER_ID,)
+    ).fetchone()["n"]
+    assert profile_count == 1
