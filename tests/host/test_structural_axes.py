@@ -112,6 +112,48 @@ def test_comp_transparency_single_figure_requires_currency():
     assert score_comp_transparency(None, None, jd) == {"value": False, "method": "regex_grammar"}
 
 
+def test_comp_transparency_revenue_figure_is_not_salary():
+    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
+
+    for jd in (
+        "Our product helps save customers $100,000 annually on cloud costs.",
+        "We generated $2,000,000 in revenue last year.",
+        "The team was awarded a $300,000 annual research grant.",
+        "This role manages a budget of $2,000,000.",
+        "We process $2,000,000 in transactions annually.",
+    ):
+        assert score_comp_transparency(None, None, jd) == {
+            "value": False,
+            "method": "regex_grammar",
+        }, jd
+
+
+def test_comp_transparency_unlabeled_equity_or_bonus_figure_is_not_true():
+    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
+
+    jd1 = (
+        "Salary is not the focus here -- we instead offer $200,000 in equity "
+        "(RSUs) vesting over four years."
+    )
+    jd2 = (
+        "The salary is comparable to similar roles and this role also includes "
+        "a $40,000 signing bonus."
+    )
+    # A lone bonus/equity figure with no base-pay label must NOT read as a
+    # transparent base-pay disclosure.
+    assert score_comp_transparency(None, None, jd1)["value"] is not True
+    assert score_comp_transparency(None, None, jd2)["value"] is not True
+
+
+def test_comp_transparency_spelled_out_currency_range_is_transparent():
+    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
+
+    jd = "Compensation range: 90,000 to 110,000 dollars per year."
+    result = score_comp_transparency(None, None, jd)
+    assert result["value"] is True
+    assert result["method"] == "regex_grammar"
+
+
 # ---------------------------------------------------------------------------
 # freshness
 # ---------------------------------------------------------------------------
@@ -167,6 +209,10 @@ def test_freshness_no_usable_date_falls_back_to_flat_default():
         ("Lead Generation Specialist", False),  # 'lead generation' is not a level
         ("Lead Engineer", True),
         ("Lead", True),
+        ("Lead Generative AI Engineer", True),
+        ("Lead Generalist", True),
+        ("Lead Geneticist", True),
+        ("Lead General Counsel", True),
     ],
 )
 def test_seniority_clarity(title, expected):

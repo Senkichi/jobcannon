@@ -10,7 +10,8 @@ import re
 
 _LEVEL_RE = re.compile(
     r"\b(senior|sr\.?|staff|principal|junior|jr\.?|entry[- ]?level|director|"
-    r"vp|vice president|head of|chief|lead(?!\s+gen)|manager|associate|intern|level\s*[1-9])\b",
+    r"vp|vice president|head of|chief|lead(?!\s+gen(?:eration)?\b)|manager|associate|intern"
+    r"|level\s*[1-9])\b",
     re.IGNORECASE,
 )
 
