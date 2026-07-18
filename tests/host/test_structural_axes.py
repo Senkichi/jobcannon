@@ -154,6 +154,26 @@ def test_comp_transparency_spelled_out_currency_range_is_transparent():
     assert result["method"] == "regex_grammar"
 
 
+def test_comp_transparency_unlabeled_bonus_or_commission_range_is_not_true():
+    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
+
+    jd1 = "This role pays out $30,000 to $50,000 in annual bonuses tied to sales targets."
+    jd2 = "This sales role pays $40,000 to $60,000 in commission on top of a modest draw."
+    # Variable-comp-only ranges with no base-pay label must not read as full transparency.
+    assert score_comp_transparency(None, None, jd1)["value"] is not True
+    assert score_comp_transparency(None, None, jd2)["value"] is not True
+
+
+def test_comp_transparency_label_and_figure_on_separate_lines():
+    from jobcannon.host.structural_axes.comp_transparency import score_comp_transparency
+
+    # ATS-templated layout: comp label as a heading, figure on the next line.
+    jd1 = "Base Salary Range\n$120,000 - $160,000"
+    jd2 = "The pay range for this role is:\n$120,000 - $150,000 annually."
+    assert score_comp_transparency(None, None, jd1)["value"] is True
+    assert score_comp_transparency(None, None, jd2)["value"] is True
+
+
 # ---------------------------------------------------------------------------
 # freshness
 # ---------------------------------------------------------------------------
