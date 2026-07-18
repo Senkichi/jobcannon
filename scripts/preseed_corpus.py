@@ -5,7 +5,7 @@ proof, so it must not bypass procrastinate with direct run_scan_task calls.
 Usage (operator, from the deployed worker environment or a shell with
 DATABASE_URL set):
     python scripts/preseed_corpus.py data/seed_companies.csv           # upsert + enqueue
-    python scripts/preseed_corpus.py data/seed_companies.csv --verify  # HEAD-check board URLs, no writes
+    python scripts/preseed_corpus.py data/seed_companies.csv --verify  # GET-check board URLs, no writes
     python scripts/preseed_corpus.py data/seed_companies.csv --limit 8 # staging-scan subset (spec §8)
 """
 
@@ -151,7 +151,7 @@ def _seed(rows: list[dict[str, str]]) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("csv_path")
-    parser.add_argument("--verify", action="store_true", help="HEAD-check board URLs; no writes")
+    parser.add_argument("--verify", action="store_true", help="GET-check board URLs; no writes")
     parser.add_argument("--limit", type=int, default=None, help="seed only the first N rows")
     args = parser.parse_args(argv)
 

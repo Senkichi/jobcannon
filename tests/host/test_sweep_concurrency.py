@@ -40,6 +40,45 @@ def test_concurrent_embed_sweeps_partition_not_duplicate(
     assert embeddings.embed_pending_postings(conn_b, {}, batch_size=4) == 0
 
 
+@requires_postgres
+def test_embed_sweep_empty_backlog_skips_model(db_conn, monkeypatch):
+    """The model-hoist restructure (adversarial review finding) must preserve
+    this property: an empty backlog is caught by the cheap existence probe
+    and returns before _get_model() is ever called — no cold-start download
+    on a drained corpus."""
+    from jobcannon.host import embeddings
+
+    def _boom():
+        raise AssertionError("model must not be constructed on an empty backlog")
+
+    monkeypatch.setattr(embeddings, "_get_model", _boom)
+    assert embeddings.embed_pending_postings(db_conn, {}, batch_size=10) == 0
+
+
+@requires_postgres
+def test_concurrent_structural_sweeps_partition_not_duplicate(
+    db_conn_pair, seeded_pending_postings
+):
+    """Mirrors test_concurrent_embed_sweeps_partition_not_duplicate for the
+    structural sweep (adversarial review finding): pure-Python rules scoring,
+    no model stub needed."""
+    from jobcannon.host.structural_axes import score_pending_structural_axes
+
+    conn_a, conn_b = db_conn_pair
+    ids = seeded_pending_postings
+    # conn_a locks the first 2 rows in an open (uncommitted) transaction:
+    conn_a.execute(
+        "SELECT id FROM postings WHERE id = ANY(%s) ORDER BY id LIMIT 2 FOR UPDATE", (ids,)
+    ).fetchall()
+    # conn_b's sweep must SKIP the locked pair and score exactly the other 2:
+    assert score_pending_structural_axes(conn_b, {}, batch_size=4) == 2
+    conn_a.rollback()  # release the locks
+    # Second sweep picks up exactly the formerly-locked pair:
+    assert score_pending_structural_axes(conn_b, {}, batch_size=4) == 2
+    # And a third finds nothing pending (versioned re-sweep satisfied):
+    assert score_pending_structural_axes(conn_b, {}, batch_size=4) == 0
+
+
 def test_get_model_negative_cache_backoff(monkeypatch):
     from jobcannon.host import embeddings
 
