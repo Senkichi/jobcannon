@@ -57,3 +57,29 @@ def test_deferred_scan_job_runs_to_success_on_real_postgres(monkeypatch):
             teardown_engine_seams()
     finally:
         drop_throwaway_db(db_name)
+
+
+def test_ensure_procrastinate_schema_is_noop_on_second_boot(monkeypatch):
+    """Models every Render redeploy: the worker image restarts against the
+    same already-provisioned DB. The to_regclass probe must find the schema
+    already applied and skip apply_schema entirely on the second boot — not
+    merely avoid raising (adversarial review finding)."""
+    import procrastinate.schema as schema_module
+
+    import jobcannon.worker.__main__ as worker_main
+    from jobcannon.host import tasks
+
+    dsn, db_name = create_throwaway_db("jobcannon_worker_second_boot")
+    monkeypatch.setenv("DATABASE_URL", dsn)
+    try:
+        with tasks.app.replace_connector(procrastinate.PsycopgConnector(conninfo=dsn)):
+            worker_main._ensure_procrastinate_schema()  # first boot: applies the schema
+
+            calls = []
+            monkeypatch.setattr(
+                schema_module.SchemaManager, "apply_schema", lambda self: calls.append(1)
+            )
+            worker_main._ensure_procrastinate_schema()  # second boot: must be a no-op
+            assert calls == []
+    finally:
+        drop_throwaway_db(db_name)

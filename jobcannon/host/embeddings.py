@@ -5,8 +5,10 @@ Mirrors jobcannon.host.structural_axes.score_pending_structural_axes: a
 versioned re-sweep (embedding_model_version IS DISTINCT FROM the current
 version) so a model bump re-embeds the whole corpus with no separate backfill,
 single-writer (this module is the ONLY writer of postings.embedding /
-embedding_model_version / embedded_at), and the same commit_unless_nested /
-raw-unwrap contract.
+embedding_model_version / embedded_at), rows claimed via FOR UPDATE SKIP
+LOCKED inside one batch transaction (see embed_pending_postings' docstring),
+and the same raw-unwrap contract (conn.raw when conn is an
+EngineCompatConnection).
 
 Differs from the structural tail in two deliberate ways:
 1. The pending SELECT gates on jd_full presence (you cannot embed nothing) —
@@ -123,11 +125,25 @@ def embed_pending_postings(conn: Any, config: Any, *, batch_size: int = 500) -> 
     is now ONE batch transaction with `FOR UPDATE SKIP LOCKED` row claiming, so
     concurrent sweeps (N>1 workers) PARTITION the pending backlog instead of
     racing to double-embed or blocking on each other's rows. Rows stay LOCKED
-    for the duration of the batch (seconds of ONNX compute); commit is
-    batch-atomic — a crash mid-batch loses at most that batch's work, and the
-    versioned re-sweep self-heals it next run. This deliberately trades away
-    the previous per-row-commit partial-progress property for correct
-    partitioning under concurrency.
+    only for the duration of ONNX inference on an already-warm model (seconds)
+    — never for model construction/download, which now happens before any row
+    is claimed (see below). Commit is batch-atomic — a crash mid-batch loses
+    at most that batch's work, and the versioned re-sweep self-heals it next
+    run. This deliberately trades away the previous per-row-commit
+    partial-progress property for correct partitioning under concurrency.
+
+    Model-hoist note: on first use per process, `_get_model()` downloads the
+    ~130 MB ONNX model. That construction now runs BETWEEN two transactions —
+    after a cheap probe confirms there is work to do, before the row-claiming
+    transaction opens — so a cold start never holds freshly-claimed row locks
+    (nor a pooled connection) for the download's duration. Under worker
+    concurrency 2, both slots hitting a cold start simultaneously used to mean
+    one held its claim+connection while blocked on `_model_lock` behind the
+    other's download; now both download (or fail fast via the negative cache)
+    before either claims a row. An unavailable model also now fails fast
+    without ever locking rows or opening the batch transaction. The empty-
+    backlog fast path (probe finds nothing) still never constructs the model
+    at all, preserving that property for an already-drained corpus.
 
     psycopg3 nesting note: on a bare pooled connection `raw.transaction()` is a
     real BEGIN/COMMIT (the connection is idle at entry — the structural sweep
@@ -135,8 +151,29 @@ def embed_pending_postings(conn: Any, config: Any, *, batch_size: int = 500) -> 
     rollback-isolated `db_conn` test fixture it degrades to a SAVEPOINT, which
     still scopes `FOR UPDATE` row locks correctly. `register_vector` inside the
     transaction is fine (connection-level adapter registration, idempotent).
+    The probe below is wrapped in its OWN `raw.transaction()` for the same
+    reason: a bare `raw.execute(...)` outside any transaction context would
+    leave psycopg3's implicit transaction open on the connection, so the claim
+    transaction that follows would itself degrade to a SAVEPOINT nested inside
+    that leftover implicit transaction — silently changing its lock/commit
+    scope (the psycopg3 implicit-txn trap). Wrapping the probe explicitly
+    closes it out and returns the connection to idle before the claim opens.
     """
     raw = conn.raw if hasattr(conn, "raw") else conn
+    # Cheap existence probe in its own transaction so the connection returns to
+    # idle before the claim below (see psycopg3 nesting note above) — the
+    # wrapper transaction is load-bearing, not decorative.
+    with raw.transaction():
+        probe = raw.execute(
+            "SELECT 1 FROM postings WHERE jd_full ~ '\\S' "
+            "AND embedding_model_version IS DISTINCT FROM %s LIMIT 1",
+            (EMBEDDING_MODEL_VERSION,),
+        ).fetchone()
+    if probe is None:
+        return 0
+    # Model construction (first-boot: a large download) happens BEFORE any row
+    # locks are taken — see the model-hoist note above.
+    model = _get_model()
     with raw.transaction():
         pending = raw.execute(
             "SELECT id, jd_full FROM postings "
@@ -148,7 +185,6 @@ def embed_pending_postings(conn: Any, config: Any, *, batch_size: int = 500) -> 
         if not pending:
             return 0
         register_vector(raw)
-        model = _get_model()
         # .embed() yields float32 ndarrays aligned 1:1 with input order; fastembed
         # truncates each text to the model's 512-token window internally.
         vectors = list(model.embed([row["jd_full"] for row in pending]))

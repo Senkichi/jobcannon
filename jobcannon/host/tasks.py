@@ -1,23 +1,31 @@
-"""Procrastinate task-shape declarations for the hosted job taxonomy.
+"""Procrastinate task-shape declarations for the hosted job taxonomy, plus the
+periodic enqueue tick that fires them.
 
-Wave 2 defines the task callables so PR-10's worker standup is purely additive.
-It does NOT run a worker, register a periodic cron, or apply procrastinate's
-schema. 'enrich' is intentionally not defined: no enrich hook exists to run.
+Task shapes (`scan`, `expiry_check`, `stale_detect`) and the periodic enqueue
+tick (`enqueue_due_scans`, declared with `@app.periodic` + `@app.task` below)
+all live here. 'enrich' is intentionally not defined: no enrich hook exists to
+run. Defining the periodic task's SHAPE is not the same as RUNNING it: this
+module still never runs a worker or applies procrastinate's schema at import
+time — `jobcannon.worker.__main__` owns both (it applies procrastinate's
+schema via `_ensure_procrastinate_schema`, then calls `App.run_worker()`),
+and `App.run_worker()` is what actually fires the periodic tick and every
+deferred task on schedule.
 
 Connector note: PsycopgConnector (procrastinate 3.9.0, the pinned version —
 see pyproject.toml) is the async psycopg3 connector, and it is REQUIRED here
-because PR-10's worker calls App.run_worker(), which opens the connector
-async (asyncio.run(... self.open_async() ...)). SyncPsycopgConnector does not
-subclass BaseAsyncConnector and inherits open_async/execute_query_*_async
-stubs that raise SyncConnectorConfigurationError, so a SyncPsycopgConnector-
-backed App crashes at run_worker() before fetching any job — sync connectors
-are defer-only. Every sync call site (web routes, the periodic tick, scripts'
-`.defer()` calls) keeps working unchanged: PsycopgConnector implements
-get_sync_connector(), which lazily builds an internal SyncPsycopgConnector for
-pre-open sync use, so ONE async connector serves both run_worker() and every
-sync defer. Construction is still lazy (verified empirically against 3.9.0:
-constructing PsycopgConnector, and wrapping it in App(), does not attempt a
-connection), so an empty/unset DATABASE_URL stays harmless at import time.
+because `jobcannon.worker.__main__` calls App.run_worker(), which opens the
+connector async (asyncio.run(... self.open_async() ...)). SyncPsycopgConnector
+does not subclass BaseAsyncConnector and inherits open_async/execute_query_*_
+async stubs that raise SyncConnectorConfigurationError, so a
+SyncPsycopgConnector-backed App crashes at run_worker() before fetching any
+job — sync connectors are defer-only. Every sync call site (web routes, the
+periodic tick's own enqueue loop, scripts' `.defer()` calls) keeps working
+unchanged: PsycopgConnector implements get_sync_connector(), which lazily
+builds an internal SyncPsycopgConnector for pre-open sync use, so ONE async
+connector serves both run_worker() and every sync defer. Construction is
+still lazy (verified empirically against 3.9.0: constructing PsycopgConnector,
+and wrapping it in App(), does not attempt a connection), so an empty/unset
+DATABASE_URL stays harmless at import time.
 
 Registry note: `app.tasks` is keyed by each task's fully-qualified dotted name
 (``<module>.<function>``, e.g. ``jobcannon.host.tasks.scan``), NOT the bare
