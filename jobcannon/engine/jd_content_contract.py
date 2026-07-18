@@ -271,6 +271,18 @@ def jd_content_reject(jd_full: str | None, title: str | None = None) -> tuple[st
     return None
 
 
+def has_recognizable_jd_shape(text: str) -> bool:
+    """Public: does text contain a recognizable JD section signal
+    (responsibilities/qualifications/'what you'll do'/...)?
+
+    Single point of enforcement for the positive JD-shape vocabulary
+    (``_JD_POSITIVE_RE``) so callers outside this module (the structural-axes
+    jd-quality scorer) never duplicate the regex. ``classify_jd_content``
+    below is refactored to call this wrapper for the identical check.
+    """
+    return bool(_JD_POSITIVE_RE.search(text.lower()))
+
+
 def classify_jd_content(
     jd_full: str | None,
     title: str | None = None,
@@ -302,7 +314,7 @@ def classify_jd_content(
 
     stripped = jd_full.strip()
     low = stripped.lower()
-    has_shape = bool(_JD_POSITIVE_RE.search(low))
+    has_shape = has_recognizable_jd_shape(low)
     substantial = len(stripped) >= _CLEAN_MIN_CHARS
 
     ground_tokens = significant_tokens(title) if title else significant_tokens(company or "")
