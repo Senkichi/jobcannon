@@ -62,7 +62,10 @@ def _run_html_fallback_scan(
     )
 
     company_filter = ""
-    params = [*non_scannable, high_score_threshold]
+    # high_score_threshold is accepted for call-site parity but no longer bound:
+    # _high_score_history_clause is neutralized to TRUE (zero params) in this
+    # hosted port — see its docstring in _run.py.
+    params = [*non_scannable]
     if company_names:
         company_placeholders = ",".join("?" * len(company_names))
         company_filter = f"AND name_raw IN ({company_placeholders})"
@@ -75,7 +78,7 @@ def _run_html_fallback_scan(
                {non_scannable_clause}
            )
              AND homepage_url IS NOT NULL
-             AND scan_enabled = 1
+             AND scan_enabled = TRUE
              AND careers_crawl_last_at IS NULL
              AND {_high_score_history_clause("careers_crawl_last_at")}
              {company_filter}

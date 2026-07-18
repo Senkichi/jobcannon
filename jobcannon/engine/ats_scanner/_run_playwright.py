@@ -119,7 +119,15 @@ def run_playwright_platform_scan(
 
 
 def _playwright_phase_query(company_names: list[str] | None = None) -> str:
-    """SQL for the Playwright phase cohort (mirrors Phase A's status gate)."""
+    """SQL for the Playwright phase cohort (mirrors Phase A's status gate).
+
+    Written in SQLite dialect on purpose — see _dormancy_gate_clause's
+    docstring in _run.py for why: this engine module is DB-agnostic, and
+    jobcannon/db/compat.py's engine_sql_to_host() is the sole Postgres-
+    translation seam (rewrites datetime('now') -> now() for the hosted path;
+    tests/engine/test_run_playwright.py exercises this query directly against
+    bare SQLite with no translation).
+    """
     from jobcannon.engine.ats_scanner._run import _high_score_history_clause
 
     quoted = ",".join(f"'{p}'" for p in sorted(PLAYWRIGHT_PLATFORMS))
@@ -132,9 +140,9 @@ def _playwright_phase_query(company_names: list[str] | None = None) -> str:
            FROM companies
            WHERE ats_platform IN ({quoted})
              AND (
-                 (ats_probe_status = 'hit' AND scan_enabled = 1)
+                 (ats_probe_status = 'hit' AND scan_enabled = TRUE)
                  OR
-                 (ats_probe_status = 'error' AND scan_enabled = 1
+                 (ats_probe_status = 'error' AND scan_enabled = TRUE
                   AND (retry_after IS NULL OR retry_after < datetime('now')))
              )
              AND {_high_score_history_clause("last_scanned_at")}
@@ -144,8 +152,13 @@ def _playwright_phase_query(company_names: list[str] | None = None) -> str:
 def count_playwright_eligible(
     conn: sqlite3.Connection, threshold: int, company_names: list[str] | None = None
 ) -> int:
-    """Count Playwright-phase companies subject to the high-score gate."""
-    params = [threshold]
+    """Count Playwright-phase companies subject to the high-score gate.
+
+    `threshold` is accepted for call-site parity but no longer bound:
+    _high_score_history_clause is neutralized to TRUE (zero params) in this
+    hosted port — see its docstring in _run.py.
+    """
+    params: list = []
     if company_names:
         params.extend(company_names)
 
@@ -175,8 +188,12 @@ def _run_playwright_scan(
     Batches every eligible Playwright-platform company under a single
     ``sync_playwright()`` + ``chromium.launch()`` block. A no-op when no such
     companies exist or when Playwright is not installed (optional heavy dep).
+
+    `high_score_threshold` is accepted for call-site parity but no longer
+    bound: _high_score_history_clause is neutralized to TRUE (zero params)
+    in this hosted port — see its docstring in _run.py.
     """
-    params = [high_score_threshold]
+    params: list = []
     if company_names:
         params.extend(company_names)
 
