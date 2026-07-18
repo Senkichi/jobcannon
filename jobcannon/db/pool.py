@@ -27,6 +27,17 @@ from jobcannon.db.rows import hybrid_row
 _pool: ConnectionPool | None = None
 
 
+def _configure(conn: psycopg.Connection) -> None:
+    # Runs ONCE when a new connection is created (unlike `_reset`, which runs
+    # on every return-to-pool): pin the session timezone so timestamptz reads
+    # (e.g. corpus_stats' freshest_last_seen) always come back UTC-aware,
+    # making the templates' hardcoded "... UTC" label true by construction
+    # instead of incidentally matching whatever TimeZone GUC the connecting
+    # role happens to default to.
+    with conn.transaction():
+        conn.execute("SET TIME ZONE 'UTC'")
+
+
 def _reset(conn: psycopg.Connection) -> None:
     # Runs when a connection returns to the pool: undo session-level tweaks.
     with conn.transaction():
@@ -42,6 +53,7 @@ def open_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> None:
         min_size=min_size,
         max_size=max_size,
         kwargs={"row_factory": hybrid_row},
+        configure=_configure,
         reset=_reset,
         open=False,
     )
