@@ -16,4 +16,13 @@ aggregates only. See each analysis directory's README.
 
 ## License
 
-MIT.
+Code is licensed under [AGPL-3.0-or-later](LICENSE): if you run a modified
+version of this software as a network service, you must make your modified
+source available to its users. Forking and monetizing an open fork is fine;
+taking it closed-source is not.
+
+Published analysis outputs under `analyses/` (prose, figures, aggregate
+data) are licensed separately — see `analyses/README.md`.
+
+Contributions require a signed Contributor License Agreement — see
+[CONTRIBUTING.md](CONTRIBUTING.md) and [CLA.md](CLA.md).

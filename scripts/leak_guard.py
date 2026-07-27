@@ -40,7 +40,7 @@ def main() -> int:
     tracked = sorted(set(tracked) | set(untracked))
     hits: list[str] = []
     for rel in tracked:
-        # MIT license attribution intentionally carries the repo owner's own
+        # AGPL license attribution intentionally carries the repo owner's own
         # public GitHub handle (github.com/<owner>/jobcannon) — that is not a
         # leak, it is required copyright notice. Every other path stays scanned.
         if pathlib.PurePosixPath(rel).name == "LICENSE":
