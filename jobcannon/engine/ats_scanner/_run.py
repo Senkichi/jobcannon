@@ -403,7 +403,7 @@ def _run_ats_scan_body(
     dormancy_threshold = int(config.get("ats", {}).get("dormancy_threshold", 10))
     dormancy_interval_days = int(config.get("ats", {}).get("dormancy_interval_days", 3))
 
-    # Workday per-board pagination budget (issue #216): threaded explicitly
+    # Workday per-board pagination budget (private issue #216): threaded explicitly
     # through run_platform_scan -> fetch_postings rather than via a ContextVar.
     # ContextVars do not propagate into ThreadPoolExecutor worker threads, so
     # under the parallel page-fetch pool (issue #1029) the override would
@@ -1087,7 +1087,7 @@ def _scan_one_company_via_ats_api(
                     ats_platform=platform,
                 )
 
-        # Log company scan with skipped_title_filter count (issue #849)
+        # Log company scan with skipped_title_filter count (private issue #849)
         conn.execute(
             """INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, skipped_title_filter)
                VALUES (?, ?, ?, ?)""",

@@ -1,7 +1,7 @@
 """
 Tests for universal title-filter enforcement via ParsedJob.from_job (Phase 48.01).
 
-Acceptance criteria from issue #52:
+Acceptance criteria from private issue #52:
 - ParsedJob.from_job calls is_metadata_blob + clean_title for every caller.
 - Fixtures from each of the three documented callsites yield UnresolvedParsedJob
   with 'title_metadata_blob' reason.

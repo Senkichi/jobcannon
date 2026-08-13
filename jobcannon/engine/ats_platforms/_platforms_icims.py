@@ -17,7 +17,7 @@ Descriptions are NOT pulled here — the list page exposes only titles +
 locations, so ``jd_full`` is filled asynchronously by enrichment, the same
 deferral pattern as the Breezy / Rippling / BambooHR registry scanners.
 
-iCIMS has no public API; this is the locked rationale (issue #454). Do not
+iCIMS has no public API; this is the locked rationale (private issue #454). Do not
 reverse-engineer a JSON endpoint as the primary path.
 """
 

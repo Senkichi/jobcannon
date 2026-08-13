@@ -517,7 +517,7 @@ class TestSchemaContract:
 
 
 # ---------------------------------------------------------------------------
-# Tests: issue #227 quality floor — fail-closed coercion + degenerate flag
+# Tests: private issue #227 quality floor — fail-closed coercion + degenerate flag
 # ---------------------------------------------------------------------------
 
 
