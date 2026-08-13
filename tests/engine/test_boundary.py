@@ -79,7 +79,19 @@ def test_every_engine_module_imports():
             engine_modules_imported += 1
     assert not failures, "engine modules failed to import:\n" + "\n".join(failures)
 
-    engine_files_on_disk = [p for p in engine_dir.rglob("*.py") if "__pycache__" not in p.parts]
+    # Deliberately os.walk, NOT a second rglob: the collector above already
+    # walks with rglob, so a shared rglob blindspot (e.g. symlink handling)
+    # would shrink both sides in lockstep and hide itself. A different walk
+    # primitive keeps the comparison honest.
+    import os
+
+    engine_files_on_disk = [
+        os.path.join(root, f)
+        for root, _dirs, files in os.walk(engine_dir)
+        if "__pycache__" not in pathlib.Path(root).parts
+        for f in files
+        if f.endswith(".py")
+    ]
     assert engine_modules_imported == len(engine_files_on_disk), (
         f"collector imported {engine_modules_imported} jobcannon.engine modules but "
         f"{len(engine_files_on_disk)} .py files exist on disk under jobcannon/engine — "

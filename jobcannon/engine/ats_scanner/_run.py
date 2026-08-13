@@ -426,6 +426,12 @@ def _run_ats_scan_body(
     if runtime_limit_s is not None and runtime_limit_s <= 0:
         runtime_limit_s = None
 
+    # Compute the scan-wide soft deadline once (issue #1368): every
+    # per-company phase (A, A2, C) checks this deadline before starting each
+    # company and breaks out gracefully when it passes. Phase E (activity
+    # log) always runs regardless — partial results discovered before the
+    # deadline are still logged, so the run is not silently lost the way a
+    # hard scheduler kill abandons the daemon thread.
     scan_deadline = time.monotonic() + runtime_limit_s if runtime_limit_s else None
     # Privately the scoring phase's harder wall is the scheduler job config's
     # value (_get_job_max_runtime_s(config, "ats_scan")); the hosted engine
