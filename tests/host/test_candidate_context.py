@@ -1,10 +1,14 @@
 """Host-side candidate-context resolver: resolve + build.
 
-The load-bearing test is multi-tenancy: two users with IDENTICAL profile
-column values must resolve independently — mutating one and re-resolving
-the OTHER must show no bleed-through. It fails if resolution is ever
-memoized on profile/config shape instead of user_id (the rejected
-process-global-cache design)."""
+The load-bearing test is multi-tenancy, and it seeds DISTINCT content per
+tenant on purpose: identity of output then proves identity of tenant. A
+first draft seeded identical profiles and asserted the two contexts were
+equal — which cannot distinguish "B got B's data" from "B got A's data",
+and let an injected process-global cache keyed on profile shape pass every
+test. Distinct seeds, cross-negatives, and a collision tenant sharing
+seniority_level AND target_locations kill that class: any cache keyed on
+those session-held fields (either one, or the pair) collides two tenants
+here and serves one tenant's context to the other."""
 
 from __future__ import annotations
 
@@ -24,6 +28,30 @@ PROFILE_FIELDS = {
     "target_locations": ["Remote"],
     "seniority_level": "senior",
     "years_of_experience": 8,
+}
+
+# Every value distinct from PROFILE_FIELDS: cross-negative assertions need
+# tokens that can only have come from one tenant's row.
+TENANT_B_FIELDS = {
+    "skills": ["golang", "kubernetes"],
+    "experience_summary": "Infrastructure and reliability work.",
+    "target_titles": ["Platform Engineer"],
+    "target_locations": ["Onsite NYC"],
+    "seniority_level": "staff",
+    "years_of_experience": 12,
+}
+
+# Collides with PROFILE_FIELDS on seniority_level AND target_locations while
+# differing in every token-bearing field: a cache keyed on either of those
+# fields, or on both together, collides these two tenants and hands one of
+# them the other's context.
+TENANT_C_FIELDS = {
+    "skills": ["rust"],
+    "experience_summary": "Embedded systems work.",
+    "target_titles": ["Firmware Engineer"],
+    "target_locations": ["Remote"],
+    "seniority_level": "senior",
+    "years_of_experience": 5,
 }
 
 
@@ -56,33 +84,51 @@ def test_resolve_raises_typed_error_naming_the_user_for_missing_profile(db_conn)
     assert exc_info.value.user_id == "no-such-user"
 
 
-def test_two_tenants_with_identical_profiles_resolve_independently(db_conn):
-    """Seed two users with identical column values, mutate one, re-resolve
-    the OTHER. Must fail if a config/content-keyed global cache is ever
-    reintroduced: identical inputs would share one cache slot, and tenant
-    B's mutation would either leak into A or be masked by A's stale entry."""
+def test_tenants_resolve_their_own_content_never_each_others(db_conn):
+    """Three tenants with distinct content; C shares seniority_level with A.
+
+    Cross-negatives prove each context carries only its own tenant's tokens —
+    a shape-keyed or field-keyed process-global cache serves one tenant's
+    context to another and fails one of these assertions. Then mutate B and
+    re-resolve A: A must never observe B's mutation."""
     from jobcannon.db._profiles import upsert_profile
     from jobcannon.host.candidate_context import resolve_candidate_context
 
-    _seed_user(db_conn, "tenant-a")
-    _seed_user(db_conn, "tenant-b")
-    upsert_profile(db_conn, "tenant-a", **PROFILE_FIELDS)
-    upsert_profile(db_conn, "tenant-b", **PROFILE_FIELDS)
+    for user_id, fields in [
+        ("tenant-a", PROFILE_FIELDS),
+        ("tenant-b", TENANT_B_FIELDS),
+        ("tenant-c", TENANT_C_FIELDS),
+    ]:
+        _seed_user(db_conn, user_id)
+        upsert_profile(db_conn, user_id, **fields)
 
-    before_a = resolve_candidate_context(db_conn, "tenant-a")
-    before_b = resolve_candidate_context(db_conn, "tenant-b")
-    assert before_a == before_b  # identical inputs render identically
+    ctx_a = resolve_candidate_context(db_conn, "tenant-a")
+    ctx_b = resolve_candidate_context(db_conn, "tenant-b")
+    ctx_c = resolve_candidate_context(db_conn, "tenant-c")
 
-    upsert_profile(db_conn, "tenant-b", seniority_level="staff", target_locations=["Onsite NYC"])
+    assert ctx_a != ctx_b
+    assert "python" in ctx_a
+    assert "python" not in ctx_b
+    assert "golang" in ctx_b
+    assert "golang" not in ctx_a
 
+    # C collides with A on seniority_level AND target_locations: a memo
+    # keyed on either field, or on the pair, hands C A's context.
+    assert ctx_c != ctx_a
+    assert "rust" in ctx_c
+    assert "python" not in ctx_c
+    assert "Data Engineer" not in ctx_c
+    assert "Firmware Engineer" in ctx_c
+
+    # Mutation independence: B's update must never surface in A.
+    upsert_profile(db_conn, "tenant-b", seniority_level="principal", target_locations=["Chicago"])
     after_b = resolve_candidate_context(db_conn, "tenant-b")
     after_a = resolve_candidate_context(db_conn, "tenant-a")
-    assert after_b != before_b
-    assert "staff" in after_b
-    assert "Onsite NYC" in after_b
-    assert after_a == before_a  # tenant A never observes B's mutation
-    assert "staff" not in after_a
-    assert "Onsite NYC" not in after_a
+    assert "principal" in after_b
+    assert "Chicago" in after_b
+    assert after_a == ctx_a
+    assert "principal" not in after_a
+    assert "Chicago" not in after_a
 
 
 def test_build_candidate_context_is_pure_plain_dict_no_conn():
