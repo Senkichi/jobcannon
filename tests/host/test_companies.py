@@ -1,3 +1,5 @@
+import pytest
+
 from tests.host.conftest import requires_postgres
 
 pytestmark = requires_postgres
@@ -42,11 +44,39 @@ def test_slug_collision_leaves_ats_fields_untouched(db_conn):
     assert row["ats_slug"] is None  # collision → ATS fields untouched
 
 
-def test_rejects_empty_name(db_conn):
+def test_rejects_nameless_input_with_typed_error(db_conn):
+    from jobcannon.db._companies import CompanyNameRejectedError, upsert_company
+
+    conn = _svc_conn(db_conn)
+    for bad in ("", "   ", "---"):
+        with pytest.raises(CompanyNameRejectedError):
+            upsert_company(conn, bad)
+
+
+def test_accepts_non_latin_company_name(db_conn):
     from jobcannon.db._companies import upsert_company
 
-    assert upsert_company(_svc_conn(db_conn), "") is None
-    assert upsert_company(_svc_conn(db_conn), "   ") is None
+    assert isinstance(upsert_company(_svc_conn(db_conn), "株式会社テスト"), int)
+
+
+def test_accepts_digit_only_company_name(db_conn):
+    """The predicate is isalnum(), matching the private original — a
+    digit-only name is a real company name, not garbage. This is the
+    fixture that discriminates isalnum() from the old isalpha() check."""
+    from jobcannon.db._companies import upsert_company
+
+    assert isinstance(upsert_company(_svc_conn(db_conn), "1024"), int)
+
+
+def test_non_name_failure_raises_wrapped_upsert_error(db_conn):
+    """ats_probe_status='hit' without platform+slug trips m0001's hit-state
+    CHECK — previously swallowed into a silent None, now wrapped and raised
+    with the original error chained as __cause__."""
+    from jobcannon.db._companies import CompanyUpsertError, upsert_company
+
+    with pytest.raises(CompanyUpsertError) as exc_info:
+        upsert_company(_svc_conn(db_conn), "Hit Without Slug", ats_probe_status="hit")
+    assert exc_info.value.__cause__ is not None
 
 
 def test_update_branch_ats_collision_leaves_fields_untouched(db_conn):
@@ -91,3 +121,30 @@ def test_upsert_company_populates_name_raw(db_conn):
     cid = upsert_company(db_conn, "Acme Robotics")
     row = db_conn.execute("SELECT name, name_raw FROM companies WHERE id = %s", (cid,)).fetchone()
     assert row["name_raw"] == "Acme Robotics" == row["name"]
+
+
+def test_reject_reason_attribution(db_conn):
+    """Pins each guard's reason literal AND the guard order: 250 dashes is
+    both overlong and non-alphanumeric, so the reason must attribute to the
+    alphanumeric check, which runs first (same relative order as the private
+    boundary's classifier)."""
+    from jobcannon.db._companies import CompanyNameRejectedError, upsert_company
+
+    conn = _svc_conn(db_conn)
+    with pytest.raises(CompanyNameRejectedError) as exc_info:
+        upsert_company(conn, "   ")
+    assert exc_info.value.reason == "empty_after_cleanup"
+
+    with pytest.raises(CompanyNameRejectedError) as exc_info:
+        upsert_company(conn, "x" * 201)
+    assert exc_info.value.reason == "overlong"
+    # Boundary pinned in both directions: exactly at the cap is accepted
+    # (kills a `>` -> `>=` drift on the overlong guard). This pins the
+    # cap at its current value (200) — a known, deliberate divergence
+    # documented in the port notes — so any later cap reconciliation
+    # must revisit this exact assertion.
+    assert isinstance(upsert_company(conn, "x" * 200), int)
+
+    with pytest.raises(CompanyNameRejectedError) as exc_info:
+        upsert_company(conn, "-" * 250)
+    assert exc_info.value.reason == "no_alphanumeric_characters"

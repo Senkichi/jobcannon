@@ -56,7 +56,14 @@ def set_jd_full(
     *,
     source: str,
     title: str | None = None,
+    config: dict | None = None,
 ) -> bool:
+    """Store a JD body on the posting, gated by the junk and content contracts.
+
+    `config` is accepted (keyword-only) to pin the private chokepoint's full
+    signature; it is threaded into the content-gate call by a follow-up
+    change and is unused until then.
+    """
     raw = conn.raw if hasattr(conn, "raw") else conn
     if not text:
         return False
