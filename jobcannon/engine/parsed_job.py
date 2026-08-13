@@ -83,6 +83,7 @@ from jobcannon.engine.careers_crawler._title_filters import (
     is_metadata_blob,
 )
 from jobcannon.engine.location_canonical import JobLocation
+from jobcannon.engine.runtime_config import get_runtime_config
 from jobcannon.engine.url_canonical import canonicalize_url
 
 if TYPE_CHECKING:
@@ -391,7 +392,7 @@ class ParsedJob:
         # synchronous ingest path. The row is still written; jd_full is cleared so
         # enrichment re-fetches a clean body and the score never sees the garbage.
         if clean_jd_full is not None:
-            _jd_rej = jd_content_reject(clean_jd_full, cleaned_title)
+            _jd_rej = jd_content_reject(clean_jd_full, cleaned_title, dict(get_runtime_config()))
             if _jd_rej is not None:
                 unresolved_reasons.append(_jd_rej[0])
                 clean_jd_full = None

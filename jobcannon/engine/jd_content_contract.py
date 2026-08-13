@@ -40,18 +40,23 @@ ENFORCEMENT (single points, mirrored from the title contract)
   can never store obvious junk. Both callers pass the job's ``title`` when they
   have it (the enrichment write path always does), so the title cross-field
   reject (I-17 ``title_zero_overlap``) fires at the write chokepoint, falling
-  back to content-only signals when no title is available.
+  back to content-only signals when no title is available. A leading JSON
+  configuration blob with an empty or missing ``job_description`` is also
+  rejected here, so a long Eightfold/Netflix micro-site config payload cannot
+  satisfy the length gate while carrying no prose.
 * ``classify_jd_content`` (the full 3-way) runs in the background adjudicator
   and the versioned re-sweep, so the AMBIGUOUS residual is LLM-resolved off the
   hot path and a rule improvement heals the whole corpus on a
   ``JD_CONTENT_VERSION`` bump.
 
-The module is PURE (regex + the shared ``normalizers`` token helpers) so it is
-deterministic, unit-testable, and importable from ``db/`` without a web cycle.
+The module is PURE (regex + JSON structural checks + the shared ``normalizers``
+token helpers) so it is deterministic, unit-testable, and importable from
+``db/`` without a web cycle.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -64,7 +69,7 @@ from jobcannon.engine.normalizers import body_mentions_any_stem, significant_tok
 # standing re-sweep so the whole corpus is re-validated under the new version.
 # Mirrors NORMALIZER_VERSION / TITLE_HYGIENE_VERSION.
 # ---------------------------------------------------------------------------
-JD_CONTENT_VERSION: int = 2
+JD_CONTENT_VERSION: int = 4
 
 # Reason codes emitted into jobs.unresolved_reasons (the m078 quarantine surface).
 # Distinct from I-13's ``jd_full_junk`` (the length/density gate, owned by
@@ -72,9 +77,10 @@ JD_CONTENT_VERSION: int = 2
 # recomputed by its re-sweep.
 JD_OFFSITE: str = "jd_full_offsite"
 JD_EXPIRED: str = "jd_full_expired"
+JD_TRUNCATED: str = "jd_full_truncated"
 
 #: All jd-content reason codes the re-sweep owns + recomputes.
-JD_CONTENT_REASON_CODES: frozenset[str] = frozenset({JD_OFFSITE, JD_EXPIRED})
+JD_CONTENT_REASON_CODES: frozenset[str] = frozenset({JD_OFFSITE, JD_EXPIRED, JD_TRUNCATED})
 
 # ---------------------------------------------------------------------------
 # Tunables (validated against the live 13,664-row corpus via scripts/jd_*).
@@ -208,6 +214,113 @@ _JD_POSITIVE_RE = re.compile(
 )
 
 
+# --- jd_full completeness thresholds (issue #1295) ---
+# Minimum characters for a job description to be accepted as the full jd_full.
+# A body below this floor, or ending in a trailing ellipsis/…, is treated as a
+# truncated snippet and routed back to enrichment.
+#
+# ADAPTATION (declared in the port record): upstream these defaults and the
+# resolver live in the app-level config module. The engine cannot import that
+# layer (boundary: pure engine, no host config), and this contract module is
+# the only engine consumer, so the resolver is inlined here verbatim.
+DEFAULT_JD_FULL_MIN_CHARS = 200
+DEFAULT_JD_FULL_REJECT_TRAILING_ELLIPSIS = True
+
+
+def get_jd_full_thresholds(config: dict | None = None) -> tuple[int, bool]:
+    """Resolve jd_full completeness thresholds from config.
+
+    Returns:
+        (min_chars, reject_trailing_ellipsis) with safe defaults.
+    """
+    if config is None:
+        config = {}
+    jd_cfg = config.get("enrichment", {}).get("jd_full", {}) or {}
+    min_chars = int(jd_cfg.get("min_chars", DEFAULT_JD_FULL_MIN_CHARS))
+    reject_ellipsis = bool(
+        jd_cfg.get("reject_trailing_ellipsis", DEFAULT_JD_FULL_REJECT_TRAILING_ELLIPSIS)
+    )
+    if min_chars < 1:
+        min_chars = DEFAULT_JD_FULL_MIN_CHARS
+    return min_chars, reject_ellipsis
+
+
+#: Trailing ellipsis/… (optionally followed by whitespace). A body ending like
+#: this is almost always a search-result snippet, not a full JD.
+_TRAILING_ELLIPSIS_RE = re.compile(r"(?:\.\.\.|…)\s*$")
+
+
+# Leading non-whitespace characters that indicate a serialized JSON payload.
+_JSON_START_CHARS: frozenset[str] = frozenset({"{", "["})
+
+
+def _is_json_config_blob(jd_full: str) -> bool:
+    """Return True when *jd_full* is a leading JSON object with no real prose.
+
+    Eightfold/Netflix micro-sites sometimes serve the entire page body as a
+    configuration JSON blob (theme, fonts, supported locales, and an empty
+    ``job_description``). The blob clears the length gate while containing no
+    actual job description, so the scorer sees a long "JD" with no signal.
+
+    Detection is intentionally tight:
+      * the stripped body must start with ``{`` or ``[``;
+      * the leading JSON value must parse and dominate the body (so a JD that
+        merely contains an inline JSON block is not rejected);
+      * for an object, there must be no non-empty ``job_description`` or
+        ``description`` field. A real posting served as JSON with a genuine
+        prose description is left for the normal contract.
+    """
+    stripped = jd_full.strip()
+    if not stripped or stripped[0] not in _JSON_START_CHARS:
+        return False
+    try:
+        obj, end = json.JSONDecoder().raw_decode(stripped, 0)
+    except json.JSONDecodeError:
+        return False
+
+    # The JSON value must be the bulk of the body. Anything after the first
+    # complete value that is more than trailing whitespace is real prose, not a
+    # pure serialized blob.
+    if end < len(stripped) - 20:
+        return False
+
+    if not isinstance(obj, dict):
+        # Leading arrays / scalars that dominate the body are also not prose.
+        return True
+
+    for key, val in obj.items():
+        if key.lower() in ("job_description", "description"):
+            if isinstance(val, str) and val.strip():
+                # Real prose description inside a JSON object -> not a config blob.
+                return False
+            # Empty/missing description in a leading JSON object -> config blob.
+    return True
+
+
+def _is_jd_truncated(
+    jd_full: str | None,
+    config: dict | None = None,
+    *,
+    check_min: bool = True,
+) -> tuple[str, str] | None:
+    """Return (JD_TRUNCATED, signal) if the body is a truncated snippet.
+
+    Two independent signals, both config-driven:
+      * ``too_short`` — stripped length is below ``enrichment.jd_full.min_chars``.
+      * ``trailing_ellipsis`` — body ends with ``...`` or ``…`` and
+        ``enrichment.jd_full.reject_trailing_ellipsis`` is true.
+    """
+    if not jd_full:
+        return None
+    stripped = jd_full.strip()
+    min_chars, reject_ellipsis = get_jd_full_thresholds(config)
+    if check_min and len(stripped) < min_chars:
+        return (JD_TRUNCATED, "too_short")
+    if reject_ellipsis and _TRAILING_ELLIPSIS_RE.search(stripped):
+        return (JD_TRUNCATED, "trailing_ellipsis")
+    return None
+
+
 class JdVerdict(Enum):
     """Outcome of the jd-content contract."""
 
@@ -231,12 +344,16 @@ class JdContentResult:
     signal: str
 
 
-def jd_content_reject(jd_full: str | None, title: str | None = None) -> tuple[str, str] | None:
+def jd_content_reject(
+    jd_full: str | None,
+    title: str | None = None,
+    config: dict | None = None,
+) -> tuple[str, str] | None:
     """Deterministic HIGH-precision reject check.
 
     Returns ``(reason_code, signal)`` if the body is provably not this job's
     posting, else None. The content-only signals (wiki / block / listing / 404 /
-    expired) need no title and are safe to enforce at every write
+    expired / truncated) need no title and are safe to enforce at every write
     (``set_jd_full``). The title zero-overlap signal additionally requires
     *title* and a substantial body; it is the wired I-17 ``title_jd_mismatch``.
 
@@ -246,6 +363,11 @@ def jd_content_reject(jd_full: str | None, title: str | None = None) -> tuple[st
     if not jd_full:
         return None
     stripped = jd_full.strip()
+
+    truncated = _is_jd_truncated(stripped, config, check_min=True)
+    if truncated is not None:
+        return truncated
+
     low = stripped.lower()
     head = low[:_HEAD_WINDOW]
 
@@ -261,6 +383,13 @@ def jd_content_reject(jd_full: str | None, title: str | None = None) -> tuple[st
         return (JD_OFFSITE, "no_search_results")
     if _EXPIRED_RE.search(low):
         return (JD_EXPIRED, "expired_or_filled")
+
+    # Serialized configuration / markup with no prose job description (issue
+    # #1558). A long JSON blob (Eightfold/Netflix micro-site config, empty
+    # ``job_description``) fools the length gate; reject at the content layer
+    # so the scorer never sees it.
+    if _is_json_config_blob(stripped):
+        return (JD_OFFSITE, "json_config_blob")
 
     # I-17 wired: a substantial body that shares ZERO of the title's content
     # stems is the silent wrong-page case (the body is about something else).
@@ -289,6 +418,7 @@ def classify_jd_content(
     jd_full: str | None,
     title: str | None = None,
     company: str | None = None,
+    config: dict | None = None,
 ) -> JdContentResult:
     """Full three-way jd-content verdict (REJECT / CLEAN / AMBIGUOUS).
 
@@ -308,7 +438,7 @@ def classify_jd_content(
     signature because the LLM adjudicator the AMBIGUOUS path feeds needs it, and
     callers already have it to hand).
     """
-    rej = jd_content_reject(jd_full, title)
+    rej = jd_content_reject(jd_full, title, config)
     if rej is not None:
         return JdContentResult(JdVerdict.REJECT, rej[0], rej[1])
     if not jd_full:
