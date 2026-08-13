@@ -532,3 +532,43 @@ def test_has_recognizable_jd_shape_none_and_empty_return_false():
 
     assert has_recognizable_jd_shape(None) is False
     assert has_recognizable_jd_shape("") is False
+
+
+# ---------------------------------------------------------------------------
+# Mutation-review pins (B3 review round): boundary + dominance-guard killers.
+# Adopted from the test-quality refuter's sabotage-verified proposals.
+# ---------------------------------------------------------------------------
+
+
+def test_truncation_floor_boundary():
+    """Bidirectional boundary pin at the default floor: 199 rejects, 200 does
+    not. Kills both the off-by-one (`<` -> `<=`) and floor-shift mutants that
+    the accessor-literal test alone leaves green."""
+    assert _is_jd_truncated("x" * 199) == ("jd_full_truncated", "too_short")
+    assert _is_jd_truncated("x" * 200) is None
+
+
+def test_json_blob_must_dominate_body():
+    """A leading JSON-LD header followed by a real JD is NOT a config blob —
+    the dominance criterion is load-bearing (deleting it rejects common
+    extractor output that leads with a schema.org JobPosting header)."""
+    header = json.dumps({"@type": "JobPosting", "employmentType": "FULL_TIME"})
+    body = header + "\n\n" + _REAL_JD
+    assert _is_json_config_blob(body) is False
+    assert jd_content_reject(body) is None
+
+
+def test_leading_array_blob_rejected():
+    """A dominating leading ARRAY payload is a blob — pins the documented
+    `[` half of _JSON_START_CHARS."""
+    payload = json.dumps([{"locale": "en-US", "theme": "dark"}] * 40)
+    assert _is_json_config_blob(payload) is True
+
+
+def test_malformed_config_degrades_to_defaults():
+    """String / None LEAF values must not crash the gate at the chokepoint:
+    a null jd_full section degrades to defaults, a numeric string coerces.
+    (A null `enrichment` section still raises — upstream-identical resolver
+    shape, tracked as a follow-up issue, parity-bound.)"""
+    assert get_jd_full_thresholds({"enrichment": {"jd_full": None}}) == (200, True)
+    assert get_jd_full_thresholds({"enrichment": {"jd_full": {"min_chars": "50"}}}) == (50, True)
