@@ -78,18 +78,19 @@ def _verify(rows: list[dict[str, str]]) -> int:
     return 0
 
 
-def _upsert_companies(rows: list[dict[str, str]]) -> int:
+def _upsert_companies(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     """Upsert each row's company via the pooled connection factory (requires
-    the engine seams to already be wired). Returns the number of rows landed
+    the engine seams to already be wired). Returns the rows that landed
     (upsert_company raises CompanyNameRejectedError on malformed names and
     CompanyUpsertError on row-level DB failures — both logged and skipped
-    here — so one bad manifest row can't abort the seed, and _enqueue_scans
-    always runs for the rows that did land)."""
+    here — so one bad manifest row can't abort the seed; the caller enqueues
+    scans only for the returned rows, so a skipped row never gets an orphan
+    scan for a company that was never inserted)."""
     from jobcannon.db import _companies
     from jobcannon.engine import services
 
     svc = services.get_services()
-    upserted = 0
+    landed: list[dict[str, str]] = []
     with svc.connection_factory() as conn:
         for row in rows:
             try:
@@ -107,9 +108,9 @@ def _upsert_companies(rows: list[dict[str, str]]) -> int:
             ) as exc:
                 log.warning("SKIP %-30s %s", row["name"], exc)
                 continue
-            upserted += 1
+            landed.append(row)
         conn.commit()
-    return upserted
+    return landed
 
 
 def _enqueue_scans(rows: list[dict[str, str]]) -> tuple[int, int]:
@@ -143,17 +144,20 @@ def _seed(rows: list[dict[str, str]]) -> int:
     host_config = load_host_config()
     init_engine_seams(host_config)
     try:
-        upserted = _upsert_companies(rows)
-        enqueued, already = _enqueue_scans(rows)
+        landed = _upsert_companies(rows)
+        enqueued, already = _enqueue_scans(landed)
     finally:
         teardown_engine_seams()
 
     log.info(
         "pre-seed complete: %d companies upserted, %d scans enqueued, %d already-enqueued",
-        upserted,
+        len(landed),
         enqueued,
         already,
     )
+    if rows and not landed:
+        log.error("pre-seed FAILED: every row was skipped — systemic DB failure, not bad rows")
+        return 1
     return 0
 
 

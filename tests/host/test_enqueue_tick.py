@@ -132,18 +132,27 @@ def test_preseed_corpus_read_rows_roundtrips_csv_header(tmp_path):
 def test_preseed_upsert_skips_row_level_failures(monkeypatch):
     """_upsert_companies' skip contract: a CompanyNameRejectedError OR a
     CompanyUpsertError on one row is logged-and-skipped, never aborts the
-    seed — the remaining rows still land and the count reflects only them."""
+    seed — the remaining rows still land, and the returned landed list is
+    exactly those rows (skipped rows must not reach _enqueue_scans, or a
+    scan would be deferred for a company that was never inserted). The
+    catch is pinned in BOTH directions: narrowing it re-raises the
+    CompanyUpsertError row; widening it to a bare Exception would swallow
+    the KeyError case asserted at the end."""
     import contextlib
     from types import SimpleNamespace
+
+    import pytest
 
     from jobcannon.db import _companies
     from jobcannon.engine import services
     from scripts import preseed_corpus
 
     seen: list[str] = []
+    statuses: list[str] = []
 
     def fake_upsert(conn, name, **kwargs):
         seen.append(name)
+        statuses.append(kwargs["ats_probe_status"])
         if name == "Malformed":
             raise _companies.CompanyNameRejectedError(name, "no_alphanumeric_characters")
         if name == "DbSad":
@@ -159,11 +168,21 @@ def test_preseed_upsert_skips_row_level_failures(monkeypatch):
         services, "get_services", lambda: SimpleNamespace(connection_factory=fake_factory)
     )
 
+    good_a = {"name": "Acme", "ats_platform": "greenhouse", "ats_slug": "acme"}
+    good_b = {"name": "Globex", "ats_platform": "lever", "ats_slug": "globex"}
     rows = [
-        {"name": "Acme", "ats_platform": "greenhouse", "ats_slug": "acme"},
+        good_a,
         {"name": "Malformed", "ats_platform": "lever", "ats_slug": "bad1"},
         {"name": "DbSad", "ats_platform": "lever", "ats_slug": "bad2"},
-        {"name": "Globex", "ats_platform": "lever", "ats_slug": "globex"},
+        good_b,
     ]
-    assert preseed_corpus._upsert_companies(rows) == 2
+    assert preseed_corpus._upsert_companies(rows) == [good_a, good_b]
     assert seen == ["Acme", "Malformed", "DbSad", "Globex"]
+    # The pre-seed manifest path is the "hit" path: a seeded company must be
+    # immediately scan-eligible, so the hardcoded status is load-bearing.
+    assert statuses == ["hit"] * 4
+
+    # An error class OUTSIDE the two-element catch tuple must propagate:
+    # a row missing a required key is a manifest bug, not a skippable row.
+    with pytest.raises(KeyError):
+        preseed_corpus._upsert_companies([{"name": "NoKeys"}])
