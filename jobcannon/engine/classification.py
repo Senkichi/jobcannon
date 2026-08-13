@@ -45,9 +45,11 @@ _STRONG_AXIS_FLOOR: int = 4
 # excluded_axes). Exclusion works by substitution, never key removal — the
 # six-key domain guard forbids five-key dicts — so the marker must itself be
 # a valid ordinal (int in 1..5) to pass the value guard. It is the neutral
-# midpoint so an excluded slot can never trip the any-axis-1 reject, and it
-# never contributes to the mean / strong-axis / flat-neutral computations:
-# those consult the excluded-axis set instead of trusting the vector.
+# midpoint so an excluded slot can never trip the any-axis-1 reject. The mean
+# and strong-axis computations consult the excluded-axis set, so the marker
+# never contributes to them; the flat-neutral tell instead reads the RAW
+# pre-substitution vector, so a marker can neither manufacture an all-3s
+# vector nor suppress the tell on a genuinely flat one.
 _EXCLUDED_AXIS_MARKER: int = 3
 
 

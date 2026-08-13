@@ -97,7 +97,9 @@ def test_two_excluded_markers_never_dilute_the_mean():
     < 3.75 -> consider. Two excluded axes and a non-default floor are
     required to open a separating window (see module docstring); the raw 1
     on an excluded axis also turns a truncated exclusion set into a visible
-    reject."""
+    reject. Do not weaken this fixture: it is the single discriminator for
+    the marker-leak mutant family (marker-in-mean, parallel-set-deleted,
+    truncated-multi-axis)."""
     scores = _vector(title_fit=4, domain_match=4, seniority_match=4, location_fit=1, comp_fit=5)
     result = derive_classification(
         scores,
@@ -145,6 +147,18 @@ def test_raw_flat_neutral_stays_low_signal_under_exclusion():
 # ---------------------------------------------------------------------------
 # Sabotage: break the mechanism, confirm the guard fires
 # ---------------------------------------------------------------------------
+
+
+def test_excluded_axis_marker_is_neutral_and_below_strong_floor():
+    """The marker must sit AT the neutral midpoint (3) and strictly below the
+    strong-axis floor. A marker raised to >= _STRONG_AXIS_FLOOR that
+    additionally leaked into the strong-axis count would manufacture apply
+    verdicts; no single behavioral test can see that two-edit family, so the
+    constant itself is pinned."""
+    from jobcannon.engine.classification import _EXCLUDED_AXIS_MARKER, _STRONG_AXIS_FLOOR
+
+    assert _EXCLUDED_AXIS_MARKER == 3
+    assert _EXCLUDED_AXIS_MARKER < _STRONG_AXIS_FLOOR
 
 
 def test_sabotage_key_removal_exclusion_raises():
