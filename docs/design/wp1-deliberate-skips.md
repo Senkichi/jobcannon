@@ -43,9 +43,10 @@ budgets) rather than copied.
 **Skip:** the private KV-cache admission threshold (and its parallelism
 pinning) tunes a locally-running inference server on the desktop GPU. No
 hosted local-inference path exists today, so there is nothing for the
-threshold to govern. Whether one is ever admitted is exactly the open
-question entry 4 records; if that question resolves yes, this entry must be
-revisited alongside it.
+threshold to govern. That question resolved **yes** (2026-08-13 — see entry
+4): this threshold becomes a port-alongside obligation when the self-hosted
+inference provider lands, re-derived for the operator's hardware under
+entry 4's zero-personal-detail constraint rather than copied.
 
 ## 3. `stale_detector` disk-refresh semantics
 
@@ -78,19 +79,25 @@ Cannot-occur-hosted ruling, all four steps:
 **Private evidence:** private-only, no SHA (environment configuration, not a
 commit).
 
-**Skip status: ESCALATE [OWNER]** — undecided, recorded rather than guessed.
+**Skip status: RESOLVED — deferred port obligation (owner ruled yes, 2026-08-13).**
 
 The private deployment pins environment variables for its locally-running
-inference server. Whether the hosted deployment ever runs against a
-self-hosted inference endpoint is not yet decided: the engine carries an
-inference-tuning config default (`jobcannon/engine/job_scorer.py:95` reads
-`providers.ollama.num_ctx`), but no provider implementation or endpoint
-wiring exists in this codebase.
+inference server. The owner question this entry originally recorded — will
+the hosted deployment admit a self-hosted inference endpoint (an
+operator-supplied local model server)? — is answered: **yes**. The
+environment pinning is therefore load-bearing-in-waiting: it must be ported
+alongside the provider implementation that admits such an endpoint. None
+exists in this repository today; the engine carries only an inference-tuning
+config default (`jobcannon/engine/job_scorer.py:95` reads
+`providers.ollama.num_ctx`).
 
-**Owner question (yes/no):** will the hosted deployment admit a self-hosted
-inference endpoint (an operator-supplied local model server)? If **yes**, the
-environment pinning becomes load-bearing and must be ported alongside that
-provider. If **no**, this skip is permanent and the entry closes.
+**Binding constraint attached to the ruling:** the port must carry zero
+operator-personal or machine-specific details. Concretely: no baked-in
+filesystem paths, usernames, hostnames, GPU/VRAM figures, or tuning values
+copied from a specific machine — every such value arrives as operator
+configuration with neutral defaults, and test fixtures are synthesized
+rather than copied from private runs. Entry 2's KV-cache threshold falls
+under the same rule.
 
 ## 5. Wizard scoring-leg call timeout
 
