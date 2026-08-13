@@ -1,3 +1,5 @@
+import pytest
+
 from tests.host.conftest import requires_postgres
 
 pytestmark = requires_postgres
@@ -42,11 +44,39 @@ def test_slug_collision_leaves_ats_fields_untouched(db_conn):
     assert row["ats_slug"] is None  # collision → ATS fields untouched
 
 
-def test_rejects_empty_name(db_conn):
+def test_rejects_nameless_input_with_typed_error(db_conn):
+    from jobcannon.db._companies import CompanyNameRejectedError, upsert_company
+
+    conn = _svc_conn(db_conn)
+    for bad in ("", "   ", "---"):
+        with pytest.raises(CompanyNameRejectedError):
+            upsert_company(conn, bad)
+
+
+def test_accepts_non_latin_company_name(db_conn):
     from jobcannon.db._companies import upsert_company
 
-    assert upsert_company(_svc_conn(db_conn), "") is None
-    assert upsert_company(_svc_conn(db_conn), "   ") is None
+    assert isinstance(upsert_company(_svc_conn(db_conn), "株式会社テスト"), int)
+
+
+def test_accepts_digit_only_company_name(db_conn):
+    """The predicate is isalnum(), matching the private original — a
+    digit-only name is a real company name, not garbage. This is the
+    fixture that discriminates isalnum() from the old isalpha() check."""
+    from jobcannon.db._companies import upsert_company
+
+    assert isinstance(upsert_company(_svc_conn(db_conn), "1024"), int)
+
+
+def test_non_name_failure_raises_wrapped_upsert_error(db_conn):
+    """ats_probe_status='hit' without platform+slug trips m0001's hit-state
+    CHECK — previously swallowed into a silent None, now wrapped and raised
+    with the original error chained as __cause__."""
+    from jobcannon.db._companies import CompanyUpsertError, upsert_company
+
+    with pytest.raises(CompanyUpsertError) as exc_info:
+        upsert_company(_svc_conn(db_conn), "Hit Without Slug", ats_probe_status="hit")
+    assert exc_info.value.__cause__ is not None
 
 
 def test_update_branch_ats_collision_leaves_fields_untouched(db_conn):

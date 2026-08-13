@@ -3,7 +3,11 @@ chokepoint. Same signature, same monotonic probe-status rule
 (hit=2 > pending=1 > miss=0; UPDATE applies at new_rank >= current_rank so an
 equal-rank sighting still refreshes fields via COALESCE, but a downgrade
 never lands), same collision semantics (UNIQUE(ats_platform, ats_slug):
-another owner of the pair -> log, leave ATS fields untouched, return the id).
+another owner of the pair -> log, leave ATS fields untouched, return the id),
+and same failure contract: name-policy rejects raise CompanyNameRejectedError
+and any other failure is wrapped in CompanyUpsertError — never a silent None.
+The malformed-name predicate is isalnum()-based like the private original
+(Unicode-aware, and accepts digit-only names that isalpha() would reject).
 
 Row access note: all internal row reads use STRING keys only (never
 positional). This function is called both through the pooled
@@ -34,9 +38,10 @@ write visible to any OTHER connection. Durability is handled separately by
 the explicit pool.commit_unless_nested(raw) call before each return — a
 no-op when nested inside an ambient `with conn.transaction():` block (e.g.
 tests/host/conftest.py's db_conn fixture, where psycopg3 forbids explicit
-commit() outright), a real commit otherwise. The outer fail-closed
+commit() outright), a real commit otherwise. The outer
 `except Exception` handler (e.g. the companies hit-state CHECK firing when a
-caller passes ats_probe_status="hit" without platform+slug) needs no
+caller passes ats_probe_status="hit" without platform+slug) wraps the
+failure in CompanyUpsertError and needs no
 explicit rollback: whichever inner `with raw.transaction():` was open when
 the exception was raised already rolled itself back automatically.
 """
@@ -51,6 +56,29 @@ import psycopg
 from jobcannon.db.pool import commit_unless_nested
 
 logger = logging.getLogger(__name__)
+
+
+class CompanyNameRejectedError(ValueError):
+    """Raised when a company name is rejected by the name-policy boundary.
+
+    Carries the rejected raw name and the classification reason so callers
+    cannot silently treat a failure as a missing id.
+    """
+
+    def __init__(self, name: str, reason: str):
+        self.name = name
+        self.reason = reason
+        super().__init__(f"Company name rejected: {name!r} ({reason})")
+
+
+class CompanyUpsertError(RuntimeError):
+    """Raised when upsert_company fails for a non-name-policy reason."""
+
+    def __init__(self, name: str, cause: Exception):
+        self.name = name
+        self.cause = cause
+        super().__init__(f"upsert_company failed for {name!r}: {cause}")
+
 
 _PROBE_STATUS_PRECEDENCE = {"hit": 2, "pending": 1, "miss": 0}
 _MAX_NAME_LEN = 200
@@ -134,15 +162,15 @@ def upsert_company(
     ats_slug: str | None = None,
     ats_probe_status: str = "pending",
     homepage_url: str | None = None,
-) -> int | None:
+) -> int:
     raw = conn.raw if hasattr(conn, "raw") else conn
     normalized = (name or "").strip()
-    if (
-        not normalized
-        or len(normalized) > _MAX_NAME_LEN
-        or not any(c.isalpha() for c in normalized)
-    ):
-        return None
+    if not normalized:
+        raise CompanyNameRejectedError(name or "", "empty_after_cleanup")
+    if len(normalized) > _MAX_NAME_LEN:
+        raise CompanyNameRejectedError(name, "overlong")
+    if not any(c.isalnum() for c in normalized):
+        raise CompanyNameRejectedError(name, "no_alphanumeric_characters")
     try:
         existing = raw.execute(
             "SELECT id, ats_probe_status FROM companies WHERE lower(name) = lower(%s)",
@@ -220,6 +248,8 @@ def upsert_company(
             ats_probe_status,
             homepage_url,
         )
-    except Exception:
-        logger.warning("upsert_company failed for %r", name, exc_info=True)
-        return None
+    except CompanyNameRejectedError:
+        raise
+    except Exception as e:
+        logger.warning("upsert_company failed for '%s' (non-fatal): %s", name, e)
+        raise CompanyUpsertError(name, e) from e

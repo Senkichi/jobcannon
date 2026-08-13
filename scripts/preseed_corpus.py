@@ -80,9 +80,9 @@ def _verify(rows: list[dict[str, str]]) -> int:
 
 def _upsert_companies(rows: list[dict[str, str]]) -> int:
     """Upsert each row's company via the pooled connection factory (requires
-    the engine seams to already be wired). Returns the number of rows
-    processed (upsert_company itself no-ops on malformed names — see its
-    docstring — so this is "rows attempted", not "rows guaranteed inserted")."""
+    the engine seams to already be wired). Returns the number of rows landed
+    (upsert_company raises CompanyNameRejectedError on malformed names —
+    logged and skipped here — so a bad manifest row can't abort the seed)."""
     from jobcannon.db import _companies
     from jobcannon.engine import services
 
@@ -90,14 +90,18 @@ def _upsert_companies(rows: list[dict[str, str]]) -> int:
     upserted = 0
     with svc.connection_factory() as conn:
         for row in rows:
-            _companies.upsert_company(
-                conn,
-                row["name"],
-                ats_platform=row["ats_platform"],
-                ats_slug=row["ats_slug"],
-                ats_probe_status="hit",
-                homepage_url=row.get("homepage_url") or None,
-            )
+            try:
+                _companies.upsert_company(
+                    conn,
+                    row["name"],
+                    ats_platform=row["ats_platform"],
+                    ats_slug=row["ats_slug"],
+                    ats_probe_status="hit",
+                    homepage_url=row.get("homepage_url") or None,
+                )
+            except _companies.CompanyNameRejectedError as exc:
+                log.warning("SKIP %-30s %s", row["name"], exc)
+                continue
             upserted += 1
         conn.commit()
     return upserted

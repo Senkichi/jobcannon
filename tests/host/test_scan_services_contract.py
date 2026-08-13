@@ -113,6 +113,30 @@ def test_engine_upsert_path_lands_in_postgres(wired_services):
     assert row["jd_full"] == desc  # promoted via svc.set_jd_full through the engine path
 
 
+def test_real_impl_signatures_pinned():
+    """Both persistence seams the host binds into ScanServices carry the
+    pinned signatures: set_jd_full's full keyword-only tail (source, title,
+    config) and upsert_company's non-optional int return."""
+    import inspect
+
+    from jobcannon.db import _companies, _jd_full
+
+    jd_params = inspect.signature(_jd_full.set_jd_full).parameters
+    assert list(jd_params) == ["conn", "dedup_key", "text", "source", "title", "config"]
+    assert jd_params["config"].kind is inspect.Parameter.KEYWORD_ONLY
+
+    co_sig = inspect.signature(_companies.upsert_company)
+    assert list(co_sig.parameters) == [
+        "conn",
+        "name",
+        "ats_platform",
+        "ats_slug",
+        "ats_probe_status",
+        "homepage_url",
+    ]
+    assert co_sig.return_annotation in ("int", int)
+
+
 def test_optional_hooks_all_default_none(wired_services):
     svc = wired_services
     for hook in (

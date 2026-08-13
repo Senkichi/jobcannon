@@ -49,9 +49,12 @@ class ScanServices:
     #   matches job_finder.db._jobs.upsert_job(conn, parsed, *, company_id=None,
     #   score_breakdown=None, ats_platform=None, config=None) -> UpsertResult
     set_jd_full: Callable[..., Any]
-    #   matches job_finder.db._jd_full.set_jd_full(conn, dedup_key, ...)
+    #   matches job_finder.db._jd_full.set_jd_full(conn, dedup_key, text, *,
+    #   source, title=None, config=None) -> bool
     upsert_company: Callable[..., Any]
-    #   matches job_finder.web.ats_company.upsert_company(conn, name, ...)
+    #   matches job_finder.web.ats_company.upsert_company(conn, name, ...) -> int;
+    #   raises CompanyNameRejectedError (name policy) / CompanyUpsertError
+    #   (anything else) instead of returning None
     # -- config / secrets (required) --
     config: dict
     get_secret: Callable[..., "str | None"]

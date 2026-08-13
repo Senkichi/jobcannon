@@ -72,6 +72,20 @@ def test_rejects_empty(db_conn, posting):
     assert set_jd_full(_svc_conn(db_conn), posting, None, source="test") is False
 
 
+def test_set_jd_full_signature_accepts_config():
+    """Signature pin: the private chokepoint takes a keyword-only
+    `config: dict | None = None`; the port must match so the gate call can
+    thread it without another signature change."""
+    import inspect
+
+    from jobcannon.db._jd_full import set_jd_full
+
+    params = inspect.signature(set_jd_full).parameters
+    assert "config" in params
+    assert params["config"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params["config"].default is None
+
+
 def test_rejects_title_zero_overlap_content(db_conn, posting):
     """I-17 content-contract rejection (jd_content_reject), distinct from
     the I-13 short-junk gate covered by test_rejects_short_junk above."""
