@@ -139,7 +139,10 @@ def test_reject_reason_attribution(db_conn):
         upsert_company(conn, "x" * 201)
     assert exc_info.value.reason == "overlong"
     # Boundary pinned in both directions: exactly at the cap is accepted
-    # (kills a `>` -> `>=` drift on the overlong guard).
+    # (kills a `>` -> `>=` drift on the overlong guard). This pins the
+    # cap at its current value (200) — a known, deliberate divergence
+    # documented in the port notes — so any later cap reconciliation
+    # must revisit this exact assertion.
     assert isinstance(upsert_company(conn, "x" * 200), int)
 
     with pytest.raises(CompanyNameRejectedError) as exc_info:

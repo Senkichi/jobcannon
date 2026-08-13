@@ -186,3 +186,37 @@ def test_preseed_upsert_skips_row_level_failures(monkeypatch):
     # a row missing a required key is a manifest bug, not a skippable row.
     with pytest.raises(KeyError):
         preseed_corpus._upsert_companies([{"name": "NoKeys"}])
+
+
+def test_preseed_seed_wires_landed_rows_and_failure_floor(monkeypatch):
+    """_seed's composition contract — the helpers are each pinned in
+    isolation; this pins the wiring between them: scans are enqueued for
+    exactly the LANDED rows (not the full manifest), a seed where every
+    row skips exits 1, and an empty manifest is not a failure."""
+    from types import SimpleNamespace
+
+    from jobcannon.host import config as host_config_mod
+    from jobcannon.host import wiring
+    from scripts import preseed_corpus
+
+    monkeypatch.setattr(host_config_mod, "load_host_config", lambda: SimpleNamespace())
+    monkeypatch.setattr(wiring, "init_engine_seams", lambda cfg: None)
+    monkeypatch.setattr(wiring, "teardown_engine_seams", lambda: None)
+
+    rows = [{"name": "Acme"}, {"name": "Bad"}, {"name": "Globex"}]
+    landed = [rows[0], rows[2]]
+    enqueued_with: list[list] = []
+
+    def fake_enqueue(got):
+        enqueued_with.append(got)
+        return (len(got), 0)
+
+    monkeypatch.setattr(preseed_corpus, "_upsert_companies", lambda r: landed)
+    monkeypatch.setattr(preseed_corpus, "_enqueue_scans", fake_enqueue)
+    assert preseed_corpus._seed(rows) == 0
+    assert enqueued_with == [landed]
+
+    monkeypatch.setattr(preseed_corpus, "_upsert_companies", lambda r: [])
+    assert preseed_corpus._seed(rows) == 1
+
+    assert preseed_corpus._seed([]) == 0
