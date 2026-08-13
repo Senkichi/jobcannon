@@ -60,9 +60,10 @@ def set_jd_full(
 ) -> bool:
     """Store a JD body on the posting, gated by the junk and content contracts.
 
-    `config` is accepted (keyword-only) to pin the private chokepoint's full
-    signature; it is threaded into the content-gate call by a follow-up
-    change and is unused until then.
+    `config` (keyword-only) pins the private chokepoint's full signature and
+    is threaded into the content-gate call, so per-deployment
+    ``enrichment.jd_full`` thresholds govern the truncation check at the
+    write chokepoint.
     """
     raw = conn.raw if hasattr(conn, "raw") else conn
     if not text:
@@ -72,7 +73,7 @@ def set_jd_full(
     if _is_jd_junk(text):
         logger.warning("set_jd_full: junk-gated [source=%s] prefix=%r", source, text.strip()[:60])
         return False
-    rejection = jd_content_reject(text, title)
+    rejection = jd_content_reject(text, title, config)
     if rejection is not None:
         logger.warning(
             "set_jd_full: content-gated [source=%s] reason=%s signal=%s prefix=%r",
