@@ -1,4 +1,4 @@
-"""Invariants for the unified enrichment-tier vocabulary (issue #260, F1 root cause).
+"""Invariants for the unified enrichment-tier vocabulary (private issue #260, F1 root cause).
 
 `jobcannon/engine/enrichment_states.py` is the single source of truth for tier
 names and the predicates over them. These tests pin:
@@ -39,7 +39,7 @@ _JOB_FINDER_ROOT = Path(__file__).resolve().parents[2] / "jobcannon"
 
 
 # ---------------------------------------------------------------------------
-# Set distinctness — the load-bearing design decision (issue #260)
+# Set distinctness — the load-bearing design decision (private issue #260)
 # ---------------------------------------------------------------------------
 
 

@@ -44,7 +44,7 @@ SUB_SCORE_KEYS: tuple[str, ...] = (
 # Canonical classification verdicts — the universe derive_classification() can
 # return. Order is the confusion-matrix / report axis order (do not reorder
 # without re-pinning the eval reports). "low_signal" is the honest no-signal
-# class (issue #210/#227), distinct from a confident "reject".
+# class (private issue #210/#227), distinct from a confident "reject".
 CLASSIFICATIONS: tuple[str, ...] = (
     "apply",
     "consider",
@@ -55,5 +55,5 @@ CLASSIFICATIONS: tuple[str, ...] = (
 
 # Minimum jd_full length required for gold-set labeling and snapshot freezing.
 # Rows below this threshold are rejected by the labeler and retired by the
-# migration (issue #676). Single-sourced across migration, labeler, and heal script.
+# migration (private issue #676). Single-sourced across migration, labeler, and heal script.
 MIN_GOLD_JD_CHARS = 500

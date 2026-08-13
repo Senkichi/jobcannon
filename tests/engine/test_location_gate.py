@@ -1,4 +1,4 @@
-"""Tests for the P3.2 location completeness gate in score_job (issue #391).
+"""Tests for the P3.2 location completeness gate in score_job (private issue #391).
 
 D-7 (Completeness gates, not garbage-in scoring): a job is scored when its
 inputs are ready or provably exhausted. The location gate mirrors the existing
