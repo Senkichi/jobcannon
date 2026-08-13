@@ -95,6 +95,14 @@ class ScanServices:
     #   owner_identity_passes, resolve_slug_collision, new_summary,
     #   try_static_extract, try_embedded_json_extract, try_playwright_extract,
     #   upsert_and_log.
+    scan_deadline_s: float | None = None
+    #   Whole-scan runtime budget in seconds. Replaces the private repo's
+    #   job-level max-runtime wall for the ATS scan (the scheduler layer's
+    #   _get_job_max_runtime_s) - that layer does not exist hosted,
+    #   so the host supplies the wall at its one construction site. None =>
+    #   unbounded (dev/CI default; existing construction sites stay valid).
+    #   <= 0 is normalized to "no bound" by the engine, matching the
+    #   documented ">0" semantics of ats.runtime_limit_s.
 
 
 _active: ScanServices | None = None
