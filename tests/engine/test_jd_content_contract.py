@@ -19,13 +19,21 @@ this task's manifest).
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from jobcannon.engine.jd_content_contract import (
+    JD_CONTENT_REASON_CODES,
+    JD_CONTENT_VERSION,
     JD_EXPIRED,
     JD_OFFSITE,
+    JD_TRUNCATED,
     JdVerdict,
+    _is_jd_truncated,
+    _is_json_config_blob,
     classify_jd_content,
+    get_jd_full_thresholds,
     jd_content_reject,
 )
 
@@ -147,9 +155,10 @@ def test_ambiguous_real_jd_without_headings():
 
 
 def test_ambiguous_short_jd():
-    body = "We are looking for a Data Scientist. Responsibilities include modeling."
+    # Above the min-length floor but below the substantial CLEAN bar: still AMBIGUOUS.
+    body = ("We are looking for a Data Scientist. Responsibilities include modeling. " * 4).strip()
     res = classify_jd_content(body, "Data Scientist", "Acme Corp")
-    assert res.verdict is JdVerdict.AMBIGUOUS  # has shape+grounding but too short
+    assert res.verdict is JdVerdict.AMBIGUOUS  # has shape+grounding but not substantial
 
 
 def test_ambiguous_grounded_but_no_shape():
@@ -249,6 +258,216 @@ def test_empty_jd_is_not_rejected():
 
 
 # ---------------------------------------------------------------------------
+# Version watermark + reason-code registry (the re-sweep contract surface)
+# ---------------------------------------------------------------------------
+
+
+def test_jd_content_version_is_4():
+    # LITERAL pin: the resync lands the private contract's truncation +
+    # json-blob rules, whose watermark is 4. A drift here silently re-arms
+    # (or fails to re-arm) the whole-corpus re-sweep.
+    assert JD_CONTENT_VERSION == 4
+
+
+def test_reason_code_registry_set_equality():
+    # Pinned against string literals, not the module's own constants, so a
+    # renamed/retyped code cannot self-consistently pass.
+    assert JD_CONTENT_REASON_CODES == frozenset(
+        {"jd_full_offsite", "jd_full_expired", "jd_full_truncated"}
+    )
+    assert JD_TRUNCATED == "jd_full_truncated"
+
+
+# ---------------------------------------------------------------------------
+# Truncation gate (issue #1295): too_short + trailing_ellipsis
+# ---------------------------------------------------------------------------
+
+
+def test_truncated_snippet_rejected():
+    """A long snippet ending in '...' is rejected as truncated."""
+    snippet = "A" * 227 + "..."  # 230 chars
+    rej = jd_content_reject(snippet)
+    assert rej is not None
+    assert rej[0] == JD_TRUNCATED
+    assert rej[1] == "trailing_ellipsis"
+
+
+def test_too_short_body_rejected():
+    """A body below the min-length floor is rejected."""
+    rej = jd_content_reject("Short body.")
+    assert rej is not None
+    assert rej[0] == JD_TRUNCATED
+    assert rej[1] == "too_short"
+
+
+def test_is_jd_truncated_signals():
+    assert _is_jd_truncated("tiny") == ("jd_full_truncated", "too_short")
+    assert _is_jd_truncated("B" * 250 + "…") == ("jd_full_truncated", "trailing_ellipsis")
+    # A healthy body (above the floor, no trailing ellipsis) is falsy.
+    assert not _is_jd_truncated("C" * 250)
+    assert not _is_jd_truncated(None)
+    assert not _is_jd_truncated("")
+
+
+def test_truncated_check_runs_first():
+    # Order discriminator: a SHORT body that also leads with a head-block
+    # marker must attribute to the truncation gate, which the private
+    # contract runs before every content signal.
+    rej = jd_content_reject("Request denied.")
+    assert rej == ("jd_full_truncated", "too_short")
+
+
+def test_get_jd_full_thresholds_defaults_and_overrides():
+    assert get_jd_full_thresholds(None) == (200, True)
+    assert get_jd_full_thresholds({}) == (200, True)
+    cfg = {"enrichment": {"jd_full": {"min_chars": 50, "reject_trailing_ellipsis": False}}}
+    assert get_jd_full_thresholds(cfg) == (50, False)
+    # A nonsensical floor falls back to the default rather than disabling the gate.
+    assert get_jd_full_thresholds({"enrichment": {"jd_full": {"min_chars": 0}}}) == (200, True)
+
+
+def test_config_threads_through_reject_and_classify():
+    # The config parameter must actually govern the gate (wired, not decorative):
+    # lowering min_chars admits a body the default floor rejects, in BOTH
+    # public entry points.
+    body = "We are looking for a Data Scientist. Responsibilities include modeling."
+    assert jd_content_reject(body)[0] == JD_TRUNCATED  # default floor: rejected
+    permissive = {"enrichment": {"jd_full": {"min_chars": 10}}}
+    assert jd_content_reject(body, None, permissive) is None
+    assert classify_jd_content(body, "Data Scientist", "Acme", permissive).verdict is not (
+        JdVerdict.REJECT
+    )
+    # And disabling the ellipsis signal admits a trailing-ellipsis body.
+    snippet = "A" * 227 + "..."
+    assert jd_content_reject(snippet)[1] == "trailing_ellipsis"
+    no_ellipsis = {"enrichment": {"jd_full": {"reject_trailing_ellipsis": False}}}
+    assert jd_content_reject(snippet, None, no_ellipsis) is None
+
+
+# ---------------------------------------------------------------------------
+# JSON config blob (issue #1558)
+# ---------------------------------------------------------------------------
+
+# Eightfold/Netflix micro-site config blob: a large JSON object with theme,
+# fonts, supported locales, and an empty ``job_description``. The blob is above
+# the low_signal length threshold but carries no prose, so it must be rejected
+# at the content-contract extraction gate.
+_NETFLIX_EIGHTFOLD_BLOB = json.dumps(
+    {
+        "theme": {
+            "primary_color": "#E50914",
+            "secondary_color": "#221F1F",
+            "logo_url": "https://assets.nflxext.com/us/en/nf/logo.png",
+            "appearance": "dark",
+            "custom_css_enabled": True,
+        },
+        "fonts": ["Netflix Sans", "Helvetica Neue", "Arial", "sans-serif"],
+        "supported_locales": [
+            "en-US",
+            "es-US",
+            "pt-BR",
+            "fr-FR",
+            "de-DE",
+            "it-IT",
+            "ja-JP",
+            "ko-KR",
+            "zh-CN",
+            "hi-IN",
+            "ar-AE",
+            "tr-TR",
+            "pl-PL",
+            "nl-NL",
+            "sv-SE",
+            "da-DK",
+            "fi-FI",
+            "no-NO",
+            "cs-CZ",
+            "hu-HU",
+            "ro-RO",
+            "sk-SK",
+            "hr-HR",
+            "sl-SI",
+            "bg-BG",
+            "ru-RU",
+            "uk-UA",
+            "he-IL",
+            "th-TH",
+            "vi-VN",
+            "id-ID",
+            "ms-MY",
+        ],
+        "company_name": "Netflix",
+        "job_title": "Data Scientist 4",
+        "job_description": "",
+        "apply_url": "https://explore.jobs.netflix.net/careers/job/40875/apply",
+        "metadata": {
+            "id": 40875,
+            "department": "Data & Insights",
+            "location": "USA - Remote",
+            "employment_type": "full-time",
+        },
+        "css_rules": [
+            ".nf-hero { background: #E50914; color: #fff; }",
+            ".nf-button { border-radius: 4px; font-weight: 600; }",
+            ".nf-job-card { padding: 24px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }",
+            ".nf-search-bar { margin-bottom: 16px; }",
+            ".nf-footer { font-size: 12px; color: #666; }",
+        ],
+    },
+    separators=(",", ":"),
+)
+
+
+def test_netflix_eightfold_config_blob_rejected():
+    """Issue #1558: a long Eightfold/Netflix config blob must be REJECT, not CLEAN.
+
+    The payload clears the length gate but contains no job description prose,
+    so it cannot be scored.
+    """
+    res = classify_jd_content(_NETFLIX_EIGHTFOLD_BLOB, "Data Scientist 4", "Netflix")
+    assert res.verdict is JdVerdict.REJECT
+    assert res.reason == JD_OFFSITE
+    assert res.signal == "json_config_blob"
+
+
+def test_json_blob_with_real_description_not_rejected():
+    """A JSON object with a non-empty prose description is not a config blob."""
+    body = json.dumps(
+        {
+            "job_title": "Senior Data Scientist",
+            "job_description": (
+                "Senior Data Scientist at Acme. We are looking for a Senior Data "
+                "Scientist to join our analytics team. Responsibilities include "
+                "building machine learning models, running experiments, and "
+                "partnering with product. Qualifications: 5+ years of Python and SQL. "
+                "What you'll do: design data pipelines, ship models to production, "
+                "mentor analysts."
+            ),
+        }
+    )
+    assert not _is_json_config_blob(body)
+    assert jd_content_reject(body) is None
+
+
+def test_prose_containing_braces_is_not_a_blob():
+    # A real JD that merely CONTAINS an inline JSON/code block must not be
+    # mistaken for a serialized config payload.
+    body = _REAL_JD + ' Example payload: {"model": "gpt", "temperature": 0.2}.'
+    assert not _is_json_config_blob(body)
+    assert jd_content_reject(body, "Senior Data Scientist") is None
+
+
+def test_expired_marker_wins_over_blob_shape():
+    # Order discriminator: the json-blob check runs AFTER the expired signal,
+    # so a JSON payload whose text carries a dead-posting sentence attributes
+    # to JD_EXPIRED (matching the private signal order).
+    payload = json.dumps({"message": "This position has been filled. " * 12, "job_description": ""})
+    rej = jd_content_reject(payload)
+    assert rej is not None
+    assert rej[0] == JD_EXPIRED
+
+
+# ---------------------------------------------------------------------------
 # ParsedJob.from_job ingest gate
 # ---------------------------------------------------------------------------
 
@@ -277,6 +496,25 @@ def test_from_job_keeps_clean_jd():
     assert p.jd_full is not None
 
 
+def test_from_job_ingest_gate_reads_runtime_config():
+    # L3 wiring pin: the ingest gate passes the host-injected runtime config
+    # into jd_content_reject. With a provider demanding an absurd floor, a
+    # body that is CLEAN under defaults must be quarantined as truncated —
+    # deleting the config argument at the parsed_job call site kills this.
+    from jobcannon.engine.runtime_config import set_config_provider
+
+    set_config_provider(lambda: {"enrichment": {"jd_full": {"min_chars": 10_000}}})
+    try:
+        p = _from_job("Senior Data Scientist", jd_full=_REAL_JD)
+        assert JD_TRUNCATED in p.unresolved_reasons
+        assert p.jd_full is None
+    finally:
+        set_config_provider(None)
+    # And with the provider cleared, the same body is stored again.
+    p = _from_job("Senior Data Scientist", jd_full=_REAL_JD)
+    assert p.jd_full is not None
+
+
 # ---------------------------------------------------------------------------
 # has_recognizable_jd_shape — additive public wrapper (1B Wave 2 PR 7)
 # ---------------------------------------------------------------------------
@@ -294,3 +532,43 @@ def test_has_recognizable_jd_shape_none_and_empty_return_false():
 
     assert has_recognizable_jd_shape(None) is False
     assert has_recognizable_jd_shape("") is False
+
+
+# ---------------------------------------------------------------------------
+# Mutation-review pins (B3 review round): boundary + dominance-guard killers.
+# Adopted from the test-quality refuter's sabotage-verified proposals.
+# ---------------------------------------------------------------------------
+
+
+def test_truncation_floor_boundary():
+    """Bidirectional boundary pin at the default floor: 199 rejects, 200 does
+    not. Kills both the off-by-one (`<` -> `<=`) and floor-shift mutants that
+    the accessor-literal test alone leaves green."""
+    assert _is_jd_truncated("x" * 199) == ("jd_full_truncated", "too_short")
+    assert _is_jd_truncated("x" * 200) is None
+
+
+def test_json_blob_must_dominate_body():
+    """A leading JSON-LD header followed by a real JD is NOT a config blob —
+    the dominance criterion is load-bearing (deleting it rejects common
+    extractor output that leads with a schema.org JobPosting header)."""
+    header = json.dumps({"@type": "JobPosting", "employmentType": "FULL_TIME"})
+    body = header + "\n\n" + _REAL_JD
+    assert _is_json_config_blob(body) is False
+    assert jd_content_reject(body) is None
+
+
+def test_leading_array_blob_rejected():
+    """A dominating leading ARRAY payload is a blob — pins the documented
+    `[` half of _JSON_START_CHARS."""
+    payload = json.dumps([{"locale": "en-US", "theme": "dark"}] * 40)
+    assert _is_json_config_blob(payload) is True
+
+
+def test_malformed_config_degrades_to_defaults():
+    """String / None LEAF values must not crash the gate at the chokepoint:
+    a null jd_full section degrades to defaults, a numeric string coerces.
+    (A null `enrichment` section still raises — upstream-identical resolver
+    shape, tracked as a follow-up issue, parity-bound.)"""
+    assert get_jd_full_thresholds({"enrichment": {"jd_full": None}}) == (200, True)
+    assert get_jd_full_thresholds({"enrichment": {"jd_full": {"min_chars": "50"}}}) == (50, True)
