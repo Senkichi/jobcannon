@@ -1,7 +1,7 @@
 # Deliberate non-ports (WP-1 resync)
 
 A skip that is not written down is indistinguishable from an oversight at the
-next resync. This document records five deliberate non-ports from the private
+next resync. This document records the deliberate non-ports from the private
 predecessor codebase, each with its evidence commit (or an explicit
 private-only marker) and the rationale. Entries are mechanical records, not
 roadmap statements.
@@ -106,3 +106,23 @@ that a single monotonic deadline governs the whole cascade, owned at the
 cascade entry point. Porting a per-leg timeout would install exactly the
 per-provider multiplication that constraint forbids. When a cascade is
 implemented, the wizard's scoring leg inherits the cascade deadline instead.
+
+## 6. Scrape-blocklist enforcement comment on the HTML-fallback scrape call
+
+**Private evidence:** commit `c2793bb9` — its only `ats_scanner` hunk is a
+comment block above the HTML-fallback scan's scrape call documenting that the
+private `careers_scraper` internally enforces the scrape-host blocklist gate
+(`_is_blocklisted_scrape_host`), so callers need no gate of their own.
+
+**Skip:** comment-only, no behavior delta. The hosted engine reaches scraping
+through the `ScanServices.scrape_careers_page` hook
+(`jobcannon/engine/ats_scanner/_run_html.py` — the module header records that
+`careers_scraper` itself does not port), so whatever implementation the host
+injects may or may not carry that internal gate. Porting the comment would
+assert an enforcement property this repository cannot guarantee about an
+injected callable.
+
+**What would invalidate this skip:** porting `careers_scraper` (or shipping
+any first-party implementation of `scrape_careers_page`) — at that point the
+blocklist gate becomes this repository's property to enforce and document,
+and the comment (and the gate itself) must come along.

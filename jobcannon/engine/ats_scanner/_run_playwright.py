@@ -182,6 +182,7 @@ def _run_playwright_scan(
     high_score_threshold: int,
     tracker=None,
     company_names: list[str] | None = None,
+    deadline_monotonic: float | None = None,
 ) -> None:
     """Phase A2: scan Playwright-class companies (iCIMS) under one browser.
 
@@ -192,6 +193,10 @@ def _run_playwright_scan(
     `high_score_threshold` is accepted for call-site parity but no longer
     bound: _high_score_history_clause is neutralized to TRUE (zero params)
     in this hosted port — see its docstring in _run.py.
+
+    ``deadline_monotonic`` (issue #1368) is the scan-wide soft deadline shared
+    with Phases A and C; when set, the phase stops starting new companies once
+    it passes. The already-open browser is still closed in ``finally``.
     """
     params: list = []
     if company_names:
@@ -217,10 +222,15 @@ def _run_playwright_scan(
         logger.warning("Playwright not installed — skipping iCIMS scan phase: %s", exc)
         return
 
+    scanned = 0
+    truncated = False
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         try:
             for company in companies:
+                if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+                    truncated = True
+                    break
                 _scan_one_company_via_playwright(
                     conn,
                     db_path,
@@ -232,6 +242,7 @@ def _run_playwright_scan(
                     all_new_job_keys,
                     max_load_more,
                 )
+                scanned += 1
                 if tracker is not None:
                     tracker.tick()
                 # Polite delay between companies (rendering is heavier than API).
@@ -241,6 +252,14 @@ def _run_playwright_scan(
                 browser.close()
             except Exception:
                 logger.debug("iCIMS scan: browser.close() failed", exc_info=True)
+
+    if truncated:
+        summary["truncated"] = True
+        logger.info(
+            "ATS Phase A2 (Playwright) truncated after %d/%d companies (scan deadline reached)",
+            scanned,
+            len(companies),
+        )
 
 
 def _scan_one_company_via_playwright(
