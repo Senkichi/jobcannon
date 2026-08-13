@@ -57,9 +57,8 @@ def test_every_engine_module_imports():
     under jobcannon/engine — counted here by tallying how many of the
     modules it actually imports live under jobcannon/engine, and comparing
     that tally against an independent filesystem walk of jobcannon/engine
-    itself. A module the collector silently skips (e.g. a future rglob
-    pattern change, a symlink rglob doesn't follow) would otherwise shrink
-    coverage without failing anything.
+    itself. A module the collector silently skips (e.g. under a future rglob
+    pattern change) would otherwise shrink coverage without failing anything.
     """
     import importlib
 
@@ -79,10 +78,13 @@ def test_every_engine_module_imports():
             engine_modules_imported += 1
     assert not failures, "engine modules failed to import:\n" + "\n".join(failures)
 
-    # Deliberately os.walk, NOT a second rglob: the collector above already
-    # walks with rglob, so a shared rglob blindspot (e.g. symlink handling)
-    # would shrink both sides in lockstep and hide itself. A different walk
-    # primitive keeps the comparison honest.
+    # Deliberately os.walk + endswith, NOT a second rglob("*.py"): repeating
+    # the collector's glob would let a future pattern change shrink both
+    # sides in lockstep and hide itself; with a glob-free disk side, pattern
+    # drift is one-sided and detectable. That is ALL this split buys — the
+    # two primitives are symmetric on symlink/junction semantics (both
+    # decline symlinks, both descend junctions, both sit on os.scandir), so
+    # an OS-layer blindspot stays shared.
     import os
 
     engine_files_on_disk = [

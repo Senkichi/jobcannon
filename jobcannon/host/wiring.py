@@ -23,7 +23,13 @@ from jobcannon.host.health_recorder import record_scan_health
 
 _JD_STORAGE_MAX_CHARS = 50_000  # parity with the private repo's JD_STORAGE_MAX_CHARS
 _SCAN_DEADLINE_S = (
-    12_600.0  # parity with the private deployment's job-level runtime cap for the ATS scan
+    # Parity with the private deployment's job-level runtime cap for the ATS
+    # scan. Calibration caveat: that cap bounds one whole-fleet scan, while a
+    # hosted scan task covers a single company — so the same number is a much
+    # looser per-unit bound here, a backstop against a pathologically hung
+    # single-company scan, not a fleet budget. Retuning it is a deliberate
+    # operator decision; numeric parity is what the port preserves.
+    12_600.0
 )
 
 

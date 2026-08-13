@@ -2,12 +2,12 @@
 
 Deliberately a separate module from test_scan_services_contract.py: that
 file carries a module-scope ``pytestmark = requires_postgres``, under which
-these two tests would silently skip in a no-Postgres environment — leaving
-the production wall (wiring.py's ``scan_deadline_s=_SCAN_DEADLINE_S``)
-deletable with a fully green suite. Neither test below touches a database:
-one constructs the dataclass directly, the other calls build_scan_services,
-which only assembles a ScanServices (it opens no pool and calls no
-connection_factory).
+these tests would silently skip in a no-Postgres environment — leaving the
+production wall (wiring.py's ``scan_deadline_s=_SCAN_DEADLINE_S``)
+deletable with a fully green suite. No test below touches a database: they
+construct the dataclass directly, call build_scan_services (which only
+assembles a ScanServices — no pool, no connection_factory call), or read
+the env-backed config loader.
 """
 
 
@@ -39,3 +39,31 @@ def test_build_scan_services_sets_scan_deadline_s():
     svc = build_scan_services(HostConfig(database_url="postgresql://unused"))
     assert isinstance(svc.scan_deadline_s, float)
     assert svc.scan_deadline_s > 0
+
+
+def test_hosted_config_stays_on_the_serial_scan_branch(monkeypatch):
+    """Tripwire for the issue #39 deadlock precondition.
+
+    The engine's concurrent scan branch (``scan_concurrency > 1``) deadlocks
+    when the scan deadline trips with submitted work still queued (issue
+    #39). Hosted is safe only because the host config loader passes no
+    ``scan_concurrency`` knob through, so the engine resolves its default of
+    1 and stays on the serial branch. Asserted two ways, because the
+    loader's optional-knob semantics (unset -> absent from the mapping)
+    would let a pass-through hide from a purely behavioral check whenever
+    the env var happens to be unset: the loader's source must not mention
+    the knob outside comments, and the mapping it builds must resolve to
+    concurrency 1. If this fails because a pass-through was added: fix
+    issue #39 first, then update this test alongside it.
+    """
+    import inspect
+
+    from jobcannon.engine.ats_platforms import _concurrency
+    from jobcannon.host import config as host_config
+
+    code_lines = [line.split("#", 1)[0] for line in inspect.getsource(host_config).splitlines()]
+    assert not any("scan_concurrency" in line for line in code_lines)
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    runtime = host_config.load_host_config().runtime
+    assert _concurrency.get_scan_concurrency(runtime) == 1

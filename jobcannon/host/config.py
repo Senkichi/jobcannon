@@ -40,6 +40,13 @@ def load_host_config() -> HostConfig:
     if not database_url:
         raise RuntimeError("DATABASE_URL is required (Postgres DSN)")
     runtime: dict = {}
+    # Do NOT add an ats.scan_concurrency pass-through here. The engine's
+    # concurrent scan branch (scan_concurrency > 1) deadlocks when the scan
+    # deadline trips with submitted work still queued — issue #39. Hosted is
+    # safe today ONLY because this mapping omits that knob, so the engine
+    # resolves its default of 1 and stays on the serial branch
+    # (tripwire test: tests/host/test_scan_services_deadline.py). Fix #39
+    # before adding the knob.
     _put_int(runtime, "ats", "scan_memo_ttl_s", "JC_SCAN_MEMO_TTL_S")
     _put_int(runtime, "ats", "detail_fetch_concurrency", "JC_DETAIL_FETCH_CONCURRENCY")
     _put_int(runtime, "ats", "page_fetch_concurrency", "JC_PAGE_FETCH_CONCURRENCY")
