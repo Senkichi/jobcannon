@@ -61,9 +61,11 @@ def set_jd_full(
     """Store a JD body on the posting, gated by the junk and content contracts.
 
     `config` (keyword-only) pins the private chokepoint's full signature and
-    is threaded into the content-gate call, so per-deployment
-    ``enrichment.jd_full`` thresholds govern the truncation check at the
-    write chokepoint.
+    is threaded into the content-gate call, so ``enrichment.jd_full``
+    thresholds govern the truncation check for any caller that supplies
+    config. The scan-path caller (``ats_scanner/_run.py``) does not supply it
+    — faithful to the private call site — so that path runs on the engine
+    defaults today.
     """
     raw = conn.raw if hasattr(conn, "raw") else conn
     if not text:

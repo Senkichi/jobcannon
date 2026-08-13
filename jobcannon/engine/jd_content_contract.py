@@ -40,14 +40,18 @@ ENFORCEMENT (single points, mirrored from the title contract)
   can never store obvious junk. Both callers pass the job's ``title`` when they
   have it (the enrichment write path always does), so the title cross-field
   reject (I-17 ``title_zero_overlap``) fires at the write chokepoint, falling
-  back to content-only signals when no title is available.
+  back to content-only signals when no title is available. A leading JSON
+  configuration blob with an empty or missing ``job_description`` is also
+  rejected here, so a long Eightfold/Netflix micro-site config payload cannot
+  satisfy the length gate while carrying no prose.
 * ``classify_jd_content`` (the full 3-way) runs in the background adjudicator
   and the versioned re-sweep, so the AMBIGUOUS residual is LLM-resolved off the
   hot path and a rule improvement heals the whole corpus on a
   ``JD_CONTENT_VERSION`` bump.
 
-The module is PURE (regex + the shared ``normalizers`` token helpers) so it is
-deterministic, unit-testable, and importable from ``db/`` without a web cycle.
+The module is PURE (regex + JSON structural checks + the shared ``normalizers``
+token helpers) so it is deterministic, unit-testable, and importable from
+``db/`` without a web cycle.
 """
 
 from __future__ import annotations
