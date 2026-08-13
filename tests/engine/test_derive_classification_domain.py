@@ -199,12 +199,18 @@ def test_get_effective_location_fit_non_dict_json_is_none():
 
 def test_effective_sub_scores_no_verdict_equals_input():
     scores = dict(_VALID)
-    assert effective_sub_scores(scores, None) == scores
+    result = effective_sub_scores(scores, None)
+    assert result == scores
+    # Identity, not just equality: the no-verdict path returns the input
+    # object itself, so a mutant that rebuilds the dict is caught.
+    assert result is scores
 
 
 def test_effective_sub_scores_malformed_verdict_equals_input():
     scores = dict(_VALID)
-    assert effective_sub_scores(scores, "{malformed") == scores
+    result = effective_sub_scores(scores, "{malformed")
+    assert result == scores
+    assert result is scores
 
 
 def test_effective_sub_scores_substitutes_only_location_fit():
@@ -234,3 +240,10 @@ def test_is_non_degenerate_low_signal_flat_neutral_vector():
 
 def test_is_non_degenerate_low_signal_false_with_signal_and_text():
     assert is_non_degenerate_low_signal(dict(_VALID), "free", 5000, 1500) is False
+
+
+def test_is_non_degenerate_low_signal_false_with_some_threes():
+    """A mixed vector containing 3s is not flat-neutral — only ALL-3s is the
+    tell. Kills the mutant where the flat check degrades to any(v == 3)."""
+    scores = {**dict.fromkeys(_ALL_KEYS, 3), "title_fit": 4}
+    assert is_non_degenerate_low_signal(scores, None, 5000, 1500) is False

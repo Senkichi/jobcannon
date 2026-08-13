@@ -1,10 +1,16 @@
 """Axis-exclusion mechanism for derive_classification.
 
 Exclusion is substitution-with-a-marker plus a parallel excluded-axis set,
-never key removal — the six-key domain guard forbids partial vectors on
-purpose. The sabotage tests here fail if the mechanism is ever "simplified"
-to key removal, or if the substituted marker starts leaking into the mean /
-strong-axis / flat-neutral arithmetic.
+never key removal — the six-key domain guard forbids partial caller vectors
+on purpose. The flat-neutral tell reads the RAW vector (pre-substitution):
+a marker can neither manufacture an all-3s vector nor suppress the tell on
+a genuinely flat one.
+
+The mean/strong-axis leak fixture uses TWO excluded axes and a non-default
+apply_mean_floor deliberately: at the default 3.5 floor no integer vector
+satisfying all>=3 and strong>=3 places a leaked neutral marker inside the
+separating window, so single-axis [1,2,3,4,5] parametrizations alone can
+never detect a leak.
 
 The invariant test pins the mislabel class where a profile carrying no
 location constraint (hence no stored location-policy verdict) gets a posting
@@ -85,17 +91,35 @@ def test_excluded_axis_cannot_push_vector_over_apply(raw_location_fit: int):
     assert result == "consider"
 
 
+def test_two_excluded_markers_never_dilute_the_mean():
+    """included = [4,4,4,3] -> mean 3.75 (>= floor 3.75), strong 3 -> apply.
+    If the two markers leak into the arithmetic: [4,4,4,3,3,3] -> mean 3.50
+    < 3.75 -> consider. Two excluded axes and a non-default floor are
+    required to open a separating window (see module docstring); the raw 1
+    on an excluded axis also turns a truncated exclusion set into a visible
+    reject."""
+    scores = _vector(title_fit=4, domain_match=4, seniority_match=4, location_fit=1, comp_fit=5)
+    result = derive_classification(
+        scores,
+        None,
+        excluded_axes={"location_fit", "comp_fit"},
+        apply_mean_floor=3.75,
+    )
+    assert result == "apply"
+
+
 # ---------------------------------------------------------------------------
-# Flat-neutral is a six-REAL-axis pattern
+# Flat-neutral reads the RAW vector: substitution can neither manufacture
+# nor suppress the tell
 # ---------------------------------------------------------------------------
 
 
 def test_all_threes_manufactured_by_substitution_is_not_low_signal():
     """Raw vector carries a real signal (location_fit=1) that exclusion
-    substitutes to the neutral marker, making the literal vector all-3s. A
-    marker-manufactured all-3s must not silently convert a real verdict into
-    low_signal; only a vector whose six REAL axes all sit at the midpoint is
-    the no-discrimination tell."""
+    substitutes to the neutral marker, making the substituted vector all-3s.
+    A marker-manufactured all-3s must not silently convert a real verdict
+    into low_signal; only a vector whose six RAW axes all sit at the midpoint
+    is the no-discrimination tell."""
     scores = _vector(location_fit=1)
     result = derive_classification(scores, None, excluded_axes={"location_fit"})
     assert result != "low_signal"
@@ -103,8 +127,19 @@ def test_all_threes_manufactured_by_substitution_is_not_low_signal():
 
 
 def test_genuine_all_threes_without_exclusion_stays_low_signal():
-    # Companion control: the suppression above is scoped to exclusions.
+    # Companion control for the manufactured case above.
     assert derive_classification(_vector(), None) == "low_signal"
+
+
+def test_raw_flat_neutral_stays_low_signal_under_exclusion():
+    """A vector the model genuinely scored flat (raw all-3s) is the
+    no-discrimination tell no matter what is excluded: the tell reads raw
+    scores, so exclusion must not promote the row to consider."""
+    assert derive_classification(_vector(), None, excluded_axes={"location_fit"}) == "low_signal"
+    assert (
+        derive_classification(_vector(), None, excluded_axes={"location_fit", "comp_fit"})
+        == "low_signal"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -133,10 +168,12 @@ def test_sabotage_key_removal_exclusion_raises():
 @pytest.mark.parametrize("location_fit", [1, 2, 3, 4, 5])
 def test_no_location_constraint_never_rejects_via_location_fit(location_fit: int):
     """No location constraint means no stored location-policy verdict:
-    effective_sub_scores passes the vector through unchanged, and the scoring
-    caller excludes the axis the model scored against nothing. No raw value
-    1..5 may then produce a reject via location_fit (every other axis here is
-    >= 3, so any reject would be location-caused)."""
+    effective_sub_scores passes the vector through unchanged, and a scoring
+    caller uses the exclusion seam this module provides to drop the axis the
+    model scored against nothing (no production caller is wired yet — this
+    pins the seam's contract). No raw value 1..5 may then produce a reject
+    via location_fit (every other axis here is >= 3, so any reject would be
+    location-caused)."""
     scores = effective_sub_scores(
         _vector(title_fit=4, domain_match=4, location_fit=location_fit), None
     )

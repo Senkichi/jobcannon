@@ -105,13 +105,16 @@ def effective_sub_scores(
     """Return ``sub_scores`` with ``location_fit`` swapped to the policy's effective value.
 
     Single enforcement point for the raw-vs-effective ``location_fit`` split
-    introduced by issue #1213: the assessment writer stores the LLM's raw
-    ``location_fit`` in ``sub_scores_json`` (so the UI can show what the model
-    actually said) but derives classification from the location policy's
-    ``effective_location_fit``. Any consumer that re-derives classification
-    straight from ``sub_scores_json`` — without consulting the stored
-    location-policy verdict — will systematically disagree with the stored
-    classification for every policy-adjusted row (issues #1484, #1494).
+    introduced by issue #1213: in the private original, the assessment writer
+    stores the LLM's raw ``location_fit`` in ``sub_scores_json`` (so the UI
+    can show what the model actually said) but derives classification from
+    the location policy's ``effective_location_fit``. This schema has no
+    ``sub_scores_json`` column yet (see ``jobcannon/db/compat.py``); the
+    helper is ported ahead of that writer so any future consumer that
+    re-derives classification from stored sub-scores consults the stored
+    location-policy verdict — skipping that consultation systematically
+    disagrees with the stored classification for every policy-adjusted row
+    (issues #1484, #1494).
 
     This helper is that consultation. Call it on the parsed ``sub_scores`` dict
     plus the raw serialized verdict before passing the result to
@@ -303,6 +306,10 @@ def derive_classification(
     if _bad:
         raise ValueError(f"sub_scores values must be int in 1..5 (got {_bad})")
 
+    # Captured before marker substitution: the flat-neutral tell below reads
+    # the caller's raw vector, never substituted markers.
+    _raw_values = list(sub_scores.values())
+
     # Axis exclusion: substitution-with-a-marker plus a parallel excluded-axis
     # set — NEVER key removal (the domain guard above forbids five-key dicts,
     # deliberately: a partial vector must not classify). Runs AFTER the guards
@@ -323,18 +330,20 @@ def derive_classification(
     # Branch (C): flat-neutral vector -> low_signal (issue #210). All six axes
     # at the neutral midpoint means the model did not discriminate; surface it
     # honestly rather than promoting it. Runs before the any-axis-1 reject and
-    # the apply branch; independent of JD length / enrichment_tier. The domain
-    # guard above guarantees all six keys are present here. The tell is a
-    # SIX-axis pattern, so it requires zero exclusions: a substituted neutral
-    # marker could manufacture an all-3s vector out of a vector that carried a
-    # real (excluded) signal, silently converting a real verdict into
-    # low_signal.
-    _values = list(sub_scores.values())
-    if not _excluded and all(v == 3 for v in _values):
+    # the apply branch; independent of JD length / enrichment_tier. The tell
+    # reads _raw_values — the vector BEFORE marker substitution — which cuts
+    # both ways: a substituted marker cannot manufacture an all-3s vector out
+    # of a vector that carried a real (excluded) signal, and a vector the
+    # model genuinely scored flat stays low_signal under any exclusion set.
+    # Reading raw scores also keeps this tell consistent with
+    # is_non_degenerate_low_signal, which reads the same raw vector and takes
+    # no excluded_axes.
+    if all(v == 3 for v in _raw_values):
         return "low_signal"
 
     # Reads the substituted vector: an excluded slot holds the neutral marker,
     # never a raw 1, so this can only fire from a non-excluded axis.
+    _values = list(sub_scores.values())
     if any(v == 1 for v in _values):
         return "reject"
 
