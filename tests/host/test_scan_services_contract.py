@@ -155,3 +155,35 @@ def test_optional_hooks_all_default_none(wired_services):
         "prober_extensions",
     ):
         assert getattr(svc, hook) is None
+
+
+def test_scan_deadline_s_omitted_defaults_to_none():
+    """ScanServices must stay constructible without scan_deadline_s (existing
+    construction sites — including the fixture above — pass no such kwarg),
+    and the field must default to None (unbounded)."""
+    from jobcannon.engine import services
+
+    svc = services.ScanServices(
+        connection_factory=lambda **kw: None,
+        upsert_job=lambda *a, **kw: None,
+        set_jd_full=lambda *a, **kw: None,
+        upsert_company=lambda *a, **kw: None,
+        config={},
+        get_secret=lambda name, *, config=None: None,
+        jd_storage_max_chars=50_000,
+    )
+    assert svc.scan_deadline_s is None
+
+
+def test_build_scan_services_sets_scan_deadline_s():
+    """build_scan_services() only assembles a ScanServices dataclass — it
+    never opens a database connection (jobcannon.host.wiring.build_scan_
+    services calls no connection_factory / pool_mod.open_pool) — so this can
+    run without a live Postgres even though the module pytestmark requires
+    it for the rest of the file."""
+    from jobcannon.host.config import HostConfig
+    from jobcannon.host.wiring import build_scan_services
+
+    svc = build_scan_services(HostConfig(database_url="postgresql://unused"))
+    assert isinstance(svc.scan_deadline_s, float)
+    assert svc.scan_deadline_s > 0

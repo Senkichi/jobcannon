@@ -91,7 +91,7 @@ def get_scan_concurrency(config: dict) -> int:
     ``run_ats_scan`` already receives an explicit ``config`` dict as a
     parameter — so this takes one directly rather than adding a runtime-
     config-provider dependency to a code path that doesn't otherwise need
-    one (it also runs from the scheduler outside any request context).
+    one (it also runs under the scheduler outside any request context).
 
     Args:
         config: Application config dict (same one ``run_ats_scan`` receives).

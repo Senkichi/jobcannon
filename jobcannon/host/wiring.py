@@ -22,6 +22,9 @@ from jobcannon.host.config import HostConfig
 from jobcannon.host.health_recorder import record_scan_health
 
 _JD_STORAGE_MAX_CHARS = 50_000  # parity with the private repo's JD_STORAGE_MAX_CHARS
+_SCAN_DEADLINE_S = (
+    12_600.0  # parity with the private deployment's job-level runtime cap for the ATS scan
+)
 
 
 def build_scan_services(host_config: HostConfig) -> services.ScanServices:
@@ -39,6 +42,7 @@ def build_scan_services(host_config: HostConfig) -> services.ScanServices:
         ),  # operational secrets: Render env vars, resolved per-name in later waves
         jd_storage_max_chars=_JD_STORAGE_MAX_CHARS,
         # prober_extensions deliberately omitted -> None (fail-closed, spec §3.6)
+        scan_deadline_s=_SCAN_DEADLINE_S,
     )
 
 

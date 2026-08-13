@@ -411,7 +411,11 @@ def _run_ats_scan_body(
     # budget.
     workday_max_pages = config.get("ats", {}).get("workday_max_pages")
 
-    # Optional Phase A runtime cap (issue #1130): absent or 0 = no limit.
+    # Optional whole-scan runtime cap (issue #1130 introduced it as a
+    # Phase-A-only cap; issue #1368 generalized it to bound the full
+    # per-company scan — Phases A + A2 + C — so the job exits gracefully
+    # with partial results instead of being killed mid-company by the
+    # scheduler's hard wall-clock timeout). Absent or 0 = no limit.
     # Normalized once at the boundary rather than re-checked at every call
     # site: a negative value is documented as "no limit" (matches the
     # config.example.yaml ">0" semantics) but was previously truthy, so
@@ -421,6 +425,22 @@ def _run_ats_scan_body(
     runtime_limit_s = config.get("ats", {}).get("runtime_limit_s")
     if runtime_limit_s is not None and runtime_limit_s <= 0:
         runtime_limit_s = None
+
+    scan_deadline = time.monotonic() + runtime_limit_s if runtime_limit_s else None
+    # Privately the scoring phase's harder wall is the scheduler job config's
+    # value (_get_job_max_runtime_s(config, "ats_scan")); the hosted engine
+    # has no scheduler layer, so the wall is the host-supplied ScanServices
+    # bound (services.scan_deadline_s), normalized like runtime_limit_s above.
+    wall_s = svc.scan_deadline_s
+    if wall_s is not None and wall_s <= 0:
+        wall_s = None
+    score_deadline = time.monotonic() + wall_s if wall_s else None
+    # Hosted, ats.runtime_limit_s is absent from the runtime config (the host
+    # exposes no env knob for it), so without a fallback the scan phases would
+    # run unbounded and only the scoring loop would ever hit a deadline check.
+    # The wall therefore bounds every phase when the softer scan knob is unset.
+    if scan_deadline is None:
+        scan_deadline = score_deadline
 
     # Scan concurrency for Phase A (issue #1030): default 1 preserves serial
     # behavior byte-for-byte; clamped to [1, 6] — see _concurrency.py.
@@ -477,7 +497,7 @@ def _run_ats_scan_body(
             company_names,
             workday_max_pages,
             scan_concurrency,
-            runtime_limit_s=runtime_limit_s,
+            deadline_monotonic=scan_deadline,
         )
 
         # Phase A2 — Playwright-class scan (iCIMS): JS-rendered, no-API boards.
@@ -495,6 +515,7 @@ def _run_ats_scan_body(
             high_score_threshold,
             tracker,
             company_names,
+            deadline_monotonic=scan_deadline,
         )
 
         # Phase B — Homepage discovery for companies missing homepage_url. Runs
@@ -513,10 +534,11 @@ def _run_ats_scan_body(
             high_score_threshold,
             tracker,
             company_names,
+            deadline_monotonic=scan_deadline,
         )
 
         # Phase D — Auto-scoring for newly discovered jobs across both phases.
-        _score_new_ats_jobs(conn, config, all_new_job_keys, summary)
+        _score_new_ats_jobs(conn, config, all_new_job_keys, summary, score_deadline)
 
         # Phase E — Activity feed entry so Dashboard Recent Activity shows 'ats_scan'.
         _log_ats_scan_run(conn, summary)
@@ -766,9 +788,15 @@ def _run_ats_api_scan(
     company_names: list[str] | None = None,
     workday_max_pages: int | None = None,
     scan_concurrency: int = 1,
-    runtime_limit_s: int | None = None,
+    deadline_monotonic: float | None = None,
 ) -> None:
-    """Phase A: scan confirmed-hit companies (and retry-eligible errors) via ATS API."""
+    """Phase A: scan confirmed-hit companies (and retry-eligible errors) via ATS API.
+
+    ``deadline_monotonic`` (issue #1368) is the scan-wide soft deadline
+    computed once in ``run_ats_scan`` and shared across Phases A/A2/C. When
+    set, the phase stops submitting new companies once ``time.monotonic()``
+    passes it; in-flight workers are still drained and merged (issue #1130).
+    """
     # Query companies with confirmed ATS slug (hit) AND error companies eligible
     # for retry (past their retry_after backoff window). Gated by the
     # high-score-history clause so companies that have only ever produced
@@ -807,12 +835,14 @@ def _run_ats_api_scan(
     ).fetchall()
 
     total_companies = len(companies)
-    start_monotonic = time.monotonic()
     truncated = False
 
     if scan_concurrency <= 1:
         # Serial path: preserve exact current behavior including 0.5s sleep
         for company in companies:
+            if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+                truncated = True
+                break
             _scan_one_company_via_ats_api(
                 conn,
                 db_path,
@@ -827,9 +857,6 @@ def _run_ats_api_scan(
                 tracker.tick()
             # Polite delay between companies (0.5s)
             time.sleep(0.5)
-            if runtime_limit_s and time.monotonic() - start_monotonic >= runtime_limit_s:
-                truncated = True
-                break
     else:
         # Concurrent path: thread pool with per-host pacing. Submit lazily so a
         # runtime limit can stop queuing new companies while in-flight workers
@@ -861,7 +888,7 @@ def _run_ats_api_scan(
         future_to_company = {}
         try:
             for company in companies:
-                if runtime_limit_s and time.monotonic() - start_monotonic >= runtime_limit_s:
+                if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
                     truncated = True
                     break
                 future = executor.submit(
@@ -922,8 +949,8 @@ def _run_ats_api_scan(
                     # cancelled) still gets merged below instead of abandoned.
                     if (
                         not truncated
-                        and runtime_limit_s
-                        and time.monotonic() - start_monotonic >= runtime_limit_s
+                        and deadline_monotonic is not None
+                        and time.monotonic() >= deadline_monotonic
                     ):
                         truncated = True
                         # Discard whatever's still queued now; anything
@@ -940,8 +967,8 @@ def _run_ats_api_scan(
                         tracker.tick()
                     if (
                         not truncated
-                        and runtime_limit_s
-                        and time.monotonic() - start_monotonic >= runtime_limit_s
+                        and deadline_monotonic is not None
+                        and time.monotonic() >= deadline_monotonic
                     ):
                         truncated = True
                         executor.shutdown(wait=False, cancel_futures=True)
@@ -958,10 +985,9 @@ def _run_ats_api_scan(
     if truncated:
         summary["truncated"] = True
         logger.info(
-            "ATS Phase A truncated after %d/%d companies (runtime_limit_s=%s)",
+            "ATS Phase A truncated after %d/%d companies (scan deadline reached)",
             summary["companies_scanned"],
             total_companies,
-            runtime_limit_s,
         )
 
 
@@ -1371,11 +1397,18 @@ def _score_new_ats_jobs(
     config: dict,
     all_new_job_keys: list,
     summary: dict,
+    deadline_monotonic: float | None = None,
 ) -> None:
     """Phase D: enrich sparse rows, then score via score_and_persist_job.
 
     Matches careers_crawl: shell listings (short HTML fallback, thin API text)
     often lack jd_full / salary / location until enrich_job runs.
+
+    ``deadline_monotonic`` (issue #1368) is the hard-wall deadline for the
+    whole scan — privately the scheduler's job-level max runtime for ats_scan,
+    hosted the ScanServices ``scan_deadline_s`` wall. It stops the scoring
+    loop before starting a new job once it passes, so a long scoring tail is
+    abandoned gracefully between jobs instead of overrunning the wall.
     """
     # v3.0 (Phase 34 Plan 3 Commit A): uses unified score_and_persist_job;
     # per-classification counters replace haiku_scored / sonnet_evaluated.
@@ -1389,6 +1422,14 @@ def _score_new_ats_jobs(
         scored_count = 0
 
         for dedup_key in all_new_job_keys:
+            if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+                summary["truncated"] = True
+                logger.info(
+                    "ATS Phase D (scoring) truncated after %d/%d jobs (scan deadline reached)",
+                    scored_count,
+                    len(all_new_job_keys),
+                )
+                break
             try:
                 row = conn.execute(
                     "SELECT * FROM jobs WHERE dedup_key = ?", (dedup_key,)
