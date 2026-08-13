@@ -51,7 +51,8 @@ m0001 does not carry or on gates with no representable Postgres form:
   (b) `stale_detector.py`'s audit-trail writes (:295, :400) INSERT into
       `pipeline_events`, a table with no hosted equivalent in m0001.
   (c) `ats_scanner/_probe.py`'s speculative-probe column
-      `ats_probe_attempted_at` (:277-358) is the only remaining
+      `ats_probe_attempted_at` (eligibility reads :280-281; probe-outcome
+      writes :408-:705 — re-verified 2026-08-13) is the only remaining
       `run_ats_scan`-adjacent column gap: m0003 (PR 5a, merged) added the
       other seven companies columns that `ats_scanner/_run.py` (:193-293)
       and `ats_scanner/_run_playwright.py` (:250, :298) reference —
@@ -62,6 +63,21 @@ m0001 does not carry or on gates with no representable Postgres form:
       own docstring flagged this as deferred to "a later PR"). `_probe.py`'s
       `probe_ats_slugs` is a separate scan orchestrator from `run_ats_scan`
       and is not exercised by this PR.
+  (d) `has_subcountry_constraint` — unlike (a)-(c), not a blocked engine
+      surface but a private-schema delta, recorded so the resync surface
+      stays complete. A private-schema `jobs` column (private migration
+      `m207454240_add_has_subcountry_constraint_to_jobs`: `ALTER TABLE
+      jobs ADD COLUMN has_subcountry_constraint INTEGER`), written solely
+      by the private location-enrichment chain (`enrichment_tiers.py:818`
+      -> `data_enricher.py:1008` -> the single DB write at
+      `data_enricher.py:1196`), none of which is on the port surface. The
+      hosted schema carries no such column, no hosted migration adds one,
+      and no engine code reads or writes it (verified 2026-08-13: zero
+      hits repo-wide, tracked and untracked, with positive controls —
+      `location_fit`, `enrichment_tier`, and `jd_full` all hit). If a
+      future port brings the location-enrichment writer chain across,
+      this entry must be resolved (hosted column + migration) before that
+      port merges.
 
 What IS verified end-to-end on Postgres: the `_upsert_one_ats_api_job` write
 path (INSERT/UPDATE against `postings`, including the translated
