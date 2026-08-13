@@ -50,11 +50,22 @@ def test_host_has_no_private_or_scheduler_imports():
 def test_every_engine_module_imports():
     """Phantom-module guard: the blanket job_finder.web.->jobcannon.engine.
     rewrite can produce imports of engine modules that don't exist, which the
-    regex above cannot see. Importing every module catches them loudly."""
+    regex above cannot see. Importing every module catches them loudly.
+
+    Also a completeness guard: this loop's collector (pkg.rglob("*.py")
+    rooted at jobcannon/, not jobcannon/engine/) must walk every .py file
+    under jobcannon/engine — counted here by tallying how many of the
+    modules it actually imports live under jobcannon/engine, and comparing
+    that tally against an independent filesystem walk of jobcannon/engine
+    itself. A module the collector silently skips (e.g. under a future rglob
+    pattern change) would otherwise shrink coverage without failing anything.
+    """
     import importlib
 
     pkg = REPO_ROOT / "jobcannon"
+    engine_dir = pkg / "engine"
     failures = []
+    engine_modules_imported = 0
     for py in sorted(pkg.rglob("*.py")):
         rel = py.relative_to(REPO_ROOT).with_suffix("")
         mod = ".".join(rel.parts).removesuffix(".__init__")
@@ -62,7 +73,32 @@ def test_every_engine_module_imports():
             importlib.import_module(mod)
         except Exception as exc:  # noqa: BLE001 — any import failure is a defect
             failures.append(f"{mod}: {type(exc).__name__}: {exc}")
+            continue
+        if engine_dir in py.parents:
+            engine_modules_imported += 1
     assert not failures, "engine modules failed to import:\n" + "\n".join(failures)
+
+    # Deliberately os.walk + endswith, NOT a second rglob("*.py"): repeating
+    # the collector's glob would let a future pattern change shrink both
+    # sides in lockstep and hide itself; with a glob-free disk side, pattern
+    # drift is one-sided and detectable. That is ALL this split buys — the
+    # two primitives are symmetric on symlink/junction semantics (both
+    # decline symlinks, both descend junctions, both sit on os.scandir), so
+    # an OS-layer blindspot stays shared.
+    import os
+
+    engine_files_on_disk = [
+        os.path.join(root, f)
+        for root, _dirs, files in os.walk(engine_dir)
+        if "__pycache__" not in pathlib.Path(root).parts
+        for f in files
+        if f.endswith(".py")
+    ]
+    assert engine_modules_imported == len(engine_files_on_disk), (
+        f"collector imported {engine_modules_imported} jobcannon.engine modules but "
+        f"{len(engine_files_on_disk)} .py files exist on disk under jobcannon/engine — "
+        "the collector is missing (or double-counting) files"
+    )
 
 
 # ---------------------------------------------------------------------------

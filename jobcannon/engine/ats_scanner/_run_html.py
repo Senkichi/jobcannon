@@ -36,8 +36,16 @@ def _run_html_fallback_scan(
     high_score_threshold: int,
     tracker=None,
     company_names: list[str] | None = None,
+    deadline_monotonic: float | None = None,
 ) -> None:
-    """Phase C: HTML scrape miss/error companies (+ non-scannable hits) with homepage."""
+    """Phase C: HTML scrape miss/error companies (+ non-scannable hits) with homepage.
+
+    ``deadline_monotonic`` (issue #1368) is the scan-wide soft deadline shared
+    with Phases A and A2; when set, the phase stops starting new companies once
+    it passes so the scan exits gracefully with partial results instead of
+    overrunning the whole-scan wall (privately the scheduler's hard wall-clock
+    timeout; hosted the ScanServices ``scan_deadline_s`` bound).
+    """
     # Eligible cohort:
     #   - ats_probe_status in ('miss', 'error') with a homepage (original gate), OR
     #   - ats_probe_status='hit' for a NON_SCANNABLE_PLATFORMS platform (e.g. jobvite).
@@ -86,7 +94,12 @@ def _run_html_fallback_scan(
         tuple(params),
     ).fetchall()
 
+    scanned = 0
+    truncated = False
     for miss_company in miss_companies:
+        if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+            truncated = True
+            break
         _scan_one_company_via_html(
             conn,
             db_path,
@@ -97,10 +110,19 @@ def _run_html_fallback_scan(
             summary,
             all_new_job_keys,
         )
+        scanned += 1
         if tracker is not None:
             tracker.tick()
         # Polite delay — HTML scraping is slower than ATS API calls
         time.sleep(1.0)
+
+    if truncated:
+        summary["truncated"] = True
+        logger.info(
+            "ATS Phase C (HTML fallback) truncated after %d/%d companies (scan deadline reached)",
+            scanned,
+            len(miss_companies),
+        )
 
 
 def _scan_one_company_via_html(

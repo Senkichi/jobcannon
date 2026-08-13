@@ -49,9 +49,12 @@ class ScanServices:
     #   matches job_finder.db._jobs.upsert_job(conn, parsed, *, company_id=None,
     #   score_breakdown=None, ats_platform=None, config=None) -> UpsertResult
     set_jd_full: Callable[..., Any]
-    #   matches job_finder.db._jd_full.set_jd_full(conn, dedup_key, ...)
+    #   matches job_finder.db._jd_full.set_jd_full(conn, dedup_key, text, *,
+    #   source, title=None, config=None) -> bool
     upsert_company: Callable[..., Any]
-    #   matches job_finder.web.ats_company.upsert_company(conn, name, ...)
+    #   matches job_finder.web.ats_company.upsert_company(conn, name, ...) -> int;
+    #   raises CompanyNameRejectedError (name policy) / CompanyUpsertError
+    #   (anything else) instead of returning None
     # -- config / secrets (required) --
     config: dict
     get_secret: Callable[..., "str | None"]
@@ -92,6 +95,14 @@ class ScanServices:
     #   owner_identity_passes, resolve_slug_collision, new_summary,
     #   try_static_extract, try_embedded_json_extract, try_playwright_extract,
     #   upsert_and_log.
+    scan_deadline_s: float | None = None
+    #   Whole-scan runtime budget in seconds. Replaces the private repo's
+    #   job-level max-runtime wall for the ATS scan (the scheduler layer's
+    #   _get_job_max_runtime_s) - that layer does not exist hosted,
+    #   so the host supplies the wall at its one construction site. None =>
+    #   unbounded (dev/CI default; existing construction sites stay valid).
+    #   <= 0 is normalized to "no bound" by the engine, matching the
+    #   documented ">0" semantics of ats.runtime_limit_s.
 
 
 _active: ScanServices | None = None

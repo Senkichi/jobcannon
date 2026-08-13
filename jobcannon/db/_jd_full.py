@@ -56,7 +56,17 @@ def set_jd_full(
     *,
     source: str,
     title: str | None = None,
+    config: dict | None = None,
 ) -> bool:
+    """Store a JD body on the posting, gated by the junk and content contracts.
+
+    `config` (keyword-only) pins the private chokepoint's full signature and
+    is threaded into the content-gate call, so ``enrichment.jd_full``
+    thresholds govern the truncation check for any caller that supplies
+    config. The scan-path caller (``ats_scanner/_run.py``) does not supply it
+    — faithful to the private call site — so that path runs on the engine
+    defaults today.
+    """
     raw = conn.raw if hasattr(conn, "raw") else conn
     if not text:
         return False
@@ -65,7 +75,7 @@ def set_jd_full(
     if _is_jd_junk(text):
         logger.warning("set_jd_full: junk-gated [source=%s] prefix=%r", source, text.strip()[:60])
         return False
-    rejection = jd_content_reject(text, title)
+    rejection = jd_content_reject(text, title, config)
     if rejection is not None:
         logger.warning(
             "set_jd_full: content-gated [source=%s] reason=%s signal=%s prefix=%r",

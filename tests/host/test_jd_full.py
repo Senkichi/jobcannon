@@ -72,6 +72,37 @@ def test_rejects_empty(db_conn, posting):
     assert set_jd_full(_svc_conn(db_conn), posting, None, source="test") is False
 
 
+def test_set_jd_full_signature_accepts_config():
+    """Signature pin: the private chokepoint takes a keyword-only
+    `config: dict | None = None`; the port must match so the gate call can
+    thread it without another signature change."""
+    import inspect
+
+    from jobcannon.db._jd_full import set_jd_full
+
+    params = inspect.signature(set_jd_full).parameters
+    assert "config" in params
+    assert params["config"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params["config"].default is None
+
+
+def test_config_governs_content_gate(db_conn, posting):
+    """The keyword-only `config` is threaded into jd_content_reject, not
+    decorative: a config demanding an absurd min-chars floor rejects a body
+    that stores fine under defaults. (The permissive direction cannot be
+    probed here — the I-13 junk gate's own hardcoded floor runs first.)"""
+    from jobcannon.db._jd_full import set_jd_full
+
+    strict = {"enrichment": {"jd_full": {"min_chars": 10_000}}}
+    assert set_jd_full(_svc_conn(db_conn), posting, GOOD_JD, source="test", config=strict) is False
+    row = db_conn.execute(
+        "SELECT jd_full FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["jd_full"] is None
+    # Same body, default thresholds: stored.
+    assert set_jd_full(_svc_conn(db_conn), posting, GOOD_JD, source="test") is True
+
+
 def test_rejects_title_zero_overlap_content(db_conn, posting):
     """I-17 content-contract rejection (jd_content_reject), distinct from
     the I-13 short-junk gate covered by test_rejects_short_junk above."""
