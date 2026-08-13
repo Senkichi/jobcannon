@@ -292,7 +292,7 @@ class TestJobDedupKey:
 
 
 # ===========================================================================
-# P4.1 — versioned dedup-key derivation (D-8, issue #377)
+# P4.1 — versioned dedup-key derivation (D-8, private issue #377)
 # ===========================================================================
 
 

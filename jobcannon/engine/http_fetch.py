@@ -4,7 +4,7 @@
 on total request time: a server that trickles one byte every ``timeout``-minus-
 epsilon seconds keeps the read alive indefinitely. This was observed wedging a
 live ATS scan's Phase-C HTML fallback on a single slow careers host for 90+
-minutes (issue #39) — the scan thread blocked forever inside ``requests.get``
+minutes (private issue #39) — the scan thread blocked forever inside ``requests.get``
 while the rest of the app kept heartbeating, never writing the completion row.
 
 ``fetch_with_deadline`` runs the GET on a daemon worker thread and abandons it

@@ -42,7 +42,7 @@ def load_host_config() -> HostConfig:
     runtime: dict = {}
     # Do NOT add an ats.scan_concurrency pass-through here. The engine's
     # concurrent scan branch (scan_concurrency > 1) deadlocks when the scan
-    # deadline trips with submitted work still queued — issue #39. Hosted is
+    # deadline trips with submitted work still queued — jobcannon issue #39. Hosted is
     # safe today ONLY because this mapping omits that knob, so the engine
     # resolves its default of 1 and stays on the serial branch
     # (tripwire test: tests/host/test_scan_services_deadline.py). Fix #39

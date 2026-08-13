@@ -42,10 +42,10 @@ def test_build_scan_services_sets_scan_deadline_s():
 
 
 def test_hosted_config_stays_on_the_serial_scan_branch(monkeypatch):
-    """Tripwire for the issue #39 deadlock precondition.
+    """Tripwire for the jobcannon issue #39 deadlock precondition.
 
     The engine's concurrent scan branch (``scan_concurrency > 1``) deadlocks
-    when the scan deadline trips with submitted work still queued (issue
+    when the scan deadline trips with submitted work still queued (jobcannon issue
     #39). Hosted is safe only because the host config loader passes no
     ``scan_concurrency`` knob through, so the engine resolves its default of
     1 and stays on the serial branch. Asserted two ways, because the
@@ -54,7 +54,7 @@ def test_hosted_config_stays_on_the_serial_scan_branch(monkeypatch):
     the env var happens to be unset: the loader's source must not mention
     the knob outside comments, and the mapping it builds must resolve to
     concurrency 1. If this fails because a pass-through was added: fix
-    issue #39 first, then update this test alongside it.
+    jobcannon issue #39 first, then update this test alongside it.
     """
     import inspect
 

@@ -120,7 +120,7 @@ class ScoringResult:
       a precondition was not met (SCORER-05). ``reason`` names which gate fired:
         "awaiting_jd"       — jd_full absent/empty; job needs enrichment.
         "awaiting_location" — locations_structured + location both empty and the
-                              job is still enrichable (D-7 / P3.2 gate, issue #391).
+                              job is still enrichable (D-7 / P3.2 gate, private issue #391).
     - status="error": data is None, provider/model are whatever the dispatcher
       reported if the call reached it, error is a human-readable reason.
     """
@@ -288,7 +288,7 @@ def _coerce_assessment(
     classification is Python-derived at persist time (anti-pattern 3
     defense; see db.derive_classification).
 
-    Fail-closed coercion (issue #227, mechanism 2): every one of the six axes
+    Fail-closed coercion (private issue #227, mechanism 2): every one of the six axes
     is REQUIRED. A missing or uncoercible axis raises
     ``_IncompleteAssessmentError`` rather than being silently dropped. The
     previous behaviour produced a *partial* sub-score vector, which
@@ -345,7 +345,7 @@ def scoring_precheck(job: dict) -> str | None:
                                 empty, the job is still enrichable (enrichment
                                 tier is NOT terminal), and the row does not
                                 already carry ``"location_missing"`` in
-                                ``unresolved_reasons`` (P3.2, issue #391).
+                                ``unresolved_reasons`` (P3.2, private issue #391).
 
     Both the live scorer (``score_job``) and the candidate-counting predicate
     (``exclusion_filter.count_scorable`` and the batch-scoring worker loop) gate
@@ -363,7 +363,7 @@ def scoring_precheck(job: dict) -> str | None:
     if not (job.get("jd_full") or "").strip():
         return "awaiting_jd"
 
-    # P3.2 location gate (issue #391): a row is gated when it carries no
+    # P3.2 location gate (private issue #391): a row is gated when it carries no
     # location signal AND can still be enriched into one. Terminal-tier rows
     # pass through (their location is as good as it will ever get); rows that
     # already recorded "location_missing" pass through (blocking forever would
@@ -417,7 +417,7 @@ def score_job(
     status='skipped' (reason='awaiting_jd') without invoking call_model —
     no API call, no cost, no log spam.
 
-    P3.2 (location gate, issue #391): when locations_structured AND location
+    P3.2 (location gate, private issue #391): when locations_structured AND location
     are both empty AND the job is not at a terminal enrichment tier AND the
     row does not carry "location_missing" in unresolved_reasons, returns
     status='skipped' (reason='awaiting_location'). Batch scoring re-selects
@@ -519,7 +519,7 @@ def score_job(
             degenerate=getattr(result, "degenerate", False),
         )
     except _IncompleteAssessmentError as exc:
-        # Fail-closed (issue #227): a partial/uncoercible vector must not be
+        # Fail-closed (private issue #227): a partial/uncoercible vector must not be
         # persisted as a complete score. Leave the job unscored.
         log.warning(
             "score_job: incomplete assessment for dedup_key=%s from provider=%s: %s",
