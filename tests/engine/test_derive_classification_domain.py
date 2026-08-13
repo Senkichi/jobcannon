@@ -17,7 +17,12 @@ from __future__ import annotations
 
 import pytest
 
-from jobcannon.engine.classification import derive_classification
+from jobcannon.engine.classification import (
+    derive_classification,
+    effective_sub_scores,
+    get_effective_location_fit,
+    is_non_degenerate_low_signal,
+)
 
 _VALID = {
     "title_fit": 4,
@@ -146,3 +151,86 @@ def test_low_signal_short_circuit_does_not_raise_on_empty():
         low_signal_threshold=1500,
     )
     assert result == "low_signal"
+
+
+# ---------------------------------------------------------------------------
+# get_effective_location_fit — single parsing point for the policy override.
+# A value that is not a genuine int (bool is an int subclass; "4" and 4.0 are
+# not ints; malformed JSON parses to nothing) must yield None, never a
+# coerced score. One assertion per case.
+# ---------------------------------------------------------------------------
+
+
+def test_get_effective_location_fit_bool_true_is_none():
+    assert get_effective_location_fit('{"effective_location_fit": true}') is None
+
+
+def test_get_effective_location_fit_string_digit_is_none():
+    assert get_effective_location_fit('{"effective_location_fit": "4"}') is None
+
+
+def test_get_effective_location_fit_float_is_none():
+    assert get_effective_location_fit('{"effective_location_fit": 4.0}') is None
+
+
+def test_get_effective_location_fit_malformed_json_is_none():
+    assert get_effective_location_fit("{malformed") is None
+
+
+def test_get_effective_location_fit_none_verdict_is_none():
+    assert get_effective_location_fit(None) is None
+
+
+def test_get_effective_location_fit_valid_int_returns_it():
+    # Positive control: the None cases above are only meaningful because a
+    # well-formed verdict DOES parse to its int.
+    assert get_effective_location_fit('{"effective_location_fit": 4}') == 4
+
+
+def test_get_effective_location_fit_non_dict_json_is_none():
+    assert get_effective_location_fit("[1, 2, 3]") is None
+
+
+# ---------------------------------------------------------------------------
+# effective_sub_scores — swaps location_fit to the policy's effective value,
+# or returns the original dict unchanged when no valid verdict exists.
+# ---------------------------------------------------------------------------
+
+
+def test_effective_sub_scores_no_verdict_equals_input():
+    scores = dict(_VALID)
+    assert effective_sub_scores(scores, None) == scores
+
+
+def test_effective_sub_scores_malformed_verdict_equals_input():
+    scores = dict(_VALID)
+    assert effective_sub_scores(scores, "{malformed") == scores
+
+
+def test_effective_sub_scores_substitutes_only_location_fit():
+    scores = dict(_VALID)  # location_fit == 4
+    swapped = effective_sub_scores(scores, '{"effective_location_fit": 2}')
+    assert swapped["location_fit"] == 2
+    others = {k: v for k, v in swapped.items() if k != "location_fit"}
+    assert others == {k: v for k, v in scores.items() if k != "location_fit"}
+    # New dict, input never mutated.
+    assert scores["location_fit"] == 4
+
+
+# ---------------------------------------------------------------------------
+# is_non_degenerate_low_signal — shared rule for the two genuine low_signal
+# paths (terminal enrichment + short JD; flat-neutral vector).
+# ---------------------------------------------------------------------------
+
+
+def test_is_non_degenerate_low_signal_terminal_tier_short_jd():
+    assert is_non_degenerate_low_signal(dict(_VALID), "exhausted", 100, 1500) is True
+
+
+def test_is_non_degenerate_low_signal_flat_neutral_vector():
+    scores = dict.fromkeys(_ALL_KEYS, 3)
+    assert is_non_degenerate_low_signal(scores, None, 5000, 1500) is True
+
+
+def test_is_non_degenerate_low_signal_false_with_signal_and_text():
+    assert is_non_degenerate_low_signal(dict(_VALID), "free", 5000, 1500) is False

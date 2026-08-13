@@ -8,6 +8,8 @@ directly as `jobcannon.engine.classification`.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from jobcannon.engine.constants import SUB_SCORE_KEYS as _SUB_SCORE_KEYS
@@ -38,6 +40,99 @@ DEFAULT_APPLY_MEAN_FLOOR: float = 3.5
 DEFAULT_APPLY_MIN_STRONG_AXES: int = 3
 # An axis is "strong" when it carries positive (not merely non-negative) signal.
 _STRONG_AXIS_FLOOR: int = 4
+
+# Substitution marker for an excluded axis (see derive_classification's
+# excluded_axes). Exclusion works by substitution, never key removal — the
+# six-key domain guard forbids five-key dicts — so the marker must itself be
+# a valid ordinal (int in 1..5) to pass the value guard. It is the neutral
+# midpoint so an excluded slot can never trip the any-axis-1 reject, and it
+# never contributes to the mean / strong-axis / flat-neutral computations:
+# those consult the excluded-axis set instead of trusting the vector.
+_EXCLUDED_AXIS_MARKER: int = 3
+
+
+def is_non_degenerate_low_signal(
+    sub_scores: dict,
+    enrichment_tier: str | None,
+    jd_full_length: int,
+    low_signal_threshold: int,
+) -> bool:
+    """Return True if the row is low_signal for a non-degenerate reason.
+
+    Two non-degenerate paths to ``low_signal``:
+      1. enrichment is exhausted (a terminal tier) AND the full JD is shorter
+         than the low_signal threshold — the model has no reliable text to score.
+      2. every sub-score is exactly the neutral midpoint (3) — the model did not
+         discriminate on any axis.
+
+    This helper is intentionally separate from ``derive_classification`` so the
+    backfill/reconciliation paths can reuse the same rule without duplicating it.
+    """
+    if enrichment_tier in _TERMINAL_ENRICHMENT_TIERS and jd_full_length < low_signal_threshold:
+        return True
+    return all(v == 3 for v in sub_scores.values())
+
+
+def get_effective_location_fit(verdict_json: str | None) -> int | None:
+    """Extract ``effective_location_fit`` from a serialized LocationPolicy
+    verdict, or None when absent/malformed.
+
+    This is the single parsing point for the policy override. A missing,
+    empty, malformed, or non-integer value (including bool and float) is
+    treated as ``None``: callers that display the value to the auditor must
+    not silently substitute the raw LLM ``location_fit`` for a policy value
+    that does not exist.
+    """
+    if not verdict_json:
+        return None
+    try:
+        data = json.loads(verdict_json)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    value = data.get("effective_location_fit")
+    # bool is an int subclass; exclude it the same way derive_classification does.
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    return value
+
+
+def effective_sub_scores(
+    sub_scores: dict,
+    location_policy_verdict_json: str | None,
+) -> dict:
+    """Return ``sub_scores`` with ``location_fit`` swapped to the policy's effective value.
+
+    Single enforcement point for the raw-vs-effective ``location_fit`` split
+    introduced by issue #1213: the assessment writer stores the LLM's raw
+    ``location_fit`` in ``sub_scores_json`` (so the UI can show what the model
+    actually said) but derives classification from the location policy's
+    ``effective_location_fit``. Any consumer that re-derives classification
+    straight from ``sub_scores_json`` — without consulting the stored
+    location-policy verdict — will systematically disagree with the stored
+    classification for every policy-adjusted row (issues #1484, #1494).
+
+    This helper is that consultation. Call it on the parsed ``sub_scores`` dict
+    plus the raw serialized verdict before passing the result to
+    ``derive_classification``. When no verdict is stored (None, empty,
+    malformed, or missing/invalid ``effective_location_fit``) the original dict
+    is returned unchanged — the no-policy case classifies identically either way.
+
+    Args:
+        sub_scores: parsed ``sub_scores_json`` dict (the raw LLM sub-scores).
+        location_policy_verdict_json: serialized location-policy verdict JSON
+            string, or None when the row has no stored verdict.
+
+    Returns:
+        A new dict with ``location_fit`` replaced by the verdict's
+        ``effective_location_fit`` when a valid verdict is present, otherwise
+        the original ``sub_scores`` dict unchanged.
+    """
+    effective = get_effective_location_fit(location_policy_verdict_json)
+    if effective is None:
+        return sub_scores
+    return {**sub_scores, "location_fit": effective}
 
 
 @dataclass(frozen=True)
@@ -80,6 +175,7 @@ def derive_classification(
     apply_min_strong_axes: int = DEFAULT_APPLY_MIN_STRONG_AXES,
     *,
     degenerate: bool = False,
+    excluded_axes: Collection[str] = (),
 ) -> str:
     """Python-derived 5-way classification — NOT LLM-emitted (CONTEXT D-06, anti-pattern 3).
 
@@ -154,6 +250,25 @@ def derive_classification(
         degenerate: issue #227 flag from JobAssessment.degenerate. True only
             when the cascade quality floor accepted an all-providers-degenerate
             result. Routes to low_signal (no-signal vector, never apply).
+        excluded_axes: axis names (a strict subset of the six canonical keys)
+            that a policy layer has ruled non-scorable for this row — e.g.
+            ``location_fit`` for a profile carrying no location constraint,
+            where the model scored the axis against nothing and a 1 there is
+            noise, not evidence. Exclusion is substitution, never key removal:
+            the domain guard requires all six keys, so each excluded axis's
+            value is replaced (in a NEW dict; the input is never mutated) by
+            ``_EXCLUDED_AXIS_MARKER`` — a valid neutral ordinal, so the value
+            guard holds and the any-axis-1 reject can never fire from an
+            excluded slot. The mean, strong-axis count, and apply/consider
+            all-of checks then iterate over NON-excluded axes only, so the
+            marker never contributes arithmetically; and the flat-neutral tell
+            requires zero exclusions, because a substituted neutral could
+            manufacture an all-3s vector out of a real verdict. The three
+            thresholds (apply_mean_floor, apply_min_strong_axes,
+            _STRONG_AXIS_FLOOR) are deliberately NOT recalibrated for the
+            smaller divisor. Raw values of excluded axes are still validated
+            (garbage is rejected even in an excluded slot). Excluding every
+            axis raises ValueError — nothing would remain to classify on.
 
     Returns:
         One of "reject", "low_signal", "apply", "consider", "skip".
@@ -188,30 +303,56 @@ def derive_classification(
     if _bad:
         raise ValueError(f"sub_scores values must be int in 1..5 (got {_bad})")
 
+    # Axis exclusion: substitution-with-a-marker plus a parallel excluded-axis
+    # set — NEVER key removal (the domain guard above forbids five-key dicts,
+    # deliberately: a partial vector must not classify). Runs AFTER the guards
+    # so raw values are fully validated even in excluded slots, and builds a
+    # new dict so the caller's input is never mutated. Substituting the
+    # neutral marker (rather than merely ignoring the slot) is what makes the
+    # any-axis-1 reject below safe by construction: no caller can pass a raw
+    # 1 in an excluded axis and still trigger a reject from it.
+    _excluded = frozenset(excluded_axes)
+    if _excluded:
+        _unknown = _excluded - _expected
+        if _unknown:
+            raise ValueError(f"excluded_axes has unknown axes: {sorted(_unknown)}")
+        if _excluded == _expected:
+            raise ValueError("excluded_axes cannot name all six axes — nothing left to classify")
+        sub_scores = {**sub_scores, **dict.fromkeys(_excluded, _EXCLUDED_AXIS_MARKER)}
+
     # Branch (C): flat-neutral vector -> low_signal (issue #210). All six axes
     # at the neutral midpoint means the model did not discriminate; surface it
     # honestly rather than promoting it. Runs before the any-axis-1 reject and
     # the apply branch; independent of JD length / enrichment_tier. The domain
-    # guard above guarantees all six keys are present here.
+    # guard above guarantees all six keys are present here. The tell is a
+    # SIX-axis pattern, so it requires zero exclusions: a substituted neutral
+    # marker could manufacture an all-3s vector out of a vector that carried a
+    # real (excluded) signal, silently converting a real verdict into
+    # low_signal.
     _values = list(sub_scores.values())
-    if all(v == 3 for v in _values):
+    if not _excluded and all(v == 3 for v in _values):
         return "low_signal"
 
+    # Reads the substituted vector: an excluded slot holds the neutral marker,
+    # never a raw 1, so this can only fire from a non-excluded axis.
     if any(v == 1 for v in _values):
         return "reject"
 
     # Branch (B): "apply" requires affirmative fit evidence (issue #210), not
     # merely the absence of weakness. No weak axis (all >= 3), enough strong
-    # axes (>= 4), AND a mean at or above the floor.
-    _strong_axes = sum(1 for v in _values if v >= _STRONG_AXIS_FLOOR)
-    _mean = sum(_values) / len(_values)
+    # axes (>= 4), AND a mean at or above the floor. Computed over NON-excluded
+    # axes only: a substituted exclusion marker never contributes to the
+    # strong-axis count or the mean.
+    _included = [v for k, v in sub_scores.items() if k not in _excluded]
+    _strong_axes = sum(1 for v in _included if v >= _STRONG_AXIS_FLOOR)
+    _mean = sum(_included) / len(_included)
     if (
-        all(v >= 3 for v in _values)
+        all(v >= 3 for v in _included)
         and _strong_axes >= apply_min_strong_axes
         and _mean >= apply_mean_floor
     ):
         return "apply"
 
-    if all(v >= 2 for v in _values):
+    if all(v >= 2 for v in _included):
         return "consider"
     return "skip"
