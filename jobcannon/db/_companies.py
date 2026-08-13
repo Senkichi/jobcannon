@@ -167,10 +167,10 @@ def upsert_company(
     normalized = (name or "").strip()
     if not normalized:
         raise CompanyNameRejectedError(name or "", "empty_after_cleanup")
-    if len(normalized) > _MAX_NAME_LEN:
-        raise CompanyNameRejectedError(name, "overlong")
     if not any(c.isalnum() for c in normalized):
         raise CompanyNameRejectedError(name, "no_alphanumeric_characters")
+    if len(normalized) > _MAX_NAME_LEN:
+        raise CompanyNameRejectedError(name, "overlong")
     try:
         existing = raw.execute(
             "SELECT id, ats_probe_status FROM companies WHERE lower(name) = lower(%s)",

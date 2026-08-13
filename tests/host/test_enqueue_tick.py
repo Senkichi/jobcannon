@@ -127,3 +127,43 @@ def test_preseed_corpus_read_rows_roundtrips_csv_header(tmp_path):
             "homepage_url": "https://acme.example",
         }
     ]
+
+
+def test_preseed_upsert_skips_row_level_failures(monkeypatch):
+    """_upsert_companies' skip contract: a CompanyNameRejectedError OR a
+    CompanyUpsertError on one row is logged-and-skipped, never aborts the
+    seed — the remaining rows still land and the count reflects only them."""
+    import contextlib
+    from types import SimpleNamespace
+
+    from jobcannon.db import _companies
+    from jobcannon.engine import services
+    from scripts import preseed_corpus
+
+    seen: list[str] = []
+
+    def fake_upsert(conn, name, **kwargs):
+        seen.append(name)
+        if name == "Malformed":
+            raise _companies.CompanyNameRejectedError(name, "no_alphanumeric_characters")
+        if name == "DbSad":
+            raise _companies.CompanyUpsertError(name, RuntimeError("boom"))
+        return len(seen)
+
+    @contextlib.contextmanager
+    def fake_factory():
+        yield SimpleNamespace(commit=lambda: None)
+
+    monkeypatch.setattr(_companies, "upsert_company", fake_upsert)
+    monkeypatch.setattr(
+        services, "get_services", lambda: SimpleNamespace(connection_factory=fake_factory)
+    )
+
+    rows = [
+        {"name": "Acme", "ats_platform": "greenhouse", "ats_slug": "acme"},
+        {"name": "Malformed", "ats_platform": "lever", "ats_slug": "bad1"},
+        {"name": "DbSad", "ats_platform": "lever", "ats_slug": "bad2"},
+        {"name": "Globex", "ats_platform": "lever", "ats_slug": "globex"},
+    ]
+    assert preseed_corpus._upsert_companies(rows) == 2
+    assert seen == ["Acme", "Malformed", "DbSad", "Globex"]

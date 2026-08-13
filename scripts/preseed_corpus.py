@@ -81,8 +81,10 @@ def _verify(rows: list[dict[str, str]]) -> int:
 def _upsert_companies(rows: list[dict[str, str]]) -> int:
     """Upsert each row's company via the pooled connection factory (requires
     the engine seams to already be wired). Returns the number of rows landed
-    (upsert_company raises CompanyNameRejectedError on malformed names —
-    logged and skipped here — so a bad manifest row can't abort the seed)."""
+    (upsert_company raises CompanyNameRejectedError on malformed names and
+    CompanyUpsertError on row-level DB failures — both logged and skipped
+    here — so one bad manifest row can't abort the seed, and _enqueue_scans
+    always runs for the rows that did land)."""
     from jobcannon.db import _companies
     from jobcannon.engine import services
 
@@ -99,7 +101,10 @@ def _upsert_companies(rows: list[dict[str, str]]) -> int:
                     ats_probe_status="hit",
                     homepage_url=row.get("homepage_url") or None,
                 )
-            except _companies.CompanyNameRejectedError as exc:
+            except (
+                _companies.CompanyNameRejectedError,
+                _companies.CompanyUpsertError,
+            ) as exc:
                 log.warning("SKIP %-30s %s", row["name"], exc)
                 continue
             upserted += 1

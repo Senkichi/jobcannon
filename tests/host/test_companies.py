@@ -121,3 +121,24 @@ def test_upsert_company_populates_name_raw(db_conn):
     cid = upsert_company(db_conn, "Acme Robotics")
     row = db_conn.execute("SELECT name, name_raw FROM companies WHERE id = %s", (cid,)).fetchone()
     assert row["name_raw"] == "Acme Robotics" == row["name"]
+
+
+def test_reject_reason_attribution(db_conn):
+    """Pins each guard's reason literal AND the guard order: 250 dashes is
+    both overlong and non-alphanumeric, so the reason must attribute to the
+    alphanumeric check, which runs first (same relative order as the private
+    boundary's classifier)."""
+    from jobcannon.db._companies import CompanyNameRejectedError, upsert_company
+
+    conn = _svc_conn(db_conn)
+    with pytest.raises(CompanyNameRejectedError) as exc_info:
+        upsert_company(conn, "   ")
+    assert exc_info.value.reason == "empty_after_cleanup"
+
+    with pytest.raises(CompanyNameRejectedError) as exc_info:
+        upsert_company(conn, "x" * 201)
+    assert exc_info.value.reason == "overlong"
+
+    with pytest.raises(CompanyNameRejectedError) as exc_info:
+        upsert_company(conn, "-" * 250)
+    assert exc_info.value.reason == "no_alphanumeric_characters"
