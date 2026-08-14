@@ -8,16 +8,19 @@
   <h1 class="text-2xl font-semibold mb-3">The corpus is warming up</h1>
   <p class="text-neutral-400">No postings scanned yet. Once the first scan cycle completes, live counts appear here.</p>
 {% else %}
-  {# Structurally unreachable in 1B: profiles have no authed-user writer yet
-     (only the guest_demo seed calls upsert_profile), so an authed Clerk
-     user's profile is always None until 1C ships onboarding. Rendered
-     defensively rather than left undefined — reuses the same live-corpus
-     block demo.html shows, the most factually-accurate copy available. #}
-  <h1 class="text-2xl font-semibold mb-3">The live corpus</h1>
-  <p class="text-neutral-400">
-    <strong class="text-neutral-100">{{ stats.postings }}</strong> live postings across
-    <strong class="text-neutral-100">{{ stats.companies }}</strong> companies
-    {%- if stats.freshest_last_seen %} · freshest signal {{ stats.freshest_last_seen.strftime("%Y-%m-%d %H:%M") }} UTC{% endif %}
+  {# Live now that an authed Clerk user's profile actually gets written
+     (jobcannon/web/onboarding.py's picker, or the anon-to-authed handoff)
+     instead of always being None: the real, server-filtered feed list,
+     replacing the placeholder "live corpus" copy this branch rendered
+     before any authed-user profile writer existed. #}
+  <h1 class="text-2xl font-semibold mb-3">Your feed</h1>
+  <p class="text-sm text-neutral-500 mb-4" data-ordering-label>
+    {% if ordering.personalized %}
+      Ranked by {{ ordering.ranker_version }}.
+    {% else %}
+      Sorted by recency &mdash; personalized ranking is not live yet ({{ ordering.ranker_version }}).
+    {% endif %}
   </p>
+  {% include "_feed_list.html" %}
 {% endif %}
 {% endblock %}
