@@ -22,6 +22,7 @@ from typing import Any
 from jobcannon.web.apply_url import pick_apply_url
 from jobcannon.web.why import why_chips
 
+
 # An empty why_chips() return renders an empty chip list on purpose — no
 # placeholder chip is injected here. The "signals still computing" marker in
 # _posting_row.html covers the one state worth flagging (structural_axes
