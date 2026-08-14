@@ -5,9 +5,15 @@ posting list: title/company/workplace-type/location filters and a sort
 token, all read from the query string and validated against a fixed
 allowlist before any of it reaches SQL — an unrecognized token degrades to
 the unfiltered/default value rather than a 500. Each row carries its own
-literal "why" chips (jobcannon.web.why.why_chips) or, when that call has
-nothing to restate for a given row, a single pending-signal marker, so a
-row never renders a silently-empty chip list. `feed_state` has no writer
+literal "why" chips (jobcannon.web.why.why_chips); a row whose
+`structural_axes` is still NULL (the axes batch caps at 500 rows per scan
+tick, so a large pre-seed leaves a transient NULL slice) also renders a
+"signals still computing" marker alongside whatever chips it does have,
+rather than silently omitting the fact that axis-derived signals aren't in
+yet. That marker lives in `_posting_row.html` (shared by this route and
+jobcannon.web.onboarding's /preview through `_feed_list.html`), never
+recomputed per route, so it can't drift between the two consumers.
+`feed_state` has no writer
 anywhere in this codebase yet, so every row's rank comes back NULL today —
 the ordering label says so honestly (`UNRANKED_VERSION`, defined once here
 so a later event-emitting consumer can import the same literal instead of
@@ -55,17 +61,6 @@ _EMPTY_STATS = {"postings": 0, "companies": 0, "freshest_last_seen": None}
 # event-emitting consumer rather than retyped, so the displayed label and
 # whatever gets logged can never drift apart.
 UNRANKED_VERSION = "unranked-v0"
-
-# A row whose why_chips() call has nothing to restate (e.g. the
-# structural-axes batch — capped at 500 rows per scan tick,
-# jobcannon/host/structural_axes/__init__.py — hasn't reached it yet, no
-# salary is listed, and the visitor's profile has no title/skill overlap)
-# still needs the UI to say something rather than silently render an empty
-# chip list. This is a placeholder applied at the call site, not a
-# why_chips() return value: why.py's own contract requires it be able to
-# return [] (tests/host/test_why.py::test_no_selections_yields_no_overlap_chip),
-# so the fallback belongs here, not inside why_chips itself.
-_WHY_PENDING_MARKER = "why: not yet available for this posting"
 
 # Workplace-type filter vocabulary: the form speaks lowercase,
 # postings.workplace_type (jobcannon/db/_jobs.py, written from
@@ -181,9 +176,7 @@ def feed():
     ordering = {"personalized": False, "ranker_version": UNRANKED_VERSION}
     if profile is not None and stats.get("postings", 0) > 0:
         rows = _read_feed_postings(user_id=user_id, filters=filters)
-        entries = [
-            {"row": row, "chips": why_chips(row, profile) or [_WHY_PENDING_MARKER]} for row in rows
-        ]
+        entries = [{"row": row, "chips": why_chips(row, profile)} for row in rows]
         ordering = _ordering_label(rows)
 
     return render_template(
