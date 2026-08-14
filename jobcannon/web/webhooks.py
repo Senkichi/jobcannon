@@ -61,19 +61,14 @@ def clerk_webhook():
     if not user_id:
         return ("", 400)
 
-    from jobcannon.db.pool import commit_unless_nested, connection_factory
+    from jobcannon.db import _users
+    from jobcannon.db.pool import connection_factory
 
     if event_type in ("user.created", "user.updated"):
         with connection_factory() as conn:
-            conn.raw.execute(
-                "INSERT INTO users (id, email) VALUES (%s, %s) "
-                "ON CONFLICT (id) DO UPDATE SET email = COALESCE(EXCLUDED.email, users.email)",
-                (user_id, _primary_email(data)),
-            )
-            commit_unless_nested(conn.raw)
+            _users.ensure_user(conn, user_id, email=_primary_email(data))
     elif event_type == "user.deleted":
         with connection_factory() as conn:
-            conn.raw.execute("DELETE FROM users WHERE id = %s", (user_id,))
-            commit_unless_nested(conn.raw)
+            _users.delete_user(conn, user_id)
     # Unknown event types: acknowledged 200 so Clerk doesn't retry forever.
     return ("", 200)
