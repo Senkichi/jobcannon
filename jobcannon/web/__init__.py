@@ -14,7 +14,7 @@ from jobcannon.web.anon_session import capture_attribution, ensure_session_ids
 
 logger = logging.getLogger(__name__)
 
-PUBLIC_PATHS = frozenset({"/healthz", "/demo"})
+PUBLIC_PATHS = frozenset({"/healthz", "/demo", "/start"})
 
 
 def _resolve_consent(identity) -> bool:
@@ -142,4 +142,8 @@ def create_app(config: dict | None = None) -> Flask:
     from jobcannon.web.pages import pages_bp
 
     app.register_blueprint(pages_bp)
+
+    from jobcannon.web.onboarding import onboarding_bp
+
+    app.register_blueprint(onboarding_bp)
     return app
