@@ -13,11 +13,20 @@ callers (jobcannon/web/pages.py, jobcannon/web/actions.py) must degrade the
 apply control rather than render a dead link.
 
 `apply_destination_for_row` returns a hostname-only token, never a full URL:
-event payloads may never carry a path or query string (no PII, no free
-text), and tests/host/test_feed_events.py asserts the stored value contains
-no `://` and no `?`. A URL with no parseable host (relative, malformed, or
-otherwise unusable) is treated the same as "no usable URL" — the caller gets
-None either way and must degrade the same way.
+event payloads may never carry a path, query string, port, or userinfo (no
+PII, no free text). It reads `urlsplit(url).hostname`, not `.netloc` —
+`.netloc` still contains a port (`host:443`) and any userinfo
+(`user:pw@host`) scraped straight from an uncurated `source_urls` /
+`sightings` value, either of which would land verbatim in the event
+payload. `jobcannon/web/anon_session.py::_referrer_host` already establishes
+this exact pattern (hostname, wrapped `try/except ValueError`, bounded to
+the payload string cap) for the same reason; this function mirrors it. A
+malformed URL (`urlsplit` itself can raise `ValueError`, e.g. an unparseable
+bracketed-IPv6 host) or a URL with no parseable host is treated the same as
+"no usable URL" — the caller gets None either way and must degrade the same
+way, never a 500. The returned hostname is bounded to
+`jobcannon.db.events_schema._MAX_STR` so it can never itself be the reason
+`validate_payload` rejects the event.
 
 Row access is STRING-KEY only via `_get`, matching every other row-reading
 module in this package (jobcannon/web/why.py, jobcannon/db/_feed.py).
@@ -27,6 +36,8 @@ from __future__ import annotations
 
 from typing import Any
 from urllib.parse import urlsplit
+
+from jobcannon.db.events_schema import _MAX_STR
 
 
 def _get(mapping: Any, key: str, default: Any = None) -> Any:
@@ -53,9 +64,13 @@ def pick_apply_url(row: Any) -> str | None:
 
 def apply_destination_for_row(row: Any) -> str | None:
     """Hostname-only token for `pick_apply_url(row)`, or None when there is
-    no usable URL or the URL has no parseable host."""
+    no usable URL, the URL has no parseable host, or `urlsplit` itself
+    raises `ValueError` on a malformed URL."""
     url = pick_apply_url(row)
     if url is None:
         return None
-    netloc = urlsplit(url).netloc
-    return netloc or None
+    try:
+        hostname = urlsplit(url).hostname
+    except ValueError:
+        return None
+    return hostname[:_MAX_STR] if hostname else None
