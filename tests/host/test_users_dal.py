@@ -69,6 +69,7 @@ def test_anon_prefix_does_not_collide_with_guest_sentinel(db_conn):
 
     assert not GUEST_USER_ID.startswith(ANON_ID_PREFIX)
     assert not is_anon_id(GUEST_USER_ID)
+    assert not is_anon_id("user_abc")  # Clerk-issued ids never carry ANON_ID_PREFIX
 
     anon_id = mint_anon_user(db_conn)
     assert is_anon_id(anon_id)
