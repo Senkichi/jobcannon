@@ -1,7 +1,20 @@
 {# One posting row. Included once per entry ({"row": ..., "chips": ...}) by
    _feed_list.html, which is itself shared by /preview, /, and /demo — this
    partial carries no route-specific logic and no save/dismiss/apply
-   controls (those land with the authenticated feed). #}
+   controls (those land with the authenticated feed).
+
+   The "signals still computing" marker below is keyed on
+   entry.row.structural_axes being NULL — a real, transient state (the
+   structural-axes batch caps at 500 rows per scan tick) rather than on
+   entry.chips being empty: why_chips() returns salary/title-overlap chips
+   independently of structural_axes, so a row can have real chips AND still
+   be missing its axis-derived signals. Rendering the marker only when chips
+   is empty would silently hide that gap whenever another chip happened to
+   be present; keying it on the actual NULL column instead means the axis
+   absence is never hidden and never backfilled with a fabricated value.
+   Single-sourced here (not in jobcannon/web/pages.py or
+   jobcannon/web/onboarding.py) so both consuming routes render it
+   identically. #}
 <article class="border border-neutral-800 rounded-lg p-4 space-y-2" data-posting-row>
   <div class="flex items-baseline justify-between gap-4">
     <h2 class="text-lg font-medium text-neutral-100">{{ entry.row.title }}</h2>
@@ -20,6 +33,9 @@
       {%- if entry.row.salary_max %}&ndash;{{ entry.row.salary_max }}{% endif %}
       {%- if entry.row.salary_period and entry.row.salary_period != "unknown" %} / {{ entry.row.salary_period }}{% endif %}
     </p>
+  {% endif %}
+  {% if entry.row.structural_axes is none %}
+    <p class="text-xs text-neutral-500 italic" data-signals-pending>why: not yet available for this posting</p>
   {% endif %}
   {% if entry.chips %}
     <ul class="flex flex-wrap gap-2 text-xs text-neutral-300" data-why-chips>
