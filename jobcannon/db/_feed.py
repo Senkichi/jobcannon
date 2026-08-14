@@ -66,6 +66,7 @@ def _escape_like(value: str) -> str:
 def _build_filters(
     *,
     titles: list[str] | None,
+    title_contains: str | None,
     workplace_type: str | None,
     location_contains: str | None,
     company: str | None,
@@ -73,12 +74,24 @@ def _build_filters(
     """Parameterized WHERE fragments + bound params, shared by
     `list_feed_postings` and `count_feed_postings` so the two queries can
     never drift out of sync. Every filter value is a bound parameter; only
-    ORDER BY is ever built from the `_SORTS` allowlist."""
+    ORDER BY is ever built from the `_SORTS` allowlist.
+
+    `titles` (exact-match, `= ANY(%s)`) and `title_contains` (substring,
+    `LIKE`) are two distinct callers, not two spellings of the same filter:
+    `titles` serves the picker's structured selections
+    (jobcannon/web/onboarding.py), where the value is one of a fixed set of
+    corpus-derived strings and exact match is correct; `title_contains`
+    serves the authed feed's free-text title box (jobcannon/web/pages.py),
+    where a user is typing a fragment. Both may be passed at once without
+    conflict — they AND together like every other filter here."""
     clauses: list[str] = []
     params: list[Any] = []
     if titles:
         clauses.append("p.title = ANY(%s)")
         params.append(list(titles))
+    if title_contains is not None:
+        clauses.append("p.title LIKE %s ESCAPE '\\'")
+        params.append(f"%{_escape_like(title_contains)}%")
     if workplace_type is not None:
         clauses.append("p.workplace_type = %s")
         params.append(workplace_type)
@@ -96,6 +109,7 @@ def list_feed_postings(
     *,
     user_id: str | None = None,
     titles: list[str] | None = None,
+    title_contains: str | None = None,
     workplace_type: str | None = None,
     location_contains: str | None = None,
     company: str | None = None,
@@ -115,6 +129,7 @@ def list_feed_postings(
 
     where_clauses, params = _build_filters(
         titles=titles,
+        title_contains=title_contains,
         workplace_type=workplace_type,
         location_contains=location_contains,
         company=company,
@@ -152,6 +167,7 @@ def count_feed_postings(
     conn: Any,
     *,
     titles: list[str] | None = None,
+    title_contains: str | None = None,
     workplace_type: str | None = None,
     location_contains: str | None = None,
     company: str | None = None,
@@ -163,6 +179,7 @@ def count_feed_postings(
     count is identical whether or not that join is present."""
     where_clauses, params = _build_filters(
         titles=titles,
+        title_contains=title_contains,
         workplace_type=workplace_type,
         location_contains=location_contains,
         company=company,

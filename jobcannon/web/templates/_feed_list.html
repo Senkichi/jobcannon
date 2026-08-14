@@ -1,9 +1,37 @@
 {# Shared posting-list partial: iterates `entries` (a list of
    {"row": <postings row>, "chips": <why_chips(...) list[str]>}) and includes
-   _posting_row.html once per entry. Consumed by /preview (this PR) and,
-   later, / and /demo once those routes render a real feed instead of the
-   corpus-count shell. No hx-* attributes here (a later PR governs the
-   HTMX fragment partials); this is a plain server-rendered include. #}
+   _posting_row.html once per entry. Consumed by /preview and / (both
+   server-render a real feed here; /demo still shows corpus counts only,
+   never this partial). No hx-* attributes here (a later PR governs the
+   HTMX fragment partials); this is a plain server-rendered include.
+
+   Optional `filters` context (a dict of display-safe strings — see
+   jobcannon/web/pages.py's `_parse_feed_filters` — plus the `sort_tokens` /
+   `workplace_types` option lists it needs) renders a GET filter form above
+   the list when the caller passes it. jobcannon/web/pages.py's authed feed
+   does; jobcannon/web/onboarding.py's /preview does not yet, so it keeps
+   its own single location field unchanged and this block is skipped there. #}
+{% if filters is defined %}
+  <form method="get" class="mb-6 grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm" data-feed-filters>
+    <input type="text" name="title" value="{{ filters.title }}" placeholder="Title contains"
+           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100">
+    <input type="text" name="company" value="{{ filters.company }}" placeholder="Company"
+           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100">
+    <input type="text" name="location" value="{{ filters.location }}" placeholder="Location contains"
+           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100">
+    <select name="workplace_type" class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100">
+      {% for wt in workplace_types %}
+        <option value="{{ wt }}" {% if wt == filters.workplace_type %}selected{% endif %}>{{ wt }}</option>
+      {% endfor %}
+    </select>
+    <select name="sort" class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100">
+      {% for token in sort_tokens %}
+        <option value="{{ token }}" {% if token == filters.sort %}selected{% endif %}>{{ token }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="text-sm underline text-neutral-300">Apply filters</button>
+  </form>
+{% endif %}
 {% if entries %}
   <div class="space-y-4" data-feed-list>
     {% for entry in entries %}
