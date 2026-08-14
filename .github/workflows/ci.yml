@@ -16,6 +16,12 @@ permissions:
 
 jobs:
   test:
+    # Same-repo gate: pull requests from forks must never reach the
+    # self-hosted runner. The event-name disjunct is load-bearing — this
+    # workflow also triggers on push to main, where the pull_request context
+    # is null, so the head-repo comparison alone would evaluate false and
+    # silently disable CI for every push to main.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # SELF-HOSTED (2026-07-16): GitHub-hosted runners are billing-blocked
     # account-wide, so CI runs on the operator's Windows box (runner
     # jcpub-9800x3d-1, same fleet pattern as the private repo). Restore a
