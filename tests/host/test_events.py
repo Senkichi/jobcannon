@@ -159,6 +159,42 @@ def test_consent_recorded_writes_postgres_regardless_of_grant(
     assert mock_capture.call_count == (1 if granted else 0)
 
 
+@pytest.mark.parametrize("consent_granted", [True, False])
+def test_user_signed_up_writes_postgres_regardless_of_consent(
+    consent_granted, fake_connection_factory, mock_insert_event, mock_capture
+):
+    """user_signed_up is signup attribution, which a brand-new account —
+    non-consenting by column default — would otherwise never produce (the
+    _FIRST_PARTY_ALWAYS exemption generalizes consent_recorded's shape to
+    this second type). Unlike consent_recorded, PostHog fan-out here is
+    gated on consent_granted directly rather than a payload key, since a
+    signup event carries no "was this decision a grant" field of its own."""
+    from jobcannon.host.events import log_event
+
+    log_event(
+        "user_signed_up",
+        user_id="user_1",
+        consent_granted=consent_granted,
+        payload={"channel": "direct", "wave": "0", "signup_method": "clerk"},
+    )
+
+    assert mock_insert_event.call_count == 1
+    assert mock_capture.call_count == (1 if consent_granted else 0)
+
+
+def test_other_event_types_still_drop_entirely_without_consent(
+    fake_connection_factory, mock_insert_event, mock_capture
+):
+    """The _FIRST_PARTY_ALWAYS exemption is scoped to exactly two types —
+    every other event type must keep today's drop-entirely behavior."""
+    from jobcannon.host.events import log_event
+
+    log_event("posting_watchlist_added", user_id="user_1", consent_granted=False)
+
+    assert mock_insert_event.call_count == 0
+    assert mock_capture.call_count == 0
+
+
 # ---- log_event: PostHog failure isolation ------------------------------
 
 

@@ -1,16 +1,24 @@
 """log_event — the single server-side product-analytics chokepoint
-(1B Wave 2 PR 8).
+(1B Wave 2 PR 8; Phase 1C generalizes the first-party-write shape below to a
+second event type).
 
 Writes to Postgres (source of truth, durable before this call returns) and
 fans out to PostHog (best-effort, only attempted after the Postgres write
 has committed). Gated by:
   1. events_schema.validate_payload — a PII-proof allowlist (ValueError on
      any unlisted key / oversized string / out-of-enum value).
-  2. a per-request consent check — every event EXCEPT consent_recorded is
-     dropped (no Postgres write, no PostHog fan-out) unless consent_granted
-     is True. consent_recorded itself always writes to Postgres (it IS the
-     audit trail of a consent decision, including a decline), but only fans
-     out to PostHog when the decision was a grant.
+  2. a per-request consent check — every event type NOT in
+     _FIRST_PARTY_ALWAYS is dropped entirely (no Postgres write, no PostHog
+     fan-out) unless consent_granted is True. The two types in
+     _FIRST_PARTY_ALWAYS always reach Postgres regardless of consent — each
+     IS itself a record that must survive independent of the decision it
+     describes (consent_recorded is the audit trail of a consent decision,
+     including a decline; user_signed_up is signup attribution, which a
+     brand-new account — non-consenting by column default — would otherwise
+     never produce). The PostHog fan-out stays consent-gated for both:
+     consent_recorded fans out only when the decision itself was a grant
+     (payload["granted"]); user_signed_up fans out only when consent_granted
+     is True.
 
 Adapted from the PR8 brief's log_event(...) sketch, which assumed a Flask
 per-request `g.db` connection. This codebase has no such seam — every other
@@ -40,6 +48,15 @@ from jobcannon.db import _events, events_schema
 from jobcannon.db.pool import commit_unless_nested, connection_factory
 from jobcannon.host import posthog_client
 
+# Event types whose Postgres write is unconditional (never dropped for lack
+# of consent) because each type IS itself the durable record of something
+# that already happened, independent of the analytics opt-in. The PostHog
+# fan-out is NOT included in this exemption — it stays consent-gated for
+# both, generalizing the shape consent_recorded already had rather than
+# scattering a second conditional. Not a widened events_schema allowlist —
+# just which types skip the early consent-gated return below.
+_FIRST_PARTY_ALWAYS = frozenset({"consent_recorded", "user_signed_up"})
+
 
 def log_event(
     event_type: str,
@@ -60,10 +77,10 @@ def log_event(
     if consent_granted is None:
         consent_granted = _consent_from_context()
 
-    # consent_recorded writes unconditionally (it IS the audit trail of a
-    # consent decision, grant or decline); every other event type requires
-    # consent to have already been granted.
-    if event_type != "consent_recorded" and not consent_granted:
+    # consent_recorded and user_signed_up write unconditionally (see
+    # _FIRST_PARTY_ALWAYS above); every other event type requires consent to
+    # have already been granted, or is dropped entirely.
+    if event_type not in _FIRST_PARTY_ALWAYS and not consent_granted:
         return
 
     with connection_factory() as conn:
@@ -81,8 +98,11 @@ def log_event(
         )
         commit_unless_nested(conn.raw)
 
-    if event_type == "consent_recorded" and not (payload or {}).get("granted"):
-        return  # audit row written above, no PostHog fan-out for a decline
+    if event_type == "consent_recorded":
+        if not (payload or {}).get("granted"):
+            return  # audit row written above, no PostHog fan-out for a decline
+    elif event_type in _FIRST_PARTY_ALWAYS and not consent_granted:
+        return  # first-party write landed above; PostHog fan-out stays consent-gated
 
     posthog_client.capture(distinct_id or user_id or _anon_id(), event_type, dict(payload or {}))
 
