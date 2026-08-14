@@ -28,6 +28,8 @@ from uuid import uuid4
 
 from flask import current_app, g, request, session
 
+from jobcannon.db.events_schema import _MAX_STR
+
 _CHANNEL_DISALLOWED = re.compile(r"[^a-z0-9_-]")
 _CHANNEL_MAX_LEN = 32
 
@@ -56,11 +58,20 @@ def _referrer_host() -> str:
     referrer = request.referrer
     if not referrer:
         return "unknown"
-    # .hostname (not .netloc) deliberately excludes a port. Path and query
-    # are never captured here — hostname only — since a referrer URL can
-    # carry search terms, session tokens, or other identifying detail that
-    # has no business landing in an attribution record.
-    return urlsplit(referrer).hostname or "unknown"
+    try:
+        hostname = urlsplit(referrer).hostname
+    except ValueError:
+        # A malformed Referer (e.g. an unparseable bracketed-IPv6 form) must
+        # never turn an otherwise-successful request into a 500 — same
+        # fail-closed stance as the rest of this module's request-time reads.
+        return "unknown"
+    # .hostname (not .netloc) deliberately excludes a port. Path and query are
+    # never captured here — hostname only — since a referrer URL can carry
+    # search terms, session tokens, or other identifying detail that has no
+    # business landing in an attribution record. Bounded to the events
+    # payload validator's string cap so the captured value is never already
+    # too long to store by the time a later signup event carries it.
+    return (hostname or "unknown")[:_MAX_STR]
 
 
 def capture_attribution() -> None:

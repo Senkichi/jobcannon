@@ -120,6 +120,39 @@ def test_referrer_is_hostname_only():
     assert ":" not in referrer_host
 
 
+def test_malformed_referrer_does_not_500():
+    """A malformed Referer (urlsplit raises ValueError on this shape, e.g. an
+    unclosed bracketed IPv6 host) must never turn an otherwise-successful
+    request into a 500 — capture_attribution() runs on every request,
+    including the public-path branch, so a single crafted link would
+    otherwise lock a visitor out of the site entirely."""
+    app = _app()
+    client = app.test_client()
+
+    resp = client.get("/_probe", headers={"Referer": "http://[::1"})
+
+    assert resp.status_code == 200
+    assert resp.get_json()["attribution"]["referrer_host"] == "unknown"
+
+
+def test_referrer_host_is_bounded_to_the_payload_validator_cap():
+    """referrer_host is exactly the value a later PR puts in a
+    user_signed_up payload; jobcannon/db/events_schema.py's validate_payload
+    rejects any string over _MAX_STR chars, so an unbounded capture here
+    would already be unemittable by the time it reaches that call. Asserted
+    at the point of capture, not only at the point of emission."""
+    from jobcannon.db.events_schema import _MAX_STR
+
+    app = _app()
+    client = app.test_client()
+
+    long_host = "a" * (_MAX_STR + 100) + ".example.com"
+    resp = client.get("/_probe", headers={"Referer": f"https://{long_host}/path"})
+    referrer_host = resp.get_json()["attribution"]["referrer_host"]
+
+    assert len(referrer_host) <= _MAX_STR
+
+
 def test_missing_attribution_is_total():
     app = _app()
     client = app.test_client()
