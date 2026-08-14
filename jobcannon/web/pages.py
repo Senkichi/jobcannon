@@ -5,21 +5,27 @@ posting list: title/company/workplace-type/location filters and a sort
 token, all read from the query string and validated against a fixed
 allowlist before any of it reaches SQL — an unrecognized token degrades to
 the unfiltered/default value rather than a 500. Each row carries its own
-literal "why" chips (jobcannon.web.why.why_chips); a row whose
-`structural_axes` is still NULL (the axes batch caps at 500 rows per scan
-tick, so a large pre-seed leaves a transient NULL slice) also renders a
-"signals still computing" marker alongside whatever chips it does have,
-rather than silently omitting the fact that axis-derived signals aren't in
-yet. That marker lives in `_posting_row.html` (shared by this route and
-jobcannon.web.onboarding's /preview through `_feed_list.html`), never
-recomputed per route, so it can't drift between the two consumers.
+literal "why" chips (jobcannon.web.feed_entries.build_entry, which wraps
+jobcannon.web.why.why_chips); a row whose `structural_axes` is still NULL
+(the axes batch caps at 500 rows per scan tick, so a large pre-seed leaves
+a transient NULL slice) also renders a "signals still computing" marker
+alongside whatever chips it does have, rather than silently omitting the
+fact that axis-derived signals aren't in yet. That marker lives in
+`_posting_row.html` (shared by this route and jobcannon.web.onboarding's
+/preview through `_feed_list.html`), keyed on the NULL column itself and
+never on an empty chip list, so it can't drift between the two consumers.
 `feed_state` has no writer
 anywhere in this codebase yet, so every row's rank comes back NULL today —
 the ordering label says so honestly (`UNRANKED_VERSION`, defined once here
 so a later event-emitting consumer can import the same literal instead of
-retyping it) rather than implying a ranking that has not run. No
-watchlist/pipeline UI and no `posting_impression` events are wired from
-this route — that remains separate, later work. GET /demo is unchanged: it
+retyping it) rather than implying a ranking that has not run. Each row also
+carries its per-user `saved` state and a usable apply link when one exists
+(jobcannon.web.feed_entries.build_entry) — the save/dismiss/apply mutation
+routes themselves live in jobcannon/web/actions.py, not here, this route
+only renders the controls (`show_actions=True`) — and, on every render,
+this route logs one `posting_impression` event per rendered row
+(feed_position 1-based, ranker_version from the row or `UNRANKED_VERSION`)
+through jobcannon.host.events.log_event. GET /demo is unchanged: it
 still shows corpus COUNTS only, never a posting list. Picker-first
 onboarding (GET/POST /start, GET /preview) lives in
 jobcannon/web/onboarding.py, not here.
@@ -46,7 +52,8 @@ from jobcannon.db._feed import list_feed_postings
 from jobcannon.db._profiles import GUEST_USER_ID, get_profile
 from jobcannon.db._stats import corpus_stats
 from jobcannon.db.pool import connection_factory
-from jobcannon.web.why import why_chips
+from jobcannon.host.events import log_event
+from jobcannon.web.feed_entries import build_entry
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +68,14 @@ _EMPTY_STATS = {"postings": 0, "companies": 0, "freshest_last_seen": None}
 # event-emitting consumer rather than retyped, so the displayed label and
 # whatever gets logged can never drift apart.
 UNRANKED_VERSION = "unranked-v0"
+
+# The `surface` value logged on every posting_impression event this route
+# emits (events_schema._ALLOWED_KEYS["posting_impression"] == {"surface"}).
+# Defined once so the literal typed into the feed template's rendering
+# decision and the literal written to the payload can never drift apart —
+# there is only one call site today, but the constant is what makes that a
+# choice rather than an accident.
+_IMPRESSION_SURFACE = "feed"
 
 # Workplace-type filter vocabulary: the form speaks lowercase,
 # postings.workplace_type (jobcannon/db/_jobs.py, written from
@@ -166,6 +181,29 @@ def _ordering_label(rows: list[Any]) -> dict[str, Any]:
     return {"personalized": True, "ranker_version": version or UNRANKED_VERSION}
 
 
+def _log_impressions(user_id: str, rows: list[Any]) -> None:
+    """One `posting_impression` event per rendered row: `feed_position` is
+    the 1-based index within THIS response, `ranker_version` is the row's
+    own `feed_state` value or the shared `UNRANKED_VERSION` literal when
+    unranked. No cross-request dedup — a second page view is a second
+    impression, by design, which is what makes "every impression carries
+    position and ranker_version" mechanically checkable rather than
+    incidentally true of whichever request happened to run first.
+    `consent_granted` is left at its default (None): `log_event` resolves it
+    from the ambient per-request `g.consent_granted` set by
+    `jobcannon.web`'s before_request hook, so a non-consenting user's
+    impressions are dropped before any Postgres write, not filtered here."""
+    for position, row in enumerate(rows, start=1):
+        log_event(
+            "posting_impression",
+            user_id=user_id,
+            posting_id=row["id"],
+            feed_position=position,
+            ranker_version=row["ranker_version"] or UNRANKED_VERSION,
+            payload={"surface": _IMPRESSION_SURFACE},
+        )
+
+
 @pages_bp.get("/", strict_slashes=False)
 def feed():
     user_id = g.clerk_user.user_id
@@ -176,8 +214,9 @@ def feed():
     ordering = {"personalized": False, "ranker_version": UNRANKED_VERSION}
     if profile is not None and stats.get("postings", 0) > 0:
         rows = _read_feed_postings(user_id=user_id, filters=filters)
-        entries = [{"row": row, "chips": why_chips(row, profile)} for row in rows]
+        entries = [build_entry(row, profile) for row in rows]
         ordering = _ordering_label(rows)
+        _log_impressions(user_id, rows)
 
     return render_template(
         "feed.html",
@@ -188,6 +227,7 @@ def feed():
         ordering=ordering,
         sort_tokens=sorted(_feed._SORTS),
         workplace_types=_WORKPLACE_TYPES,
+        show_actions=True,
     )
 
 
