@@ -228,17 +228,15 @@ def test_filters_apply_and_unknown_sort_token_is_rejected_without_500(app):
     _seed_posting(dsn, "feed-filter-alpha", company_id, title="Distinctive Filter Alpha")
     _seed_posting(dsn, "feed-filter-beta", company_id, title="Distinctive Filter Beta")
 
-    filtered = client.get("/", query_string={"title": "Distinctive Filter Alpha"})
+    # "Alpha" (not the full seeded title) is deliberate: it is a strict
+    # substring of "Distinctive Filter Alpha" and not equal to it, so this
+    # only passes under a title-contains filter — an exact-match filter
+    # would match zero rows on this input and fail the assertion below.
+    filtered = client.get("/", query_string={"title": "Alpha"})
     html_filtered = filtered.get_data(as_text=True)
     assert filtered.status_code == 200
     assert "Distinctive Filter Alpha" in html_filtered
     assert "Distinctive Filter Beta" not in html_filtered
-    # Positive control: the filter form echoes the submitted title back into
-    # its own `value="..."` attribute regardless of match count, so
-    # "Distinctive Filter Alpha" being present above is NOT proof the row
-    # itself rendered — only that the query string round-tripped. Assert the
-    # empty-result copy is absent too, so a filter that (wrongly) matched
-    # nothing can't pass this test on the echoed form value alone.
     assert "No postings match your selections yet." not in html_filtered
 
     bogus_sort = client.get("/", query_string={"sort": "bogus-token-xyz"})
@@ -246,6 +244,118 @@ def test_filters_apply_and_unknown_sort_token_is_rejected_without_500(app):
     assert bogus_sort.status_code == 200
     assert "Distinctive Filter Alpha" in html_bogus
     assert "Distinctive Filter Beta" in html_bogus
+
+
+def test_title_filter_matches_on_substring_not_full_title(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app)
+    company_id = _seed_company(dsn, "Substring Title Co")
+    _seed_posting(dsn, "feed-substr-1", company_id, title="Senior Backend Engineer")
+    _seed_posting(dsn, "feed-substr-2", company_id, title="Product Manager")
+
+    resp = client.get("/", query_string={"title": "Backend"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Senior Backend Engineer" in html
+    assert "Product Manager" not in html
+    assert "No postings match your selections yet." not in html
+
+
+def test_company_filter_excludes_non_matching_company(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app)
+    match_co = _seed_company(dsn, "Match Co")
+    other_co = _seed_company(dsn, "Other Co")
+    _seed_posting(dsn, "feed-company-match", match_co, title="Match Row", company="Match Co")
+    _seed_posting(dsn, "feed-company-other", other_co, title="Other Row", company="Other Co")
+
+    resp = client.get("/", query_string={"company": "Match Co"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Match Row" in html
+    assert "Other Row" not in html
+    assert "No postings match your selections yet." not in html
+
+
+def test_location_filter_matches_on_substring(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app)
+    company_id = _seed_company(dsn, "Location Filter Co")
+    _seed_posting(
+        dsn, "feed-loc-match", company_id, title="Remote Row", location="Austin, TX (Remote)"
+    )
+    _seed_posting(dsn, "feed-loc-other", company_id, title="Onsite Row", location="Denver, CO")
+
+    resp = client.get("/", query_string={"location": "Austin"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Remote Row" in html
+    assert "Onsite Row" not in html
+    assert "No postings match your selections yet." not in html
+
+
+def test_workplace_type_filter_excludes_non_matching_type(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app)
+    company_id = _seed_company(dsn, "Workplace Filter Co")
+    _seed_posting(
+        dsn, "feed-wt-remote", company_id, title="Remote Type Row", workplace_type="REMOTE"
+    )
+    _seed_posting(
+        dsn, "feed-wt-onsite", company_id, title="Onsite Type Row", workplace_type="ONSITE"
+    )
+
+    resp = client.get("/", query_string={"workplace_type": "remote"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Remote Type Row" in html
+    assert "Onsite Type Row" not in html
+    assert "No postings match your selections yet." not in html
+
+
+def test_filters_are_additive_not_independently_matched(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app)
+    company_id = _seed_company(dsn, "Additive Filter Co")
+    _seed_posting(
+        dsn,
+        "feed-additive-both",
+        company_id,
+        title="Backend Engineer",
+        company="Additive Match Co",
+    )
+    _seed_posting(
+        dsn,
+        "feed-additive-title-only",
+        company_id,
+        title="Backend Analyst",
+        company="Additive Match Co",
+    )
+    _seed_posting(
+        dsn,
+        "feed-additive-company-only",
+        company_id,
+        title="Backend Engineer",
+        company="Different Co",
+    )
+
+    resp = client.get("/", query_string={"title": "Engineer", "company": "Additive Match Co"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "feed-additive-both" not in html  # sanity: dedup_key never rendered
+    assert "Backend Engineer" in html
+    assert "Backend Analyst" not in html
+    # Both postings titled "Backend Engineer" share that title string; the
+    # company-only row must still be excluded by the additive title filter.
+    # Distinguish via the (unique) company name, which only the
+    # both-match row shares with the filter value.
+    assert "Different Co" not in html
+    assert "No postings match your selections yet." not in html
 
 
 def test_db_failure_degrades_to_empty_state_not_500(app, monkeypatch):

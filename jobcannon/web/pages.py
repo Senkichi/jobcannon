@@ -122,11 +122,13 @@ def _parse_feed_filters(args: Any) -> dict[str, str]:
 
 def _feed_query_kwargs(filters: dict[str, str]) -> dict[str, Any]:
     """Display-safe `filters` (see `_parse_feed_filters`) -> the keyword
-    arguments `list_feed_postings` accepts. `title` is matched via the same
-    exact-match `titles` list parameter the picker's structured selections
-    already use (jobcannon/db/_feed.py has no substring title filter)."""
+    arguments `list_feed_postings` accepts. `title` is matched via
+    `title_contains` (a substring `LIKE`, jobcannon/db/_feed.py) — distinct
+    from the exact-match `titles` list parameter the picker's structured
+    selections use; this route's title box is free text, not a pick from a
+    fixed corpus-derived set."""
     return {
-        "titles": [filters["title"]] if filters["title"] else None,
+        "title_contains": filters["title"] or None,
         "company": filters["company"] or None,
         "workplace_type": _WORKPLACE_TYPE_DB_VALUES.get(filters["workplace_type"]),
         "location_contains": filters["location"] or None,

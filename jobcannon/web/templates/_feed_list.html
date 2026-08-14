@@ -13,7 +13,7 @@
    its own single location field unchanged and this block is skipped there. #}
 {% if filters is defined %}
   <form method="get" class="mb-6 grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm" data-feed-filters>
-    <input type="text" name="title" value="{{ filters.title }}" placeholder="Title"
+    <input type="text" name="title" value="{{ filters.title }}" placeholder="Title contains"
            class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100">
     <input type="text" name="company" value="{{ filters.company }}" placeholder="Company"
            class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100">
