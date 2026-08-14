@@ -286,3 +286,7 @@ def test_401_page_renders_without_a_signup_link_when_clerk_sign_up_url_is_blank(
     assert resp.status_code == 401
     assert 'href=""' not in html
     assert "Sign-in required" in html
+    # The anchor itself must be absent, not merely non-empty-href: a
+    # template that ignored the injected blank double and fell back to the
+    # TESTING default would satisfy every assertion above this one.
+    assert "Sign in or sign up" not in html
