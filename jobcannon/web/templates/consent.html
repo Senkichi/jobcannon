@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Analytics preferences — Job Cannon{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-3">Analytics preferences</h1>
+{% if error %}
+  <p class="text-red-400 mb-4">{{ error }}</p>
+{% endif %}
+<p class="text-neutral-400 mb-6">
+  {% if choice_made %}
+    Current choice: {{ "allowed" if consent_granted else "declined" }}.
+  {% else %}
+    You haven't made a choice yet.
+  {% endif %}
+</p>
+<p class="text-neutral-500 text-sm mb-6">
+  Analytics help us see which parts of the feed are useful. Declining
+  changes nothing about how the product works for you.
+</p>
+<form method="post" action="/consent" class="flex gap-4">
+  <button type="submit" name="choice" value="grant"
+          class="bg-neutral-100 text-neutral-950 px-4 py-2 rounded font-medium">
+    Allow analytics
+  </button>
+  <button type="submit" name="choice" value="decline"
+          class="border border-neutral-700 px-4 py-2 rounded font-medium">
+    Decline
+  </button>
+</form>
+{% endblock %}
