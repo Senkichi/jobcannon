@@ -218,7 +218,7 @@ def test_each_row_renders_at_least_one_why_chip_or_the_pending_marker(app):
     html = client.get("/").get_data(as_text=True)
 
     assert "Chip Test Posting" in html
-    assert "why: not yet available for this posting" in html
+    assert "signals still computing for this posting" in html
 
 
 def test_filters_apply_and_unknown_sort_token_is_rejected_without_500(app):

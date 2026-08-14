@@ -3,14 +3,16 @@ Wave 2 PR 8 adds per-request consent resolution for the log_event chokepoint;
 adds the anonymous session carrier (jobcannon.web.anon_session),
 Flask session signing (SECRET_KEY), and the HOST_CONFIG accessor; Phase 1C
 adds the anon-to-authed handoff (jobcannon.web.handoff) and the consent
-surface it can redirect to (jobcannon.web.consent))."""
+surface it can redirect to (jobcannon.web.consent); adds an HTML body for
+401 responses via the errorhandler below, replacing Werkzeug's default
+plain-text body)."""
 
 from __future__ import annotations
 
 import logging
 import os
 
-from flask import Flask, abort, g, request
+from flask import Flask, abort, current_app, g, render_template, request
 
 from jobcannon.web.anon_session import capture_attribution, ensure_session_ids
 from jobcannon.web.handoff import run_handoff_if_pending
@@ -108,6 +110,27 @@ def create_app(config: dict | None = None) -> Flask:
     @app.get("/healthz")
     def healthz():
         return {"status": "ok"}
+
+    @app.errorhandler(401)
+    def unauthorized(_error):
+        """HTML body for every 401 in this app, not only an authed-route
+        sign-in prompt: `clerk_auth` below runs before Flask resolves
+        routing, so this handler also renders for `/static/<path>` (Flask
+        registers that rule unconditionally, and it is not in
+        PUBLIC_PATHS) and for any unmatched path, both of which would
+        otherwise 404 — they hit this 401 handler first instead. That is
+        deliberate, not a routing bug to "fix" into a distinct 404 page.
+        The status code stays 401.
+
+        Reads clerk_sign_up_url through the one HOST_CONFIG accessor
+        (app.config["HOST_CONFIG"], set on every create_app code path
+        above, including TESTING) rather than a second os.environ read.
+        getattr tolerates a test double that only carries the attributes a
+        given test cares about; the template branches on an empty value
+        rather than rendering href="".
+        """
+        clerk_sign_up_url = getattr(current_app.config["HOST_CONFIG"], "clerk_sign_up_url", "")
+        return render_template("error_401.html", clerk_sign_up_url=clerk_sign_up_url), 401
 
     @app.before_request
     def clerk_auth():

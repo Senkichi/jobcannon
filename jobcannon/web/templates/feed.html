@@ -5,8 +5,7 @@
   <h1 class="text-2xl font-semibold mb-3">Your feed isn't wired up yet</h1>
   <p class="text-neutral-400">Job Cannon is in its corpus-building phase. Profiles and the ranked feed arrive in the next release — the scanner is already filling the shared corpus below.</p>
 {% elif stats.postings == 0 %}
-  <h1 class="text-2xl font-semibold mb-3">The corpus is warming up</h1>
-  <p class="text-neutral-400">No postings scanned yet. Once the first scan cycle completes, live counts appear here.</p>
+  {% include "_corpus_empty.html" %}
 {% else %}
   {# Live now that an authed Clerk user's profile actually gets written
      (jobcannon/web/onboarding.py's picker, or the anon-to-authed handoff)
