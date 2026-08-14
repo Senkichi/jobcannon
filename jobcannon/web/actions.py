@@ -47,6 +47,7 @@ import psycopg
 from flask import Blueprint, abort, g, render_template
 
 from jobcannon.db._feed import list_feed_postings
+from jobcannon.db._profiles import get_profile
 from jobcannon.db._user_actions import dismiss_posting, mark_applied, save_posting
 from jobcannon.db.pool import connection_factory
 from jobcannon.host.events import log_event
@@ -63,9 +64,20 @@ def _fetch_entry(conn, user_id: str, posting_id: int) -> dict | None:
     narrowed to a single posting id. Returns None both when the posting does
     not exist and when it does but is excluded (dismissed) — routes that
     need to 404 on the former rely on the ForeignKeyViolation the write
-    itself raises, not on this function's return value."""
+    itself raises, not on this function's return value.
+
+    Loads the caller's profile and passes it to `build_entry` the same way
+    `jobcannon/web/pages.py`'s route does — `build_entry`'s second argument
+    is the only input to `why_chips`'s title/skill overlap chip
+    (`jobcannon/web/why.py::_overlap_chip`), so skipping this read here would
+    silently drop that chip from every mutation-response fragment, even
+    though the page render right before it showed the chip for the same
+    row."""
     rows = list_feed_postings(conn, user_id=user_id, posting_id=posting_id, limit=1)
-    return build_entry(rows[0], None) if rows else None
+    if not rows:
+        return None
+    profile = get_profile(conn, user_id)
+    return build_entry(rows[0], profile)
 
 
 def _row_response(entry: dict | None):
