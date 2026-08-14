@@ -1,7 +1,9 @@
 """Flask app factory for the hosted skeleton (Wave 1: health + auth + webhooks;
 Wave 2 PR 8 adds per-request consent resolution for the log_event chokepoint;
 adds the anonymous session carrier (jobcannon.web.anon_session),
-Flask session signing (SECRET_KEY), and the HOST_CONFIG accessor)."""
+Flask session signing (SECRET_KEY), and the HOST_CONFIG accessor; Phase 1C
+adds the anon-to-authed handoff (jobcannon.web.handoff) and the consent
+surface it can redirect to (jobcannon.web.consent))."""
 
 from __future__ import annotations
 
@@ -11,6 +13,7 @@ import os
 from flask import Flask, abort, g, request
 
 from jobcannon.web.anon_session import capture_attribution, ensure_session_ids
+from jobcannon.web.handoff import run_handoff_if_pending
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +136,11 @@ def create_app(config: dict | None = None) -> Flask:
         g.consent_granted = _resolve_consent(identity)
         ensure_session_ids()
         capture_attribution()
+        # Must run after ensure_session_ids(): the handoff's user_signed_up
+        # emission reads g.feed_session_id, which that call populates.
+        handoff_response = run_handoff_if_pending()
+        if handoff_response is not None:
+            return handoff_response
         return None
 
     from jobcannon.web.webhooks import webhooks_bp
@@ -146,4 +154,8 @@ def create_app(config: dict | None = None) -> Flask:
     from jobcannon.web.onboarding import onboarding_bp
 
     app.register_blueprint(onboarding_bp)
+
+    from jobcannon.web.consent import consent_bp
+
+    app.register_blueprint(consent_bp)
     return app

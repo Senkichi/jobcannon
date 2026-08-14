@@ -52,6 +52,19 @@ def app_with_pool():
         drop_throwaway_db(db_name)
 
 
+def _skip_handoff(client) -> None:
+    """These tests exercise _resolve_consent's per-request gate in
+    isolation, not the anon-to-authed handoff (covered separately in
+    tests/host/test_handoff.py). Without this, a fresh client's first
+    authenticated request is the handoff's one-time trip, which redirects
+    to /consent instead of ever reaching the /whoami route registered
+    below."""
+    from jobcannon.web.handoff import _HANDOFF_DONE_KEY
+
+    with client.session_transaction() as sess:
+        sess[_HANDOFF_DONE_KEY] = True
+
+
 @requires_postgres
 def test_consent_granted_true_reaches_g_consent_granted(app_with_pool):
     import psycopg
@@ -75,7 +88,9 @@ def test_consent_granted_true_reaches_g_consent_granted(app_with_pool):
         seen["consent_granted"] = g.consent_granted
         return "ok"
 
-    resp = app.test_client().get("/whoami")
+    client = app.test_client()
+    _skip_handoff(client)
+    resp = client.get("/whoami")
     assert resp.status_code == 200
     assert seen["consent_granted"] is True
 
@@ -95,7 +110,9 @@ def test_consent_defaults_false_for_user_without_consent_row(app_with_pool):
         seen["consent_granted"] = g.consent_granted
         return "ok"
 
-    resp = app.test_client().get("/whoami")
+    client = app.test_client()
+    _skip_handoff(client)
+    resp = client.get("/whoami")
     assert resp.status_code == 200
     assert seen["consent_granted"] is False
 
