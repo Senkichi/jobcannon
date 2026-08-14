@@ -66,8 +66,16 @@ def test_create_app_wires_verify_request_when_seams_stubbed(monkeypatch):
 
 def test_create_app_raises_on_missing_webhook_secret(monkeypatch):
     """F3a: an unset CLERK_WEBHOOK_SIGNING_SECRET must fail fast at startup,
-    non-TESTING, before any request is served."""
-    _stub_seams(monkeypatch)
+    non-TESTING, before any request is served.
+
+    secret_key is stubbed blank here (not the default "sk_flask_test") so
+    this test actually pins the fail-fast ORDER: the webhook-secret check
+    must raise before the secret-key check gets a chance to. With a truthy
+    secret_key the two orderings are indistinguishable — this test's outcome
+    would be identical either way, and the comment at the SECRET_KEY call
+    site in jobcannon/web/__init__.py claiming this test pins the ordering
+    would be false."""
+    _stub_seams(monkeypatch, secret_key="")
     monkeypatch.delenv("CLERK_WEBHOOK_SIGNING_SECRET", raising=False)
 
     from jobcannon.web import create_app
