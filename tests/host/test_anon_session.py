@@ -1,0 +1,146 @@
+"""jobcannon/web/anon_session.py — the anonymous session id carrier and
+attribution capture — plus the HOST_CONFIG accessor's TESTING-branch
+availability (jobcannon/web/__init__.py), which this module's
+capture_attribution() depends on for `signup_wave`.
+
+No Postgres needed: these are pure Flask app / session tests, same shape as
+tests/host/test_auth.py.
+"""
+
+import re
+
+from flask import g, session
+
+
+def _app(**extra_config):
+    from jobcannon.web import create_app
+    from jobcannon.web.auth import ClerkIdentity
+
+    app = create_app(
+        config={
+            "TESTING": True,
+            "VERIFY_REQUEST": lambda req: ClerkIdentity(user_id="user_1", claims={"sub": "user_1"}),
+            "WEBHOOK_SECRET": "whsec_dGVzdA==",
+            **extra_config,
+        }
+    )
+
+    @app.get("/_probe")
+    def probe():
+        return {
+            "anon_session_id": g.get("anon_session_id"),
+            "feed_session_id": g.get("feed_session_id"),
+            "attribution": session.get("attribution"),
+        }
+
+    return app
+
+
+def test_ids_minted_once_and_stable_across_requests():
+    app = _app()
+    client = app.test_client()
+
+    first = client.get("/_probe").get_json()
+    second = client.get("/_probe").get_json()
+
+    assert first["anon_session_id"].startswith("anon_")
+    assert first["feed_session_id"]
+    assert first["anon_session_id"] != first["feed_session_id"]
+    assert second["anon_session_id"] == first["anon_session_id"]
+    assert second["feed_session_id"] == first["feed_session_id"]
+
+
+def test_g_anon_session_id_is_populated_for_public_and_authed_paths(monkeypatch):
+    """Pins that events._anon_id() no longer falls back to the literal
+    "anonymous" inside a request, on either kind of path — it did,
+    unconditionally, before this module existed. A custom path is added to
+    PUBLIC_PATHS (rather than reusing /healthz or /demo, which are already
+    registered by create_app and can't carry a second handler) so the
+    public-path branch of the before_request gate can be probed directly."""
+    monkeypatch.setattr(
+        "jobcannon.web.PUBLIC_PATHS", frozenset({"/healthz", "/demo", "/_probe_public"})
+    )
+
+    from jobcannon.host.events import _anon_id
+
+    app = _app()
+
+    @app.get("/_probe_public")
+    def probe_public():
+        return {"anon_id": _anon_id()}
+
+    @app.get("/_probe_authed")
+    def probe_authed():
+        return {"anon_id": _anon_id()}
+
+    client = app.test_client()
+    public_anon_id = client.get("/_probe_public").get_json()["anon_id"]
+    authed_anon_id = client.get("/_probe_authed").get_json()["anon_id"]
+
+    assert public_anon_id != "anonymous"
+    assert public_anon_id.startswith("anon_")
+    assert authed_anon_id != "anonymous"
+    assert authed_anon_id.startswith("anon_")
+
+
+def test_channel_is_normalized_and_truncated():
+    app = _app()
+    client = app.test_client()
+
+    resp = client.get("/_probe", query_string={"ref": "Hacker News!!"})
+    channel = resp.get_json()["attribution"]["channel"]
+
+    assert re.fullmatch(r"[a-z0-9_-]{1,32}", channel)
+
+
+def test_referrer_is_hostname_only():
+    app = _app()
+    client = app.test_client()
+
+    resp = client.get("/_probe", headers={"Referer": "https://example.com/path/to/page?q=1&x=2"})
+    referrer_host = resp.get_json()["attribution"]["referrer_host"]
+
+    assert referrer_host == "example.com"
+    assert "/" not in referrer_host
+    assert "?" not in referrer_host
+    assert ":" not in referrer_host
+
+
+def test_missing_attribution_is_total():
+    app = _app()
+    client = app.test_client()
+
+    attribution = client.get("/_probe").get_json()["attribution"]
+
+    assert attribution["channel"] == "direct"
+    assert attribution["referrer_host"] == "unknown"
+
+
+def test_host_config_is_available_under_testing():
+    """Every existing web test sets TESTING: True (tests/host/test_auth.py)
+    without ever injecting HOST_CONFIG — this is the assertion that keeps a
+    later route reading app.config["HOST_CONFIG"] from KeyError-ing into a
+    500 under all of them."""
+    from jobcannon.web import create_app
+
+    app = create_app({"TESTING": True})
+
+    host_config = app.config["HOST_CONFIG"]
+    assert isinstance(host_config.clerk_sign_up_url, str)
+    assert host_config.clerk_sign_up_url
+
+
+def test_injected_host_config_wins_over_the_testing_default():
+    from jobcannon.host.config import HostConfig
+    from jobcannon.web import create_app
+
+    double = HostConfig(
+        database_url="",
+        secret_key="injected-secret",
+        clerk_sign_up_url="https://example.com/custom-sign-up",
+        signup_wave="7",
+    )
+    app = create_app({"TESTING": True, "HOST_CONFIG": double})
+
+    assert app.config["HOST_CONFIG"] is double
+    assert app.config["SECRET_KEY"] == "injected-secret"
