@@ -188,8 +188,8 @@ def test_failed_submit_leaves_no_orphan_anon_user_row(app, monkeypatch):
 
 def test_repeat_get_start_after_submit_shows_completion_state(app):
     """The redirect target, confirmed working on its own: GET /start after
-    a completed POST /start renders the "preview coming next" confirmation,
-    not a 401 or a 500."""
+    a completed POST /start renders the "submitted" confirmation with a
+    link to /preview, not a 401 or a 500."""
     client = app.test_client()
     post_resp = client.post("/start", data={"seniority_level": "mid", "workplace_type": "any"})
     assert post_resp.status_code in (302, 303)
@@ -198,4 +198,5 @@ def test_repeat_get_start_after_submit_shows_completion_state(app):
     html = resp.get_data(as_text=True)
 
     assert resp.status_code == 200
-    assert "preview coming next" in html.lower()
+    assert "picker submitted" in html.lower()
+    assert 'href="/preview"' in html

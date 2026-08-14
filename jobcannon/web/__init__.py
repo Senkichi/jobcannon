@@ -17,7 +17,7 @@ from jobcannon.web.handoff import run_handoff_if_pending
 
 logger = logging.getLogger(__name__)
 
-PUBLIC_PATHS = frozenset({"/healthz", "/demo", "/start"})
+PUBLIC_PATHS = frozenset({"/healthz", "/demo", "/start", "/preview"})
 
 
 def _resolve_consent(identity) -> bool:
