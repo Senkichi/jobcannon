@@ -17,6 +17,7 @@ Re-exported from the package for backward compatibility.
 import json
 import logging
 import sqlite3
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -118,6 +119,13 @@ class _CompanyScanResult:
     # merged into summary["errors"] by the caller — otherwise they are
     # silently dropped, diverging from serial-path behavior.
     job_errors: list[str] = field(default_factory=list)
+    # True when the scan-wide deadline (issue #1368) tripped before this
+    # company's worker started any real work: the worker no-opped at entry and
+    # nothing ran, so the caller must skip this result entirely (no counters,
+    # no tracker tick) — the concurrent-path equivalent of the serial path
+    # never reaching the company at all. See the abort-event design note in
+    # _run_ats_api_scan's concurrent branch (issue #39).
+    deadline_skipped: bool = False
 
 
 # scoring_orchestrator.score_and_persist_job and homepage_discoverer's
@@ -591,6 +599,7 @@ def _scan_one_company_worker(
     target_titles: list,
     title_exclusions: list,
     workday_max_pages: int | None,
+    abort: threading.Event | None = None,
 ) -> _CompanyScanResult:
     """Worker task: scan one company with its own DB connection and return delta result.
 
@@ -606,10 +615,24 @@ def _scan_one_company_worker(
         target_titles: Title-match keywords for inclusion.
         title_exclusions: Title-match keywords for exclusion.
         workday_max_pages: Optional page budget for paginated platforms.
+        abort: Scan-wide deadline flag (issue #39). Checked once at entry:
+            when already set, the company was still queued when the deadline
+            tripped, so return a ``deadline_skipped`` no-op without opening a
+            connection or touching the network. Not re-checked mid-scan — a
+            worker that has started is always allowed to finish (issue #1130).
 
     Returns:
         A _CompanyScanResult with the delta from this company scan.
     """
+    if abort is not None and abort.is_set():
+        return _CompanyScanResult(
+            company_name=company["name_raw"],
+            jobs_discovered=0,
+            jobs_new=[],
+            skipped_title_filter=0,
+            deadline_skipped=True,
+        )
+
     company_id = company["id"]
     company_name = company["name_raw"]
     platform = company["ats_platform"]
@@ -868,29 +891,35 @@ def _run_ats_api_scan(
         # runtime limit can stop queuing new companies while in-flight workers
         # finish.
         #
-        # Once the cap fires there are two distinct things to do, and only
-        # one of them is actually about *submission speed*:
-        #   1. Discard whatever is still sitting in the executor's internal
-        #      queue (i.e. never got a worker thread) via
-        #      executor.shutdown(wait=False, cancel_futures=True), called
-        #      the moment truncation is first detected. This is what makes
-        #      the cap effective even though submitting every company up
-        #      front is essentially instantaneous — cancel_futures discards
-        #      not-yet-started work regardless of how much of it was queued.
-        #   2. Never abandon a future that has ALREADY started — cancel()
-        #      only succeeds on a still-PENDING future, so a RUNNING one
-        #      keeps going. The for-loop below therefore never breaks early:
-        #      it keeps draining as_completed() to exhaustion so every
-        #      already-running worker's result is still merged into
-        #      summary/all_new_job_keys before this function returns. No job
-        #      a worker discovered can silently skip Phase D scoring, and
-        #      Phase A2+ can never start while a worker thread is still
-        #      writing (issue #1130 rework — the prior code broke out of
-        #      this loop immediately on truncation and called
-        #      shutdown(wait=False, cancel_futures=True), which let an
+        # Once the cap fires there are two distinct things to do:
+        #   1. Make sure work that never started does not run for real. This
+        #      is done with ``abort_scan`` — an Event every worker checks at
+        #      entry, returning a ``deadline_skipped`` no-op when set — and
+        #      deliberately NOT with executor.shutdown(cancel_futures=True)
+        #      mid-loop. cancel_futures leaves drained futures in state
+        #      CANCELLED, and as_completed() only counts a cancelled future
+        #      as done once a worker thread performs the
+        #      CANCELLED_AND_NOTIFIED transition — which never happens for a
+        #      drained item, so the drain loop below would block forever on
+        #      the stranded future (issue #39: this exact deadlock is what
+        #      made graceful truncation unreachable on this path).
+        #      With the abort event, every submitted future completes
+        #      normally (real result or entry no-op), so as_completed()
+        #      always terminates.
+        #   2. Never abandon a future that has ALREADY started. The for-loop
+        #      below never breaks early: it keeps draining as_completed() to
+        #      exhaustion so every already-running worker's result is still
+        #      merged into summary/all_new_job_keys before this function
+        #      returns. No job a worker discovered can silently skip Phase D
+        #      scoring, and Phase A2+ can never start while a worker thread
+        #      is still writing (issue #1130 rework — the prior code broke
+        #      out of this loop immediately on truncation and let an
         #      already-running worker's DB write and result race past the
-        #      rest of run_ats_scan unmerged).
+        #      rest of run_ats_scan unmerged). The abort event preserves
+        #      this by construction: it is checked only at worker entry,
+        #      never mid-scan.
         executor = ThreadPoolExecutor(max_workers=scan_concurrency)
+        abort_scan = threading.Event()
         future_to_company = {}
         try:
             for company in companies:
@@ -904,24 +933,25 @@ def _run_ats_api_scan(
                     target_titles,
                     title_exclusions,
                     workday_max_pages,
+                    abort_scan,
                 )
                 future_to_company[future] = company
 
             if truncated:
-                # Cap already fired while still enqueuing companies: discard
-                # whatever hasn't started yet right away instead of waiting
-                # for the drain loop below to notice on its first completed
-                # future.
-                executor.shutdown(wait=False, cancel_futures=True)
+                # Cap already fired while still enqueuing companies: flag the
+                # abort so every queued-but-unstarted worker no-ops at entry
+                # instead of scanning for real.
+                abort_scan.set()
 
             for future in as_completed(future_to_company):
                 company = future_to_company[future]
-                if future.cancelled():
-                    # Discarded by cancel_futures above before it ever got a
-                    # worker thread — nothing ran, nothing to merge.
-                    continue
                 try:
                     result = future.result()
+
+                    if result.deadline_skipped:
+                        # Queued behind the deadline: the worker no-opped at
+                        # entry, nothing ran, nothing to merge or tick.
+                        continue
 
                     # Merge delta into shared state (single-threaded)
                     summary["jobs_discovered"] += result.jobs_discovered
@@ -959,10 +989,10 @@ def _run_ats_api_scan(
                         and time.monotonic() >= deadline_monotonic
                     ):
                         truncated = True
-                        # Discard whatever's still queued now; anything
-                        # already running keeps going and is drained by this
-                        # same loop on a later iteration.
-                        executor.shutdown(wait=False, cancel_futures=True)
+                        # Everything still queued now no-ops at worker entry;
+                        # anything already running keeps going and is drained
+                        # by this same loop on a later iteration.
+                        abort_scan.set()
 
                 except Exception as exc:
                     logger.exception(
@@ -977,15 +1007,18 @@ def _run_ats_api_scan(
                         and time.monotonic() >= deadline_monotonic
                     ):
                         truncated = True
-                        executor.shutdown(wait=False, cancel_futures=True)
+                        abort_scan.set()
 
         finally:
             # Every future in future_to_company has already been drained by
-            # the loop above (cancelled ones are skipped, running ones are
-            # waited on via as_completed) — this is a defensive no-op wait
-            # in the common case, kept so an exception that escapes the loop
-            # before draining finishes still can't return with a worker
-            # mid-write.
+            # the loop above (deadline-skipped ones are entry no-ops, running
+            # ones are waited on via as_completed) — this is a defensive
+            # no-op wait in the common case, kept so an exception that
+            # escapes the loop before draining finishes still can't return
+            # with a worker mid-write. cancel_futures is safe HERE (unlike
+            # mid-loop, see the design note above): nothing iterates
+            # as_completed after this point, so a future stranded in
+            # CANCELLED has no waiter left to deadlock.
             executor.shutdown(wait=True, cancel_futures=True)
 
     if truncated:
