@@ -16,6 +16,20 @@ permissions:
 
 jobs:
   test:
+    # Same-repo gate: keeps fork pull requests off the self-hosted runner.
+    # DEFENSE IN DEPTH ONLY — on pull_request events the workflow definition
+    # is read from the PR's merge ref, so a malicious fork PR can edit this
+    # file and bypass the gate entirely. The only real control is having no
+    # self-hosted runner registered while the repo is public.
+    # Never make this job a sole required status check: a job skipped by
+    # this condition SATISFIES branch protection, so a fork PR would show a
+    # green required check for code that never ran. Any future protection
+    # topology needs an always-reporting aggregate job.
+    # The event-name disjunct below is load-bearing — this workflow also
+    # triggers on push to main, where the pull_request context is null, so
+    # the head-repo comparison alone would evaluate false and silently
+    # disable CI for every push to main.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # SELF-HOSTED (2026-07-16): GitHub-hosted runners are billing-blocked
     # account-wide, so CI runs on the operator's Windows box (runner
     # jcpub-9800x3d-1, same fleet pattern as the private repo). Restore a
