@@ -14,7 +14,8 @@
    absence is never hidden and never backfilled with a fabricated value.
    Single-sourced here (not in jobcannon/web/pages.py or
    jobcannon/web/onboarding.py) so both consuming routes render it
-   identically. #}
+   identically. This branch emits no event of any kind — impression
+   logging is later, separate work and must not be added here. #}
 <article class="border border-neutral-800 rounded-lg p-4 space-y-2" data-posting-row>
   <div class="flex items-baseline justify-between gap-4">
     <h2 class="text-lg font-medium text-neutral-100">{{ entry.row.title }}</h2>
@@ -35,7 +36,7 @@
     </p>
   {% endif %}
   {% if entry.row.structural_axes is none %}
-    <p class="text-xs text-neutral-500 italic" data-signals-pending>why: not yet available for this posting</p>
+    <p class="text-xs text-neutral-500 italic" data-signals-pending>signals still computing for this posting</p>
   {% endif %}
   {% if entry.chips %}
     <ul class="flex flex-wrap gap-2 text-xs text-neutral-300" data-why-chips>
