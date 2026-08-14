@@ -3,7 +3,9 @@ Wave 2 PR 8 adds per-request consent resolution for the log_event chokepoint;
 adds the anonymous session carrier (jobcannon.web.anon_session),
 Flask session signing (SECRET_KEY), and the HOST_CONFIG accessor; Phase 1C
 adds the anon-to-authed handoff (jobcannon.web.handoff) and the consent
-surface it can redirect to (jobcannon.web.consent))."""
+surface it can redirect to (jobcannon.web.consent); adds an HTML body for
+401 responses via the errorhandler below, replacing Werkzeug's default
+plain-text body)."""
 
 from __future__ import annotations
 
