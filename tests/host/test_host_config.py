@@ -96,6 +96,27 @@ def test_malformed_auth_block_statuses_raises_named_error(monkeypatch):
         load_host_config()
 
 
+def test_every_declared_env_field_is_read_by_the_loader(monkeypatch):
+    """Pins that HostConfig's `metadata={"env": ...}` declarations are not
+    decoration: for every field that declares one, load_host_config() must
+    actually read that env var into the matching attribute. Without this,
+    tests/host/test_render_config.py's derived guard could go on asserting
+    a declaration that governs nothing."""
+    import dataclasses
+
+    from jobcannon.host.config import HostConfig, load_host_config
+
+    env_fields = [f for f in dataclasses.fields(HostConfig) if f.metadata.get("env")]
+    assert env_fields, "HostConfig declares no env metadata — nothing to pin here"
+    for f in env_fields:
+        monkeypatch.setenv(f.metadata["env"], "sentinel-value")
+
+    cfg = load_host_config()
+
+    for f in env_fields:
+        assert getattr(cfg, f.name) == "sentinel-value", f.name
+
+
 @pytest.mark.parametrize("value", ["", " "])
 @pytest.mark.parametrize("var", ["POSTHOG_API_KEY", "POSTHOG_HOST"])
 def test_empty_and_whitespace_posthog_var_is_absent(monkeypatch, var, value):

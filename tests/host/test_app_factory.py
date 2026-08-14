@@ -8,6 +8,8 @@ without a live database or a real Clerk backend.
 
 import pytest
 
+from jobcannon.host.config import HostConfig
+
 
 class _FakeState:
     def __init__(self, is_signed_in, payload):
@@ -27,9 +29,17 @@ class _FakeClerk:
         return _FakeState(is_signed_in=True, payload={"sub": "user_x", "org_id": None})
 
 
-def _stub_seams(monkeypatch):
+def _stub_seams(monkeypatch, *, secret_key="sk_flask_test"):
     monkeypatch.setattr("jobcannon.host.init_engine_seams", lambda *a, **kw: None)
-    monkeypatch.setattr("jobcannon.host.load_host_config", lambda: object())
+    monkeypatch.setattr(
+        "jobcannon.host.load_host_config",
+        lambda: HostConfig(
+            database_url="postgresql:///stub",
+            secret_key=secret_key,
+            clerk_sign_up_url="https://clerk.test/sign-up",
+            signup_wave="0",
+        ),
+    )
 
 
 def _set_clerk_env(monkeypatch, *, jwt_key="jwt_test", authorized_parties="https://example.org"):
@@ -56,13 +66,35 @@ def test_create_app_wires_verify_request_when_seams_stubbed(monkeypatch):
 
 def test_create_app_raises_on_missing_webhook_secret(monkeypatch):
     """F3a: an unset CLERK_WEBHOOK_SIGNING_SECRET must fail fast at startup,
-    non-TESTING, before any request is served."""
-    _stub_seams(monkeypatch)
+    non-TESTING, before any request is served.
+
+    secret_key is stubbed blank here (not the default "sk_flask_test") so
+    this test actually pins the fail-fast ORDER: the webhook-secret check
+    must raise before the secret-key check gets a chance to. With a truthy
+    secret_key the two orderings are indistinguishable — this test's outcome
+    would be identical either way, and the comment at the SECRET_KEY call
+    site in jobcannon/web/__init__.py claiming this test pins the ordering
+    would be false."""
+    _stub_seams(monkeypatch, secret_key="")
     monkeypatch.delenv("CLERK_WEBHOOK_SIGNING_SECRET", raising=False)
 
     from jobcannon.web import create_app
 
     with pytest.raises(RuntimeError, match="CLERK_WEBHOOK_SIGNING_SECRET"):
+        create_app(config={})
+
+
+def test_create_app_raises_on_missing_flask_secret_key(monkeypatch):
+    """A blank JC_SECRET_KEY (surfaced via HostConfig.secret_key) must fail
+    fast at startup, non-TESTING, before any request is served — same
+    rationale and shape as the webhook-secret fail-fast above, and ordered
+    after it (see the comment at the call site in jobcannon/web/__init__.py)."""
+    _stub_seams(monkeypatch, secret_key="")
+    monkeypatch.setenv("CLERK_WEBHOOK_SIGNING_SECRET", "whsec_dGVzdA==")
+
+    from jobcannon.web import create_app
+
+    with pytest.raises(RuntimeError, match="JC_SECRET_KEY"):
         create_app(config={})
 
 
