@@ -75,6 +75,52 @@ def read_consent_state(conn: Any, user_id: str) -> bool:
     return bool(row and row["analytics_consent"])
 
 
+def db_now_iso(conn: Any) -> str:
+    """The database's own clock, formatted as e.g. "2026-08-13T18:04:11.512034Z".
+
+    The ONLY sanctioned source of record_consent's `consented_at` argument: a
+    caller that reads this on the SAME connection inside the SAME transaction
+    as a subsequent record_consent() call gets back a string drawn from that
+    transaction's own now() — byte-identical to what record_consent's UPDATE
+    stores in analytics_consent_updated_at (also SQL now()), because psycopg3
+    connections here are not autocommit (jobcannon/db/pool.py). This is how a
+    process-wall-clock-free consented_at is produced without weakening the
+    no-datetime.now()-in-persistence-paths rule to a bare exception.
+
+    Quoting note: the to_char format string below embeds Postgres-literal
+    double quotes around T and Z, so this SQL is written as a Python
+    triple-single-quoted string — a double-quoted Python string would
+    terminate early at the first embedded `"` and either fail to parse or
+    silently produce the wrong format.
+    """
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    row = raw.execute(
+        """SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS now_iso"""
+    ).fetchone()
+    return row["now_iso"]
+
+
+def read_consent_choice_made(conn: Any, user_id: str) -> bool:
+    """ "Has a choice been recorded?" — False for BOTH no-choice cases: the
+    row exists but analytics_consent_updated_at is NULL (never chosen), and
+    no row exists at all (unknown user). The two are deliberately collapsed
+    because every caller today does the same thing with either answer: show
+    the consent surface. This is the only way to distinguish "never chose"
+    from "declined" — both leave analytics_consent = false; only this
+    column, and only record_consent, ever sets it.
+
+    Do not branch callers on which of the two no-choice cases applies. If a
+    future caller needs that distinction, add a separate reader rather than
+    changing this one's return type.
+    """
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    row = raw.execute(
+        "SELECT analytics_consent_updated_at IS NOT NULL AS choice_made FROM users WHERE id = %s",
+        (user_id,),
+    ).fetchone()
+    return bool(row and row["choice_made"])
+
+
 def record_consent(
     conn: Any,
     *,
