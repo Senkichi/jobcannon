@@ -93,6 +93,20 @@ def test_channel_is_normalized_and_truncated():
     assert re.fullmatch(r"[a-z0-9_-]{1,32}", channel)
 
 
+def test_channel_over_32_chars_is_truncated_to_32():
+    """A 13-char cleaned input alone can pass the regex above whether or not
+    the [:32] slice exists in the implementation — force actual truncation so
+    this test can fail for the reason its name claims."""
+    app = _app()
+    client = app.test_client()
+
+    resp = client.get("/_probe", query_string={"ref": "a" * 40 + "!!"})
+    channel = resp.get_json()["attribution"]["channel"]
+
+    assert len(channel) == 32
+    assert channel == "a" * 32
+
+
 def test_referrer_is_hostname_only():
     app = _app()
     client = app.test_client()
@@ -114,6 +128,28 @@ def test_missing_attribution_is_total():
 
     assert attribution["channel"] == "direct"
     assert attribution["referrer_host"] == "unknown"
+
+
+def test_attribution_wave_comes_from_host_config_not_the_environment(monkeypatch):
+    """Pins that capture_attribution() reads signup_wave off HOST_CONFIG (the
+    one wiring site) rather than re-reading the env var directly, which would
+    be a second, competing read of the same setting. Setting the env var to a
+    different value than the injected HostConfig proves which one wins."""
+    from jobcannon.host.config import HostConfig
+
+    monkeypatch.setenv("JC_SIGNUP_WAVE", "env-value-should-be-ignored")
+    double = HostConfig(
+        database_url="",
+        secret_key="sk_flask_test",
+        clerk_sign_up_url="https://clerk.test/sign-up",
+        signup_wave="7",
+    )
+    app = _app(HOST_CONFIG=double)
+    client = app.test_client()
+
+    wave = client.get("/_probe").get_json()["attribution"]["wave"]
+
+    assert wave == "7"
 
 
 def test_host_config_is_available_under_testing():
