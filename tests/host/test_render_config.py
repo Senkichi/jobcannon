@@ -84,9 +84,31 @@ def test_storage_limit_env_matches_disk_size():
 
 
 def test_every_required_env_var_is_declared_on_both_services():
+    """The env-var requirement is DERIVED from HostConfig's field metadata,
+    not restated here as a literal — a var added to HostConfig without
+    matching render.yaml coverage must fail this test, not go unnoticed
+    (see the sabotage check named in the PR that added this derivation)."""
+    import dataclasses
+
+    from jobcannon.host.config import HostConfig
+
     bp = _blueprint()
-    required = {
-        "DATABASE_URL",
+    derived = {
+        f.metadata["env"]: set(f.metadata.get("declare_on", ()))
+        for f in dataclasses.fields(HostConfig)
+        if f.metadata.get("env")
+    }
+    # Anti-vacuity control: an empty or mis-keyed `derived` would otherwise
+    # make the whole test pass by asserting nothing.
+    assert derived, "HostConfig declares no env metadata — the derivation is broken, not the yaml"
+    assert "web" in derived["DATABASE_URL"] and "worker" in derived["DATABASE_URL"]
+
+    # The four Clerk names stay a literal, deliberately: they are read
+    # directly from os.environ in jobcannon/web/auth.py (CLERK_SECRET_KEY,
+    # CLERK_JWT_KEY, CLERK_AUTHORIZED_PARTIES) and jobcannon/web/__init__.py
+    # (CLERK_WEBHOOK_SIGNING_SECRET) rather than through HostConfig, so
+    # nothing exists yet to derive them from.
+    clerk_required = {
         "CLERK_SECRET_KEY",
         "CLERK_JWT_KEY",
         "CLERK_AUTHORIZED_PARTIES",
@@ -94,6 +116,7 @@ def test_every_required_env_var_is_declared_on_both_services():
     }
     for svc in bp["services"]:
         declared = {e["key"] for e in svc.get("envVars", [])}
+        required = {env for env, svcs in derived.items() if svc["type"] in svcs} | clerk_required
         missing = required - declared
         # Worker never verifies Clerk requests or webhooks:
         if svc["type"] == "worker":

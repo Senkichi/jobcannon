@@ -50,6 +50,16 @@ services:
         sync: false
       - key: CLERK_WEBHOOK_SIGNING_SECRET
         sync: false
+      - key: JC_SECRET_KEY
+        sync: false
+      - key: CLERK_SIGN_UP_URL
+        sync: false
+      # First cohort's signup wave label; captured into every session's
+      # attribution at first contact (jobcannon.web.anon_session) so a later
+      # signup can be attributed back to a cohort. Literal value, not a
+      # secret.
+      - key: JC_SIGNUP_WAVE
+        value: "0"
       - key: POSTHOG_API_KEY
         sync: false
       # Optional: EU/self-hosted PostHog routing only; unset -> US cloud

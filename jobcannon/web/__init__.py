@@ -1,5 +1,7 @@
 """Flask app factory for the hosted skeleton (Wave 1: health + auth + webhooks;
-Wave 2 PR 8 adds per-request consent resolution for the log_event chokepoint)."""
+Wave 2 PR 8 adds per-request consent resolution for the log_event chokepoint;
+adds the anonymous session carrier (jobcannon.web.anon_session),
+Flask session signing (SECRET_KEY), and the HOST_CONFIG accessor)."""
 
 from __future__ import annotations
 
@@ -7,6 +9,8 @@ import logging
 import os
 
 from flask import Flask, abort, g, request
+
+from jobcannon.web.anon_session import capture_attribution, ensure_session_ids
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +50,18 @@ def create_app(config: dict | None = None) -> Flask:
     if not app.config.get("TESTING"):
         from jobcannon.host import init_engine_seams, load_host_config
 
-        init_engine_seams(load_host_config())
+        host_config = app.config.get("HOST_CONFIG") or load_host_config()
+        init_engine_seams(host_config)  # unchanged: the ONE wiring site, non-TESTING only
+    else:
+        from jobcannon.host.config import HostConfig
+
+        host_config = app.config.get("HOST_CONFIG") or HostConfig(
+            database_url="",  # tests open the pool with their own throwaway DSN
+            secret_key="testing-secret-key",
+            clerk_sign_up_url="https://clerk.test/sign-up",
+            signup_wave="0",
+        )
+    app.config["HOST_CONFIG"] = host_config  # ALWAYS set, both branches
 
     if "WEBHOOK_SECRET" in app.config:
         secret = app.config["WEBHOOK_SECRET"]
@@ -59,6 +74,26 @@ def create_app(config: dict | None = None) -> Flask:
         # or left to the env-var default) must never surface as per-request
         # 500s / invalid-signature noise instead of a clear boot failure.
         raise RuntimeError("CLERK_WEBHOOK_SIGNING_SECRET is required (Svix webhook signing secret)")
+
+    # Flask session signing key (jobcannon.web.anon_session's cookie carrier
+    # needs this). Same injectable-config / fail-fast shape as WEBHOOK_SECRET
+    # above, kept AFTER it so an unset webhook secret still raises with that
+    # message first (test_create_app_raises_on_missing_webhook_secret pins
+    # this ordering).
+    secret_key = app.config.get("SECRET_KEY") or getattr(host_config, "secret_key", "")
+    if not app.config.get("TESTING") and not secret_key:
+        raise RuntimeError("JC_SECRET_KEY is required (Flask session signing key)")
+    app.config["SECRET_KEY"] = secret_key
+    # Secure by default, relaxed for both test and local-dev runs. Keyed off
+    # testing/debug rather than TESTING alone: a plain `flask run` /
+    # `python -m jobcannon` over http://localhost with TESTING unset would
+    # otherwise have the browser silently drop the session cookie (secure
+    # cookies are dropped over plain HTTP) — a defect with no error anywhere,
+    # that no test here would catch (the Werkzeug test client sends secure
+    # cookies over plain HTTP regardless).
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = not (app.testing or app.debug)
 
     verify = app.config.get("VERIFY_REQUEST")
     if verify is None and not app.config.get("TESTING"):
@@ -86,6 +121,8 @@ def create_app(config: dict | None = None) -> Flask:
         if (request.path.rstrip("/") or "/") in PUBLIC_PATHS or request.blueprint == "webhooks":
             g.clerk_user = None
             g.consent_granted = False
+            ensure_session_ids()
+            capture_attribution()
             return None
         identity = app.config["VERIFY_REQUEST"](request)
         # Set g.clerk_user BEFORE the possible abort(401): any error handler
@@ -94,6 +131,8 @@ def create_app(config: dict | None = None) -> Flask:
         if identity is None:
             abort(401)
         g.consent_granted = _resolve_consent(identity)
+        ensure_session_ids()
+        capture_attribution()
         return None
 
     from jobcannon.web.webhooks import webhooks_bp
