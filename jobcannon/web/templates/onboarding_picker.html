@@ -2,8 +2,11 @@
 {% block title %}Get started — Job Cannon{% endblock %}
 {% block content %}
 {% if submitted %}
-  <h1 class="text-2xl font-semibold mb-3">Picker submitted — preview coming next</h1>
-  <p class="text-neutral-400">Your selections are saved. The ranked preview arrives in the next release.</p>
+  <h1 class="text-2xl font-semibold mb-3">Picker submitted</h1>
+  <p class="text-neutral-400">
+    Your selections are saved.
+    <a href="{{ url_for('onboarding.preview') }}" class="underline">See your preview</a>.
+  </p>
 {% else %}
   <h1 class="text-2xl font-semibold mb-3">Tell us what you're looking for</h1>
   <p class="text-neutral-400 mb-6">No account needed yet — this just tunes what the feed shows you later.</p>
