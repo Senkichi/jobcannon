@@ -260,6 +260,141 @@ def test_handoff_is_idempotent_on_subsequent_requests(app):
     assert len(_events_rows(dsn, CLERK_ID, "user_signed_up")) == 1
 
 
+def test_picker_resubmission_after_signup_is_rekeyed_not_orphaned(app):
+    """A picker submitted at /start AFTER the handoff has already completed
+    once must still be consumed on a later authed request — the completion
+    marker gates only the emission phase, never the DB re-key phase. Before
+    the fix, `_HANDOFF_DONE_KEY` short-circuited the whole handoff, so
+    `pending_picker` was never consumed and the anon users+profiles pair
+    was orphaned permanently."""
+    dsn = app.config["_TEST_DSN"]
+    client = app.test_client()
+    _authed(app)
+
+    # First authed request: no pending picker, completes the handoff.
+    client.get("/")
+    assert len(_events_rows(dsn, CLERK_ID, "user_signed_up")) == 1
+
+    # /start is public and cannot see the authed identity, so resubmitting
+    # the picker mints a fresh anon users+profiles pair.
+    resp = _complete_picker(client)
+    assert resp.status_code == 302
+    with client.session_transaction() as sess:
+        anon_id = sess["pending_picker"]["anon_id"]
+
+    # A later authed request must still consume the pending picker even
+    # though handoff_done is already set from the first request.
+    client.get("/")
+
+    clerk_profile = _profile_row(dsn, CLERK_ID)
+    assert clerk_profile is not None
+    assert clerk_profile["seniority_level"] == "senior"
+    assert sorted(clerk_profile["skills"]) == ["python"]
+
+    with psycopg.connect(dsn) as conn:
+        assert (
+            conn.execute("SELECT count(*) FROM users WHERE id = %s", (anon_id,)).fetchone()[0] == 0
+        )
+        assert (
+            conn.execute("SELECT count(*) FROM profiles WHERE user_id = %s", (anon_id,)).fetchone()[
+                0
+            ]
+            == 0
+        )
+    with client.session_transaction() as sess:
+        assert "pending_picker" not in sess
+
+    # The emission phase stayed gated on the completion marker: no second
+    # user_signed_up row for the resubmission.
+    assert len(_events_rows(dsn, CLERK_ID, "user_signed_up")) == 1
+
+
+def test_signup_emission_failure_does_not_500_and_retries_next_request(app, monkeypatch):
+    """A `log_event` failure during the emission phase (e.g. an oversized
+    `wave` value rejected by `events_schema.validate_payload`) must not
+    propagate into `before_request` as a 500, and must not permanently wedge
+    the session: the DB phase has already committed by the time this runs,
+    so a later authed request must complete the emission instead of 500ing
+    forever."""
+    dsn = app.config["_TEST_DSN"]
+    client = app.test_client()
+    _authed(app)
+
+    import jobcannon.web.handoff as handoff_mod
+
+    real_log_event = handoff_mod.log_event
+    calls = {"n": 0}
+
+    def _flaky_log_event(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("payload rejected (simulated)")
+        return real_log_event(*args, **kwargs)
+
+    monkeypatch.setattr(handoff_mod, "log_event", _flaky_log_event)
+
+    resp = client.get("/")
+    assert resp.status_code != 500
+    assert _events_rows(dsn, CLERK_ID, "user_signed_up") == []
+    with client.session_transaction() as sess:
+        assert sess.get(handoff_mod._HANDOFF_DONE_KEY) is not True
+        assert sess.get("attribution") is not None
+
+    resp2 = client.get("/")
+    assert resp2.status_code != 500
+    assert len(_events_rows(dsn, CLERK_ID, "user_signed_up")) == 1
+    with client.session_transaction() as sess:
+        assert sess.get(handoff_mod._HANDOFF_DONE_KEY) is True
+
+
+def test_oversized_signup_wave_does_not_500_or_wedge_the_session():
+    """Reproduces the exact production reachability path named in review:
+    JC_SIGNUP_WAVE (jobcannon/host/config.py) is read unvalidated and
+    unbounded into the `wave` payload key, and
+    events_schema.validate_payload rejects any string over 200 chars.
+    Without wrapping the emission this 500s every authed request in the
+    session forever."""
+    from jobcannon.db import pool as pool_mod
+    from jobcannon.db.migrate import run_migrations
+    from jobcannon.host.config import HostConfig
+    from jobcannon.web import create_app
+    from jobcannon.web.auth import ClerkIdentity
+
+    dsn, db_name = create_throwaway_db("jobcannon_handoff_wave")
+    try:
+        run_migrations(dsn)
+        pool_mod.open_pool(dsn)
+        flask_app = create_app(
+            config={
+                "TESTING": True,
+                "VERIFY_REQUEST": lambda req: ClerkIdentity(
+                    user_id=CLERK_ID, claims={"sub": CLERK_ID}
+                ),
+                "WEBHOOK_SECRET": "whsec_dGVzdA==",
+                "HOST_CONFIG": HostConfig(
+                    database_url="",
+                    secret_key="testing-secret-key",
+                    clerk_sign_up_url="https://clerk.test/sign-up",
+                    signup_wave="w" * 250,
+                ),
+            }
+        )
+        client = flask_app.test_client()
+
+        resp = client.get("/")
+        assert resp.status_code != 500
+
+        assert _events_rows(dsn, CLERK_ID, "user_signed_up") == []
+
+        # Nothing wedged: an unrelated request on the same session still
+        # succeeds instead of 500ing on every subsequent hit.
+        resp2 = client.get("/healthz")
+        assert resp2.status_code == 200
+    finally:
+        pool_mod.close_pool()
+        drop_throwaway_db(db_name)
+
+
 def test_signup_without_picker_still_records_attribution(app):
     """No POST /start in this session at all — the handoff must skip the
     profile re-key and the anon-row delete, but still emit user_signed_up
