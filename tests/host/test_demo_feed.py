@@ -252,3 +252,8 @@ def test_demo_requires_no_cookie_and_no_signup(app):
 
     assert resp.status_code == 200
     assert "No Cookie Demo Title" in html
+    # Positive control: the profile card alone also renders the target
+    # title, so a feed-row discriminator is required to prove the posting
+    # itself reached the page rather than the empty-state fallback.
+    assert "data-why-chips" in html
+    assert "No postings match your selections yet." not in html
