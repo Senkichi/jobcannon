@@ -5,7 +5,8 @@ Flask session signing (SECRET_KEY), and the HOST_CONFIG accessor; Phase 1C
 adds the anon-to-authed handoff (jobcannon.web.handoff) and the consent
 surface it can redirect to (jobcannon.web.consent); adds an HTML body for
 401 responses via the errorhandler below, replacing Werkzeug's default
-plain-text body)."""
+plain-text body; adds the authed save/dismiss/apply mutation routes
+(jobcannon.web.actions))."""
 
 from __future__ import annotations
 
@@ -181,4 +182,8 @@ def create_app(config: dict | None = None) -> Flask:
     from jobcannon.web.consent import consent_bp
 
     app.register_blueprint(consent_bp)
+
+    from jobcannon.web.actions import actions_bp
+
+    app.register_blueprint(actions_bp)
     return app

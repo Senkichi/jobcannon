@@ -6,6 +6,14 @@ The default ordering is written for that state first, not as a fallback —
 `tests/host/test_feed_state_not_written.py` guards this module (and every
 other module under the scanned roots) never writing to `feed_state`.
 
+An authenticated reader (`user_id` not None) never sees a posting they have
+dismissed: `list_feed_postings` LEFT JOINs `pipeline_status` and excludes
+`status = 'dismissed'` rows. Every row also carries a `saved` flag (whether a
+`watchlists` row exists for that `(user_id, posting_id)` pair) so
+`jobcannon/web/feed_entries.py::build_entry` can render per-user state
+without a second query. Both tables are written exclusively by
+`jobcannon/db/_user_actions.py`; this module only reads them.
+
 Row access: STRING-KEY only, matching every other DAL module in this
 package (`_profiles.py`, `_stats.py`, `_companies.py`) — both the pooled
 `HybridRow` and the test fixtures' `dict_row` support `row["col"]`.
@@ -70,6 +78,7 @@ def _build_filters(
     workplace_type: str | None,
     location_contains: str | None,
     company: str | None,
+    posting_id: int | None = None,
 ) -> tuple[list[str], list[Any]]:
     """Parameterized WHERE fragments + bound params, shared by
     `list_feed_postings` and `count_feed_postings` so the two queries can
@@ -83,7 +92,15 @@ def _build_filters(
     corpus-derived strings and exact match is correct; `title_contains`
     serves the authed feed's free-text title box (jobcannon/web/pages.py),
     where a user is typing a fragment. Both may be passed at once without
-    conflict — they AND together like every other filter here."""
+    conflict — they AND together like every other filter here.
+
+    `posting_id` narrows to exactly one posting. It exists so
+    `jobcannon/web/actions.py` can re-fetch the single row it just mutated
+    through this SAME query — dismissed-exclusion and the `saved` flag
+    (`list_feed_postings`'s authed branch) apply identically whether the
+    caller wants a full page or one row, rather than a second,
+    independently-maintained "what does this user see for posting X" query.
+    """
     clauses: list[str] = []
     params: list[Any] = []
     if titles:
@@ -101,6 +118,9 @@ def _build_filters(
     if location_contains is not None:
         clauses.append("p.location LIKE %s ESCAPE '\\'")
         params.append(f"%{_escape_like(location_contains)}%")
+    if posting_id is not None:
+        clauses.append("p.id = %s")
+        params.append(posting_id)
     return clauses, params
 
 
@@ -113,6 +133,7 @@ def list_feed_postings(
     workplace_type: str | None = None,
     location_contains: str | None = None,
     company: str | None = None,
+    posting_id: int | None = None,
     sort: str = "default",
     limit: int = FEED_PAGE_MAX,
     offset: int = 0,
@@ -121,7 +142,13 @@ def list_feed_postings(
     here. `structural_axes` may come back NULL for a real, existing posting
     (the axes batch cap processes 500 rows per scan tick, so a large
     pre-seed leaves a transient NULL slice); callers must handle that, this
-    function does not filter it out."""
+    function does not filter it out.
+
+    An authed reader (`user_id` not None) never sees a posting whose
+    `pipeline_status.status = 'dismissed'` — that exclusion clause is added
+    only on this branch, never shared with `count_feed_postings` via
+    `_build_filters`, because it depends on `user_id` and the anonymous
+    branch has no per-user row to exclude by."""
     if sort not in _SORTS:
         raise ValueError(f"unknown sort token: {sort!r}")
     order_by = _SORTS[sort]
@@ -133,26 +160,33 @@ def list_feed_postings(
         workplace_type=workplace_type,
         location_contains=location_contains,
         company=company,
+        posting_id=posting_id,
     )
-    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
     raw = conn.raw if hasattr(conn, "raw") else conn
 
     if user_id is not None:
+        authed_where_clauses = [*where_clauses, "(ps.status IS DISTINCT FROM 'dismissed')"]
+        where_sql = f"WHERE {' AND '.join(authed_where_clauses)}"
         sql = (
             f"SELECT {_SELECT_COLUMNS}, "
-            "fs.rank_score AS rank_score, fs.ranker_version AS ranker_version "
+            "fs.rank_score AS rank_score, fs.ranker_version AS ranker_version, "
+            "(w.id IS NOT NULL) AS saved "
             "FROM postings p "
             "LEFT JOIN feed_state fs ON fs.user_id = %s AND fs.posting_id = p.id "
+            "LEFT JOIN pipeline_status ps ON ps.user_id = %s AND ps.posting_id = p.id "
+            "LEFT JOIN watchlists w ON w.user_id = %s AND w.posting_id = p.id "
             f"{where_sql} "
             f"ORDER BY {order_by} "
             "LIMIT %s OFFSET %s"
         )
-        query_params = [user_id, *params, limit, offset]
+        query_params = [user_id, user_id, user_id, *params, limit, offset]
     else:
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         sql = (
             f"SELECT {_SELECT_COLUMNS}, "
-            "NULL::double precision AS rank_score, NULL::text AS ranker_version "
+            "NULL::double precision AS rank_score, NULL::text AS ranker_version, "
+            "NULL::boolean AS saved "
             "FROM postings p "
             f"{where_sql} "
             f"ORDER BY {order_by} "
