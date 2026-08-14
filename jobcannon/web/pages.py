@@ -25,10 +25,16 @@ routes themselves live in jobcannon/web/actions.py, not here, this route
 only renders the controls (`show_actions=True`) — and, on every render,
 this route logs one `posting_impression` event per rendered row
 (feed_position 1-based, ranker_version from the row or `UNRANKED_VERSION`)
-through jobcannon.host.events.log_event. GET /demo is unchanged: it
-still shows corpus COUNTS only, never a posting list. Picker-first
-onboarding (GET/POST /start, GET /preview) lives in
-jobcannon/web/onboarding.py, not here.
+through jobcannon.host.events.log_event. GET /demo now renders the
+canned guest profile (jobcannon.db._profiles.GUEST_USER_ID) plus, once that
+profile is seeded, the same populated feed and literal why-chips filtered to
+its target_titles — the corpus-counts-only render is now the fallback for
+when the guest profile row is absent or the corpus itself is empty, not the
+whole page. Unlike GET /, /demo renders no mutation controls (it never
+passes show_actions) and logs no events: its g.consent_granted is hardcoded
+False (jobcannon/web/__init__.py) and its render path never calls
+`_log_impressions` or log_event. Picker-first onboarding (GET/POST
+/start, GET /preview) lives in jobcannon/web/onboarding.py, not here.
 
 `corpus_stats` / `get_profile` / `list_feed_postings` / `connection_factory`
 are imported at MODULE level (unlike `jobcannon/web/__init__.py`'s
@@ -167,6 +173,23 @@ def _read_feed_postings(*, user_id: str, filters: dict[str, str]) -> list[Any]:
         return []
 
 
+def _read_demo_feed_postings(profile: Any) -> list[Any]:
+    """Fail-closed feed read for /demo, the same discipline as
+    `_read_feed_postings`: an unopened connection pool or a genuine DB
+    outage degrades to an empty result list (`_feed_list.html`'s own
+    empty-state branch still renders) rather than a 500 on a public,
+    unauthenticated entry point. Filtered by the guest profile's own
+    target_titles (the canned selections `scripts/seed_guest_demo.py`
+    seeds) — /demo has no query-string filters of its own; it is a
+    read-only showcase of one fixed profile, not a general-purpose search."""
+    try:
+        with connection_factory() as conn:
+            return list_feed_postings(conn, user_id=GUEST_USER_ID, titles=profile["target_titles"])
+    except Exception:
+        logger.warning("demo feed read failed (defaulting to empty result set)", exc_info=True)
+        return []
+
+
 def _ordering_label(rows: list[Any]) -> dict[str, Any]:
     """Honest ordering label: `feed_state` is read-only in Phase 1C (never
     written anywhere), so every row comes back with rank_score NULL today —
@@ -234,4 +257,14 @@ def feed():
 @pages_bp.get("/demo", strict_slashes=False)
 def demo():
     stats, profile = _read_page_data(GUEST_USER_ID)
-    return render_template("demo.html", stats=stats, profile=profile)
+
+    entries: list[dict[str, Any]] = []
+    ordering = {"personalized": False, "ranker_version": UNRANKED_VERSION}
+    if profile is not None and stats.get("postings", 0) > 0:
+        rows = _read_demo_feed_postings(profile)
+        entries = [build_entry(row, profile) for row in rows]
+        ordering = _ordering_label(rows)
+
+    return render_template(
+        "demo.html", stats=stats, profile=profile, entries=entries, ordering=ordering
+    )

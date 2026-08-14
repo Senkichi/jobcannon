@@ -109,6 +109,12 @@ def test_demo_fail_closed_when_corpus_stats_raises(app_client_unauthed, monkeypa
 
 
 def test_demo_is_public_and_renders_corpus_stats(app_client_unauthed, monkeypatch):
+    """corpus_stats/get_profile are mocked but list_feed_postings is not, so
+    the feed read hits the unpatched nullcontext(object()) sentinel conn and
+    fails closed to an empty result set (jobcannon/web/pages.py's
+    _read_demo_feed_postings) — this test is about the profile-present /
+    corpus-stats branch rendering at all, not about a populated feed list
+    (that is tests/host/test_demo_feed.py's job, against a real DB)."""
     from jobcannon.web import pages
 
     _patch_connection_factory(monkeypatch)
@@ -122,8 +128,9 @@ def test_demo_is_public_and_renders_corpus_stats(app_client_unauthed, monkeypatc
     response = app_client_unauthed.get("/demo")
     html = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert "The live corpus" in html
-    assert "3" in html
+    assert "Guest demo feed" in html
+    assert "Seniority: senior" in html
+    assert "3</strong> live postings" in html
 
 
 def test_demo_renders_warming_up_when_corpus_empty(app_client_unauthed, monkeypatch):
@@ -164,4 +171,4 @@ def test_demo_trailing_slash_is_public_not_401(app_client_unauthed, monkeypatch)
     response = app_client_unauthed.get("/demo/")
     html = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert "The live corpus" in html
+    assert "Guest demo feed" in html
