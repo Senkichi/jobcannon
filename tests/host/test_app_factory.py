@@ -8,6 +8,8 @@ without a live database or a real Clerk backend.
 
 import pytest
 
+from jobcannon.host.config import HostConfig
+
 
 class _FakeState:
     def __init__(self, is_signed_in, payload):
@@ -27,9 +29,17 @@ class _FakeClerk:
         return _FakeState(is_signed_in=True, payload={"sub": "user_x", "org_id": None})
 
 
-def _stub_seams(monkeypatch):
+def _stub_seams(monkeypatch, *, secret_key="sk_flask_test"):
     monkeypatch.setattr("jobcannon.host.init_engine_seams", lambda *a, **kw: None)
-    monkeypatch.setattr("jobcannon.host.load_host_config", lambda: object())
+    monkeypatch.setattr(
+        "jobcannon.host.load_host_config",
+        lambda: HostConfig(
+            database_url="postgresql:///stub",
+            secret_key=secret_key,
+            clerk_sign_up_url="https://clerk.test/sign-up",
+            signup_wave="0",
+        ),
+    )
 
 
 def _set_clerk_env(monkeypatch, *, jwt_key="jwt_test", authorized_parties="https://example.org"):
@@ -63,6 +73,20 @@ def test_create_app_raises_on_missing_webhook_secret(monkeypatch):
     from jobcannon.web import create_app
 
     with pytest.raises(RuntimeError, match="CLERK_WEBHOOK_SIGNING_SECRET"):
+        create_app(config={})
+
+
+def test_create_app_raises_on_missing_flask_secret_key(monkeypatch):
+    """A blank JC_SECRET_KEY (surfaced via HostConfig.secret_key) must fail
+    fast at startup, non-TESTING, before any request is served — same
+    rationale and shape as the webhook-secret fail-fast above, and ordered
+    after it (see the comment at the call site in jobcannon/web/__init__.py)."""
+    _stub_seams(monkeypatch, secret_key="")
+    monkeypatch.setenv("CLERK_WEBHOOK_SIGNING_SECRET", "whsec_dGVzdA==")
+
+    from jobcannon.web import create_app
+
+    with pytest.raises(RuntimeError, match="JC_SECRET_KEY"):
         create_app(config={})
 
 
