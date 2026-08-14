@@ -187,19 +187,44 @@ def test_demo_emits_no_events(app):
     same reason: /demo forces g.consent_granted = False
     (jobcannon/web/__init__.py) and every account defaults to
     analytics_consent = false, so a bare "zero events rows" assertion passes
-    whether or not the route calls log_event and therefore tests nothing."""
+    whether or not the route calls log_event and therefore tests nothing.
+
+    The structural half is scoped to demo()'s own call graph, not the whole
+    module: pages.py legitimately imports and calls log_event for the authed
+    feed's per-row posting_impression logging, so a module-wide "never
+    imports events" guard would outlaw the feed route's job. Instead this
+    walks the transitive closure of module-local functions reachable from
+    demo() (derived from the AST, so a new demo helper is covered
+    automatically) and asserts none of them call log_event."""
     source = pathlib.Path(_PAGES_MODULE_PATH).read_text(encoding="utf-8")
     tree = ast.parse(source)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            callee = node.func
-            name = callee.id if isinstance(callee, ast.Name) else getattr(callee, "attr", None)
-            assert name != "log_event", "pages.py must not call log_event directly"
-        if isinstance(node, ast.ImportFrom):
-            assert node.module != "jobcannon.host.events", "pages.py must not import events"
-            assert all(alias.name != "log_event" for alias in node.names)
-        if isinstance(node, ast.Import):
-            assert all(alias.name != "jobcannon.host.events" for alias in node.names)
+    module_functions = {
+        node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
+
+    def _called_names(fn: ast.FunctionDef) -> set[str]:
+        names = set()
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Call):
+                callee = node.func
+                name = callee.id if isinstance(callee, ast.Name) else getattr(callee, "attr", None)
+                if name is not None:
+                    names.add(name)
+        return names
+
+    reachable: set[str] = set()
+    frontier = ["demo"]
+    while frontier:
+        fn_name = frontier.pop()
+        if fn_name in reachable or fn_name not in module_functions:
+            continue
+        reachable.add(fn_name)
+        frontier.extend(_called_names(module_functions[fn_name]))
+    assert "demo" in reachable, "demo() not found in pages.py — guard is scanning nothing"
+    for fn_name in sorted(reachable):
+        assert "log_event" not in _called_names(module_functions[fn_name]), (
+            f"{fn_name}() is reachable from demo() and calls log_event — /demo must not emit events"
+        )
 
     dsn = app.config["_TEST_DSN"]
     _seed_guest_profile(dsn, target_titles=["No Events Demo Title"])
