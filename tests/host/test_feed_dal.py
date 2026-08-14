@@ -115,6 +115,26 @@ def test_anonymous_and_authed_shapes_return_identical_columns(db_conn):
     assert authed_rows[0]["ranker_version"] is None
 
 
+def test_dismissed_posting_is_excluded_for_the_dismissing_user_but_not_others(db_conn):
+    from jobcannon.db._feed import list_feed_postings
+    from jobcannon.db._user_actions import dismiss_posting
+
+    _seed_user(db_conn, "u-dismisser")
+    _seed_user(db_conn, "u-other")
+    company_id = _seed_company(db_conn, "Acme")
+    posting_id = _seed_posting(db_conn, "p-dismissed", company_id, last_seen=_BASE_TIME)
+
+    dismiss_posting(db_conn, "u-dismisser", posting_id)
+
+    dismisser_ids = [r["id"] for r in list_feed_postings(db_conn, user_id="u-dismisser")]
+    other_ids = [r["id"] for r in list_feed_postings(db_conn, user_id="u-other")]
+    anon_ids = [r["id"] for r in list_feed_postings(db_conn)]
+
+    assert posting_id not in dismisser_ids
+    assert posting_id in other_ids
+    assert posting_id in anon_ids
+
+
 def test_unknown_sort_token_raises_valueerror(db_conn):
     from jobcannon.db._feed import list_feed_postings
 
