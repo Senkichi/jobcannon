@@ -180,7 +180,7 @@ def test_failed_submit_leaves_no_orphan_anon_user_row(app, monkeypatch):
     monkeypatch.setattr("jobcannon.web.onboarding.upsert_profile", _boom)
 
     client = app.test_client()
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="simulated failure between mint and upsert"):
         client.post("/start", data={"seniority_level": "mid", "workplace_type": "any"})
 
     assert _anon_user_count(app.config["_TEST_DSN"]) == 0
