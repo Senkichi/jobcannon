@@ -7,11 +7,17 @@ route this blueprint owns — no separate auth check is needed here.
 
 Each route performs its `jobcannon.db._user_actions` mutation, logs the
 matching allowlisted event through `jobcannon.host.events.log_event`, and
-re-renders `jobcannon/web/templates/_posting_row.html` for the caller's HTMX
-outerHTML swap — always `200` (never `204`: HTMX requires `200` for an
-outerHTML swap, matching the rest of this codebase's fragment-route
-convention). Dismiss is the one route whose "re-rendered fragment" is an
-empty body: `_fetch_entry` below re-runs the exact same query
+re-renders `jobcannon/web/templates/_posting_row.html`, always returning
+`200` (never `204`: HTMX requires `200` for an outerHTML swap, matching the
+rest of this codebase's fragment-route convention). Save and dismiss are
+driven by an `hx-post` + `hx-swap="outerHTML"` on the row's own control, so
+that fragment IS what replaces the row in the DOM. Apply is invoked from a
+plain `fetch()` instead (see `_posting_row.html`'s apply markup for why —
+an `<a href>` and an htmx AJAX trigger cannot coexist on one click), so its
+response fragment is returned for contract consistency with the other two
+routes but is not applied to the DOM by the caller. Dismiss is the one
+route whose "re-rendered fragment" is an empty body: `_fetch_entry` below
+re-runs the exact same query
 `jobcannon.db._feed.list_feed_postings` uses for a plain page render, which
 already excludes a `pipeline_status.status = 'dismissed'` row — so a
 dismissed posting's disappearance from the DOM falls out of the one query

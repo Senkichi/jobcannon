@@ -4,10 +4,13 @@
    show_actions=True (the authenticated feed's own render, and the fragment
    jobcannon/web/actions.py re-renders after a mutation) — /preview and
    /demo entries carry no `saved` / `apply_url` keys and never set
-   show_actions, so this block is skipped there. Every control targets THIS
-   row's own `data-posting-row` root with hx-swap="outerHTML" (never 204 —
-   jobcannon/web/actions.py's fragment routes always return 200), matching
-   the accordion-row convention this codebase already uses elsewhere.
+   show_actions, so this block is skipped there. Save and dismiss target
+   THIS row's own `data-posting-row` root with hx-swap="outerHTML" (never
+   204 — jobcannon/web/actions.py's fragment routes always return 200),
+   matching the accordion-row convention this codebase already uses
+   elsewhere. Apply is the one control that does NOT use hx-post/hx-swap —
+   see the comment at its markup below for why a real outbound <a href>
+   cannot also carry an htmx AJAX trigger on the same click.
 
    The "signals still computing" marker below is keyed on
    entry.row.structural_axes being NULL — a real, transient state (the
@@ -71,12 +74,27 @@
         Dismiss
       </button>
       {% if entry.apply_url %}
+        {# Deliberately NOT hx-post: htmx installs its own click handler on
+           any element carrying hx-get/hx-post/etc and calls
+           evt.preventDefault() on it (this is htmx's documented behavior
+           for cancelling the browser's default action so its own AJAX
+           request can stand in for it) — on an <a href> that unconditionally
+           blocks the real navigation, so the outbound link would never
+           fire. hx-on:click is a plain addEventListener wrapper with no
+           such interception, so the browser's normal navigation (respecting
+           target="_blank", ctrl/middle-click, etc.) proceeds untouched while
+           a fire-and-forget POST still reaches the SAME mutation route
+           (mark_applied + posting_apply_clicked, both server-side and
+           unchanged) so applying is still recorded. keepalive keeps that
+           request alive past the click even though the tab's focus moves
+           away immediately. There is no row swap for this control: nothing
+           in this entry's rendered shape (jobcannon/web/feed_entries.py)
+           depends on apply state, so there is nothing for a swap to
+           update. #}
         <a href="{{ entry.apply_url }}"
            target="_blank"
            rel="noopener noreferrer"
-           hx-post="{{ url_for('actions.apply', posting_id=entry.row.id) }}"
-           hx-target="closest [data-posting-row]"
-           hx-swap="outerHTML"
+           hx-on:click="fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true})"
            class="underline text-neutral-300"
            data-action-apply>
           Apply
