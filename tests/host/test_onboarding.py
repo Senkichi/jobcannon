@@ -167,6 +167,25 @@ def test_invalid_seniority_rerenders_form_without_writing(app):
     assert _anon_user_count(app.config["_TEST_DSN"]) == 0
 
 
+def test_failed_submit_leaves_no_orphan_anon_user_row(app, monkeypatch):
+    """mint_anon_user and upsert_profile must share one transaction, not one
+    connection with two independent commits: if the second write raises, the
+    first must roll back too, or a stranger's retry mints a second anon row
+    forever (falsifying test_picker_submit_mints_exactly_one_anon_user_row on
+    the failure path)."""
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated failure between mint and upsert")
+
+    monkeypatch.setattr("jobcannon.web.onboarding.upsert_profile", _boom)
+
+    client = app.test_client()
+    with pytest.raises(RuntimeError):
+        client.post("/start", data={"seniority_level": "mid", "workplace_type": "any"})
+
+    assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+
+
 def test_repeat_get_start_after_submit_shows_completion_state(app):
     """The redirect target, confirmed working on its own: GET /start after
     a completed POST /start renders the "preview coming next" confirmation,

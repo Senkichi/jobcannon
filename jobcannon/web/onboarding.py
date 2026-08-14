@@ -10,7 +10,7 @@ placeholder for a later PR.
 
 POST /start validates the submission at the boundary (an unknown seniority
 level or an out-of-range years-of-experience value re-renders the form with
-a 200, never a 500), then, against one pooled connection: mints an
+a 200, never a 500), then, in one transaction on one pooled connection: mints an
 anonymous `users` row (jobcannon.db._users.mint_anon_user) and upserts a
 `profiles` row through the existing single-writer seam
 (jobcannon.db._profiles.upsert_profile) — the same users-row-then-profile
@@ -182,18 +182,19 @@ def start_submit():
 
     pending = get_pending_picker()
     with connection_factory() as conn:
-        if pending is not None and pending.get("anon_id"):
-            anon_id = pending["anon_id"]
-        else:
-            anon_id = mint_anon_user(conn)
-        upsert_profile(
-            conn,
-            anon_id,
-            skills=selections["skills"] or None,
-            target_titles=selections["titles"] or None,
-            seniority_level=selections["seniority_level"],
-            years_of_experience=selections["years_of_experience"],
-        )
+        with conn.raw.transaction():
+            if pending is not None and pending.get("anon_id"):
+                anon_id = pending["anon_id"]
+            else:
+                anon_id = mint_anon_user(conn)
+            upsert_profile(
+                conn,
+                anon_id,
+                skills=selections["skills"] or None,
+                target_titles=selections["titles"] or None,
+                seniority_level=selections["seniority_level"],
+                years_of_experience=selections["years_of_experience"],
+            )
 
     set_pending_picker({"anon_id": anon_id, **selections})
     return redirect(url_for("onboarding.start"))
