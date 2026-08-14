@@ -1,9 +1,9 @@
 """GET / (authed feed shell) and GET /demo (public guest demo) — the day-1-
 stranger prerequisites (1B Wave 3 PR 11): layout + designed empty states on
 a minimal web shell. Hard 1C boundary: no posting list, no ranked feed, no
-filters, no watchlist/pipeline UI, no onboarding flow, no
-`posting_impression` events — the demo page shows corpus COUNTS, never
-postings.
+filters, no watchlist/pipeline UI, no `posting_impression` events — the
+demo page shows corpus COUNTS, never postings. Picker-first onboarding
+(GET/POST /start) lives in jobcannon/web/onboarding.py, not here.
 
 `corpus_stats` / `get_profile` / `connection_factory` are imported at MODULE
 level (unlike `jobcannon/web/__init__.py`'s `_resolve_consent`, which does an
