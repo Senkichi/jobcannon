@@ -71,14 +71,16 @@
         Dismiss
       </button>
       {% if entry.apply_url %}
-        <button type="button"
-                hx-post="{{ url_for('actions.apply', posting_id=entry.row.id) }}"
-                hx-target="closest [data-posting-row]"
-                hx-swap="outerHTML"
-                class="underline text-neutral-300"
-                data-action-apply>
+        <a href="{{ entry.apply_url }}"
+           target="_blank"
+           rel="noopener noreferrer"
+           hx-post="{{ url_for('actions.apply', posting_id=entry.row.id) }}"
+           hx-target="closest [data-posting-row]"
+           hx-swap="outerHTML"
+           class="underline text-neutral-300"
+           data-action-apply>
           Apply
-        </button>
+        </a>
       {% else %}
         <span class="text-neutral-600" data-apply-degraded aria-disabled="true">
           No application link available
