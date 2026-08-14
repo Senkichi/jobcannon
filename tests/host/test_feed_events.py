@@ -96,18 +96,18 @@ def _grant_consent(dsn, user_id):
         conn.commit()
 
 
-def _seed_profile(dsn, user_id):
+def _seed_profile(dsn, user_id, *, skills=("python",)):
     from jobcannon.db._profiles import upsert_profile
 
     with psycopg.connect(dsn) as conn:
-        upsert_profile(conn, user_id, skills=["python"])
+        upsert_profile(conn, user_id, skills=list(skills))
 
 
-def _feed_client(app, user_id=CLERK_ID, *, consent=False):
+def _feed_client(app, user_id=CLERK_ID, *, consent=False, skills=("python",)):
     dsn = app.config["_TEST_DSN"]
     _authed(app, user_id)
     _seed_user(dsn, user_id)
-    _seed_profile(dsn, user_id)
+    _seed_profile(dsn, user_id, skills=skills)
     if consent:
         _grant_consent(dsn, user_id)
     client = app.test_client()
@@ -251,10 +251,57 @@ def test_apply_destination_is_not_a_full_url(app):
 
     clicks = _events(dsn, "posting_apply_clicked")
     assert len(clicks) == 1
-    destination = clicks[0]["payload"]["apply_destination"]
-    assert "://" not in destination
-    assert "?" not in destination
-    assert destination == "boards.greenhouse.io"
+    # Exact value, not a substring check: "://" / "?" absence is a
+    # tautology for any urlsplit-based hostname extraction (urlsplit always
+    # strips the scheme and terminates the host at the first "/", "?", or
+    # "#"), so it proves nothing about correctness on its own.
+    assert clicks[0]["payload"]["apply_destination"] == "boards.greenhouse.io"
+
+
+def test_apply_destination_strips_port_and_userinfo_end_to_end(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Apply URL Port Co")
+    posting_id = _seed_posting(
+        dsn,
+        "apply-url-port-1",
+        company_id,
+        title="Apply URL Port Row",
+        source_urls=["https://user:pw@jobs.example.com:8443/apply?ref=1"],
+    )
+
+    resp = client.post(f"/postings/{posting_id}/apply")
+    assert resp.status_code == 200
+
+    clicks = _events(dsn, "posting_apply_clicked")
+    assert len(clicks) == 1
+    assert clicks[0]["payload"]["apply_destination"] == "jobs.example.com"
+
+
+def test_apply_with_a_malformed_stored_url_does_not_500(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Malformed URL Co")
+    posting_id = _seed_posting(
+        dsn,
+        "malformed-url-1",
+        company_id,
+        title="Malformed URL Row",
+        source_urls=["https://[oops/x"],
+    )
+
+    resp = client.post(f"/postings/{posting_id}/apply")
+    assert resp.status_code == 200
+
+    # The mutation still lands even though no usable destination could be
+    # extracted for the event.
+    with psycopg.connect(dsn, row_factory=psycopg.rows.dict_row) as conn:
+        row = conn.execute(
+            "SELECT status FROM pipeline_status WHERE user_id = %s AND posting_id = %s",
+            (CLERK_ID, posting_id),
+        ).fetchone()
+    assert row["status"] == "applied"
+    assert _events(dsn, "posting_apply_clicked") == []
 
 
 def test_posting_with_no_usable_url_renders_degraded_apply_control(app):
@@ -273,6 +320,32 @@ def test_posting_with_no_usable_url_renders_degraded_apply_control(app):
     resp = client.post(f"/postings/{posting_id}/apply")
     assert resp.status_code == 200
     assert _events(dsn, "posting_apply_clicked") == []
+
+
+def test_apply_control_renders_the_seeded_outbound_link(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Outbound Link Co")
+    posting_id = _seed_posting(
+        dsn,
+        "outbound-link-1",
+        company_id,
+        title="Outbound Link Row",
+        source_urls=["https://boards.greenhouse.io/acme/jobs/123?utm_source=test"],
+    )
+
+    html = client.get("/").get_data(as_text=True)
+    assert 'href="https://boards.greenhouse.io/acme/jobs/123?utm_source=test"' in html
+    assert "data-action-apply" in html
+
+    # Regression guard: an <a href> carrying hx-post gets its default click
+    # action (the navigation) cancelled by htmx's own click handler, so the
+    # href would render but a real click would never leave the page. The
+    # apply route must be reachable only via the fire-and-forget hx-on:click
+    # fetch, never via hx-post on the anchor itself.
+    apply_path = f"/postings/{posting_id}/apply"
+    assert f'hx-post="{apply_path}"' not in html
+    assert f"fetch('{apply_path}'" in html
 
 
 def test_save_dismiss_apply_each_emit_their_allowlisted_event(app):
@@ -307,12 +380,31 @@ def test_save_dismiss_apply_each_emit_their_allowlisted_event(app):
 
 
 def test_mutations_persist_per_user(app):
+    """User A's save is invisible to user B — both directions: the raw
+    `watchlists` row count (below) AND the rendered `saved` flag each user's
+    own feed shows for the same posting. A user B that is only ever proven
+    absent from the count query would pass this test for `false AS saved` or
+    for a join with no `user_id` predicate at all (which would leak A's save
+    into every user's feed as `saved = true`); rendering B's feed and
+    checking the button text rules both of those out."""
     dsn = app.config["_TEST_DSN"]
     company_id = _seed_company(dsn, "Per User Co")
     posting_id = _seed_posting(dsn, "per-user-1", company_id, title="Per User Row")
 
     client_a = _feed_client(app, user_id="user_a_actions", consent=True)
     assert client_a.post(f"/postings/{posting_id}/save").status_code == 200
+    # Render A's view BEFORE creating client_b: _authed (called by
+    # _feed_client) overwrites the shared app.config["VERIFY_REQUEST"]
+    # callback the identity resolver reads on EVERY request regardless of
+    # which test client issued it, so a second _feed_client() call
+    # re-authenticates every client, not just its own.
+    html_a = client_a.get("/").get_data(as_text=True)
+
+    client_b = _feed_client(app, user_id="user_b_actions", consent=True)
+    html_b = client_b.get("/").get_data(as_text=True)
+    assert "Per User Row" in html_a and "Per User Row" in html_b
+    assert "Saved" in html_a  # A sees their own save reflected
+    assert "Saved" not in html_b  # B never sees A's save
 
     with psycopg.connect(dsn, row_factory=psycopg.rows.dict_row) as conn:
         a_rows = conn.execute(
@@ -325,6 +417,52 @@ def test_mutations_persist_per_user(app):
         ).fetchall()
     assert len(a_rows) == 1
     assert len(b_rows) == 0
+
+
+def test_dismissed_posting_disappears_from_the_dismissers_feed_but_not_anothers(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Dismiss Visibility Co")
+    posting_id = _seed_posting(
+        dsn, "dismiss-visibility-1", company_id, title="Dismiss Visibility Row"
+    )
+
+    client_a = _feed_client(app, user_id="user_a_dismiss", consent=True)
+    resp = client_a.post(f"/postings/{posting_id}/dismiss")
+    assert resp.status_code == 200
+    # _fetch_entry returns None for a row the dismissing user can no longer
+    # see, so the re-rendered fragment for THIS route is an empty body.
+    assert resp.get_data() == b""
+
+    html_a = client_a.get("/").get_data(as_text=True)
+    assert "Dismiss Visibility Row" not in html_a
+
+    client_b = _feed_client(app, user_id="user_b_dismiss", consent=True)
+    html_b = client_b.get("/").get_data(as_text=True)
+    assert "Dismiss Visibility Row" in html_b
+
+
+def test_the_overlap_chip_survives_a_save_mutation_swap(app):
+    """Regression for the actions.py / pages.py build_entry drift: a
+    save/dismiss/apply swap must re-render the SAME entry shape the initial
+    page render showed for that row (chips included), not a stripped-down
+    one built with no profile. Skills must actually overlap the seeded
+    title's tokens (default fixture skills=["python"] never overlaps a
+    default "Engineer" title, which would make the divergence invisible on
+    both the page render AND the swap)."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True, skills=("engineer",))
+    company_id = _seed_company(dsn, "Overlap Chip Co")
+    posting_id = _seed_posting(dsn, "overlap-chip-1", company_id, title="Engineer")
+
+    page_html = client.get("/").get_data(as_text=True)
+    assert "title matches your selections: engineer" in page_html
+
+    resp = client.post(f"/postings/{posting_id}/save")
+    assert resp.status_code == 200
+    fragment_html = resp.get_data(as_text=True)
+    assert "Engineer" in fragment_html
+    assert "Saved" in fragment_html
+    assert "title matches your selections: engineer" in fragment_html
 
 
 def test_apply_on_nonexistent_posting_is_404_not_500(app):
