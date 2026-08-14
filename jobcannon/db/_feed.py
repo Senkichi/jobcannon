@@ -38,7 +38,8 @@ _SORTS: dict[str, str] = {
     "default": "rank_score DESC NULLS LAST, last_seen DESC NULLS LAST, id DESC",
 }
 
-# Column order matches the brief's selected-column list exactly. direct_url is
+# Column order is fixed here and mirrored by the anonymous branch so both
+# shapes return identical columns. direct_url is
 # deliberately omitted: it is unconditionally NULL for every posting
 # (jobcannon/db/_jobs.py's INSERT always writes None there), so source_urls /
 # sightings are the real provenance fields. employment_type / is_remote /
