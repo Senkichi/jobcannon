@@ -1,0 +1,15 @@
+{# Shared posting-list partial: iterates `entries` (a list of
+   {"row": <postings row>, "chips": <why_chips(...) list[str]>}) and includes
+   _posting_row.html once per entry. Consumed by /preview (this PR) and,
+   later, / and /demo once those routes render a real feed instead of the
+   corpus-count shell. No hx-* attributes here (a later PR governs the
+   HTMX fragment partials); this is a plain server-rendered include. #}
+{% if entries %}
+  <div class="space-y-4" data-feed-list>
+    {% for entry in entries %}
+      {% include "_posting_row.html" %}
+    {% endfor %}
+  </div>
+{% else %}
+  <p class="text-neutral-400" data-feed-empty>No postings match your selections yet.</p>
+{% endif %}

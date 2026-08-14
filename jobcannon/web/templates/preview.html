@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Preview — Job Cannon{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-3">Your preview feed</h1>
+
+{% if not has_selections %}
+  <p class="text-neutral-400 mb-4" data-no-selections>
+    You haven't completed the picker yet, so this is the unfiltered live feed.
+    <a href="/start" class="underline">Tell us what you're looking for</a> to narrow it down.
+  </p>
+{% endif %}
+
+<p class="text-sm text-neutral-500 mb-4" data-ordering-label>
+  {% if ordering.personalized %}
+    Ranked by {{ ordering.ranker_version }}.
+  {% else %}
+    Sorted by recency &mdash; personalized ranking is not live yet.
+  {% endif %}
+</p>
+
+<form method="get" action="/preview" class="mb-6 flex gap-2">
+  <input type="text" name="location" value="{{ location_contains }}" placeholder="Filter by location"
+         class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-sm text-neutral-100">
+  <button type="submit" class="text-sm underline">Filter</button>
+</form>
+
+{% include "_feed_list.html" %}
+{% endblock %}

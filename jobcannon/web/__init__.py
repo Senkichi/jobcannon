@@ -14,7 +14,7 @@ from jobcannon.web.anon_session import capture_attribution, ensure_session_ids
 
 logger = logging.getLogger(__name__)
 
-PUBLIC_PATHS = frozenset({"/healthz", "/demo", "/start"})
+PUBLIC_PATHS = frozenset({"/healthz", "/demo", "/start", "/preview"})
 
 
 def _resolve_consent(identity) -> bool:

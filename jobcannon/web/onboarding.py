@@ -1,11 +1,11 @@
-"""Picker-first onboarding: GET/POST /start (Phase 1C).
+"""Picker-first onboarding: GET/POST /start, GET /preview (Phase 1C).
 
 GET /start renders the picker, sourcing its title/company options from the
 live corpus (jobcannon.db._feed.distinct_titles / distinct_companies —
 never a hardcoded list) so the options can never drift from what the
 database actually contains. Once a picker submission is pending in the
-session, GET /start instead renders a "submitted, preview coming next"
-confirmation state — an in-scope, independently-tested render, not a
+session, GET /start instead renders a "submitted" confirmation state
+linking to GET /preview — an in-scope, independently-tested render, not a
 placeholder for a later PR.
 
 POST /start validates the submission at the boundary (an unknown seniority
@@ -19,7 +19,10 @@ sentinel, required because profiles.user_id is a FK to users(id) with no
 ON CONFLICT fallback (upsert_profile raises ForeignKeyViolation against a
 parent-less user_id). A repeat POST /start in the same browser session
 reuses the anon id already stored in the session's `pending_picker` rather
-than minting a second `users` row.
+than minting a second `users` row. On success it redirects to GET /preview
+(not back to /start — the picker's own "submitted" confirmation render is
+still reachable by a direct repeat GET /start, e.g. a bookmarked or
+back-button revisit).
 
 The picker collects structured selections only: target titles/companies
 (corpus-derived), a small static skills-token enum (postings has no skills
@@ -30,15 +33,30 @@ collected. profiles.experience_summary and profiles.target_locations stay
 NULL — workplace_type is a session-scoped filter for a later preview, never
 a profile location constraint.
 
-This route emits no events: it is a pre-signup surface and every pre-signup
-surface's g.consent_granted is hardcoded False, so instrumenting a stranger
-here would contradict this codebase's consent-first stance. Consent has
-exactly one writer, on an authenticated surface, added in a later PR.
+GET /preview reads those same session-held selections and renders a ranked
+list of postings driven only by them — no read of profiles.target_locations
+or any other stored profile field. A visitor who never completed the
+picker still gets a real page (the unfiltered live feed plus a prompt to
+complete /start), never a 500. A visitor whose Clerk credentials verify as
+signed in is redirected to the real feed (GET /) instead: /preview is a
+pre-signup surface, and jobcannon/web/__init__.py's before_request gate
+skips VERIFY_REQUEST entirely for every PUBLIC_PATHS route (it unconditionally
+sets g.clerk_user = None there), so this route re-checks the verifier itself
+rather than trusting an already-None g.clerk_user.
+
+Both /start and /preview emit no events: they are pre-signup surfaces and
+every pre-signup surface's g.consent_granted is hardcoded False, so
+instrumenting a stranger here would contradict this codebase's consent-first
+stance. Consent has exactly one writer, on an authenticated surface, added in
+a later PR. The "why" chips shown per posting on /preview
+(jobcannon.web.why.why_chips) are pure literal restatements of stored values
+— no model call, no classification, no fit label.
 
 DAL functions are imported at MODULE level (mirroring jobcannon/web/pages.py's
 documented rationale) so tests can monkeypatch
-jobcannon.web.onboarding.{distinct_titles,distinct_companies,mint_anon_user,
-upsert_profile,connection_factory} directly as module attributes.
+jobcannon.web.onboarding.{distinct_titles,distinct_companies,list_feed_postings,
+mint_anon_user,upsert_profile,connection_factory} directly as module
+attributes.
 """
 
 from __future__ import annotations
@@ -46,13 +64,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from flask import Blueprint, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, redirect, render_template, request, url_for
 
-from jobcannon.db._feed import distinct_companies, distinct_titles
+from jobcannon.db._feed import distinct_companies, distinct_titles, list_feed_postings
 from jobcannon.db._profiles import upsert_profile
 from jobcannon.db._users import mint_anon_user
 from jobcannon.db.pool import connection_factory
 from jobcannon.web.anon_session import get_pending_picker, set_pending_picker
+from jobcannon.web.why import why_chips
 
 logger = logging.getLogger(__name__)
 
@@ -197,4 +216,90 @@ def start_submit():
             )
 
     set_pending_picker({"anon_id": anon_id, **selections})
-    return redirect(url_for("onboarding.start"))
+    return redirect(url_for("onboarding.preview"))
+
+
+def _current_identity() -> Any:
+    """Re-check Clerk auth from inside a PUBLIC_PATHS route.
+
+    jobcannon/web/__init__.py's before_request gate skips VERIFY_REQUEST
+    entirely for public paths and unconditionally sets g.clerk_user = None,
+    so a signed-in visitor's credentials are never evaluated by the time a
+    PUBLIC_PATHS view runs. /preview needs to know anyway — a returning,
+    signed-in visitor should land on the real feed, not the pre-signup
+    preview — so it calls the verifier directly. Fails OPEN to "anonymous"
+    on any error: the worst case is a signed-in visitor briefly sees the
+    preview instead of being redirected, which is a UX miss, not the kind of
+    privacy/correctness hazard a failed DB read is (contrast
+    jobcannon/web/pages.py's _read_page_data, which fails CLOSED)."""
+    verify = current_app.config.get("VERIFY_REQUEST")
+    if verify is None:
+        return None
+    try:
+        return verify(request)
+    except Exception:
+        logger.warning("preview auth re-check failed (treating as anonymous)", exc_info=True)
+        return None
+
+
+def _read_preview_postings(
+    *, titles: list[str] | None, workplace_type: str | None, location_contains: str | None
+) -> list[Any]:
+    """Fail-closed corpus read, same shape as _read_picker_options: an
+    unopened pool or a genuine DB outage degrades to an empty result list
+    (_feed_list.html's empty-state branch still renders) rather than a 500
+    on a public entry point."""
+    try:
+        with connection_factory() as conn:
+            return list_feed_postings(
+                conn,
+                user_id=None,
+                titles=titles,
+                workplace_type=workplace_type,
+                location_contains=location_contains,
+            )
+    except Exception:
+        logger.warning("preview feed read failed (defaulting to empty result set)", exc_info=True)
+        return []
+
+
+def _ordering_label(rows: list[Any]) -> dict[str, Any]:
+    """Honest ordering label: recency ordering is never presented as
+    personalized ranking (the design constraint this function exists to
+    satisfy). feed_state has no writer anywhere in this codebase yet,
+    and list_feed_postings' anonymous branch hardcodes rank_score /
+    ranker_version to NULL (it has no user_id to join feed_state on) — so
+    for /preview specifically this is unconditionally the unranked branch
+    today. Written as a real check on the rows, rather than a bare constant,
+    so the same logic stays correct if a later authenticated consumer of
+    _feed_list.html ever passes ranked rows through it."""
+    ranked_versions = [r["ranker_version"] for r in rows if r["rank_score"] is not None]
+    if not ranked_versions:
+        return {"personalized": False, "ranker_version": None}
+    version = ranked_versions[0] if len(set(ranked_versions)) == 1 else None
+    return {"personalized": True, "ranker_version": version}
+
+
+@onboarding_bp.get("/preview", strict_slashes=False)
+def preview():
+    if _current_identity() is not None:
+        return redirect(url_for("pages.feed"))
+
+    pending = get_pending_picker()
+    selections: dict[str, Any] = pending if pending is not None else {}
+    location_contains = (request.args.get("location") or "").strip() or None
+
+    rows = _read_preview_postings(
+        titles=selections.get("titles") or None,
+        workplace_type=selections.get("workplace_type"),
+        location_contains=location_contains,
+    )
+    entries = [{"row": row, "chips": why_chips(row, selections)} for row in rows]
+
+    return render_template(
+        "preview.html",
+        entries=entries,
+        has_selections=bool(selections),
+        ordering=_ordering_label(rows),
+        location_contains=location_contains or "",
+    )

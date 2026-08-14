@@ -1,0 +1,31 @@
+{# One posting row. Included once per entry ({"row": ..., "chips": ...}) by
+   _feed_list.html, which is itself shared by /preview, /, and /demo — this
+   partial carries no route-specific logic and no save/dismiss/apply
+   controls (those land with the authenticated feed). #}
+<article class="border border-neutral-800 rounded-lg p-4 space-y-2" data-posting-row>
+  <div class="flex items-baseline justify-between gap-4">
+    <h2 class="text-lg font-medium text-neutral-100">{{ entry.row.title }}</h2>
+    {% if entry.row.workplace_type %}
+      <span class="text-xs uppercase tracking-wide text-neutral-500">{{ entry.row.workplace_type }}</span>
+    {% endif %}
+  </div>
+  <p class="text-sm text-neutral-400">
+    {{ entry.row.company }}
+    {%- if entry.row.location %} &middot; {{ entry.row.location }}{% endif %}
+  </p>
+  {% if entry.row.salary_min or entry.row.salary_max %}
+    <p class="text-sm text-neutral-400">
+      {{ entry.row.salary_currency }}
+      {%- if entry.row.salary_min %} {{ entry.row.salary_min }}{% endif %}
+      {%- if entry.row.salary_max %}&ndash;{{ entry.row.salary_max }}{% endif %}
+      {%- if entry.row.salary_period and entry.row.salary_period != "unknown" %} / {{ entry.row.salary_period }}{% endif %}
+    </p>
+  {% endif %}
+  {% if entry.chips %}
+    <ul class="flex flex-wrap gap-2 text-xs text-neutral-300" data-why-chips>
+      {% for chip in entry.chips %}
+        <li class="bg-neutral-900 border border-neutral-700 rounded-full px-2 py-1">{{ chip }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</article>
