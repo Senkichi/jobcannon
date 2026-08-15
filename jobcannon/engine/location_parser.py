@@ -1,10 +1,9 @@
 """Location parsing: freeform string → ``list[JobLocation]``.
 
-This is the Layer 2 (gazetteer) + Layer 3 (heuristic) path described in
-`.planning/SPEC-location-parsing.md`. Layer 1 lives in the individual ATS
-scanners (`_platforms_smartrecruiters.py`, `_platforms_ashby.py`,
-`_platforms_lever.py`, `_platforms_rippling.py`) and is added in Commit C
-— scanners that emit structured data write `JobLocation` directly, bypassing
+This is the Layer 2 (gazetteer) + Layer 3 (heuristic) path. Layer 1 lives in
+the individual ATS scanners (`_platforms_smartrecruiters.py`,
+`_platforms_ashby.py`, `_platforms_lever.py`, `_platforms_rippling.py`) —
+scanners that emit structured data write `JobLocation` directly, bypassing
 this parser entirely.
 
 Top-level entry point is ``parse_locations``. Callers pass either a single
@@ -12,8 +11,8 @@ freeform string or a list of pre-split strings (as `locations_raw` carries).
 The parser:
 
   1. Strips and splits each input on the existing
-     `location_normalizer.split_multi_locations` separators (the SPEC says to
-     reuse it; it's already battle-tested in the dropdown path).
+     `location_normalizer.split_multi_locations` separators, which is
+     already battle-tested in the dropdown path.
   2. Detects ``workplace_type`` from inline tokens (``Remote``, ``Hybrid``,
      ``On-Site``, plus LinkedIn ``#LI-Remote`` / ``#LI-Hybrid`` / ``#LI-Onsite``
      tags) and strips the token from the remaining location string.
@@ -66,8 +65,8 @@ logger = logging.getLogger(__name__)
 # Match word-boundaried tokens, case-insensitive. The detected token is
 # STRIPPED from the location string so it doesn't pollute the city/region
 # segment match downstream. LinkedIn hashtag forms appear when callers
-# pass a JD body excerpt; the SPEC's open Q3 leaves JD-body fallback as a
-# separate parameter (not in Commit A — `jd_full` plumbing comes later).
+# pass a JD body excerpt; JD-body fallback beyond that is left as a
+# separate parameter for now — `jd_full` plumbing comes later.
 
 _REMOTE_TOKEN_RE = re.compile(
     r"\b(?:remote(?:[\s\-]*only)?|#LI[\-]Remote|fully\s+remote)\b",

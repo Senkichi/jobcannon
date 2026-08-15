@@ -110,7 +110,7 @@ Render's own build environment, a CI runner, or any other datacenter IP can
 report false failures. Confirm the `--limit 8` batch's postings land and the
 block report is clean before proceeding to the full pre-seed.
 
-## 6. Full pre-seed (OD-10)
+## 6. Full pre-seed
 
 ```
 python scripts/preseed_corpus.py data/seed_companies.csv
@@ -131,16 +131,16 @@ python scripts/scan_block_report.py --since 24
 
 Use the report to make two decisions:
 
-- **OD-9 (worker concurrency):** pin `JC_WORKER_CONCURRENCY` based on the
+- **Worker concurrency:** pin `JC_WORKER_CONCURRENCY` based on the
   observed error/block rate. **Pinning this means editing `render.yaml`'s
   `JC_WORKER_CONCURRENCY` value and merging/deploying that change** — this
   var is not `sync: false`, so Render treats it as blueprint-owned and
   reapplies the committed value on every blueprint sync. A dashboard-only
   override is silently reverted the next time the Blueprint syncs.
-- **OD-11 (static outbound IP):** decide whether a static IP add-on is
+- **Static outbound IP:** decide whether a static IP add-on is
   warranted based on the platform-level block/error shares in the report.
 
-## 8. OD-18: storage alert
+## 8. Storage alert
 
 `db_storage_check` (a daily periodic on the worker, default `17 6 * * *`
 UTC) reports `pg_database_size` against `JC_DB_STORAGE_LIMIT_MB` (default

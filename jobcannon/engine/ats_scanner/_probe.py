@@ -49,11 +49,9 @@ TRIGGER_PREFIX_CAREERS_URL = "careers_url:"
 # some but not all of the cohort.
 #
 # These platforms can still be PROMOTED via the evidence-based reconcile path
-# (job_finder/web/ats_identity_reconcile.reconcile_company_ats), which requires
+# (``services.reconcile_company_ats``, see engine/services.py), which requires
 # corroborating job-URL evidence before writing `hit`. The per-platform probe
 # functions remain available and are used by reconcile's _verify_live step.
-#
-# This was the corollary of the v2 audit at .planning/ATS-COVERAGE-AUDIT-2026-05-27.md.
 _FP_PRONE_PLATFORMS: frozenset[str] = frozenset({"bamboohr", "personio", "recruitee", "breezy"})
 
 # (platform, probe_fn) pairs. Ordering matches the historical ladder:

@@ -9,7 +9,7 @@ begin with.
 `scripts/seed_guest_demo.py` both import it rather than re-declaring the
 literal.
 
-Single current row (OD-5): `profiles.user_id` is the PRIMARY KEY (m0001), so
+Single current row: `profiles.user_id` is the PRIMARY KEY (m0001), so
 `upsert_profile` is INSERT ... ON CONFLICT (user_id) DO UPDATE, never a
 second row per user. Each column update uses `COALESCE(EXCLUDED.col,
 profiles.col)` so an omitted (None) keyword argument preserves the

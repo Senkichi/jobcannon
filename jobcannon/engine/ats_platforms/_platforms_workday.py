@@ -58,13 +58,11 @@ _PAGE_SIZE = 20
 _DEFAULT_MAX_PAGES = 100
 
 
-# Pacing for the LIST endpoint between successive page fetches. Pre-F1
-# (commit b99e1d9) the list-endpoint cadence was incidentally paced by
+# Pacing for the LIST endpoint between successive page fetches. Before the
+# F1 pagination refactor, the list-endpoint cadence was incidentally paced by
 # the per-matched-posting detail-fetch sleep in the same per-page loop.
 # Restoring an explicit inter-page delay preserves the polite-pacing
-# intent for high-page-count Workday tenants. See
-# .planning/specs/2026-05-26-polish-review-audit.md (MAJOR — Workday +
-# SmartRecruiters pagination).
+# intent for high-page-count Workday tenants.
 _PAGE_FETCH_SLEEP_S = 0.1
 
 

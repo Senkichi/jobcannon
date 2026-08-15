@@ -1,5 +1,5 @@
 """Procrastinate task-shape declarations for the hosted job taxonomy, plus the
-periodic enqueue tick and OD-18 storage-check tick that fire on a schedule.
+periodic enqueue tick and storage-check tick that fire on a schedule.
 
 Task shapes (`scan`, `expiry_check`, `stale_detect`) and the two periodics
 (`enqueue_due_scans` and `db_storage_check`, each declared with `@app.periodic`
@@ -105,7 +105,7 @@ def enqueue_due_scans(timestamp: int) -> dict:
 )
 @app.task(queue="maintenance", queueing_lock="db_storage_check")
 def db_storage_check(timestamp: int) -> dict:
-    """OD-18 periodic: report the DB storage percentage through the sanctioned
+    """Periodic: report the DB storage percentage through the sanctioned
     scan_health_log recorder so a nearing-tier-limit database shows up
     alongside every other health signal, not just in Render's own email."""
     from jobcannon.db import connection_factory

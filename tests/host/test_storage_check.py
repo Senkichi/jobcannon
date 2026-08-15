@@ -1,4 +1,4 @@
-"""OD-18 storage check: threshold logic (real Postgres) plus the periodic
+"""Storage check: threshold logic (real Postgres) plus the periodic
 task wiring (no DB — connection_factory and record_scan_health are mocked)."""
 
 from __future__ import annotations

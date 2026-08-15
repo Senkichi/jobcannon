@@ -1,12 +1,10 @@
 """Tests for ``jobcannon.engine.location_parser`` and ``location_canonical``.
 
-Implements the SPEC anchor corpus from
-``.planning/SPEC-location-parsing.md`` (Test Plan / Unit section). Every
-anchor string in that table MUST pass; failures here block the SPEC's
-Commit A merge.
-
-Layer 1 (scanner integration) and migration tests live in separate test
-files added by Commits B and C.
+This is the anchor corpus for ``parse_locations``: every row below is a
+must-pass example of freeform-string -> structured-location parsing. Layer 1
+(scanner-emitted structured locations) is covered separately by the
+per-platform Layer-1 test files (e.g. ``test_workday_layer1.py``,
+``test_greenhouse_layer1.py``).
 """
 
 from __future__ import annotations
@@ -81,11 +79,11 @@ from jobcannon.engine.location_parser import parse_locations
     ],
 )
 def test_anchor_corpus(raw: str, expected: list[tuple]) -> None:
-    """The SPEC's anchor corpus must pass byte-for-byte.
+    """The anchor corpus must pass byte-for-byte.
 
-    Maintenance note: this list is the contract; do NOT update an entry's
-    expected value to match a parser change without first updating
-    .planning/SPEC-location-parsing.md.
+    Maintenance note: this list is the contract — an entry's expected value
+    should only change alongside a deliberate, reviewed change to
+    ``parse_locations`` behavior, not to make a regression pass.
     """
     locations = parse_locations(raw)
     got = [

@@ -9,7 +9,7 @@ every tracked file for owner-identifying terms before push).
 `seed(conn)` is idempotent by construction: the `users` insert is
 `ON CONFLICT (id) DO NOTHING` and `upsert_profile` is itself an upsert, so
 running this script twice leaves exactly one users row and one current
-profile row (OD-5 single current row) — safe to re-run against production
+profile row — safe to re-run against production
 after a schema change or a fresh deploy.
 
 Usage (operator, from a shell with DATABASE_URL set):

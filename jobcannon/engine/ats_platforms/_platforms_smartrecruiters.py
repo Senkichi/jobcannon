@@ -31,11 +31,10 @@ _PAGE_SIZE = 100
 # Per-board pagination budget. Raised 500 -> 2000 (matching Workday's effective
 # budget) so large enterprise boards (e.g. AbbVie ~1460) are fully discovered.
 _MAX_RESULTS = 2000
-# Pacing for the LIST endpoint between successive page fetches. Pre-F1
-# (commit b99e1d9) the list-endpoint cadence was incidentally paced by
-# the per-matched-posting detail-fetch sleep in the same per-page loop.
-# See .planning/specs/2026-05-26-polish-review-audit.md (MAJOR — Workday
-# + SmartRecruiters pagination).
+# Pacing for the LIST endpoint between successive page fetches. Before the
+# F1 pagination refactor, the list-endpoint cadence was incidentally paced by
+# the per-matched-posting detail-fetch sleep in the same per-page loop;
+# this constant makes that pacing explicit now that the two are decoupled.
 _PAGE_FETCH_SLEEP_S = 0.1
 
 

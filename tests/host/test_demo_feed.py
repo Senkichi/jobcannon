@@ -8,7 +8,7 @@ committed on a different connection than the Flask app's pooled one.
 
 The guest profile row (scripts/seed_guest_demo.py, jobcannon.db._profiles.
 GUEST_USER_ID) is a manual operator step, and the live corpus additionally
-depends on the corpus pre-seed (OD-10, scripts/preseed_corpus.py) owner-gated
+depends on the corpus pre-seed (scripts/preseed_corpus.py) owner-gated
 step — neither can be assumed to have run against any given deploy, so every
 test here seeds its own company + postings + guest profile directly against
 the throwaway database rather than depending on either step having executed.

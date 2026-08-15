@@ -1,11 +1,12 @@
 """Postgres test fixtures for the host layer.
 
-Strategy (1B spec §8 + Windows self-hosted CI constraint): GitHub `services:`
-containers require a Linux runner, so integration tests run against a permanent
-local PostgreSQL Windows service, reachable via POSTGRES_ADMIN_DSN. Each pytest
-session (per xdist worker) creates a throwaway database, runs migrations once,
-and drops it at exit. Per-test isolation is transaction-rollback, not per-test
-databases. With POSTGRES_ADMIN_DSN unset, every test in tests/host/ SKIPS.
+Strategy: DSN-driven. Integration tests connect through POSTGRES_ADMIN_DSN,
+whatever Postgres instance that points at — a `services:` container on CI
+(ubuntu-latest, pgvector/pgvector:pg18), or any local Postgres for local
+development. Each pytest session (per xdist worker) creates a throwaway
+database, runs migrations once, and drops it at exit. Per-test isolation is
+transaction-rollback, not per-test databases. With POSTGRES_ADMIN_DSN unset,
+every test in tests/host/ SKIPS.
 """
 
 from __future__ import annotations
