@@ -62,8 +62,6 @@ entries), and ``jd_full_offsite`` / ``jd_full_expired`` (I-18). ``data_enricher`
 additionally manages ``location_missing``, clears ``salary_implausible`` once a
 later pass resolves a plausible salary, and clears the I-18 jd-content codes once
 a clean body is re-fetched.
-
-Reference: .planning/specs/2026-05-29-ingestion-contract-enforcement.md §8
 """
 
 from __future__ import annotations

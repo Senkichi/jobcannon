@@ -11,9 +11,10 @@ junk shape needs a new regex — unbounded, point-source whack-a-mole.
 This module inverts the default to **fail-closed**: a title is board-eligible only if
 it *positively* satisfies the contract. "Unknown shape" ⇒ quarantine, never clean.
 ``title_contract_violation`` is the single predicate; it is enforced at the one
-ingestion chokepoint (``ParsedJob.from_job``) and re-applied retroactively to every
-existing row by the standing re-sweep (``_run_title_resweep_if_stale`` in
-``migrations/_post_hooks.py``), so a rule improvement heals the whole corpus at once.
+ingestion chokepoint (``ParsedJob.from_job``). In the private source, a standing
+re-sweep (``_run_title_resweep_if_stale`` in ``migrations/_post_hooks.py``, not
+carried into this port) re-applied it retroactively to every existing row so a
+rule improvement healed the whole corpus at once.
 
 THE SAFE RULE SET (empirically bounded, NOT a growing blocklist)
 ----------------------------------------------------------------

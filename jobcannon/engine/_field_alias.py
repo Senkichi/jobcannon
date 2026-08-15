@@ -1,8 +1,9 @@
 """Shared field-alias helpers for JSON job-posting extraction.
 
 Provides the canonical key lists and first-match-wins extractors shared
-between ``careers_page_interactions.py`` (generic careers-page AI navigator)
-and the ATS platform scanners (Greenhouse, Lever, …).
+across the ATS platform scanners (Greenhouse, Lever, …). In the private
+source these were also shared with a generic careers-page AI navigator
+(``careers_page_interactions.py``) that was not carried into this port.
 
 **Key ordering matters — first-match-wins.**
 Each platform's real key must appear *before* any alias:

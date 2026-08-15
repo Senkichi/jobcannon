@@ -1,4 +1,4 @@
-"""OD-18: storage-percentage alert, code-owned so it is CI-testable and not
+"""Storage-percentage alert, code-owned so it is CI-testable and not
 dependent on remembering a dashboard setting. Render's managed-Postgres email
 notifications are the belt; this periodic check is the suspenders — it logs
 at ERROR and writes a scan_health_log row through the sanctioned recorder,
@@ -23,7 +23,7 @@ def check_db_storage(conn: Any, *, limit_mb: int) -> dict:
     alert = used_pct >= ALERT_THRESHOLD
     if alert:
         logger.error(
-            "database storage at %.1f%% of the %sMB tier — plan the tier upgrade (OD-18)",
+            "database storage at %.1f%% of the %sMB tier — plan the tier upgrade",
             used_pct * 100,
             limit_mb,
         )

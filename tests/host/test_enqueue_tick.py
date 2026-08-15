@@ -70,11 +70,11 @@ def test_enqueue_due_scans_tolerates_already_enqueued(monkeypatch):
 
 
 def test_preseed_corpus_csv_to_defer_loop(tmp_path):
-    """scripts/preseed_corpus.py's CSV->defer loop (OD-10), covered here per
-    the plan's test-coverage note: no network, no DB — the CSV read plus
-    _enqueue_scans's pure-connector defer loop, against an InMemoryConnector
-    swapped in via replace_connector. --verify's HTTP checks are operator
-    tooling, not exercised beyond arg parsing."""
+    """scripts/preseed_corpus.py's CSV->defer loop, covered here with
+    no network and no DB — the CSV read plus _enqueue_scans's pure-connector
+    defer loop, against an InMemoryConnector swapped in via replace_connector.
+    --verify's HTTP checks are operator tooling, not exercised beyond arg
+    parsing."""
     from procrastinate import testing
 
     from jobcannon.host import tasks

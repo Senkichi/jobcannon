@@ -1,4 +1,4 @@
-"""The durable Procrastinate worker (spec §4, OD-2 end-of-1B standup).
+"""The durable Procrastinate worker: this repo's single migration authority.
 
 Startup owns BOTH schema authorities (Global Constraints: Two-Schema-
 Authorities ruling): our applied-set ledger via run_migrations (idempotent by

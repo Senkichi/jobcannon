@@ -1,5 +1,5 @@
-"""Per-platform scan block-rate report (operator tool feeding the OD-9
-concurrency pin and OD-11 static-IP decision after the ASN load test).
+"""Per-platform scan block-rate report (operator tool feeding the worker
+concurrency pin and static-outbound-IP decision after the ASN load test).
 
 Structured columns and jsonb keys only — no regex over error strings (house
 rule: read structured, don't re-parse free text). If a signal isn't

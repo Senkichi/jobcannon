@@ -6,8 +6,7 @@ Field shape mirrors schema.org PostalAddress + LinkedIn workplaceType so
 JSON-LD export comes for free and our internal enum casing matches the
 most-quoted industry source.
 
-See `.planning/SPEC-location-parsing.md` (Canonical Shape section) for the
-full design rationale. Companion modules:
+Companion modules:
   - `location_parser.py` — Layer 2 (gazetteer) + Layer 3 (heuristic).
   - `location_normalizer.py` — pre-existing whitespace/placeholder cleanup
     used as the first step of Layer 2.
