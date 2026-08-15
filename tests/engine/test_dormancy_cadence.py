@@ -1,4 +1,4 @@
-"""Tests for yield-tiered dormancy cadence (issue #1044).
+"""Tests for yield-tiered dormancy cadence.
 
 Covers:
 - consecutive_empty_scans counter transitions (empty -> increment; find ->
@@ -212,7 +212,7 @@ def test_dormancy_gate_sql(db_with_dormancy_fixtures):
 
 
 # ---------------------------------------------------------------------------
-# B1 — drive the REAL _scan_one_company_via_ats_api function (issue #1044).
+# B1 — drive the REAL _scan_one_company_via_ats_api function.
 #
 # The seam it actually calls is run_platform_scan, imported into this
 # module's namespace (jobcannon.engine.ats_scanner._run.run_platform_scan).
@@ -271,7 +271,7 @@ def test_consecutive_empty_scans_resets_on_nonempty_real_scan(db_with_dormancy_f
 
 
 # ---------------------------------------------------------------------------
-# B2 — error path (issue #1044): consecutive_empty_scans must be UNTOUCHED
+# B2 — error path: consecutive_empty_scans must be UNTOUCHED
 # when the scan raises. The UPDATE sits after run_platform_scan() inside the
 # try block, so an exception there jumps straight to `except Exception`,
 # skipping the UPDATE entirely.
@@ -316,7 +316,7 @@ def test_consecutive_empty_scans_untouched_on_scan_error_from_nonzero(db_with_do
 
 
 # ---------------------------------------------------------------------------
-# B3 — count/selection parity (issue #1044): _count_phase_a_eligible must
+# B3 — count/selection parity: _count_phase_a_eligible must
 # agree with the number of rows _run_ats_api_scan's own selection query
 # returns. Both consume _dormancy_gate_clause() (plus the other Phase A
 # gates); this drives BOTH real code paths against the same fixtures so a

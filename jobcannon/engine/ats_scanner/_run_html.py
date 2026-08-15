@@ -40,7 +40,7 @@ def _run_html_fallback_scan(
 ) -> None:
     """Phase C: HTML scrape miss/error companies (+ non-scannable hits) with homepage.
 
-    ``deadline_monotonic`` (issue #1368) is the scan-wide soft deadline shared
+    ``deadline_monotonic`` is the scan-wide soft deadline shared
     with Phases A and A2; when set, the phase stops starting new companies once
     it passes so the scan exits gracefully with partial results instead of
     overrunning the whole-scan wall (privately the scheduler's hard wall-clock
@@ -49,7 +49,7 @@ def _run_html_fallback_scan(
     # Eligible cohort:
     #   - ats_probe_status in ('miss', 'error') with a homepage (original gate), OR
     #   - ats_probe_status='hit' for a NON_SCANNABLE_PLATFORMS platform (e.g. jobvite).
-    # The second branch is the load-bearing fix for #222: a registered-but-stub
+    # The second branch is the load-bearing fix for a registered-but-stub
     # scanner used to mark its companies 'hit', which excluded them from this
     # query entirely and silently shadowed the only viable discovery path (the
     # tenant's real careers page, often on a redirected custom domain).
@@ -203,13 +203,13 @@ def _scan_one_company_via_html(
                     try:
                         parsed = ParsedJob.from_job(job)
                     except (DenylistedCompanyError, ListingTileError):
-                        # Denylist (I-10) or result-count tile (I-14, #211):
+                        # Denylist (I-10) or result-count tile (I-14):
                         # both hard-dropped.
                         continue
                     result = svc.upsert_job(html_conn, parsed, company_id=miss_company_id)
                     if result.kind == "inserted":
                         summary["jobs_new"] += 1
-                        # #223: enqueue the PERSISTED key (clean_title-normalized).
+                        # Enqueue the PERSISTED key (clean_title-normalized).
                         all_new_job_keys.append(result.dedup_key)
                     summary["html_scraped"] += 1
                 except Exception as job_err:

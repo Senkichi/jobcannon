@@ -71,7 +71,7 @@ def test_valid_payload_coerces_to_full_assessment():
 
 
 def test_coerce_assessment_missing_axis_raises_incomplete():
-    """_coerce_assessment is fail-closed (Issue #227, mechanism 2).
+    """_coerce_assessment is fail-closed.
 
     A missing axis raises ``_IncompleteAssessmentError`` rather than
     producing a partial sub-score vector that ``derive_classification``
@@ -106,7 +106,7 @@ def test_out_of_range_int_reaches_coerce_assessment_as_is(bad_value: int):
 def test_coerce_assessment_verbose_string_axis_raises_incomplete():
     """_coerce_assessment calls int() on a verbose string → ValueError.
 
-    Fail-closed (Issue #227): an uncoercible axis raises
+    Fail-closed: an uncoercible axis raises
     ``_IncompleteAssessmentError`` rather than being silently dropped.
     """
     payload = {**_VALID_PAYLOAD, "title_fit": "4 - strong match"}
@@ -146,7 +146,7 @@ def test_wrapped_missing_score_key_raises_incomplete():
 
     _coerce_assessment checks `isinstance(raw, dict) and "score" in raw`.
     A dict without "score" falls through to int(raw) → TypeError, which
-    is fail-closed (Issue #227): it raises ``_IncompleteAssessmentError``.
+    is fail-closed: it raises ``_IncompleteAssessmentError``.
     """
     payload = {**_VALID_PAYLOAD, "title_fit": {"evidence": "no score here"}}
     with pytest.raises(_IncompleteAssessmentError):

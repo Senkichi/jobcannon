@@ -196,7 +196,7 @@ def test_concurrent_deadline_mid_drain_success_branch_truncates_not_deadlocks(
     assert "exc" not in box, f"scan raised: {box.get('exc')!r}"
     assert summary.get("truncated") is True
     # Co0 plus the two already-running gated workers are always merged
-    # (issue #1130: a started worker is always drained). Whether one of the
+    # (a started worker is always drained). Whether one of the
     # three still-queued companies also gets merged is a genuine race, not a
     # bug: after Co0's fast worker returns, its now-free pool thread races
     # the main thread's abort_scan.set() (a few lines below the drain-loop

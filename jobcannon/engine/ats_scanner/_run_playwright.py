@@ -194,7 +194,7 @@ def _run_playwright_scan(
     bound: _high_score_history_clause is neutralized to TRUE (zero params)
     in this hosted port — see its docstring in _run.py.
 
-    ``deadline_monotonic`` (issue #1368) is the scan-wide soft deadline shared
+    ``deadline_monotonic`` is the scan-wide soft deadline shared
     with Phases A and C; when set, the phase stops starting new companies once
     it passes. The already-open browser is still closed in ``finally``.
     """

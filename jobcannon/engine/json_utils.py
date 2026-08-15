@@ -25,7 +25,7 @@ def to_naive_utc_iso(dt: datetime) -> str:
     to already be UTC (the store-UTC-render-local convention) and serialized
     as-is. Every datetime headed for a DB TEXT column should pass through
     here so aware values from source feeds (Greenhouse ``-04:00`` offsets,
-    email ``Z`` suffixes) never leak tz suffixes into storage (#361).
+    email ``Z`` suffixes) never leak tz suffixes into storage.
     """
     if dt.tzinfo is not None:
         dt = dt.astimezone(UTC).replace(tzinfo=None)
@@ -41,7 +41,7 @@ def normalize_iso_string_to_naive_utc(value: str) -> str:
     tz-aware strings (trailing ``Z`` or an explicit ``+HH:MM`` / ``-HH:MM``
     offset) are parsed, converted to UTC, and re-serialized without the
     offset — the same guarantee ``to_naive_utc_iso`` gives datetime callers
-    (#1226: a pre-#361 caller once fed an aware string into
+    (a caller once fed an aware string into
     ``persist_job_expiry_state``, and since ``expiry_checked_at`` is copied
     into ``last_seen`` on a 'live' verdict, that leaked the aware suffix
     into a store-UTC-naive column).

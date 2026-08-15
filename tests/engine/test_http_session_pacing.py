@@ -1,4 +1,4 @@
-"""Tests for per-host request pacing in the shared ATS Session (issue #1030).
+"""Tests for per-host request pacing in the shared ATS Session.
 
 Every ats_platforms HTTP call routes through get_session() (guarded by
 tests/test_ats_http_session_guard.py — no file calls bare requests.get/post),

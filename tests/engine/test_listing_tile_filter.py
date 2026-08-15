@@ -1,4 +1,4 @@
-"""Tests for the result-count / category-landing tile filter (#211).
+"""Tests for the result-count / category-landing tile filter.
 
 Two layers of enforcement, one predicate:
 
@@ -6,7 +6,7 @@ Two layers of enforcement, one predicate:
      (including numeric-prefixed legitimate titles) do not.
   2. ``ParsedJob.from_job`` — raises ``ListingTileError`` (hard drop, I-14).
 
-Root cause (#211): the static crawler harvested careers-page *category landing*
+Root cause: the static crawler harvested careers-page *category landing*
 links — anchor text "84 Data Scientist Jobs" — which ordered-words-matched the
 target "Data Scientist" and slipped the keyword gate, then scored as a real
 posting. The fix rejects the tile shape at the source boundary.
@@ -36,7 +36,7 @@ from jobcannon.engine.parsed_job import ListingTileError, ParsedJob
 
 # Real count tiles / category-landing titles — MUST match.
 _TILE_TITLES = [
-    "84 Data Scientist Jobs",  # the exact #211 Capital One offender
+    "84 Data Scientist Jobs",  # the exact Capital One offender that surfaced this class
     "71 Business Analyst Jobs",
     "1,200+ openings",
     "12 results",

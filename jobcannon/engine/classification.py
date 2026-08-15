@@ -106,8 +106,8 @@ def effective_sub_scores(
 ) -> dict:
     """Return ``sub_scores`` with ``location_fit`` swapped to the policy's effective value.
 
-    Single enforcement point for the raw-vs-effective ``location_fit`` split
-    introduced by issue #1213: in the private original, the assessment writer
+    Single enforcement point for the raw-vs-effective ``location_fit`` split:
+    in the private original, the assessment writer
     stores the LLM's raw ``location_fit`` in ``sub_scores_json`` (so the UI
     can show what the model actually said) but derives classification from
     the location policy's ``effective_location_fit``. This schema has no
@@ -115,8 +115,7 @@ def effective_sub_scores(
     helper is ported ahead of that writer so any future consumer that
     re-derives classification from stored sub-scores consults the stored
     location-policy verdict — skipping that consultation systematically
-    disagrees with the stored classification for every policy-adjusted row
-    (issues #1484, #1494).
+    disagrees with the stored classification for every policy-adjusted row.
 
     This helper is that consultation. Call it on the parsed ``sub_scores`` dict
     plus the raw serialized verdict before passing the result to
@@ -225,7 +224,8 @@ def derive_classification(
     (mean 3.0, 0 strong axes) never reaches here — it is caught by branch 3 —
     and near-neutral vectors like {4,3,3,3,3,3} fall through to "consider".
 
-    Partial-vector defense (couples #227): the domain guard below requires all
+    Partial-vector defense (couples with ``_coerce_assessment``'s fail-closed
+    coercion in ``job_scorer.py``): the domain guard below requires all
     six canonical keys before any sub-score branch runs, so a vector missing an
     axis raises ValueError rather than reaching "apply" over a partial dict.
 

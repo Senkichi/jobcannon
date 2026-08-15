@@ -131,7 +131,7 @@ def test_verify_live_false_for_keyword_adapters_and_unknown():
 
 
 def test_fetch_dispatch_coverage_matches_scanner_registries():
-    """Identity guard (the #536 class): the registry's fetch views must equal the
+    """Identity guard: the registry's fetch views must equal the
     authoritative scanner registries — no scanner silently dropped from dispatch."""
     assert set(ats_registry.SCANNERS_BY_NAME) == set(ats_platforms.SCANNERS_BY_NAME)
     assert set(ats_registry.PLAYWRIGHT_SCANNERS) == set(_run_playwright._PLAYWRIGHT_SCANNERS)
@@ -509,7 +509,7 @@ class TestExtractGreenhousePostingId:
 
     def test_eu_region_host(self):
         """EU data-region host (job-boards.eu.greenhouse.io) — the moniepoint case that the
-        narrow boards.greenhouse.io pattern silently dropped (#644 fallout)."""
+        narrow boards.greenhouse.io pattern once silently dropped."""
         from jobcannon.engine.ats_registry import extract_greenhouse_posting_id
 
         assert (
@@ -554,7 +554,7 @@ class TestExtractGreenhousePostingId:
         in an unrelated host's query value (a redirect/tracking wrapper) is not a real
         posting URL and must return None. A raw ``re.search`` over the whole URL accepts
         this (py/incomplete-url-substring-sanitization); the defect must not survive in
-        extract_ either. Regression for the PR #695 adversarial finding."""
+        extract_ either. Regression for an adversarial-review finding."""
         from jobcannon.engine.ats_registry import extract_greenhouse_posting_id
 
         assert (
@@ -632,7 +632,7 @@ class TestDetectGreenhousePostingId:
         the whole URL accepts this (py/incomplete-url-substring-sanitization); binding the
         match to the parsed hostname rejects it. This is the exact false-positive that would
         key ("greenhouse", "111") into jobs.postings for a non-greenhouse URL, violating the
-        migration's F1 cross-platform guard. Regression for the PR #695 adversarial finding."""
+        migration's F1 cross-platform guard. Regression for an adversarial-review finding."""
         from jobcannon.engine.ats_registry import detect_greenhouse_posting_id
 
         assert (
