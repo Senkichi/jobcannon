@@ -62,10 +62,14 @@ services:
         value: "0"
       - key: POSTHOG_API_KEY
         sync: false
-      # Optional: EU/self-hosted PostHog routing only; unset -> US cloud
-      # (wiring.py passes host= to posthog.Posthog only when set).
+      # EU ingestion routing (data residency): committed rather than
+      # sync:false since it's a routing choice, not a secret. Keep in
+      # lockstep with jobcannon-worker's POSTHOG_HOST below — both
+      # services build their own PostHog client through the same
+      # wiring.py seam, so a mismatch would silently split analytics
+      # across regions.
       - key: POSTHOG_HOST
-        sync: false
+        value: https://eu.i.posthog.com
 
   - type: worker
     name: jobcannon-worker
@@ -90,3 +94,12 @@ services:
       # against drift.
       - key: JC_DB_STORAGE_LIMIT_MB
         value: "5120"
+      # PostHog wiring parity with jobcannon-web: the worker builds its own
+      # client through the same wiring.py seam (init_engine_seams is called
+      # unconditionally from jobcannon/worker/__main__.py). Previously
+      # undeclared here, which left the worker's PostHog client silently
+      # inert/unrouted regardless of the web service's configuration.
+      - key: POSTHOG_API_KEY
+        sync: false
+      - key: POSTHOG_HOST
+        value: https://eu.i.posthog.com

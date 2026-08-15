@@ -129,6 +129,25 @@ def test_every_required_env_var_is_declared_on_both_services():
         assert not missing, f"{svc['name']} missing env declarations: {missing}"
 
 
+def test_posthog_env_declared_identically_on_both_services():
+    """EU ingestion routing: POSTHOG_HOST is a committed literal (not
+    sync:false) so it can't drift per-service via the dashboard, and both
+    services must declare the same value — jobcannon-web and
+    jobcannon-worker each build their own PostHog client through the same
+    wiring.py seam, so a mismatch would silently split analytics between
+    regions. POSTHOG_API_KEY stays sync:false (a real secret) but must be
+    declared on both services too."""
+    bp = _blueprint()
+    hosts = {}
+    for svc in bp["services"]:
+        declared = {e["key"] for e in svc["envVars"]}
+        assert {"POSTHOG_API_KEY", "POSTHOG_HOST"} <= declared, svc["name"]
+        host_entry = next(e for e in svc["envVars"] if e["key"] == "POSTHOG_HOST")
+        assert host_entry.get("value") == "https://eu.i.posthog.com", svc["name"]
+        hosts[svc["name"]] = host_entry["value"]
+    assert hosts["jobcannon-web"] == hosts["jobcannon-worker"]
+
+
 def test_scan_block_report_help():
     """Windows self-hosted CI hazard: a bare 'python' subprocess can be
     hijacked by Windows App Execution Alias stubs — always sys.executable.
