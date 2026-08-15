@@ -11,14 +11,32 @@ DB-level trigger/role GRANT on the events table is the airtight future
 hardening. jobcannon/db/_events.py (the sanctioned writer) and
 jobcannon/db/migrations/ (legitimate schema DDL for the events table +
 analytics_consent columns) are exempt from the scan.
+
+ROOTS is resolved from __file__ rather than cwd (repo-root anchored) and
+derived from the package layout — every top-level subpackage under
+jobcannon/ (any dir with an __init__.py) — rather than a hand-maintained
+list, so a future new top-level package is automatically covered without
+anyone remembering to update this file (#45: a hand-maintained list had
+silently omitted jobcannon/engine). test_only_events_module_writes_events_table
+also carries a positive control: it asserts the walk actually visited the
+sanctioned writer (jobcannon/db/_events.py) before checking for offenders, so
+a broken ROOTS/cwd resolution that visits zero files fails loudly instead of
+passing vacuously.
 """
 
 import ast
 import pathlib
 import re
 
-ROOTS = ["jobcannon/host", "jobcannon/web", "jobcannon/db", "jobcannon/worker"]
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_PACKAGE_ROOT = _REPO_ROOT / "jobcannon"
+ROOTS = sorted(
+    p.relative_to(_REPO_ROOT).as_posix()
+    for p in _PACKAGE_ROOT.iterdir()
+    if p.is_dir() and (p / "__init__.py").is_file()
+)
 _EXEMPT_SUBSTRINGS = ("jobcannon/db/_events.py", "/migrations/")
+_SANCTIONED_WRITER = "jobcannon/db/_events.py"
 
 
 def _is_forbidden_events_sql(s: str) -> bool:
@@ -40,15 +58,27 @@ def _is_forbidden_events_sql(s: str) -> bool:
 
 def test_only_events_module_writes_events_table():
     offenders = []
+    found_sanctioned_writer = False
     for root in ROOTS:
-        for path in pathlib.Path(root).rglob("*.py"):
-            posix = str(path).replace("\\", "/")
+        for path in (_REPO_ROOT / root).rglob("*.py"):
+            posix = path.relative_to(_REPO_ROOT).as_posix()
+            if posix == _SANCTIONED_WRITER:
+                found_sanctioned_writer = True
             if any(ex in posix for ex in _EXEMPT_SUBSTRINGS):
                 continue
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
                 if isinstance(node, ast.Constant) and isinstance(node.value, str):
                     if _is_forbidden_events_sql(node.value):
-                        offenders.append(str(path))
+                        offenders.append(posix)
+    # Positive control: prove the walk actually saw real code before trusting
+    # an empty `offenders` list. If ROOTS or _REPO_ROOT ever resolves wrong
+    # (e.g. reverts to a cwd-relative path), the walk silently visits zero
+    # files and `offenders` stays empty for the wrong reason — this catches
+    # that by requiring the one known, always-present writer to have been seen.
+    assert found_sanctioned_writer, (
+        f"walk never visited {_SANCTIONED_WRITER} under ROOTS={ROOTS} "
+        f"(repo root resolved to {_REPO_ROOT}) — scan is vacuous, not clean"
+    )
     assert not offenders, f"raw events-table SQL outside _events.py: {offenders}"
 
 
