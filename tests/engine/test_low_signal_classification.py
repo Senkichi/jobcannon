@@ -125,7 +125,7 @@ def test_any_axis_one_after_low_signal_check_does_not_promote():
     assert cls == "low_signal"
 
 
-# --- Coverage for the terminal-tier set -------------------------
+# --- Coverage for the terminal-tier set ------------------------------------
 #
 # The low_signal rule must fire for every tier from which no further automatic
 # enrichment will run. The agentic enricher flips 'exhausted' to 'agentic' on
@@ -202,7 +202,7 @@ def test_non_terminal_tier_short_jd_is_not_low_signal(tier):
     assert cls == "apply"
 
 
-# --- Flat-neutral branch (branch C) -------------------------------
+# --- Flat-neutral branch (branch C) ----------------------------------------
 #
 # An all-3s vector is degenerate at the "couldn't tell" midpoint and must be
 # surfaced as low_signal regardless of JD length or enrichment_tier — it does
@@ -277,7 +277,7 @@ def test_flat_neutral_legitimacy_note_still_wins():
     assert cls == "reject"
 
 
-# --- Positive-evidence apply branch (branch B) --------------------
+# --- Positive-evidence apply branch (branch B) ------------------------------
 
 
 def test_strong_vector_is_apply():

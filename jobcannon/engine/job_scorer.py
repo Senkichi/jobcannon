@@ -288,7 +288,7 @@ def _coerce_assessment(
     classification is Python-derived at persist time (anti-pattern 3
     defense; see db.derive_classification).
 
-    Fail-closed coercion (mechanism 2): every one of the six axes
+    Fail-closed coercion: every one of the six axes
     is REQUIRED. A missing or uncoercible axis raises
     ``_IncompleteAssessmentError`` rather than being silently dropped. The
     previous behaviour produced a *partial* sub-score vector, which
