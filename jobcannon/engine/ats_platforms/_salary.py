@@ -3,7 +3,7 @@
 The single point where an ATS platform scanner turns the raw structured pay
 values it decoded into the canonical salary job-dict fields. Every salary-emitting
 scanner (Greenhouse, Lever, Ashby, Pinpoint, ...) delegates here so the
-capture → normalize → reconcile contract (tracking private issue #393) is enforced in
+capture → normalize → reconcile contract is enforced in
 exactly one place rather than re-implemented per platform.
 
 Design rules honored (binding — see #393):

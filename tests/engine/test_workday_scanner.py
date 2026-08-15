@@ -341,7 +341,7 @@ class TestFetchPostingsWithCompleteness:
     Completeness rules:
       - complete=True  when total_fetched >= total (including genuine empty board).
       - complete=False when total exceeds what the page budget can fetch — but
-        the partial postings still come back non-empty (private issue #216).
+        the partial postings still come back non-empty.
       - complete=False when a network/HTTP error prevents any page from arriving.
       - complete=False when pagination stops before total_fetched >= total.
     """
@@ -374,7 +374,7 @@ class TestFetchPostingsWithCompleteness:
 
     @patch("jobcannon.engine.ats_platforms._platforms_workday.get_session")
     def test_board_over_budget_is_incomplete_but_non_empty(self, mock_get_session, _mock_detail):
-        """Board larger than the page budget → complete=False AND non-empty (private issue #216).
+        """Board larger than the page budget → complete=False AND non-empty.
 
         Regression guard: pre-fix, a board with total > the cap returned an
         EMPTY postings list (discovery silently zeroed). Now discovery gets
@@ -409,7 +409,7 @@ class TestFetchPostingsWithCompleteness:
 
     @patch("jobcannon.engine.ats_platforms._platforms_workday.get_session")
     def test_large_board_within_budget_is_complete(self, mock_get_session, _mock_detail):
-        """A >200-posting board fully paginates when within the page budget (private issue #216)."""
+        """A >200-posting board fully paginates when within the page budget."""
         mock_post = ats_session_method(mock_get_session, "post")
         from jobcannon.engine.ats_platforms._platforms_workday import (
             _PAGE_SIZE,

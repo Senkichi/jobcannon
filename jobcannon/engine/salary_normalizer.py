@@ -1,7 +1,7 @@
 """Single normalization point for salary observations (Data Integrity Overhaul P1.1).
 
 This is the **foundation layer** of the salary capture -> normalize -> reconcile
-architecture (tracking private issue #393). It owns:
+architecture. It owns:
 
   * ``SalaryObservation`` — a lossless value object recording what a single source
     asserted about pay, with unit/currency/provenance metadata (design rule D-1).

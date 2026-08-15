@@ -54,7 +54,7 @@ _PAGE_SIZE = 20
 # reconciler's completeness gate then declines expiry-reconciliation for that
 # tenant, but discovery is no longer silently zeroed.  Tunable via
 # ``config.ats.workday_max_pages`` threaded through ``run_ats_scan`` /
-# ``reconcile_all_companies`` (private issue #216).
+# ``reconcile_all_companies``.
 _DEFAULT_MAX_PAGES = 100
 
 
@@ -239,7 +239,7 @@ def _fetch_postings_with_completeness(
     Pagination runs up to a **page budget** (``max_pages``, default
     :data:`_DEFAULT_MAX_PAGES`). Boards larger than the budget still return
     the first ``max_pages * _PAGE_SIZE`` postings — discovery is never
-    silently zeroed for a large tenant (private issue #216) — but with
+    silently zeroed for a large tenant — but with
     ``complete=False`` so the reconciler declines expiry-reconciliation.
 
     Returns ``(postings, complete)`` where ``complete`` is ``True`` only
