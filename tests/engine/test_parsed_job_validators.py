@@ -226,7 +226,7 @@ class TestI10CompanyDenylist:
         """A company in the denylist raises DenylistedCompanyError.
 
         The denylist provider returns NORMALIZED entries (normalize_company),
-        and from_job compares normalize_company(company) against them (#213).
+        and from_job compares normalize_company(company) against them.
         normalize_company('Fake Company LLC') strips 'Company' and 'LLC' as
         legal-entity tokens, yielding 'fake'.
         """
@@ -249,7 +249,7 @@ class TestI10CompanyDenylist:
             parsed_job_mod.set_denylist_provider(None)
 
     def test_from_job_denylist_matches_suffix_variant(self):
-        """#213: a suffix-free denylist entry rejects a company stored WITH a suffix."""
+        """A suffix-free denylist entry rejects a company stored WITH a suffix."""
         job = _make_job(company="Fake Company Inc")
         parsed_job_mod.set_denylist_provider(lambda: frozenset({"fake"}))
         try:

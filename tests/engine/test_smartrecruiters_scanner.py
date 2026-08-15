@@ -414,12 +414,12 @@ class TestFetchSmartRecruitersDescription:
 
 
 # ---------------------------------------------------------------------------
-# Tests: _fetch_postings_with_completeness (completeness gate, #217)
+# Tests: _fetch_postings_with_completeness (completeness gate)
 # ---------------------------------------------------------------------------
 
 
 class TestSmartRecruitersCompleteness:
-    """The reconciler may only expire against a complete live board (#217)."""
+    """The reconciler may only expire against a complete live board."""
 
     @patch("jobcannon.engine.ats_platforms._platforms_smartrecruiters.get_session")
     def test_under_cap_board_is_complete(self, mock_get_session):
@@ -471,7 +471,7 @@ class TestSmartRecruitersCompleteness:
     def test_over_cap_warning_fires_once_per_board_not_per_page(self, mock_get_session, caplog):
         """Multi-page over-cap response logs warning exactly once, not per page.
 
-        Regression guard for #1024: pre-fix, `totalFound` was re-read on every
+        Regression guard: pre-fix, `totalFound` was re-read on every
         page iteration, so the over-cap warning fired once per page (20 times for
         a 2522-posting board with cap 2000 and page size 100). After the fix,
         `totalFound` is captured only on the first page, so the warning fires
@@ -582,7 +582,7 @@ class TestSmartRecruitersCompleteness:
         assert isinstance(result, list)
 
     # -----------------------------------------------------------------------
-    # Tests: parallel page-fetch concurrency (issue #1029)
+    # Tests: parallel page-fetch concurrency
     # -----------------------------------------------------------------------
 
     @patch("jobcannon.engine.ats_platforms._platforms_smartrecruiters.get_session")

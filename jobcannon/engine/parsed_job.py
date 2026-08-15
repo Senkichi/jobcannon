@@ -20,7 +20,7 @@ Invariants enforced here:
     I-10  company not in configured denylist → raises DenylistedCompanyError
     I-13  jd_full either NULL or above content-density floor → UnresolvedParsedJob
           (reason="jd_full_junk") with jd_full=None; other fields preserved
-    I-14  title is not a result-count / category-landing tile (#211) → raises
+    I-14  title is not a result-count / category-landing tile → raises
           ListingTileError (hard drop; a count tile is not a posting)
     I-15  salary not implausible (P1.6, D-3/D-9) → UnresolvedParsedJob
           (reason="salary_implausible") when a source supplied a salary
@@ -112,7 +112,7 @@ class DenylistedCompanyError(ValueError):
 
 
 class ListingTileError(ValueError):
-    """I-14 (#211): title is a result-count / category-landing tile.
+    """I-14: title is a result-count / category-landing tile.
 
     A count tile ("84 Data Scientist Jobs", "1,200+ openings") is a category
     landing page, not a single applyable posting. Unlike the metadata-blob
@@ -226,7 +226,7 @@ class ParsedJob:
 
     # ── Metadata ────────────────────────────────────────────────────────────
     posted_date: datetime | None = None
-    posted_date_precision: str | None = None  # 'exact' | 'approximate' | 'proxy' (#363)
+    posted_date_precision: str | None = None  # 'exact' | 'approximate' | 'proxy'
 
     # ── Scoring (None at ingest; populated by scorer pipeline) ──────────────
     scoring_provider: str | None = None
@@ -257,7 +257,7 @@ class ParsedJob:
 
         Validator routing (I-07..I-17):
 
-            I-14 (listing tile, #211)       → raises ListingTileError
+            I-14 (listing tile)             → raises ListingTileError
             I-08 (title_metadata_blob)      → UnresolvedParsedJob, does NOT raise
             I-16 (title_invalid_shape /
                   title_non_posting)        → UnresolvedParsedJob, does NOT raise
@@ -316,7 +316,7 @@ class ParsedJob:
         # Both I-08 and is_metadata_blob map to the same reason code
         # 'title_metadata_blob'; the distinction is an implementation detail.
 
-        # I-14 (#211): result-count / category-landing tile — HARD DROP.
+        # I-14: result-count / category-landing tile — HARD DROP.
         # Runs before the flag-only blob checks (and before clean_title, which
         # leaves the leading-count + listing-noun shape intact). A count tile is
         # categorically not a posting and carries zero human-triage value, so we
@@ -358,7 +358,7 @@ class ParsedJob:
 
         # I-10: company denylist — raises DenylistedCompanyError.
         # Match on normalize_company (not raw .lower().strip()) so legal-entity
-        # suffix variants and aggregator re-posters fire (#213): a denylist
+        # suffix variants and aggregator re-posters fire: a denylist
         # entry of "Virtual Vocations" rejects a stored brand of
         # "Virtual Vocations Inc" — both normalize to "virtual vocations".
         # get_company_denylist returns already-normalized entries.
@@ -534,7 +534,7 @@ class UnresolvedParsedJob:
 
     # ── Metadata ────────────────────────────────────────────────────────────
     posted_date: datetime | None = None
-    posted_date_precision: str | None = None  # 'exact' | 'approximate' | 'proxy' (#363)
+    posted_date_precision: str | None = None  # 'exact' | 'approximate' | 'proxy'
 
     # ── Scoring ─────────────────────────────────────────────────────────────
     scoring_provider: str | None = None

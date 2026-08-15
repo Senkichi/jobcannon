@@ -226,7 +226,7 @@ def test_flat_neutral_is_low_signal_independent_of_jd_length():
     "tier", (None, "free", "ddg", "low", "serpapi", "mid", "exhausted", "agentic")
 )
 def test_flat_neutral_is_low_signal_across_all_tiers(tier):
-    """Flat-neutral -> low_signal regardless of enrichment_tier (covers #225)."""
+    """Flat-neutral -> low_signal regardless of enrichment_tier."""
     cls = derive_classification(
         sub_scores=dict(_NEUTRAL),
         legitimacy_note=None,
@@ -238,7 +238,7 @@ def test_flat_neutral_is_low_signal_across_all_tiers(tier):
 
 
 # ---------------------------------------------------------------------------
-# Issue #227: degenerate flag routes to low_signal (belt-and-braces with the
+# Degenerate flag routes to low_signal (belt-and-braces with the
 # upstream cascade quality floor).
 # ---------------------------------------------------------------------------
 

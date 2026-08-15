@@ -1,10 +1,10 @@
-"""Tests for parallel detail fetching in run_platform_scan (issue #1028)."""
+"""Tests for parallel detail fetching in run_platform_scan."""
 
 from jobcannon.engine.ats_platforms._registry import PlatformScanner, run_platform_scan
 
 
 class TestParallelDetailFetch:
-    """Tests for the parallel detail fetch feature added in issue #1028."""
+    """Tests for the parallel detail fetch feature."""
 
     def test_detail_fetch_callable_invoked_for_matched_postings(self):
         """When scanner has detail_fetch, it's called for each matched posting."""

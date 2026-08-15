@@ -238,7 +238,7 @@ _HAS_DOLLAR_RE = re.compile(r"\$\s*\d")
 # digits run followed by a pipe and TitleCase text.
 _REQ_ID_PIPE_RE = re.compile(r"\d{4,}\s*\|\s*[A-Z]")
 
-# Result-count / category-landing tile pattern (#211): a leading integer
+# Result-count / category-landing tile pattern: a leading integer
 # (optionally comma-grouped and/or `+`-suffixed) followed by descriptive text
 # that END-anchors on an aggregate-listing noun ("jobs", "positions",
 # "openings", "roles", "opportunities", "results"). These are category landing
@@ -502,7 +502,7 @@ def clean_title(title: str) -> str:
 is_metadata_blob = _is_metadata_blob
 
 #: Public alias for ``_is_listing_tile``.
-#: Imported by ``ParsedJob.from_job`` (#211) so result-count / category-landing
+#: Imported by ``ParsedJob.from_job`` so result-count / category-landing
 #: tiles are hard-dropped at the universal posting-hygiene enforcement point,
 #: across every ingestion path. Reused by the static crawler tier for a cheap
 #: early exit before ParsedJob construction.

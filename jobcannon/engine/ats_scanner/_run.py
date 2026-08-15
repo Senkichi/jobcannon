@@ -47,8 +47,8 @@ from jobcannon.engine.services import get_services
 # Platform key -> PlatformScanner. The scan dispatch consumes the SINGLE central
 # registry (jobcannon.engine.ats_platforms.SCANNERS_BY_NAME) directly — registering
 # a scanner there is the only step to make a platform scannable; there is no
-# second list to keep in sync. (A parallel hardcoded dict here silently dropped
-# the Amazon/Microsoft/Eightfold adapters from the live scan — see #529 fallout.)
+# second list to keep in sync. (A parallel hardcoded dict here once silently
+# dropped the Amazon/Microsoft/Eightfold adapters from the live scan.)
 # NON_SCANNABLE platforms (jobvite/google) are caught before dispatch, so their
 # presence in the registry is harmless.
 _PLATFORM_SCANNERS = SCANNERS_BY_NAME
@@ -119,7 +119,7 @@ class _CompanyScanResult:
     # merged into summary["errors"] by the caller — otherwise they are
     # silently dropped, diverging from serial-path behavior.
     job_errors: list[str] = field(default_factory=list)
-    # True when the scan-wide deadline (issue #1368) tripped before this
+    # True when the scan-wide deadline tripped before this
     # company's worker started any real work: the worker no-opped at entry and
     # nothing ran, so the caller must skip this result entirely (no counters,
     # no tracker tick) — the concurrent-path equivalent of the serial path
@@ -414,16 +414,16 @@ def _run_ats_scan_body(
     # Workday per-board pagination budget: threaded explicitly
     # through run_platform_scan -> fetch_postings rather than via a ContextVar.
     # ContextVars do not propagate into ThreadPoolExecutor worker threads, so
-    # under the parallel page-fetch pool (issue #1029) the override would
+    # under the parallel page-fetch pool the override would
     # silently fall back to the platform default instead of the configured
     # budget.
     workday_max_pages = config.get("ats", {}).get("workday_max_pages")
 
-    # Optional whole-scan runtime cap (issue #1130 introduced it as a
-    # Phase-A-only cap; issue #1368 generalized it to bound the full
-    # per-company scan — Phases A + A2 + C — so the job exits gracefully
-    # with partial results instead of being killed mid-company by the
-    # scheduler's hard wall-clock timeout). Absent or 0 = no limit.
+    # Optional whole-scan runtime cap (originally a Phase-A-only cap, later
+    # generalized to bound the full per-company scan — Phases A + A2 + C —
+    # so the job exits gracefully with partial results instead of being
+    # killed mid-company by the scheduler's hard wall-clock timeout).
+    # Absent or 0 = no limit.
     # Normalized once at the boundary rather than re-checked at every call
     # site: a negative value is documented as "no limit" (matches the
     # config.example.yaml ">0" semantics) but was previously truthy, so
@@ -434,7 +434,7 @@ def _run_ats_scan_body(
     if runtime_limit_s is not None and runtime_limit_s <= 0:
         runtime_limit_s = None
 
-    # Compute the scan-wide soft deadline once (issue #1368): every
+    # Compute the scan-wide soft deadline once: every
     # per-company phase (A, A2, C) checks this deadline before starting each
     # company and breaks out gracefully when it passes. Phase E (activity
     # log) always runs regardless — partial results discovered before the
@@ -456,7 +456,7 @@ def _run_ats_scan_body(
     if scan_deadline is None:
         scan_deadline = score_deadline
 
-    # Scan concurrency for Phase A (issue #1030): default 1 preserves serial
+    # Scan concurrency for Phase A: default 1 preserves serial
     # behavior byte-for-byte; clamped to [1, 6] — see _concurrency.py.
     scan_concurrency = get_scan_concurrency(config)
 
@@ -603,7 +603,7 @@ def _scan_one_company_worker(
 ) -> _CompanyScanResult:
     """Worker task: scan one company with its own DB connection and return delta result.
 
-    Per-host request pacing (issue #1030) is enforced once, centrally, in
+    Per-host request pacing is enforced once, centrally, in
     ``ats_platforms._http_session.get_session()`` — every platform's HTTP call
     already routes through that shared Session, so there is nothing for this
     worker to gate itself; it just runs today's per-company scan body against
@@ -619,7 +619,7 @@ def _scan_one_company_worker(
             when already set, the company was still queued when the deadline
             tripped, so return a ``deadline_skipped`` no-op without opening a
             connection or touching the network. Not re-checked mid-scan — a
-            worker that has started is always allowed to finish (issue #1130).
+            worker that has started is always allowed to finish.
 
     Returns:
         A _CompanyScanResult with the delta from this company scan.
@@ -642,7 +642,7 @@ def _scan_one_company_worker(
 
     # Open our own connection (thread-safe) — connection_factory does not
     # pass check_same_thread=False, so sharing the orchestrator's outer conn
-    # across worker threads is forbidden (see class docstring / issue #1030).
+    # across worker threads is forbidden (see class docstring).
     with svc.connection_factory(synchronous="NORMAL") as worker_conn:
         jobs_discovered = 0
         jobs_new: list[str] = []
@@ -821,10 +821,10 @@ def _run_ats_api_scan(
 ) -> None:
     """Phase A: scan confirmed-hit companies (and retry-eligible errors) via ATS API.
 
-    ``deadline_monotonic`` (issue #1368) is the scan-wide soft deadline
+    ``deadline_monotonic`` is the scan-wide soft deadline
     computed once in ``run_ats_scan`` and shared across Phases A/A2/C. When
     set, the phase stops submitting new companies once ``time.monotonic()``
-    passes it; in-flight workers are still drained and merged (issue #1130).
+    passes it; in-flight workers are still drained and merged.
     """
     # Query companies with confirmed ATS slug (hit) AND error companies eligible
     # for retry (past their retry_after backoff window). Gated by the
@@ -912,7 +912,7 @@ def _run_ats_api_scan(
         #      merged into summary/all_new_job_keys before this function
         #      returns. No job a worker discovered can silently skip Phase D
         #      scoring, and Phase A2+ can never start while a worker thread
-        #      is still writing (issue #1130 rework — the prior code broke
+        #      is still writing (a fix over the prior code, which broke
         #      out of this loop immediately on truncation and let an
         #      already-running worker's DB write and result race past the
         #      rest of run_ats_scan unmerged). The abort event preserves
@@ -1078,7 +1078,7 @@ def _scan_one_company_via_ats_api(
                 # API response with detect=True (Phase B).  The Phase-A
                 # detect=False post-filter hook has been removed; raw capture
                 # at the registry chokepoint supersedes it.
-                # Only Workday consumes max_pages (issue #1029); other
+                # Only Workday consumes max_pages; other
                 # platforms' fetch_postings accept and ignore it.
                 # force_fresh=True enforces the discovery-freshness invariant:
                 # ats_scan must never serve a cached board, even if a fresh memo
@@ -1239,9 +1239,9 @@ def _upsert_one_ats_api_job(
             salary_period=job_dict.get("salary_period") or "unknown",
             description=job_dict.get("description") or "",
             posted_date=job_dict.get("posted_date"),
-            # ATS platform APIs return audited first-posted timestamps (#363).
+            # ATS platform APIs return audited first-posted timestamps.
             # A platform may downgrade its own marker (Workday relative
-            # strings emit 'approximate', #364); default is 'exact'.
+            # strings emit 'approximate'); default is 'exact'.
             posted_date_precision=(
                 job_dict.get("posted_date_precision")
                 or ("exact" if job_dict.get("posted_date") else None)
@@ -1295,7 +1295,7 @@ def _upsert_one_ats_api_job(
             parsed = ParsedJob.from_job(job, source_meta=_source_meta)
         except (DenylistedCompanyError, ListingTileError):
             # Preserve the pre-48.07 shim early-return semantics: a
-            # denylisted company (I-10) — or a result-count tile (I-14, #211)
+            # denylisted company (I-10) — or a result-count tile (I-14)
             # — is skipped silently.
             return
 
@@ -1332,7 +1332,7 @@ def _upsert_one_ats_api_job(
 
         if result.kind == "inserted":
             summary["jobs_new"] += 1
-            # #223: enqueue the PERSISTED key (clean_title-normalized).
+            # Enqueue the PERSISTED key (clean_title-normalized).
             all_new_job_keys.append(result.dedup_key)
 
             # Store comp_json for new jobs only (first-seen wins)
@@ -1351,8 +1351,8 @@ def _upsert_one_ats_api_job(
                         e,
                     )
 
-            # Store captured structured fields for new jobs only (#451,
-            # first-seen wins) — mirrors the comp_data_json post-insert UPDATE
+            # Store captured structured fields for new jobs only
+            # (first-seen wins) — mirrors the comp_data_json post-insert UPDATE
             # rather than threading through the ParsedJob/upsert INSERT contract.
             is_remote = job_dict.get("is_remote")
             employment_type = job_dict.get("employment_type")
@@ -1373,7 +1373,7 @@ def _upsert_one_ats_api_job(
                     )
 
         # Store mutable refresh timestamp on EVERY sighting (not first-seen-wins)
-        # so it can diverge from posted_date for repost detection (#575).
+        # so it can diverge from posted_date for repost detection.
         # Uses COALESCE so a later non-NULL value wins and a missing payload value
         # never clobbers a known one.
         refreshed_at = job_dict.get("ats_refreshed_at")
@@ -1443,7 +1443,7 @@ def _score_new_ats_jobs(
     Matches careers_crawl: shell listings (short HTML fallback, thin API text)
     often lack jd_full / salary / location until enrich_job runs.
 
-    ``deadline_monotonic`` (issue #1368) is the hard-wall deadline for the
+    ``deadline_monotonic`` is the hard-wall deadline for the
     whole scan — privately the scheduler's job-level max runtime for ats_scan,
     hosted the ScanServices ``scan_deadline_s`` wall. It stops the scoring
     loop before starting a new job once it passes, so a long scoring tail is

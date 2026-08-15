@@ -5,7 +5,7 @@ F-04: source_id was missing on 100% of SmartRecruiters rows.
 
 The SmartRecruiters v1 list-endpoint returns ``id`` as the unique posting
 identifier. ``_posting_to_job`` must emit it as ``source_id`` (string).
-``posted_date`` is also extracted from ``releasedDate`` (first publication only; #360)
+``posted_date`` is also extracted from ``releasedDate`` (first publication only)
 as a cheap incidental fix.
 """
 
@@ -80,7 +80,7 @@ class TestSourceId:
 
 @patch("jobcannon.engine.ats_platforms._fetch_smartrecruiters_description", return_value="")
 class TestPostedDate:
-    """posted_date extracted from releasedDate only (#360)."""
+    """posted_date extracted from releasedDate only."""
 
     def test_posted_date_from_released_date(self, _mock_desc):
         """releasedDate present → posted_date matches it."""
@@ -89,7 +89,7 @@ class TestPostedDate:
         assert result["posted_date"] == "2024-03-15T09:00:00.000Z"
 
     def test_posting_status_updated_on_is_ignored(self, _mock_desc):
-        """postingStatusUpdatedOn is last-status-change, never used (#360)."""
+        """postingStatusUpdatedOn is last-status-change, never used."""
         posting = _minimal_posting(postingStatusUpdatedOn="2024-02-01T12:00:00.000Z")
         result = _posting_to_job(posting, "Acme")
         assert result["posted_date"] is None

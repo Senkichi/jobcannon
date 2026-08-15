@@ -79,7 +79,7 @@ def _derive_max_jd_chars(config: dict | None) -> int:
         max_jd_chars = available_tokens * chars_per_token
 
     This ensures that raising num_ctx actually extends visible JD content,
-    fixing the issue #1081 silent ceiling where 24k was hardcoded regardless
+    fixing a prior silent ceiling where 24k was hardcoded regardless
     of num_ctx setting.
 
     Args:
@@ -219,7 +219,7 @@ def _build_user_message(job: dict, config: dict | None = None) -> str:
       prompt. As a pure safety net against a pathological / poorly-cleaned
       posting, anything past the derived max_jd_chars is hard-truncated WITH a
       logged warning (never a silent section-drop). The max is derived from
-      num_ctx per issue #1081, so raising num_ctx actually extends visible JD
+      num_ctx, so raising num_ctx actually extends visible JD
       content. Removing superfluous content properly is an upstream-extraction
       job (Layer 2).
     - Compensation: the salary_min/max range is always shown; richer
@@ -267,7 +267,7 @@ def _build_user_message(job: dict, config: dict | None = None) -> str:
 class _IncompleteAssessmentError(ValueError):
     """A dispatcher payload was missing or uncoercible on a required axis.
 
-    Issue #227 (mechanism 2 — fail-closed coercion). Raised by
+    Fail-closed coercion. Raised by
     ``_coerce_assessment`` instead of silently dropping an axis and producing
     a partial sub-score vector that ``derive_classification`` could then read
     as ``apply``. ``score_job`` catches this and returns status="error" so the

@@ -18,9 +18,9 @@ import re
 # function of other stored data records the version of the function that derived
 # it, and a standing, idempotent re-derivation runs when that version changes.
 #
-# NORMALIZER_VERSION is that version tag. Version 1 is the IMPLICIT pre-#238
+# NORMALIZER_VERSION is that version tag. Version 1 is the IMPLICIT original
 # normalizer (no digit<->letter separator rule). Version 2 is the current
-# algorithm (#212/#238 added the digit<->letter boundary split at line ~249).
+# algorithm (added the digit<->letter boundary split at line ~249).
 #
 # BUMP THIS whenever normalize_company / normalize_title semantics change so
 # that the same (company, title) could map to a different dedup_key. In the
@@ -32,9 +32,9 @@ import re
 # on a version bump. The canary test in the private repo's
 # tests/test_dedup_normalizer.py fails loudly ("normalizer semantics changed --
 # bump NORMALIZER_VERSION") if the functions drift without a bump — this is the
-# enforcement that #238's once-ever-sentinel gap can never recur.
+# enforcement that a once-ever-sentinel gap can never recur.
 #
-# Issue #1046 added strip_site_code_prefix() below but does NOT wire it into
+# strip_site_code_prefix() below was added but does NOT wire into
 # normalize_company() / bump this version — the one-off migration script and
 # its own precision tests exercise the function directly. Wiring a
 # site-code-prefix strip into the live normalization path (and re-arming the
@@ -145,7 +145,7 @@ _LEGAL_ENTITY_PREFIX_RE = re.compile(
 )
 
 # ---------------------------------------------------------------------------
-# Site-code prefix detection (Issue #1046)
+# Site-code prefix detection
 #
 # ATS/career-page sources sometimes include internal site/branch/facility codes
 # as a leading prefix: e.g. "0006 MA01-CAMBRIDGE-CROSSING-US4E", "0101 The
@@ -167,7 +167,7 @@ _LEGAL_ENTITY_PREFIX_RE = re.compile(
 # Names with a leading digit token that has NEITHER signal (e.g. "3010 HYDRIL
 # USA DISTRIBUTION", "410 ICR United States USA" — no leading zero, and not
 # letter-prefixed) are intentionally NOT matched here. Those are exactly the
-# issue's "borderline" cases that need owner review rather than automatic
+# borderline cases that need owner review rather than automatic
 # stripping; a broader regex could catch them too, but only at the cost of
 # also catching "3M Company", "84 Lumber", "1st Financial Bank USA", "99 Cents
 # Only Stores", "2020 Companies", "1872 Consulting", and "21 Tech" — the
@@ -221,7 +221,7 @@ def strip_legal_entity_prefix(company: str) -> str:
 
 
 def strip_site_code_prefix(company: str | None) -> str | None:
-    """Strip a leading site-code prefix from a company name (Issue #1046).
+    """Strip a leading site-code prefix from a company name.
 
     ATS/career-page sources sometimes include internal site/branch/facility codes
     as a leading prefix: e.g. "0006 MA01-CAMBRIDGE-CROSSING-US4E", "0101 The

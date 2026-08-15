@@ -1,4 +1,4 @@
-"""Ported tests for ATS board-level scan concurrency (issue #1030).
+"""Ported tests for ATS board-level scan concurrency.
 
 Mechanical port of the private repo's tests/test_ats_scan_concurrency.py
 (6 test cases) onto the jobcannon.engine ScanServices DI seam. Substitutions
@@ -338,7 +338,7 @@ def test_concurrent_workers_never_touch_orchestrator_connection(scan_db_path):
 
 
 # ---------------------------------------------------------------------------
-# Serial vs. concurrent equivalence (issue #1030 Tests requirement, review
+# Serial vs. concurrent equivalence (Tests requirement, review
 # finding M4)
 # ---------------------------------------------------------------------------
 # The serial path (_scan_one_company_via_ats_api) uses the orchestrator's own
@@ -528,7 +528,7 @@ def _dump_scan_log(db_path: str) -> list[tuple]:
 
 
 def test_serial_and_concurrent_paths_are_equivalent(tmp_path):
-    """Equivalence test (issue #1030 Tests requirement): scan_concurrency=1
+    """Equivalence test (Tests requirement): scan_concurrency=1
     (serial path) and scan_concurrency=3 (worker-pool path) must produce
     identical DB outcomes — summary totals, the set of upserted job
     dedup_keys, the jd_full/comp-data UPDATE columns on those jobs, and the

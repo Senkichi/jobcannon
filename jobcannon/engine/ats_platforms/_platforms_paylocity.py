@@ -44,8 +44,7 @@ def _fetch_postings(guid: str, max_pages: int | None = None) -> list[dict]:
         max_pages: Unused (Paylocity's feed endpoint returns every posting
             in a single response, no pagination). Accepted for signature
             compatibility with ``run_platform_scan``, which unconditionally
-            calls ``scanner.fetch_postings(slug, max_pages=max_pages)``
-            (see #1029).
+            calls ``scanner.fetch_postings(slug, max_pages=max_pages)``.
     """
     data = _http_get_json(
         f"https://recruiting.paylocity.com/recruiting/v2/api/feed/jobs/{guid}",

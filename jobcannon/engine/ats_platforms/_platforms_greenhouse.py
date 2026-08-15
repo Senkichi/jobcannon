@@ -172,16 +172,16 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     # ── posted_date (F-02: was missing on 100% of rows) ──────────────────────
     # Greenhouse returns ISO-8601 strings (e.g. "2024-01-15T10:30:00Z").
     # ``first_published`` is the only first-posted field the Job Board API
-    # exposes (#360): ``updated_at`` is last-modified (edits/reposts bump it,
+    # exposes: ``updated_at`` is last-modified (edits/reposts bump it,
     # making stale jobs look fresh) and ``created_at`` does not exist in the
     # payload at all. A missing first_published stays NULL — a wrong date is
     # worse than no date (D-08).
     posted_date: str | None = posting.get("first_published") or None
 
-    # ── ats_refreshed_at (mutable refresh timestamp, #575) ───────────────────
+    # ── ats_refreshed_at (mutable refresh timestamp) ─────────────────────────
     # ``updated_at`` is the mutable last-modified field (bumps on edits/reposts).
     # Captured raw-as-provided and normalized to naive-UTC ISO for repost detection
-    # (divergence from posted_date). NULL when absent — no synthesis (epic #393).
+    # (divergence from posted_date). NULL when absent — no synthesis.
     ats_refreshed_at: str | None = None
     refreshed_raw = posting.get("updated_at")
     if refreshed_raw:
@@ -205,7 +205,7 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     title = resolve_title(posting, "greenhouse") or ""
     source_url = resolve_url(posting, "greenhouse") or ""
 
-    # ── Structured-field CAPTURE (#451) — raw-as-provided, no synthesis ───────
+    # ── Structured-field CAPTURE — raw-as-provided, no synthesis ──────────────
     # The Greenhouse Job Board API exposes no remote / employment-type field;
     # both stay None. It does carry a ``departments`` array of {id, name} —
     # capture the first entry's name verbatim.

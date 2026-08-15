@@ -315,7 +315,7 @@ def fetch_postings(
             # Derive title from URL slug (cheap pre-filter)
             title = _extract_title_from_url(job_url)
 
-            # Apply title isolation to remove location/date glued to title (PR #539)
+            # Apply title isolation to remove location/date glued to title
             if title:
                 title = clean_title(title)
 

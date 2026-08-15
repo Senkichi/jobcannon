@@ -56,7 +56,7 @@ def _fetch_postings_with_completeness(
     The completeness flag is the gate used by the ATS reconciler to decide
     whether expiry-reconciliation is safe for a SmartRecruiters company. A
     warning is logged whenever the board is incomplete so operators can see
-    which companies exceed the pagination cap (#217).
+    which companies exceed the pagination cap.
 
     In the private source, a dedicated ``ats_reconciler.py`` module called
     this function directly via a private import, bypassing the
@@ -65,7 +65,7 @@ def _fetch_postings_with_completeness(
     Reconciliation here is host-supplied instead (``services.py``'s
     ``reconcile_company_ats`` field, driven from ``ats_scanner/_promote.py``),
     and the registry field remains forward-wiring for the wider reconciler
-    chain (issues #1030-1033) with currently no callers.
+    chain with currently no callers.
 
     Args:
         slug: SmartRecruiters company slug.
@@ -298,7 +298,7 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
 
     # ── posted_date (F-02: optional, cheap key lookup) ────────────────────────
     # SmartRecruiters exposes ``releasedDate`` (ISO-8601, first publication) on
-    # list-endpoint results. No fallback to ``postingStatusUpdatedOn`` (#360):
+    # list-endpoint results. No fallback to ``postingStatusUpdatedOn``:
     # that field is last-status-change, not first-posted — a wrong date is
     # worse than no date (D-08).
     posted_date: str | None = posting.get("releasedDate") or None
@@ -315,7 +315,7 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
             _fetch_smartrecruiters_description(slug, str(posting_id)) if posting_id else ""
         )
 
-    # ── Structured-field CAPTURE (#451) — raw-as-provided, no synthesis ───────
+    # ── Structured-field CAPTURE — raw-as-provided, no synthesis ──────────────
     # SmartRecruiters emits ``location.remote`` (bool) and the
     # ``typeOfEmployment`` / ``department`` objects ({id, label}).
     is_remote = coerce_remote_bool(loc.get("remote") if isinstance(loc, dict) else None)
