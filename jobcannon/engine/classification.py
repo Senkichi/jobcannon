@@ -29,7 +29,7 @@ from jobcannon.engine.enrichment_states import LOW_SIGNAL_TERMINAL
 # membership tests against raw enrichment_tier strings are unchanged).
 _TERMINAL_ENRICHMENT_TIERS: frozenset[str] = frozenset(LOW_SIGNAL_TERMINAL)
 
-# Positive-evidence thresholds for the "apply" verdict (private issue #210). On the 1-5
+# Positive-evidence thresholds for the "apply" verdict. On the 1-5
 # ordinal scale, 3 means "neutral / couldn't tell" — the *absence of weakness*,
 # not the *presence of strength*. "apply" (the strongest positive class, the one
 # the user acts on) must require affirmative fit evidence: a minimum mean AND a
@@ -156,7 +156,7 @@ class JobAssessment:
           resume_priority_skills (each a list[str]); serialized to the reused
           fit_analysis column per D-08.
       provider: cascade-attribution string (e.g., "ollama", "anthropic") or None.
-      degenerate: private issue #227 quality-floor flag. True only when EVERY provider
+      degenerate: quality-floor flag. True only when EVERY provider
           in the cascade returned a no-signal (uniform axes + empty rationale)
           assessment, so the dispatcher accepted one flagged rather than
           raising. derive_classification routes a degenerate assessment to
@@ -184,9 +184,9 @@ def derive_classification(
 ) -> str:
     """Python-derived 5-way classification — NOT LLM-emitted (CONTEXT D-06, anti-pattern 3).
 
-    Rule precedence (per spec D-2.5; positive-evidence rule per private issue #210):
+    Rule precedence (per spec D-2.5):
       1. legitimacy_note truthy            -> "reject"
-      2. degenerate (private issue #227)           -> "low_signal"
+      2. degenerate                        -> "low_signal"
       3. enrichment exhausted + short jd   -> "low_signal"
       4. flat-neutral vector (all == 3)    -> "low_signal"
       5. any sub-score == 1                -> "reject"
@@ -194,7 +194,7 @@ def derive_classification(
       7. all sub-scores >= 2               -> "consider"
       8. otherwise                         -> "skip"
 
-    The ``degenerate`` branch (private issue #227) handles the all-providers-degenerate
+    The ``degenerate`` branch handles the all-providers-degenerate
     case: when every provider in the cascade returned a uniform no-signal axis
     vector, the dispatcher accepts one flagged ``degenerate=True``. Such a
     vector carries no real signal, so it must NOT be allowed to classify as
@@ -210,14 +210,14 @@ def derive_classification(
     text cannot be confidently rejected on rubric outputs (the 1 itself may be
     a hallucination from the model scoring against an empty prompt).
 
-    The flat-neutral branch (3) is the private issue #210 fix's branch (C): on the 1-5
+    The flat-neutral branch (3) is branch (C): on the 1-5
     scale 3 means "couldn't tell", so a vector that is degenerate at the neutral
     midpoint (all six axes present AND all == 3) is a strong tell the model did
     not discriminate. It is surfaced as low_signal honestly, independent of JD
     length and enrichment_tier — which also covers the agentic-tier cohort that
-    the exact-string enrichment match in branch 2 misses (private issue #225).
+    the exact-string enrichment match in branch 2 misses.
 
-    The "apply" branch (5) is private issue #210's branch (B): "apply" is the strongest
+    The "apply" branch (5) is branch (B): "apply" is the strongest
     positive class (the one the user acts on) and must require the *presence of
     strength*, not merely the *absence of weakness*. It fires only when no axis
     is weak (all >= 3), at least ``apply_min_strong_axes`` axes are strong
@@ -252,7 +252,7 @@ def derive_classification(
         apply_min_strong_axes: minimum count of strong axes (>= 4) for an
             "apply" verdict. Configurable via scoring.apply_min_strong_axes
             (default 3).
-        degenerate: private issue #227 flag from JobAssessment.degenerate. True only
+        degenerate: flag from JobAssessment.degenerate. True only
             when the cascade quality floor accepted an all-providers-degenerate
             result. Routes to low_signal (no-signal vector, never apply).
         excluded_axes: axis names (a strict subset of the six canonical keys)
@@ -329,7 +329,7 @@ def derive_classification(
             raise ValueError("excluded_axes cannot name all six axes — nothing left to classify")
         sub_scores = {**sub_scores, **dict.fromkeys(_excluded, _EXCLUDED_AXIS_MARKER)}
 
-    # Branch (C): flat-neutral vector -> low_signal (private issue #210). All six axes
+    # Branch (C): flat-neutral vector -> low_signal. All six axes
     # at the neutral midpoint means the model did not discriminate; surface it
     # honestly rather than promoting it. Runs before the any-axis-1 reject and
     # the apply branch; independent of JD length / enrichment_tier. The tell
@@ -349,7 +349,7 @@ def derive_classification(
     if any(v == 1 for v in _values):
         return "reject"
 
-    # Branch (B): "apply" requires affirmative fit evidence (private issue #210), not
+    # Branch (B): "apply" requires affirmative fit evidence, not
     # merely the absence of weakness. No weak axis (all >= 3), enough strong
     # axes (>= 4), AND a mean at or above the floor. Computed over NON-excluded
     # axes only: a substituted exclusion marker never contributes to the

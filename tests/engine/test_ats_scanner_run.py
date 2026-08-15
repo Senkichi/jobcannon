@@ -13,7 +13,7 @@ Drives ``_upsert_one_ats_api_job`` against a real on-disk sqlite3 DB and asserts
   known one.
 
 - For Phase C HTML fallback scan: companies with careers_crawl_last_at set are
-  excluded from the query (Fix 2 of private issue #565 remediation pass 2).
+  excluded from the query.
 
 Ported from the private repo's tests/test_ats_scanner_run.py onto the
 jobcannon.engine ScanServices DI seam (Task 3). The engine has no migrations

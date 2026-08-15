@@ -8,7 +8,7 @@ by hand in three places that had to agree but drifted apart — the F1 infinite-
 bug was exactly such a divergence (legacy/agentic terminal tiers missing from one
 backfill skip-set). This module owns the vocabulary; every caller imports from here.
 
-Two distinct predicates over tiers — they MUST stay distinct (see private issue #260):
+Two distinct predicates over tiers — they MUST stay distinct:
 
   ``TERMINAL`` — "stop re-enriching." A row at one of these tiers is fully drained
       of the enrichment pipeline and is excluded from backfill selection. Includes
@@ -97,7 +97,7 @@ TERMINAL: frozenset[EnrichmentTier] = frozenset(
 # "JD genuinely unobtainable -> low_signal" — the subset of TERMINAL where the
 # enrichment cascade itself exhausted its attempts to fetch a real JD. ONLY these
 # tiers participate in the derive_classification low_signal rule. Kept distinct from
-# TERMINAL on purpose (private issue #260): serpapi/mid stop the backfill but are not
+# TERMINAL on purpose: serpapi/mid stop the backfill but are not
 # low_signal. Identical to the historical ``_TERMINAL_ENRICHMENT_TIERS`` frozenset.
 LOW_SIGNAL_TERMINAL: frozenset[EnrichmentTier] = frozenset(
     {

@@ -1,4 +1,4 @@
-"""Tests for the low_signal classification rule (Phase 2d sub-fix + private issue #210).
+"""Tests for the low_signal classification rule (Phase 2d sub-fix).
 
 5th classification value distinct from apply/consider/skip/reject.
 
@@ -6,9 +6,9 @@ Rule precedence in derive_classification:
     1. legitimacy_note truthy           -> 'reject'
     2. enrichment_tier in terminal set
        AND jd_full_length < threshold   -> 'low_signal'
-    3. flat-neutral vector (all == 3)   -> 'low_signal'  (private issue #210 branch C)
+    3. flat-neutral vector (all == 3)   -> 'low_signal'  (branch C)
     4. any sub-score == 1               -> 'reject'
-    5. positive evidence                -> 'apply'       (private issue #210 branch B)
+    5. positive evidence                -> 'apply'       (branch B)
     6. all sub-scores >= 2              -> 'consider'
     7. otherwise                        -> 'skip'
 
@@ -125,7 +125,7 @@ def test_any_axis_one_after_low_signal_check_does_not_promote():
     assert cls == "low_signal"
 
 
-# --- Coverage for the terminal-tier set (private issue #225) -------------------------
+# --- Coverage for the terminal-tier set ------------------------------------
 #
 # The low_signal rule must fire for every tier from which no further automatic
 # enrichment will run. The agentic enricher flips 'exhausted' to 'agentic' on
@@ -202,12 +202,12 @@ def test_non_terminal_tier_short_jd_is_not_low_signal(tier):
     assert cls == "apply"
 
 
-# --- Flat-neutral branch (private issue #210 branch C) -------------------------------
+# --- Flat-neutral branch (branch C) ----------------------------------------
 #
 # An all-3s vector is degenerate at the "couldn't tell" midpoint and must be
 # surfaced as low_signal regardless of JD length or enrichment_tier — it does
 # not depend on the enrichment-string match, so it also covers the agentic-tier
-# cohort that the exact-string branch (2) misses (private issue #225).
+# cohort that the exact-string branch (2) misses.
 
 
 def test_flat_neutral_is_low_signal_independent_of_jd_length():
@@ -277,7 +277,7 @@ def test_flat_neutral_legitimacy_note_still_wins():
     assert cls == "reject"
 
 
-# --- Positive-evidence apply branch (private issue #210 branch B) --------------------
+# --- Positive-evidence apply branch (branch B) ------------------------------
 
 
 def test_strong_vector_is_apply():

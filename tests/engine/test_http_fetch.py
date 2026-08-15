@@ -1,4 +1,4 @@
-"""Tests for the hard-deadline HTTP wrapper (private issue #39).
+"""Tests for the hard-deadline HTTP wrapper.
 
 The load-bearing guarantee: a fetch whose underlying GET blocks longer than the
 deadline returns control to the caller AT the deadline — it does not wait for

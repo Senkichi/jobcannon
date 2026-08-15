@@ -1,7 +1,7 @@
 """Single normalization point for salary observations (Data Integrity Overhaul P1.1).
 
 This is the **foundation layer** of the salary capture -> normalize -> reconcile
-architecture (tracking private issue #393). It owns:
+architecture. It owns:
 
   * ``SalaryObservation`` — a lossless value object recording what a single source
     asserted about pay, with unit/currency/provenance metadata (design rule D-1).
@@ -10,7 +10,7 @@ architecture (tracking private issue #393). It owns:
   * ``normalize_observation`` — the single pure function that converts an observation
     into canonical annualized-USD form via an explicit **salvage ladder** (D-3).
 
-Design constraints (binding — see #393):
+Design constraints (binding):
 
   * **Engine-pure: no imports from any host layer** (enforced by
     ``tests/engine/test_boundary.py``). This module is a leaf dependency that the

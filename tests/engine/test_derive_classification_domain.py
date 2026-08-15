@@ -1,4 +1,4 @@
-"""Domain guard tests for derive_classification (private issue #257).
+"""Domain guard tests for derive_classification.
 
 Validates that:
   - Malformed sub-score dicts raise ValueError (wrong/missing/extra keys,
@@ -125,7 +125,7 @@ def test_all_twos_returns_consider():
 
 
 def test_all_threes_returns_low_signal():
-    # Flat-neutral vector is no-signal, not apply (private issue #210 branch C).
+    # Flat-neutral vector is no-signal, not apply (branch C).
     scores = dict.fromkeys(_ALL_KEYS, 3)
     assert derive_classification(scores, None) == "low_signal"
 

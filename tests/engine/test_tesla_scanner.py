@@ -1,4 +1,4 @@
-"""Tests for the Tesla Playwright scanner (private issue #554).
+"""Tests for the Tesla Playwright scanner.
 
 Covers the parser logic against a REAL cua-api JSON fixture (a trimmed slice of an
 actual live ``cua-api/apps/careers/state`` capture — all ids/names are authentic):
