@@ -3,10 +3,10 @@
 The single point where an ATS platform scanner turns the raw structured pay
 values it decoded into the canonical salary job-dict fields. Every salary-emitting
 scanner (Greenhouse, Lever, Ashby, Pinpoint, ...) delegates here so the
-capture → normalize → reconcile contract (tracking private issue #393) is enforced in
+capture → normalize → reconcile contract is enforced in
 exactly one place rather than re-implemented per platform.
 
-Design rules honored (binding — see #393):
+Design rules honored (binding):
 
   * **D-1 (Lossless capture).** The scanner's RAW per-period values — what the
     source actually asserted, e.g. ``$64/hour`` — are wrapped verbatim in a

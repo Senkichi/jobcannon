@@ -68,7 +68,7 @@ class Job:
 
         self.company = strip_legal_entity_prefix(self.company)
 
-        # Coerce posted_date from string → datetime (private issue #108).
+        # Coerce posted_date from string → datetime.
         # ATS-API platforms (Lever, Greenhouse, Ashby, SmartRecruiters, …) emit
         # posted_date as an ISO-8601 string; normalise here so every downstream
         # caller (e.g. upsert_job calling .isoformat()) can rely on the field

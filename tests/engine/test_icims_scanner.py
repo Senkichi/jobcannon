@@ -1,4 +1,4 @@
-"""Tests for the iCIMS Playwright scanner (private issue #454).
+"""Tests for the iCIMS Playwright scanner.
 
 Covers two of the three architectural seams from the private-repo original
 (the third, Orchestrator / ``ats_scanner._run_playwright``, is Task 3 scope

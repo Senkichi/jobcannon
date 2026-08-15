@@ -216,7 +216,7 @@ def _try_static_first_fallthrough(
 ) -> dict:
     """Static-first fall-through for companies without a known ATS platform.
 
-    Implements the cheap→expensive ordering per private issue #565:
+    Implements the cheap→expensive ordering:
     1. Re-detect known ATS on subdomain (careers_url + discovered links)
     2. Static HTML extract (L1/L4 from careers_crawler)
     3. Embedded-JSON tier (Tier 2.5)
@@ -842,7 +842,7 @@ def probe_single_company(
                     _handle_scan_error(conn, company_id, company_name, str(e), now)
                     return {"status": "error", "detail": str(e)}
             elif platform == "icims":
-                # iCIMS is JS-rendered with no public API (private issue #454) —
+                # iCIMS is JS-rendered with no public API —
                 # delegate to the requests-light existence probe. A 'hit' here
                 # only confirms the board is live; the Playwright scanner phase
                 # (run_ats_scan) does the actual job extraction.
@@ -1385,8 +1385,8 @@ def _probe_ibm(slug: str) -> bool:
 def _probe_icims(slug: str) -> bool:
     """Return True if slug resolves to a live iCIMS career portal.
 
-    iCIMS boards are 100% JS-rendered with no public unauthenticated JSON API
-    (private issue #454), so the probe only confirms the board *exists*: an HTTP GET
+    iCIMS boards are 100% JS-rendered with no public unauthenticated JSON API,
+    so the probe only confirms the board *exists*: an HTTP GET
     of the portal's ``/jobs/search`` page returning 200 with an iCIMS marker
     in the body. The full JS render + job extraction is the Playwright
     scanner's job (``ats_platforms/_platforms_icims.py``) — keeping the probe

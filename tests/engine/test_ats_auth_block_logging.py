@@ -1,4 +1,4 @@
-"""Tests for auth/anti-bot wall logging promotion (private issue #593).
+"""Tests for auth/anti-bot wall logging promotion.
 
 Verifies that scanners emit WARNING logs for auth-block statuses (401/403/429)
 instead of silent DEBUG, so a blocked board isn't mistaken for an empty one.

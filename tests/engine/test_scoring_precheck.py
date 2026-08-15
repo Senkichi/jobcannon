@@ -49,7 +49,7 @@ class TestJdGate:
 
 
 class TestLocationGate:
-    """P3.2 (private issue #391): no location signal + still-enrichable -> awaiting_location."""
+    """P3.2: no location signal + still-enrichable -> awaiting_location."""
 
     def test_complete_location_passes(self):
         assert scoring_precheck(_base_job()) is None
