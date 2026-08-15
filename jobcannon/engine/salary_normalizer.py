@@ -10,7 +10,7 @@ architecture. It owns:
   * ``normalize_observation`` — the single pure function that converts an observation
     into canonical annualized-USD form via an explicit **salvage ladder** (D-3).
 
-Design constraints (binding — see #393):
+Design constraints (binding):
 
   * **Engine-pure: no imports from any host layer** (enforced by
     ``tests/engine/test_boundary.py``). This module is a leaf dependency that the
