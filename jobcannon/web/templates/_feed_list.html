@@ -1,9 +1,10 @@
 {# Shared posting-list partial: iterates `entries` (a list of
    {"row": <postings row>, "chips": <why_chips(...) list[str]>}) and includes
-   _posting_row.html once per entry. Consumed by /preview and / (both
-   server-render a real feed here; /demo still shows corpus counts only,
-   never this partial). No hx-* attributes here (a later PR governs the
-   HTMX fragment partials); this is a plain server-rendered include.
+   _posting_row.html once per entry. Consumed by /preview, /, and /demo (all
+   three server-render a real feed here). No hx-* attributes here — the
+   save/dismiss controls that use them live inside _posting_row.html itself,
+   rendered only when the caller passes show_actions; this list partial is a
+   plain server-rendered include.
 
    Optional `filters` context (a dict of display-safe strings — see
    jobcannon/web/pages.py's `_parse_feed_filters` — plus the `sort_tokens` /

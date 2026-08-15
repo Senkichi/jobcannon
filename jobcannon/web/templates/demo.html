@@ -3,12 +3,44 @@
 {% block content %}
 {% if stats.postings == 0 %}
   {% include "_corpus_empty.html" %}
+{% elif not profile %}
+  <h1 class="text-2xl font-semibold mb-3">The guest profile isn't seeded yet</h1>
+  <p class="text-neutral-400">This demo renders a canned guest profile against the live corpus. An operator needs to run the guest-seed script before this page has a profile to show.</p>
 {% else %}
-  <h1 class="text-2xl font-semibold mb-3">The live corpus</h1>
-  <p class="text-neutral-400">
+  <h1 class="text-2xl font-semibold mb-3">Guest demo feed</h1>
+  <p class="text-neutral-400 mb-6">
     <strong class="text-neutral-100">{{ stats.postings }}</strong> live postings across
     <strong class="text-neutral-100">{{ stats.companies }}</strong> companies
     {%- if stats.freshest_last_seen %} · freshest signal {{ stats.freshest_last_seen.strftime("%Y-%m-%d %H:%M") }} UTC{% endif %}
+    — filtered below to the canned profile's target titles, no signup required.
   </p>
+
+  <div class="border border-neutral-800 rounded-lg p-4 mb-8 space-y-1" data-profile-card>
+    <h2 class="text-lg font-medium text-neutral-100">Guest profile</h2>
+    {% if profile.target_titles %}
+      <p class="text-sm text-neutral-400">Targeting: {{ profile.target_titles | join(", ") }}</p>
+    {% endif %}
+    {% if profile.seniority_level %}
+      <p class="text-sm text-neutral-400">Seniority: {{ profile.seniority_level }}</p>
+    {% endif %}
+    {% if profile.years_of_experience %}
+      <p class="text-sm text-neutral-400">{{ profile.years_of_experience }} years of experience</p>
+    {% endif %}
+    {% if profile.skills %}
+      <p class="text-sm text-neutral-400">Skills: {{ profile.skills | join(", ") }}</p>
+    {% endif %}
+    {% if profile.experience_summary %}
+      <p class="text-sm text-neutral-400">{{ profile.experience_summary }}</p>
+    {% endif %}
+  </div>
+
+  <p class="text-sm text-neutral-500 mb-4" data-ordering-label>
+    {% if ordering.personalized %}
+      Ranked by {{ ordering.ranker_version }}.
+    {% else %}
+      Sorted by recency &mdash; personalized ranking is not live yet ({{ ordering.ranker_version }}).
+    {% endif %}
+  </p>
+  {% include "_feed_list.html" %}
 {% endif %}
 {% endblock %}
