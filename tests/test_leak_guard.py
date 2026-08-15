@@ -57,7 +57,9 @@ def test_cla_md_required_attribution_is_carved_out(tmp_path):
     # Synthetic handle, deliberately NOT the real maintainer token: a real
     # token here would make this tracked test file itself a guard hit under
     # the real terms list — relocating the exact false positive #25 removes.
-    (repo / "CLA.md").write_text('maintained by examplehandle ("the Maintainer")\n', encoding="utf-8")
+    (repo / "CLA.md").write_text(
+        'maintained by examplehandle ("the Maintainer")\n', encoding="utf-8"
+    )
     terms_file = tmp_path / "terms.txt"
     terms_file.write_text("examplehandle\n", encoding="utf-8")
 
