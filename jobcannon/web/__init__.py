@@ -11,7 +11,6 @@ plain-text body; adds the authed save/dismiss/apply mutation routes
 from __future__ import annotations
 
 import logging
-import os
 
 from flask import Flask, abort, current_app, g, render_template, request
 
@@ -72,7 +71,7 @@ def create_app(config: dict | None = None) -> Flask:
     if "WEBHOOK_SECRET" in app.config:
         secret = app.config["WEBHOOK_SECRET"]
     else:
-        secret = os.environ.get("CLERK_WEBHOOK_SIGNING_SECRET", "")
+        secret = host_config.clerk_webhook_signing_secret
     app.config["WEBHOOK_SECRET"] = secret
     if not app.config.get("TESTING") and not secret:
         # Fail fast at startup (mirrors load_host_config's DATABASE_URL
@@ -105,7 +104,7 @@ def create_app(config: dict | None = None) -> Flask:
     if verify is None and not app.config.get("TESTING"):
         from jobcannon.web.auth import build_clerk_verifier
 
-        verify = build_clerk_verifier()
+        verify = build_clerk_verifier(host_config)
         app.config["VERIFY_REQUEST"] = verify
 
     @app.get("/healthz")

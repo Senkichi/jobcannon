@@ -24,6 +24,29 @@ Id namespaces stay disjoint: Clerk-issued ids, the `guest_demo` sentinel
 `ANON_ID_PREFIX` — `mint_anon_user` is the only producer of that prefix).
 `email` is never set for anon rows; nothing in this module collects one.
 
+`reap_unconverted_anon_users(conn, retention_days=...)` is a periodic
+maintenance DELETE (issue #48), not a request-path write. A visitor who
+completes the onboarding picker without ever signing up leaves their anon
+`users` row behind forever — nothing else ever revisits it. The predicate is
+exactly "anon-namespaced and older than the retention window", not a second
+"does it have a profile" check: `jobcannon/web/onboarding.py`'s picker
+submit mints the row and upserts its profile in one transaction, so every
+anon row has a profile from the moment it exists — a profile is not a
+conversion signal here, it is what minting itself creates. Conversion is
+`jobcannon/web/handoff.py`'s DB phase, and it does not leave a marker on the
+anon row to check for: it re-keys the profile onto the real Clerk id and
+hard-deletes the anon `users` row outright. So a surviving `anon_*` row is,
+by construction, always unconverted — there is no distinct "converted but
+still anon-prefixed" state to filter out. The one extra guard kept is
+`NOT EXISTS` against `events`: every authenticated-only route requires a
+Clerk identity (`jobcannon/web/__init__.py`'s `PUBLIC_PATHS` gate), so an
+anon id should never accumulate an events row either, but that invariant is
+flagged as drift-prone in handoff.py's own docstring ("if a pre-signup
+surface is ever instrumented..."). The guard costs nothing when it never
+matches and fails in the safe direction (skips the row) if that invariant
+is ever broken, rather than cascading a real visitor's analytics rows away
+silently.
+
 Row-mapping / transaction-nesting conventions mirror
 jobcannon/db/_profiles.py: `conn.raw` is unwrapped when present (the pooled
 EngineCompatConnection facade), a bare connection is used as-is (the
@@ -74,3 +97,24 @@ def delete_user(conn: Any, user_id: str) -> None:
 
 def is_anon_id(user_id: str) -> bool:
     return user_id.startswith(ANON_ID_PREFIX)
+
+
+def reap_unconverted_anon_users(conn: Any, *, retention_days: int) -> list[str]:
+    """Hard-delete anon `users` rows past the retention window; cascades take
+    the profile (and anything else per-user) with them. Returns the reaped
+    ids so a caller can log/count them — see this module's docstring for why
+    the predicate is exactly namespace + age, plus one `events` safety net."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    # `_` is a LIKE wildcard (matches any single char); escape the literal
+    # underscore in ANON_ID_PREFIX so the pattern can't accidentally widen.
+    like_pattern = ANON_ID_PREFIX.replace("_", "\\_") + "%"
+    rows = raw.execute(
+        "DELETE FROM users "
+        "WHERE id LIKE %s ESCAPE '\\' "
+        "AND created_at < now() - make_interval(days => %s) "
+        "AND NOT EXISTS (SELECT 1 FROM events e WHERE e.user_id = users.id) "
+        "RETURNING id",
+        (like_pattern, retention_days),
+    ).fetchall()
+    commit_unless_nested(raw)
+    return [row["id"] for row in rows]

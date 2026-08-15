@@ -103,29 +103,27 @@ def test_every_required_env_var_is_declared_on_both_services():
     assert derived, "HostConfig declares no env metadata — the derivation is broken, not the yaml"
     assert "web" in derived["DATABASE_URL"] and "worker" in derived["DATABASE_URL"]
 
-    # The four Clerk names stay a literal, deliberately: they are read
-    # directly from os.environ in jobcannon/web/auth.py (CLERK_SECRET_KEY,
-    # CLERK_JWT_KEY, CLERK_AUTHORIZED_PARTIES) and jobcannon/web/__init__.py
-    # (CLERK_WEBHOOK_SIGNING_SECRET) rather than through HostConfig, so
-    # nothing exists yet to derive them from.
-    clerk_required = {
+    # The four Clerk vars (issue #47) used to be a hand-maintained literal
+    # here because nothing derived them from HostConfig. They're now real
+    # HostConfig fields (read at their jobcannon/web/auth.py and
+    # jobcannon/web/__init__.py consumption sites instead of os.environ), so
+    # this pins them into the same metadata-derived set rather than a second
+    # hardcoded list — an omission from HostConfig would silently drop them
+    # from `derived` and this assertion would catch it.
+    assert {
         "CLERK_SECRET_KEY",
         "CLERK_JWT_KEY",
         "CLERK_AUTHORIZED_PARTIES",
         "CLERK_WEBHOOK_SIGNING_SECRET",
-    }
+    } <= derived.keys()
+
     for svc in bp["services"]:
         declared = {e["key"] for e in svc.get("envVars", [])}
-        required = {env for env, svcs in derived.items() if svc["type"] in svcs} | clerk_required
+        # Worker never verifies a Clerk request or a webhook — that's
+        # expressed once, as declare_on=("web",) on the four Clerk fields
+        # in HostConfig, not as a second exemption list here.
+        required = {env for env, svcs in derived.items() if svc["type"] in svcs}
         missing = required - declared
-        # Worker never verifies Clerk requests or webhooks:
-        if svc["type"] == "worker":
-            missing -= {
-                "CLERK_JWT_KEY",
-                "CLERK_AUTHORIZED_PARTIES",
-                "CLERK_WEBHOOK_SIGNING_SECRET",
-                "CLERK_SECRET_KEY",
-            }
         assert not missing, f"{svc['name']} missing env declarations: {missing}"
 
 
