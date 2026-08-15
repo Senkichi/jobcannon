@@ -169,7 +169,7 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     # ── posted_date (from publishedAt ISO-8601 string) ────────────────────────
     posted_date: str | None = posting.get("publishedAt") or None
 
-    # ── Structured-field CAPTURE (#451) — raw-as-provided, no synthesis ───────
+    # ── Structured-field CAPTURE — raw-as-provided, no synthesis ──────────────
     # Ashby emits ``isRemote`` (bool), ``employmentType`` (e.g. "FullTime"),
     # and ``department`` / ``team`` strings.
     is_remote = coerce_remote_bool(posting.get("isRemote"))

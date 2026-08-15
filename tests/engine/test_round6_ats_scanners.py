@@ -549,7 +549,7 @@ class TestJobviteScannerIsStub:
 
 
 # ---------------------------------------------------------------------------
-# NON_SCANNABLE_PLATFORMS invariants (#167)
+# NON_SCANNABLE_PLATFORMS invariants
 # ---------------------------------------------------------------------------
 
 

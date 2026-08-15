@@ -1,4 +1,4 @@
-"""ATS-run persistence tests for structured-field CAPTURE (#451) and refresh timestamp (#575).
+"""ATS-run persistence tests for structured-field CAPTURE and refresh timestamp.
 
 Drives ``_upsert_one_ats_api_job`` against a real on-disk sqlite3 DB and asserts:
 
@@ -613,7 +613,7 @@ def test_cache_scan_result_serializes_job_location_dataclasses(ats_scan_db_path)
 
 
 def test_cache_scan_result_serializes_datetime_and_date_values(ats_scan_db_path):
-    """_cache_scan_result must serialize live datetime/date values, not silently NULL (issue #1168)."""
+    """_cache_scan_result must serialize live datetime/date values, not silently NULL."""
     company_id = _insert_company(ats_scan_db_path)
     job = _scan_job_dict(
         posted_date=datetime(2026, 1, 1, 12, 0, 0),
@@ -695,7 +695,7 @@ def test_scan_one_company_via_ats_api_caches_full_board(ats_scan_db_path):
 
 
 def test_phase_a_stalest_first_order(ats_scan_db_path):
-    """Phase A company query orders never-scanned and stalest-scanned first (issue #1130)."""
+    """Phase A company query orders never-scanned and stalest-scanned first."""
     with open_connection(ats_scan_db_path) as conn:
         now = "2026-07-12T00:00:00"
         fixtures = [

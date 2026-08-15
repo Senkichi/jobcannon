@@ -259,7 +259,7 @@ def _fetch_postings_with_completeness(
     # misclassify that failure as "end of data" and silently discard every
     # already-fetched HIGHER-offset page too — one bad HTTP response
     # cascading into mass data loss instead of degrading just that page
-    # (issue #1029 house standard: failure isolation). `total_fetched >=
+    # (house standard: failure isolation). `total_fetched >=
     # total` (computed from the precomputed, total-bounded offset list) is
     # the sole termination signal, matching the Workday/SmartRecruiters
     # pattern.

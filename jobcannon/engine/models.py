@@ -44,7 +44,7 @@ class Job:
     salary_observations: list[dict] = field(default_factory=list)
     description: str | None = None
     posted_date: datetime | None = None
-    # Provenance of posted_date (#363): 'exact' (ATS/API first-posted
+    # Provenance of posted_date: 'exact' (ATS/API first-posted
     # timestamp), 'approximate' (relative-string parse), 'proxy' (detection-
     # time stand-in, e.g. an alert email's Date header). None when unset —
     # the upsert boundary treats a dated job without a marker as 'proxy'

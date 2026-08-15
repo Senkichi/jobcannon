@@ -32,7 +32,7 @@ NUMBERS.md.
 ats_confirmed and aggregator_only actually means for a job seeker deciding
 which listings to trust, what surprised you, and how this connects to two
 things this project already learned the hard way -
-1. the role.com aggregator-pollution incident (PR #1144: a sitemap-tier
+1. the role.com aggregator-pollution incident (a sitemap-tier
    crawler trusted a job-board domain as a single employer, misattributing
    437 postings to a phantom company) - what this corpus-wide number says
    about how much weight that class of source deserves generally, not just

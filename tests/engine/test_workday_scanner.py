@@ -490,7 +490,7 @@ class TestFetchPostingsWithCompleteness:
 
         Mirrors how run_ats_scan / reconcile_all_companies thread
         config.ats.workday_max_pages down to the registry's slug->list scanner
-        (issue #1029: threaded as an explicit parameter, replacing the
+        (threaded as an explicit parameter, replacing the
         thread-unsafe ``set_max_pages`` ContextVar this test used to cover).
         """
         mock_post = ats_session_method(mock_get_session, "post")
@@ -513,7 +513,7 @@ class TestFetchPostingsWithCompleteness:
 
         mock_post.side_effect = _page
 
-        # Pass max_pages explicitly (issue #1029)
+        # Pass max_pages explicitly
         postings, complete = _fetch_postings_with_completeness("acme.wd5/AcmeExternal", max_pages=2)
 
         assert complete is False
@@ -665,7 +665,7 @@ class TestFetchPostingsWithCompleteness:
         assert len(result) == 1
 
     # -----------------------------------------------------------------------
-    # Tests: parallel page-fetch concurrency (issue #1029)
+    # Tests: parallel page-fetch concurrency
     # -----------------------------------------------------------------------
 
     @patch("jobcannon.engine.ats_platforms._platforms_workday.get_session")

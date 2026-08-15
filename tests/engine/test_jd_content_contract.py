@@ -279,7 +279,7 @@ def test_reason_code_registry_set_equality():
 
 
 # ---------------------------------------------------------------------------
-# Truncation gate (issue #1295): too_short + trailing_ellipsis
+# Truncation gate: too_short + trailing_ellipsis
 # ---------------------------------------------------------------------------
 
 
@@ -345,7 +345,7 @@ def test_config_threads_through_reject_and_classify():
 
 
 # ---------------------------------------------------------------------------
-# JSON config blob (issue #1558)
+# JSON config blob
 # ---------------------------------------------------------------------------
 
 # Eightfold/Netflix micro-site config blob: a large JSON object with theme,
@@ -419,7 +419,7 @@ _NETFLIX_EIGHTFOLD_BLOB = json.dumps(
 
 
 def test_netflix_eightfold_config_blob_rejected():
-    """Issue #1558: a long Eightfold/Netflix config blob must be REJECT, not CLEAN.
+    """A long Eightfold/Netflix config blob must be REJECT, not CLEAN.
 
     The payload clears the length gate but contains no job description prose,
     so it cannot be scored.

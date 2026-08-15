@@ -243,7 +243,7 @@ class TestSourceId:
 
 class TestPostedDate:
     def test_posted_date_from_first_published(self):
-        """first_published ISO-8601 string → posted_date (#360)."""
+        """first_published ISO-8601 string → posted_date."""
         posting = {
             "id": 1,
             "title": "Engineer",
@@ -255,7 +255,7 @@ class TestPostedDate:
         assert result["posted_date"] == "2024-01-10T08:00:00Z"
 
     def test_updated_at_is_ignored(self):
-        """updated_at is last-modified, never used for posted_date (#360)."""
+        """updated_at is last-modified, never used for posted_date."""
         posting = {
             "id": 1,
             "title": "Engineer",
@@ -267,7 +267,7 @@ class TestPostedDate:
         assert result["posted_date"] is None
 
     def test_first_published_wins_over_updated_at(self):
-        """When both are present, first_published wins (#360)."""
+        """When both are present, first_published wins."""
         posting = {
             "id": 1,
             "title": "Engineer",

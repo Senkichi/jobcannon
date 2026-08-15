@@ -37,7 +37,7 @@ being re-sighted, and the default jobs view hides stale rows, so marking
 them stale silently hid active applications (21 such rows at the
 2026-06-11 audit).
 
-Gated-only re-sightings do not reset the unverified decay clock (#1077):
+Gated-only re-sightings do not reset the unverified decay clock:
 some aggregators (Jooble et al., the same opaque/gated set as
 is_opaque_redirect_source) republish stale inventory as fresh results, so a
 job whose sources are ALL gated re-sightings gets its last_seen refreshed
@@ -94,7 +94,7 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
       unverified threshold instead — see module docstring "Two-tier stale
       threshold".
     - Clear: job seen recently again, OR job no longer in a passive stage
-      → set is_stale = 0. EXCEPTION (#1077): a gated-only job's last_seen
+      → set is_stale = 0. EXCEPTION: a gated-only job's last_seen
       refresh does not count as "seen recently" for this arm — see module
       docstring "Gated-only re-sightings" — unless expiry_status='live'.
     - Auto-archive: last_seen older than the archive threshold AND
@@ -146,7 +146,7 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
             # everything else (NULL = not yet checked, 'live' = confirmed)
             # keeps the standard stale_cutoff.
             #
-            # ISSUE #1077 FIX: For jobs whose sources are ALL gated/opaque (is_opaque_redirect_source),
+            # For jobs whose sources are ALL gated/opaque (is_opaque_redirect_source),
             # re-sightings from those same sources must not reset the unverified decay clock.
             # We key the unverified cutoff on expiry_checked_at (when the job became unverifiable)
             # instead of last_seen for gated-only jobs. This prevents the infinite loop where
@@ -206,8 +206,7 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
             # unverified cutoff, since its last_seen is by definition more
             # recent than the standard cutoff too.
             #
-            # ISSUE #1077 FIX — composition of the three passes above/here,
-            # in order:
+            # Composition of the three passes above/here, in order:
             #   1. mark pass (last_seen, standard/inconclusive two-tier cutoff)
             #   2. gated-only mark pass (expiry_checked_at instead of
             #      last_seen — catches what (1) can never catch, because a

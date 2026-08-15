@@ -49,8 +49,7 @@ def gated_sources_from_config(config: dict) -> list[str]:
     (below) and every blueprint that needs the raw gated_sources list to pass
     into get_filtered_jobs / get_liveness_stats call this instead of
     re-deriving `(config.get("verification") or {}).get("gated_sources") or []`
-    inline — a hardcoded-list-adjacent duplication that would silently drift
-    (issue #1058 code review).
+    inline — a hardcoded-list-adjacent duplication that would silently drift.
     """
     return (config.get("verification") or {}).get("gated_sources") or []
 

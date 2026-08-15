@@ -324,7 +324,7 @@ class TestRunPlatformScanCache:
 
 
 # ---------------------------------------------------------------------------
-# run_platform_scan — thundering herd (issue #1110)
+# run_platform_scan — thundering herd
 # ---------------------------------------------------------------------------
 
 
@@ -666,7 +666,7 @@ class TestRunPlatformScanDetailFetch:
 
 
 # ---------------------------------------------------------------------------
-# _scan_memo_lock — concurrent access safety (issue #1031)
+# _scan_memo_lock — concurrent access safety
 # ---------------------------------------------------------------------------
 
 
@@ -721,7 +721,7 @@ class _ReentrancyTrackingDict(dict):
 
 
 class TestScanMemoLockConcurrency:
-    """Rigorous concurrent-access test for _scan_memo_lock (issue #1031 Tests section).
+    """Rigorous concurrent-access test for _scan_memo_lock (Tests section).
 
     Uses threading.Barrier to force N threads into _get_cached_postings /
     _store_cached_postings at the same instant, against a dict subclass

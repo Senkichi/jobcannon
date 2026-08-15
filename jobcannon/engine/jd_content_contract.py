@@ -214,7 +214,7 @@ _JD_POSITIVE_RE = re.compile(
 )
 
 
-# --- jd_full completeness thresholds (issue #1295) ---
+# --- jd_full completeness thresholds ---
 # Minimum characters for a job description to be accepted as the full jd_full.
 # A body below this floor, or ending in a trailing ellipsis/…, is treated as a
 # truncated snippet and routed back to enrichment.
@@ -384,8 +384,8 @@ def jd_content_reject(
     if _EXPIRED_RE.search(low):
         return (JD_EXPIRED, "expired_or_filled")
 
-    # Serialized configuration / markup with no prose job description (issue
-    # #1558). A long JSON blob (Eightfold/Netflix micro-site config, empty
+    # Serialized configuration / markup with no prose job description.
+    # A long JSON blob (Eightfold/Netflix micro-site config, empty
     # ``job_description``) fools the length gate; reject at the content layer
     # so the scorer never sees it.
     if _is_json_config_blob(stripped):
