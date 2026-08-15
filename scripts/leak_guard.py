@@ -12,6 +12,14 @@ import pathlib
 import subprocess
 import sys
 
+# Legal/attribution files that intentionally carry the repo owner's own
+# public GitHub handle (github.com/<owner>/jobcannon) as required copyright
+# or contributor notice — not a leak. Exact basename match, case-sensitive,
+# no extension variants. Every other path stays scanned. (#25: CLA.md carries
+# the same required-attribution sentence as LICENSE and needs the same
+# carve-out.)
+_ATTRIBUTION_CARVEOUTS = frozenset({"LICENSE", "CLA.md"})
+
 
 def main() -> int:
     terms_file = os.environ.get("JOBCANNON_LEAK_TERMS_FILE")
@@ -40,10 +48,7 @@ def main() -> int:
     tracked = sorted(set(tracked) | set(untracked))
     hits: list[str] = []
     for rel in tracked:
-        # AGPL license attribution intentionally carries the repo owner's own
-        # public GitHub handle (github.com/<owner>/jobcannon) — that is not a
-        # leak, it is required copyright notice. Every other path stays scanned.
-        if pathlib.PurePosixPath(rel).name == "LICENSE":
+        if pathlib.PurePosixPath(rel).name in _ATTRIBUTION_CARVEOUTS:
             continue
         try:
             text = pathlib.Path(rel).read_text(encoding="utf-8", errors="ignore").lower()
