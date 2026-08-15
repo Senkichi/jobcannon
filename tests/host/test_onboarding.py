@@ -8,13 +8,36 @@ tests/host/ module reads inside a rollback-isolated transaction.
 
 from __future__ import annotations
 
+import random
+import string
+
 import psycopg
 import pytest
 from psycopg.rows import dict_row
 
+from jobcannon.web.onboarding import MAX_TITLE_LENGTH, MAX_TITLES_PER_SELECTION, _parse_submission
 from tests.host.conftest import create_throwaway_db, drop_throwaway_db, requires_postgres
 
 pytestmark = requires_postgres
+
+# RFC 6265's commonly-enforced per-cookie ceiling: browsers may silently drop
+# a Set-Cookie header past this size. The picker's whole selection round-trips
+# through a signed Flask session cookie (jobcannon/web/anon_session.py's
+# set_pending_picker), so a boundary-case submission that writes to Postgres
+# successfully but blows this budget would still break /preview for a real
+# visitor — see MAX_TITLES_PER_SELECTION's module comment on onboarding.py.
+_COMMON_BROWSER_COOKIE_LIMIT = 4093
+
+
+def _non_repeating_title(seed: int, length: int) -> str:
+    """Deterministic but non-repeating text. A single repeated character
+    compresses to almost nothing under itsdangerous's zlib session encoding,
+    which would make a cookie-size assertion measure the wrong thing — the
+    caps were sized against realistic, low-redundancy text (see
+    MAX_TITLES_PER_SELECTION's module comment), not a degenerate input."""
+    rng = random.Random(seed)
+    alphabet = string.ascii_letters + " "
+    return "".join(rng.choice(alphabet) for _ in range(length))
 
 
 SEEDED_COMPANY = "Onboarding Test Co"
@@ -184,6 +207,111 @@ def test_failed_submit_leaves_no_orphan_anon_user_row(app, monkeypatch):
         client.post("/start", data={"seniority_level": "mid", "workplace_type": "any"})
 
     assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+
+
+def test_oversized_title_count_rerenders_without_writing(app):
+    """issue #54: a submission with more title selections than a real
+    visitor could ever check in the rendered picker (MAX_TITLES_PER_SELECTION)
+    must re-render with 200 and write neither a users nor a profiles row —
+    same pattern as the existing enum/range failures above."""
+    client = app.test_client()
+    titles = [f"Title {i}" for i in range(MAX_TITLES_PER_SELECTION + 1)]
+    resp = client.post(
+        "/start",
+        data={"titles": titles, "seniority_level": "mid", "workplace_type": "any"},
+    )
+
+    assert resp.status_code == 200
+    assert "too many titles selected" in resp.get_data(as_text=True)
+    assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+    assert _profile_row_for_anon(app.config["_TEST_DSN"]) is None
+
+
+def test_oversized_title_length_rerenders_without_writing(app):
+    """issue #54: a single title longer than MAX_TITLE_LENGTH (e.g. an
+    arbitrary pasted text blob) must be rejected before it reaches
+    upsert_profile, not silently truncated."""
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={
+            "titles": ["x" * (MAX_TITLE_LENGTH + 1)],
+            "seniority_level": "mid",
+            "workplace_type": "any",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert f"{MAX_TITLE_LENGTH}-character limit" in resp.get_data(as_text=True)
+    assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+    assert _profile_row_for_anon(app.config["_TEST_DSN"]) is None
+
+
+def test_title_with_control_character_rerenders_without_writing(app):
+    """issue #54's explicit proposal: reject values containing control
+    characters (e.g. an embedded bell/escape byte), not just long ones."""
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={
+            "titles": ["Engineer\x07"],
+            "seniority_level": "mid",
+            "workplace_type": "any",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert "invalid (control) characters" in resp.get_data(as_text=True)
+    assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+    assert _profile_row_for_anon(app.config["_TEST_DSN"]) is None
+
+
+def test_non_string_title_is_rejected_by_type_check():
+    """Werkzeug's real form MultiDict.getlist() always returns str (no HTTP
+    form encoding can carry a non-str value), so the type check has no
+    reachable path through a genuine POST. Exercise it the same way
+    start_submit() invokes _parse_submission, against a minimal form
+    double, to cover the branch directly."""
+
+    class _NonStringValueForm:
+        def get(self, key, default=None):
+            return {"seniority_level": "mid", "workplace_type": "any"}.get(key, default)
+
+        def getlist(self, key):
+            return [123] if key == "titles" else []
+
+    selections, error = _parse_submission(_NonStringValueForm())
+
+    assert selections is None
+    assert error == "titles must be text values"
+
+
+def test_title_selections_at_the_cap_boundary_write_successfully(app):
+    """Happy path at both boundaries inclusive: MAX_TITLES_PER_SELECTION
+    titles, each exactly MAX_TITLE_LENGTH characters, must still succeed —
+    the caps reject strictly-over, not at-the-limit, submissions. Also the
+    regression guard for the caps' actual sizing rationale: this exact
+    boundary case must fit in one session cookie (see
+    _COMMON_BROWSER_COOKIE_LIMIT above and MAX_TITLES_PER_SELECTION's
+    module comment) — a cap that lets Postgres accept a submission the
+    visitor's own browser then silently drops is still broken."""
+    client = app.test_client()
+    titles = [_non_repeating_title(i, MAX_TITLE_LENGTH) for i in range(MAX_TITLES_PER_SELECTION)]
+    resp = client.post(
+        "/start",
+        data={"titles": titles, "seniority_level": "mid", "workplace_type": "any"},
+    )
+
+    assert resp.status_code in (302, 303)
+    cookie_bytes = sum(len(h) for h in resp.headers.get_all("Set-Cookie"))
+    assert cookie_bytes < _COMMON_BROWSER_COOKIE_LIMIT, (
+        f"session cookie ({cookie_bytes}B) exceeds the common browser per-cookie limit"
+    )
+
+    row = _profile_row_for_anon(app.config["_TEST_DSN"])
+    assert row is not None
+    assert len(row["target_titles"]) == MAX_TITLES_PER_SELECTION
+    assert all(len(t) == MAX_TITLE_LENGTH for t in row["target_titles"])
 
 
 def test_repeat_get_start_after_submit_shows_completion_state(app):
