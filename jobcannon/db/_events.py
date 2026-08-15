@@ -75,6 +75,34 @@ def read_consent_state(conn: Any, user_id: str) -> bool:
     return bool(row and row["analytics_consent"])
 
 
+def has_signed_up_event(conn: Any, user_id: str) -> bool:
+    """True if a `user_signed_up` row already exists for this Clerk user id,
+    regardless of which browser session recorded it.
+
+    The durable, per-`user_id` complement to jobcannon/web/handoff.py's
+    per-session `_HANDOFF_DONE_KEY` cookie marker. The session marker alone
+    only prevents re-emission *within one cookie jar*; a second device, an
+    incognito window, a cleared cookie jar, or the session cookie's own
+    default (non-permanent, browser-lifetime) expiry all mint a fresh jar
+    that has never seen `_HANDOFF_DONE_KEY` and would otherwise re-run the
+    full emission path for a user who has already signed up. Callers should
+    only pay for this SELECT on the already-narrow path where the cheap
+    session check says "not done yet" — see handoff.py's `_should_emit()`.
+
+    `events` carries no uniqueness constraint on `(user_id, event_type)`
+    (no migration adds one), so this is a best-effort check-before-write
+    guard, not a schema-enforced one: a narrow race between two concurrent
+    *first* authed requests for the same user (both reading "no row" before
+    either writes) is accepted as strictly better than today's guaranteed
+    duplication on every fresh cookie jar."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    row = raw.execute(
+        "SELECT 1 FROM events WHERE user_id = %s AND event_type = 'user_signed_up' LIMIT 1",
+        (user_id,),
+    ).fetchone()
+    return row is not None
+
+
 def db_now_iso(conn: Any) -> str:
     """The database's own clock, formatted as e.g. "2026-08-13T18:04:11.512034Z".
 
