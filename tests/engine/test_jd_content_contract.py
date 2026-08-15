@@ -566,9 +566,25 @@ def test_leading_array_blob_rejected():
 
 
 def test_malformed_config_degrades_to_defaults():
-    """String / None LEAF values must not crash the gate at the chokepoint:
-    a null jd_full section degrades to defaults, a numeric string coerces.
-    (A null `enrichment` section still raises — upstream-identical resolver
-    shape, tracked as a follow-up issue, parity-bound.)"""
+    """String / None section AND leaf values must not crash the gate at the
+    chokepoint (issue #37): a null jd_full section degrades to defaults, a
+    numeric string coerces, a null `enrichment` section degrades (previously
+    raised AttributeError), a non-numeric min_chars degrades (previously
+    raised ValueError), a None min_chars degrades (previously raised
+    TypeError), and a non-dict jd_full section degrades."""
     assert get_jd_full_thresholds({"enrichment": {"jd_full": None}}) == (200, True)
     assert get_jd_full_thresholds({"enrichment": {"jd_full": {"min_chars": "50"}}}) == (50, True)
+    assert get_jd_full_thresholds({"enrichment": None}) == (200, True)
+    assert get_jd_full_thresholds({"enrichment": {"jd_full": {"min_chars": "abc"}}}) == (200, True)
+    assert get_jd_full_thresholds({"enrichment": {"jd_full": {"min_chars": None}}}) == (200, True)
+    assert get_jd_full_thresholds({"enrichment": {"jd_full": "yes"}}) == (200, True)
+
+
+def test_malformed_config_degrades_at_reject_chokepoint():
+    """The same malformed config shapes must not crash jd_content_reject
+    itself — the actual per-row gate hit by set_jd_full and
+    ParsedJob.from_job (issue #37's damage claim was at those chokepoints,
+    not just the resolver in isolation)."""
+    body = "x" * 250  # clears the default 200-char floor; no other reject signal
+    assert jd_content_reject(body, None, {"enrichment": None}) is None
+    assert jd_content_reject(body, None, {"enrichment": {"jd_full": {"min_chars": "abc"}}}) is None
