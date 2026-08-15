@@ -2,7 +2,10 @@
 required. Covers _run.py plus the sibling files (_run_html.py,
 _run_playwright.py) that import _high_score_history_clause and build their
 own bind-parameter lists against it (all three needed a coordinated fix: the
-neutralized clause dropped from one bind parameter to zero).
+neutralized clause dropped from one bind parameter to zero). Also covers
+ats_prober.py's static-first fall-through (dormant path, no production
+caller reaches it yet — see tests/host/test_ats_prober_dialect.py for a
+live-Postgres exercise of the two tiers that don't require Playwright).
 
 Note on architecture: `_dormancy_gate_clause` and the retry-eligibility
 `datetime('now')` calls are deliberately kept in SQLite dialect in the raw
@@ -13,14 +16,19 @@ those tests outright (`make_interval(days => ?)`'s `=>` token is a SQLite
 parse error, verified empirically). jobcannon/db/compat.py's
 engine_sql_to_host() is the sole Postgres-translation seam for these two
 shapes — see tests/host/test_compat.py for the translation-layer tests. The
-other two dialect fixes in this PR (_high_score_history_clause neutralized to
-TRUE, and scan_enabled integer-literal -> TRUE/FALSE) ARE done directly in the
-engine source below, because both forms are valid in SQLite and Postgres
-natively — no compat-layer rewrite needed, and no tests/engine/ regression.
+other two dialect fixes covered here (_high_score_history_clause neutralized
+to TRUE, and scan_enabled integer-literal -> TRUE/FALSE, including
+ats_prober.py's three sites) ARE done directly in the engine source, because
+TRUE/FALSE are valid literals in both SQLite and Postgres natively — no
+compat-layer rewrite needed, and no tests/engine/ regression: ats_prober.py's
+own sqlite3-backed suite (tests/engine/test_prober_extensions_seam.py) still
+passes unchanged, since TRUE/FALSE work against SQLite's INTEGER-affinity
+boolean storage exactly like 1/0 did.
 """
 
 import inspect
 
+from jobcannon.engine import ats_prober
 from jobcannon.engine.ats_scanner import _run, _run_html, _run_playwright
 
 
@@ -48,7 +56,16 @@ def test_no_integer_literal_boolean_comparison_on_scan_enabled():
     # silently accepts it since it stores booleans as 0/1). TRUE/FALSE literals
     # are valid in both dialects, so this fix (unlike the datetime one above)
     # is done directly in the engine source, not the compat layer.
-    for module in (_run, _run_html, _run_playwright):
+    #
+    # ats_prober is included here even though its scan_enabled writes are in
+    # SET (assignment) context, not comparison context — same underlying
+    # Postgres type error, and this module's three sites were an easy miss:
+    # the run/_run_html/_run_playwright sites were already rewritten to
+    # TRUE/FALSE when this test was first written, but ats_prober's
+    # static-first fall-through (dormant — no production caller reaches it
+    # yet) was outside that pass's scope. See tests/host/
+    # test_ats_prober_dialect.py for a live-Postgres exercise.
+    for module in (_run, _run_html, _run_playwright, ats_prober):
         src = inspect.getsource(module)
         assert "scan_enabled = 1" not in src
         assert "scan_enabled = 0" not in src
