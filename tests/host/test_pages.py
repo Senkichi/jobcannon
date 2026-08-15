@@ -55,6 +55,17 @@ def test_root_requires_auth(app_client_unauthed):
     assert app_client_unauthed.get("/").status_code == 401
 
 
+def test_401_error_page_still_carries_the_footer_source_link(app_client_unauthed):
+    """base.html's footer holds the persistent AGPL section 13 Corresponding
+    Source offer (issue #22) and must be unconditional — present whether or
+    not the viewer is signed in. error_401.html extends base.html the same
+    as every authed/public page, so the unauthenticated 401 path is the
+    cheapest proof the link isn't gated on auth state."""
+    html = app_client_unauthed.get("/").get_data(as_text=True)
+    assert 'href="https://github.com/Senkichi/jobcannon"' in html
+    assert ">Source<" in html
+
+
 def test_root_renders_no_profile_empty_state(app_client_authed, monkeypatch):
     from jobcannon.web import pages
 
@@ -172,3 +183,23 @@ def test_demo_trailing_slash_is_public_not_401(app_client_unauthed, monkeypatch)
     html = response.get_data(as_text=True)
     assert response.status_code == 200
     assert "Guest demo feed" in html
+
+
+def test_demo_page_footer_carries_the_agpl_source_link(app_client_unauthed, monkeypatch):
+    """Same footer link as test_401_error_page_still_carries_the_footer_source_link,
+    exercised on the public /demo page instead of the auth-gated 401 path —
+    together the two prove the AGPL section 13 source-offer link (issue #22)
+    renders on both an authed-route's error page and a fully public page."""
+    from jobcannon.web import pages
+
+    _patch_connection_factory(monkeypatch)
+    monkeypatch.setattr(
+        pages,
+        "corpus_stats",
+        lambda conn: {"postings": 0, "companies": 0, "freshest_last_seen": None},
+    )
+    monkeypatch.setattr(pages, "get_profile", lambda conn, user_id: None)
+
+    html = app_client_unauthed.get("/demo").get_data(as_text=True)
+    assert 'href="https://github.com/Senkichi/jobcannon"' in html
+    assert ">Source<" in html
