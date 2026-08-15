@@ -260,6 +260,48 @@ def test_handoff_is_idempotent_on_subsequent_requests(app):
     assert len(_events_rows(dsn, CLERK_ID, "user_signed_up")) == 1
 
 
+def test_two_cookie_jars_for_same_clerk_user_emit_user_signed_up_once(app):
+    """The cross-session repro this suite was missing: a second browser /
+    device / incognito window for the SAME Clerk user is a second
+    `test_client()` — a fresh cookie jar that has never seen
+    `_HANDOFF_DONE_KEY` — not a second request on the same client. Before the
+    durable per-user guard in `_events.has_signed_up_event`, each jar ran the
+    full emission path independently and doubled the `user_signed_up` row."""
+    dsn = app.config["_TEST_DSN"]
+    _authed(app)
+
+    client1 = app.test_client()
+    resp1 = client1.get("/")
+    assert resp1.status_code in (200, 302, 303)
+
+    client2 = app.test_client()
+    resp2 = client2.get("/")
+    assert resp2.status_code in (200, 302, 303)
+
+    assert len(_events_rows(dsn, CLERK_ID, "user_signed_up")) == 1
+
+
+def test_distinct_user_still_emits_after_another_users_signup(app):
+    """The durable guard is scoped to `user_id`, not global: a second,
+    distinct Clerk user's first authed request must still get its own
+    user_signed_up row even though another user has already signed up and
+    left a row in the same events table."""
+    dsn = app.config["_TEST_DSN"]
+    other_id = "user_clerk_2"
+
+    _authed(app, user_id=CLERK_ID)
+    client1 = app.test_client()
+    client1.get("/")
+    assert len(_events_rows(dsn, CLERK_ID, "user_signed_up")) == 1
+
+    _authed(app, user_id=other_id)
+    client2 = app.test_client()
+    client2.get("/")
+    assert len(_events_rows(dsn, other_id, "user_signed_up")) == 1
+    # The first user's row is untouched by the second user's signup.
+    assert len(_events_rows(dsn, CLERK_ID, "user_signed_up")) == 1
+
+
 def test_picker_resubmission_after_signup_is_rekeyed_not_orphaned(app):
     """A picker submitted at /start AFTER the handoff has already completed
     once must still be consumed on a later authed request — the completion

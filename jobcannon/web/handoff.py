@@ -28,17 +28,30 @@ because they have different repeat semantics:
    now-copied profile away). This phase is safe to repeat: `ensure_user`
    upserts, `get_profile` on an already-deleted anon id returns `None` so the
    re-key is skipped, and deleting an already-gone row is a no-op.
-2. **The signup emission + one-time `/consent` redirect** fire **at most
-   once per browser session**, gated on the `_HANDOFF_DONE_KEY` session
-   marker, independent of whether the DB phase above ran this request. After
-   the DB phase's commit — because `jobcannon.host.events.log_event` opens
-   its own pooled connection and cannot join that transaction — this module
-   emits `user_signed_up` with the consent state read fresh from the
-   database (never the ambient, request-start `g.consent_granted`, which is
-   resolved before this handoff runs and would be stale for exactly this
-   event). The handoff never writes consent itself: consent has exactly one
-   writer, on an authenticated surface (jobcannon/web/consent.py), and this
-   module only reads the stored value to pass explicitly to `log_event`.
+2. **The signup emission + one-time `/consent` redirect** are gated first by
+   the `_HANDOFF_DONE_KEY` session marker — a cheap, no-query check
+   (`_should_emit()`) that keeps this module from touching the database at
+   all on the overwhelming majority of authed requests, where that cookie
+   already says "done". That marker is per-*session*, though, not per-user:
+   a second device, an incognito window, a cleared cookie jar, or the
+   session cookie's own default (non-permanent, browser-lifetime) expiry all
+   mint a fresh jar that has never seen `_HANDOFF_DONE_KEY`. So once the
+   cheap check says "maybe", this module also consults
+   `jobcannon.db._events.has_signed_up_event` — a durable, per-`user_id`
+   read — on the same connection already opened for the DB phase below,
+   before deciding whether to actually call `log_event`. Only a user with no
+   `user_signed_up` row anywhere gets a new emission; a duplicate jar for an
+   already-signed-up user still marks its own session done (so it stops
+   re-querying) and still redirects to `/consent` if that user's choice
+   truly hasn't been made yet, but does not insert a second event. After the
+   DB phase's commit — because `jobcannon.host.events.log_event` opens its
+   own pooled connection and cannot join that transaction — an actual
+   emission carries the consent state read fresh from the database (never
+   the ambient, request-start `g.consent_granted`, which is resolved before
+   this handoff runs and would be stale for exactly this event). The handoff
+   never writes consent itself: consent has exactly one writer, on an
+   authenticated surface (jobcannon/web/consent.py), and this module only
+   reads the stored value to pass explicitly to `log_event`.
 
 **The anon-row deletion above is safe only because no pre-signup surface —
 `/start`, `/preview`, `/demo` — ever calls `log_event`.** Every one of them
@@ -113,6 +126,7 @@ def run_handoff_if_pending() -> Any:
     attribution = session.get("attribution") or {}
     consent_granted = None
     choice_made = None
+    already_signed_up = False
 
     try:
         with connection_factory() as conn:
@@ -146,6 +160,10 @@ def run_handoff_if_pending() -> Any:
             if should_emit:
                 consent_granted = _events.read_consent_state(conn.raw, clerk_id)
                 choice_made = _events.read_consent_choice_made(conn.raw, clerk_id)
+                # Durable per-user check — only reached once the cheap
+                # session marker has already said "maybe emit". See module
+                # docstring, phase 2.
+                already_signed_up = _events.has_signed_up_event(conn.raw, clerk_id)
     except Exception:
         logger.warning(
             "handoff DB phase failed for user %s (will retry on a later request)",
@@ -169,27 +187,36 @@ def run_handoff_if_pending() -> Any:
     # runs on EVERY authed request until it succeeds once, so a failure here
     # (e.g. an oversized wave value rejected by events_schema.validate_payload)
     # must never propagate into before_request and 500 an unrelated request.
-    try:
-        log_event(
-            "user_signed_up",
-            user_id=clerk_id,
-            consent_granted=consent_granted,  # read just now, never the stale ambient g
-            feed_session_id=g.feed_session_id,
-            payload={
-                "channel": attribution.get("channel", "direct"),
-                "wave": attribution.get("wave", "0"),
-                "signup_method": "clerk",
-                "referrer_url": attribution.get("referrer_host", "unknown"),
-            },
-        )
-    except Exception:
-        logger.warning(
-            "user_signed_up emission failed for user %s (DB phase already "
-            "committed; will retry emission on a later request)",
-            clerk_id,
-            exc_info=True,
-        )
-        return None
+    #
+    # Skipped entirely when `already_signed_up` is True: a durable
+    # `user_signed_up` row already exists for this user (recorded by an
+    # earlier request, possibly in a different cookie jar — see module
+    # docstring, phase 2, and #55). This session's own marker is still set
+    # below so it stops re-querying the durable check on every subsequent
+    # request, and the one-time consent redirect below is still evaluated —
+    # neither of those inserts a second event row.
+    if not already_signed_up:
+        try:
+            log_event(
+                "user_signed_up",
+                user_id=clerk_id,
+                consent_granted=consent_granted,  # read just now, never the stale ambient g
+                feed_session_id=g.feed_session_id,
+                payload={
+                    "channel": attribution.get("channel", "direct"),
+                    "wave": attribution.get("wave", "0"),
+                    "signup_method": "clerk",
+                    "referrer_url": attribution.get("referrer_host", "unknown"),
+                },
+            )
+        except Exception:
+            logger.warning(
+                "user_signed_up emission failed for user %s (DB phase already "
+                "committed; will retry emission on a later request)",
+                clerk_id,
+                exc_info=True,
+            )
+            return None
 
     session.pop("attribution", None)
     session[_HANDOFF_DONE_KEY] = True
