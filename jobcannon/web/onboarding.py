@@ -121,6 +121,75 @@ MAX_TITLES_PER_SELECTION = 20
 # would break the session-cookie round trip anyway.
 MAX_TITLE_LENGTH = 140
 
+# `companies` selections never reach durable storage (there is no
+# target_companies column anywhere in this schema — see the comment at the
+# `companies` extraction site in _parse_submission below), but they DO
+# share the exact same signed-cookie round trip titles take via
+# set_pending_picker, so an uncapped `companies` submission can blow the
+# same ~4093-byte RFC 6265 ceiling independently of titles (issue #80,
+# filed during #54's review). Capped with the same shape (count + per-item
+# length) MAX_TITLES_PER_SELECTION/MAX_TITLE_LENGTH use, but the split
+# between the two is sized differently, LENGTH first: unlike titles (bounded
+# upstream by careers_crawler's `_MAX_TITLE_LEN = 140`, so the picker's
+# rendered option window can never contain a title long enough to exceed
+# MAX_TITLE_LENGTH — see that constant's comment), postings.company /
+# companies.name have NO upstream length bound anywhere in this codebase —
+# so, unlike titles, no finite MAX_COMPANY_LENGTH can guarantee every
+# rendered option stays selectable; some cap is unavoidable given the
+# cookie budget below, and this is a known, accepted residual limitation,
+# not a solved one. Two earlier passes were rejected on two DIFFERENT
+# grounds: 10 x 60 (mirroring titles' own proportions) measured OVER the
+# session-cookie budget (4235 bytes against the ~4093 ceiling — see
+# MAX_COMPANY_LENGTH's comment for the full combined measurement); 8 x 35
+# fit the budget but was low enough on length to plausibly reject a real
+# rendered corpus name (see MAX_COMPANY_LENGTH's comment for concrete
+# examples over 35 chars) — the same functional defect #76 avoided for
+# titles by aligning with its upstream bound, not achievable here since
+# there is no upstream bound to align with. MAX_COMPANY_LENGTH is set
+# first, as high as the remaining budget allows once titles + the cookie's
+# other fixed costs are accounted for; this constant is then whatever
+# selection COUNT that length leaves room for — a usability consequence of
+# the budget, not an assumption that nobody would ever want more.
+# distinct_companies(limit=50) still renders up to 50 selectable options,
+# same as titles.
+MAX_COMPANIES_PER_SELECTION = 5
+
+# Sized first (see MAX_COMPANIES_PER_SELECTION's comment for why length
+# leads here, and for the residual limitation this bound does NOT close):
+# 55 chars covers the overwhelming majority of real company legal names,
+# suffixes included (e.g. "PricewaterhouseCoopers International Limited" is
+# 46 chars, "Federal Home Loan Mortgage Corporation" is 39) — a corpus entry
+# longer than that remains unselectable through the picker, same tradeoff
+# the cookie budget forces onto every option here. Then measured
+# empirically (same non-repeating-text methodology #76 used for titles —
+# itsdangerous's zlib+base64 session encoding roughly breaks even
+# byte-for-byte on non-repeating text, so a compressible degenerate input
+# would understate the true worst case) with the actual production cookie
+# attributes (SESSION_COOKIE_SECURE=True adds "; Secure" that a TESTING app
+# doesn't emit — this route's own tests must build that in, not measure the
+# testing-only shape): one POST /start carrying titles at
+# MAX_TITLES_PER_SELECTION x MAX_TITLE_LENGTH, companies at
+# MAX_COMPANIES_PER_SELECTION x MAX_COMPANY_LENGTH, every other
+# pending_picker field at ITS own worst case (all 10 SKILLS_OPTIONS tokens,
+# the longest SENIORITY_LEVELS value "principal", a workplace_type token),
+# AND a worst-case `?ref=` channel (_CHANNEL_MAX_LEN=32 chars) plus a
+# worst-case Referer host (events_schema._MAX_STR=200 chars — both
+# visitor-controlled and captured into the same cookie by
+# anon_session.py's capture_attribution/ensure_session_ids on this same
+# first request, alongside anon_session_id/feed_session_id) serializes to
+# ~3910 bytes total (a few bytes of run-to-run jitter from mint_anon_user's
+# random anon_id affecting zlib's compression ratio; observed range across
+# 5 runs: 3906-3911) — under the common ~4093-byte browser per-cookie
+# ceiling with ~180 bytes (~4.4%) to spare even at the high end. For scale:
+# titles alone at cap plus that same worst-case attribution tail (i.e. this
+# exact scenario minus `companies` entirely) already measures 3620 bytes —
+# the attribution tail is a pre-existing cost, not one this PR introduced,
+# but it's why `companies` doesn't get titles' full proportional share of
+# the remaining budget. Verified against this exact route in
+# tests/host/test_onboarding.py::test_company_selections_at_the_cap_boundary_write_successfully,
+# not merely calculated.
+MAX_COMPANY_LENGTH = 55
+
 # The form speaks lowercase ("remote"); postings.workplace_type (written by
 # jobcannon/db/_jobs.py from jobcannon/engine/location_canonical.py's
 # WorkplaceType Literal) holds only uppercase tokens or NULL, and
@@ -220,6 +289,28 @@ def _parse_titles(form: Any) -> tuple[list[str] | None, str | None]:
     return titles, None
 
 
+def _parse_companies(form: Any) -> tuple[list[str] | None, str | None]:
+    """Shape-validate the submitted company selections before they reach
+    set_pending_picker's session cookie: count cap, per-item length cap, and
+    a type check — the same shape _parse_titles enforces (issue #80). No
+    control-character rejection here: unlike titles, companies never reach a
+    durable jsonb column (see the comment at this function's call site), so
+    the concern that check exists for doesn't apply — the cookie-budget caps
+    below are the only hazard `companies` shares with `titles`."""
+    raw_companies = [c for c in form.getlist("companies") if c]
+    if len(raw_companies) > MAX_COMPANIES_PER_SELECTION:
+        return None, f"too many companies selected (max {MAX_COMPANIES_PER_SELECTION})"
+
+    companies: list[str] = []
+    for company in raw_companies:
+        if not isinstance(company, str):
+            return None, "companies must be text values"
+        if len(company) > MAX_COMPANY_LENGTH:
+            return None, f"company exceeds the {MAX_COMPANY_LENGTH}-character limit"
+        companies.append(company)
+    return companies, None
+
+
 def _parse_submission(form: Any) -> tuple[dict[str, Any] | None, str | None]:
     """Validate the raw POST body. Returns (selections, error) — exactly one
     of the two is non-None."""
@@ -245,15 +336,21 @@ def _parse_submission(form: Any) -> tuple[dict[str, Any] | None, str | None]:
     if error is not None:
         return None, error
 
+    companies, error = _parse_companies(form)
+    if error is not None:
+        return None, error
+
     selections = {
         "titles": titles,
         # `companies` selections never reach durable storage today — there
         # is no target_companies column anywhere in this schema (upsert_profile
         # doesn't accept one); this list only flows into the session via
-        # set_pending_picker for /preview's read-side filter. Left
-        # presence-filtered only, matching prior behavior — a durable sink
-        # would need the same cap treatment as titles above.
-        "companies": [c for c in form.getlist("companies") if c],
+        # set_pending_picker for /preview's read-side filter. Still
+        # shape-validated (count + length cap, see MAX_COMPANIES_PER_SELECTION)
+        # because it round-trips through the same session cookie titles do —
+        # a durable sink would additionally need titles' control-character
+        # check.
+        "companies": companies,
         "skills": [s for s in form.getlist("skills") if s and s in SKILLS_OPTIONS],
         "seniority_level": seniority_level,
         "years_of_experience": years_of_experience,
