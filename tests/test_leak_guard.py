@@ -54,9 +54,12 @@ def test_cla_md_required_attribution_is_carved_out(tmp_path):
     """CLA.md's required Maintainer-attribution sentence must not trip the
     guard (#25) — same carve-out already granted to LICENSE."""
     repo = _init_repo(tmp_path)
-    (repo / "CLA.md").write_text('maintained by Senkichi ("the Maintainer")\n', encoding="utf-8")
+    # Synthetic handle, deliberately NOT the real maintainer token: a real
+    # token here would make this tracked test file itself a guard hit under
+    # the real terms list — relocating the exact false positive #25 removes.
+    (repo / "CLA.md").write_text('maintained by examplehandle ("the Maintainer")\n', encoding="utf-8")
     terms_file = tmp_path / "terms.txt"
-    terms_file.write_text("senkichi\n", encoding="utf-8")
+    terms_file.write_text("examplehandle\n", encoding="utf-8")
 
     result = _run_guard(repo, terms_file)
 
