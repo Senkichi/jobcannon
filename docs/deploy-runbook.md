@@ -184,9 +184,15 @@ but the orphaned row should still be cleaned up periodically:
 SELECT id, task_name FROM procrastinate_jobs WHERE status = 'doing' AND worker_id IS NULL;
 ```
 
-Requeue (re-defer the same task) or delete each row found, as appropriate. A
-proper reclaim maintenance task is tracked as jobcannon issue #19 — until
-that lands, this is a manual operator step.
+This is handled automatically: `reclaim_orphaned_jobs` is a periodic task on
+the worker (default `*/15 * * * *` UTC, override via `JC_RECLAIM_CRON`,
+`periodic_id="reclaim_orphaned_jobs"`) that selects exactly the rows the
+query above finds and retries each one through procrastinate's `JobManager`
+(`doing` -> `todo`, so a worker picks it back up on the next tick). To
+inspect a run's result, find that task's `job_processed` line in the worker
+log — the periodic tick logs its return value inline, e.g. `{"reclaimed": 2,
+"disposition": "retry", "job_ids": [123, 124]}` — or run the query above
+directly; a healthy fleet keeps it empty between ticks.
 
 ## 9. Guest demo
 

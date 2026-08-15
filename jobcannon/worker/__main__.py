@@ -15,13 +15,15 @@ job completes, its row stays status='doing' permanently: verified against
 procrastinate 3.9.0, `procrastinate_prune_stalled_workers_v1` only DELETEs
 from `procrastinate_workers` (`jobs.worker_id` goes NULL via ON DELETE SET
 NULL) — nothing ever resets a `doing` job's status. Procrastinate's stalled-
-worker pruning is NOT a job-reclamation mechanism; do not assume it is. Two
-operational mitigations bound the blast radius in the meantime: scan jobs are
+worker pruning is NOT a job-reclamation mechanism; do not assume it is. One
+operational mitigation bounds the blast radius regardless: scan jobs are
 deduped only by per-defer queueing locks, so a stuck `doing` row does NOT
-block future enqueues of the same company; and orphan cleanup is an operator
-runbook step (query `doing` jobs with `worker_id IS NULL`, requeue or delete
-manually) pending a reclaim maintenance task (tracked follow-up). Do not
-hand-roll shutdown logic here.
+block future enqueues of the same company. Orphan cleanup itself is the
+`reclaim_orphaned_jobs` periodic task (`jobcannon/host/tasks.py`) — it
+selects exactly `status = 'doing' AND worker_id IS NULL` and retries each
+row via procrastinate's JobManager; see deploy-runbook.md "Orphaned `doing`
+jobs" for the operator-facing description. Do not hand-roll shutdown logic
+here.
 """
 
 from __future__ import annotations
