@@ -1,9 +1,11 @@
 """SmartRecruiters platform scanner (registry form).
 
 GET-paginated Posting API. Per-job description requires a secondary
-GET; ``_fetch_smartrecruiters_description`` lives in ``ats_platforms.py``
-because ``tests/test_smartrecruiters_scanner.py`` imports it directly.
-This module calls it via lazy import to avoid a circular dependency.
+GET; ``_fetch_smartrecruiters_description`` lives in ``_detail_fetchers.py``
+(re-exported through ``ats_platforms/__init__.py``) because
+``tests/engine/test_smartrecruiters_scanner.py`` imports it from the
+package namespace directly. This module calls it via lazy import to avoid
+a circular dependency.
 """
 
 from __future__ import annotations
@@ -56,10 +58,14 @@ def _fetch_postings_with_completeness(
     warning is logged whenever the board is incomplete so operators can see
     which companies exceed the pagination cap (#217).
 
-    ``ats_reconciler.py`` calls this function directly today via a private
-    import, bypassing the ``PlatformScanner.fetch_postings_with_completeness``
-    registry field entirely. The field itself is forward-wiring for the
-    wider reconciler chain (issues #1030-1033) and currently has no callers.
+    In the private source, a dedicated ``ats_reconciler.py`` module called
+    this function directly via a private import, bypassing the
+    ``PlatformScanner.fetch_postings_with_completeness`` registry field
+    entirely; that module did not survive extraction into this engine port.
+    Reconciliation here is host-supplied instead (``services.py``'s
+    ``reconcile_company_ats`` field, driven from ``ats_scanner/_promote.py``),
+    and the registry field remains forward-wiring for the wider reconciler
+    chain (issues #1030-1033) with currently no callers.
 
     Args:
         slug: SmartRecruiters company slug.
