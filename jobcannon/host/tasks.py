@@ -1,17 +1,17 @@
 """Procrastinate task-shape declarations for the hosted job taxonomy, plus the
-periodic enqueue tick, OD-18 storage-check tick, and orphaned-job reclaim
-tick that fire on a schedule.
+periodic enqueue tick, storage-check tick, orphaned-job reclaim tick, and
+anon-user reap tick that fire on a schedule.
 
-Task shapes (`scan`, `expiry_check`, `stale_detect`) and the three periodics
-(`enqueue_due_scans`, `db_storage_check`, `reclaim_orphaned_jobs`, each
-declared with `@app.periodic` + `@app.task` below) all live here. 'enrich' is
-intentionally not defined: no enrich hook exists to run. Defining a periodic
-task's SHAPE is not the same as RUNNING it: this module still never runs a
-worker or applies procrastinate's schema at import time —
-`jobcannon.worker.__main__` owns both (it applies procrastinate's schema via
-`_ensure_procrastinate_schema`, then calls `App.run_worker()`), and
-`App.run_worker()` is what actually fires every periodic tick and deferred
-task on schedule.
+Task shapes (`scan`, `expiry_check`, `stale_detect`) and the four periodics
+(`enqueue_due_scans`, `db_storage_check`, `reclaim_orphaned_jobs`,
+`reap_anon_users`, each declared with `@app.periodic` + `@app.task` below)
+all live here. 'enrich' is intentionally not defined: no enrich hook exists
+to run. Defining a periodic task's SHAPE is not the same as RUNNING it: this
+module still never runs a worker or applies procrastinate's schema at import
+time — `jobcannon.worker.__main__` owns both (it applies procrastinate's
+schema via `_ensure_procrastinate_schema`, then calls `App.run_worker()`),
+and `App.run_worker()` is what actually fires every periodic tick and
+deferred task on schedule.
 
 Connector note: PsycopgConnector (procrastinate 3.9.0, the pinned version —
 see pyproject.toml) is the async psycopg3 connector, and it is REQUIRED here
@@ -44,6 +44,7 @@ import procrastinate
 
 from procrastinate import exceptions as procrastinate_exceptions
 
+from jobcannon.db._users import reap_unconverted_anon_users
 from jobcannon.host import scan_tasks as _scan_tasks
 from jobcannon.host.scan_tasks import (
     run_expiry_check_task,
@@ -165,3 +166,22 @@ def reclaim_orphaned_jobs(timestamp: int) -> dict:
     for job_id in job_ids:
         app.job_manager.retry_job_by_id(job_id, retry_at=retry_at)
     return {"reclaimed": len(job_ids), "disposition": "retry", "job_ids": job_ids}
+
+
+@app.periodic(
+    cron=os.environ.get("JC_ANON_REAP_CRON", "43 6 * * *"),
+    periodic_id="reap_anon_users",
+)
+@app.task(queue="maintenance", queueing_lock="reap_anon_users")
+def reap_anon_users(timestamp: int) -> dict:
+    """Periodic reaper (#48): deletes anon-namespaced `users` rows (see
+    jobcannon.db._users module docstring for the predicate and why it never
+    reaps a converted visitor) once they are older than the retention
+    window. Returns a count, not the reaped ids — procrastinate persists
+    task results, and a user id is PII-adjacent."""
+    from jobcannon.db import connection_factory
+
+    retention_days = int(os.environ.get("JC_ANON_RETENTION_DAYS", "30"))
+    with connection_factory() as conn:
+        reaped_ids = reap_unconverted_anon_users(conn, retention_days=retention_days)
+    return {"reaped": len(reaped_ids), "retention_days": retention_days}
