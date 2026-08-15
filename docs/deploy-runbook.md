@@ -34,6 +34,7 @@ Render dashboard). None of them are committed anywhere in this repo.
 | `CLERK_JWT_KEY` | web | Clerk dashboard → API Keys → Advanced → JWT public key (enables networkless RS256 verification — required, see `jobcannon/web/auth.py`) |
 | `CLERK_AUTHORIZED_PARTIES` | web | Comma-separated list of the origins allowed to present a session token for this deploy (e.g. the Render web service's public URL). This is an operator-chosen value, not something copied verbatim from Clerk — it is Clerk's `azp` replay-defense check. |
 | `CLERK_WEBHOOK_SIGNING_SECRET` | web | Clerk dashboard → Webhooks → the endpoint created in step 4 → Signing Secret (`whsec_...`) |
+| `JC_SECRET_KEY` | web | Operator-generated random secret (Flask session-signing key) — not sourced from any external dashboard, unlike the Clerk/PostHog rows. The web service refuses to boot without it. |
 | `POSTHOG_API_KEY` | web, worker | PostHog project settings → Project API Key |
 
 `DATABASE_URL` is wired automatically on both services via `render.yaml`'s
