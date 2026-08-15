@@ -22,10 +22,11 @@ the form below, in the same PR as (or before) your first code contribution:
 - Your Name (@github-handle) — agrees to CLA.md as of YYYY-MM-DD
 ```
 
-This is a manual, low-friction process while the project has no outside
-contributors yet. It will move to automated CLA-bot enforcement
-(cla-assistant or similar) at the public launch — this file will be updated
-when that happens.
+`CONTRIBUTORS.md` is the project's record; it is not what gates merge. A
+required `cla-assistant` status check does that: on a first-time
+contributor's pull request, the bot comments with a link to sign the CLA
+electronically, and the check turns green once you've signed — independent
+of whether your `CONTRIBUTORS.md` line has landed yet.
 
 ## Pull requests
 

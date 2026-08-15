@@ -1,17 +1,17 @@
 """Procrastinate task-shape declarations for the hosted job taxonomy, plus the
-periodic enqueue tick, storage-check tick, and anon-user reap tick that fire
-on a schedule.
+periodic enqueue tick, storage-check tick, orphaned-job reclaim tick, and
+anon-user reap tick that fire on a schedule.
 
-Task shapes (`scan`, `expiry_check`, `stale_detect`) and the three periodics
-(`enqueue_due_scans`, `db_storage_check`, `reap_anon_users`, each declared
-with `@app.periodic` + `@app.task` below) all live here. 'enrich' is
-intentionally not defined: no enrich hook exists to run. Defining a periodic
-task's SHAPE is not the same as RUNNING it: this module still never runs a
-worker or applies procrastinate's
-schema at import time — `jobcannon.worker.__main__` owns both (it applies
-procrastinate's schema via `_ensure_procrastinate_schema`, then calls
-`App.run_worker()`), and `App.run_worker()` is what actually fires every
-periodic tick and deferred task on schedule.
+Task shapes (`scan`, `expiry_check`, `stale_detect`) and the four periodics
+(`enqueue_due_scans`, `db_storage_check`, `reclaim_orphaned_jobs`,
+`reap_anon_users`, each declared with `@app.periodic` + `@app.task` below)
+all live here. 'enrich' is intentionally not defined: no enrich hook exists
+to run. Defining a periodic task's SHAPE is not the same as RUNNING it: this
+module still never runs a worker or applies procrastinate's schema at import
+time — `jobcannon.worker.__main__` owns both (it applies procrastinate's
+schema via `_ensure_procrastinate_schema`, then calls `App.run_worker()`),
+and `App.run_worker()` is what actually fires every periodic tick and
+deferred task on schedule.
 
 Connector note: PsycopgConnector (procrastinate 3.9.0, the pinned version —
 see pyproject.toml) is the async psycopg3 connector, and it is REQUIRED here
@@ -37,6 +37,7 @@ registry (see tests/host/test_scan_tasks.py) must account for this.
 
 from __future__ import annotations
 
+import datetime
 import os
 
 import procrastinate
@@ -119,6 +120,52 @@ def db_storage_check(timestamp: int) -> dict:
         status = check_db_storage(conn, limit_mb=limit_mb)
     record_scan_health(source="db_storage_check", **status)
     return status
+
+
+@app.periodic(
+    cron=os.environ.get("JC_RECLAIM_CRON", "*/15 * * * *"),
+    periodic_id="reclaim_orphaned_jobs",
+)
+@app.task(queue="maintenance", queueing_lock="reclaim_orphaned_jobs")
+def reclaim_orphaned_jobs(timestamp: int) -> dict:
+    """Reclaim `doing` jobs orphaned by a hard-killed worker (deploy-runbook.md
+    "Orphaned `doing` jobs"): if the worker process dies mid-job (e.g. a
+    Render redeploy's grace period expiring before an in-flight scan
+    finishes), procrastinate's own stalled-worker pruning only deletes the
+    dead `procrastinate_workers` row — the job's `worker_id` goes NULL via
+    `ON DELETE SET NULL`, but nothing in procrastinate itself resets the
+    job's `status` back off `doing`.
+
+    Selection is exactly `status = 'doing' AND worker_id IS NULL` — the
+    signature that pruning leaves behind — never a generic age/heartbeat
+    "stalled" query: `JobManager.get_stalled_jobs` is heartbeat-based and
+    would also match a healthy long-running job whose worker is still
+    reporting in. `JobManager.list_jobs` cannot express this predicate either
+    — verified against 3.9.0's `list_jobs` SQL, `worker_id=None` means
+    "don't filter on worker_id" (`(%(worker_id)s::bigint IS NULL OR
+    worker_id = %(worker_id)s)`), not "worker_id IS NULL" — so selection is a
+    plain parameterized query and only the mutation goes through the
+    JobManager API.
+
+    Disposition is retry, not delete: `JobManager.retry_job_by_id` performs
+    the transition (its `procrastinate_retry_job_v2` DB function only
+    accepts a job whose status is 'doing' or 'failed', which is exactly the
+    set this query selects), and every task on this queue (scan,
+    expiry_check, stale_detect) recomputes from source rather than applying
+    incremental side effects, so re-running an interrupted one is safe.
+    """
+    from jobcannon.db import connection_factory
+
+    with connection_factory() as conn:
+        raw = conn.raw if hasattr(conn, "raw") else conn
+        rows = raw.execute(
+            "SELECT id FROM procrastinate_jobs WHERE status = 'doing' AND worker_id IS NULL"
+        ).fetchall()
+    job_ids = [row["id"] for row in rows]
+    retry_at = datetime.datetime.now(tz=datetime.timezone.utc)
+    for job_id in job_ids:
+        app.job_manager.retry_job_by_id(job_id, retry_at=retry_at)
+    return {"reclaimed": len(job_ids), "disposition": "retry", "job_ids": job_ids}
 
 
 @app.periodic(

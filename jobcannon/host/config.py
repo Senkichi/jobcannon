@@ -48,6 +48,25 @@ class HostConfig:
     signup_wave: str = field(
         default="0", metadata={"env": "JC_SIGNUP_WAVE", "declare_on": ("web",)}
     )
+    # Clerk request/webhook verification (jobcannon.web.auth.build_clerk_verifier
+    # and jobcannon.web.create_app's webhook-secret read). Requiredness is
+    # enforced at those consumption sites, not here, same rationale as
+    # secret_key above — an unset var must still produce a valid HostConfig.
+    # The worker never verifies a Clerk request or a webhook, so declare_on
+    # is web-only for all four (issue #47 folded these in from a literal
+    # that test_render_config.py used to hand-maintain).
+    clerk_secret_key: str = field(
+        default="", metadata={"env": "CLERK_SECRET_KEY", "declare_on": ("web",)}
+    )
+    clerk_jwt_key: str = field(
+        default="", metadata={"env": "CLERK_JWT_KEY", "declare_on": ("web",)}
+    )
+    clerk_authorized_parties: str = field(
+        default="", metadata={"env": "CLERK_AUTHORIZED_PARTIES", "declare_on": ("web",)}
+    )
+    clerk_webhook_signing_secret: str = field(
+        default="", metadata={"env": "CLERK_WEBHOOK_SIGNING_SECRET", "declare_on": ("web",)}
+    )
 
 
 def _put_int(mapping: dict, section: str, key: str, env_var: str) -> None:
@@ -95,4 +114,8 @@ def load_host_config() -> HostConfig:
         secret_key=os.environ.get("JC_SECRET_KEY", ""),
         clerk_sign_up_url=os.environ.get("CLERK_SIGN_UP_URL", ""),
         signup_wave=os.environ.get("JC_SIGNUP_WAVE", "0"),
+        clerk_secret_key=os.environ.get("CLERK_SECRET_KEY", ""),
+        clerk_jwt_key=os.environ.get("CLERK_JWT_KEY", ""),
+        clerk_authorized_parties=os.environ.get("CLERK_AUTHORIZED_PARTIES", ""),
+        clerk_webhook_signing_secret=os.environ.get("CLERK_WEBHOOK_SIGNING_SECRET", ""),
     )

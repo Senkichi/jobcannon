@@ -4,13 +4,20 @@ Production path: clerk-backend-api's authenticate_request with jwt_key —
 LOCAL RS256 verification, zero network calls per request (Flask's request
 object duck-types the SDK's Requestish: it only calls request.headers.get).
 Tests inject VERIFY_REQUEST instead — the SDK is never imported in tests.
+
+The four CLERK_* values are read from HostConfig (jobcannon.host.config),
+not os.environ directly — the config-surface refactor of issue #47, so
+tests/host/test_render_config.py's required-env-var guard can derive the
+full set from HostConfig's field metadata instead of a hand-maintained
+literal.
 """
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Any, Callable
+
+from jobcannon.host.config import HostConfig
 
 
 @dataclass(frozen=True)
@@ -19,12 +26,14 @@ class ClerkIdentity:
     claims: dict
 
 
-def build_clerk_verifier() -> Callable[[Any], ClerkIdentity | None]:
+def build_clerk_verifier(host_config: HostConfig) -> Callable[[Any], ClerkIdentity | None]:
     from clerk_backend_api import Clerk
     from clerk_backend_api.security.types import AuthenticateRequestOptions
 
-    sdk = Clerk(bearer_auth=os.environ["CLERK_SECRET_KEY"])
-    jwt_key = os.environ.get("CLERK_JWT_KEY")
+    if not host_config.clerk_secret_key:
+        raise RuntimeError("CLERK_SECRET_KEY is required (Clerk backend API secret)")
+    sdk = Clerk(bearer_auth=host_config.clerk_secret_key)
+    jwt_key = host_config.clerk_jwt_key
     if not jwt_key:
         # An unset key silently falls back to a per-request JWKS network
         # fetch (breaking the networkless RS256 guarantee this module's
@@ -34,9 +43,7 @@ def build_clerk_verifier() -> Callable[[Any], ClerkIdentity | None]:
             "CLERK_JWT_KEY is required (networkless RS256 verification; unset forces "
             "per-request JWKS fetch)"
         )
-    authorized_parties = [
-        p for p in os.environ.get("CLERK_AUTHORIZED_PARTIES", "").split(",") if p.strip()
-    ]
+    authorized_parties = [p for p in host_config.clerk_authorized_parties.split(",") if p.strip()]
     if not authorized_parties:
         # Unset/blank -> `authorized_parties or None` below -> None -> the SDK
         # skips the azp (cross-origin token-replay) check silently. Fail fast

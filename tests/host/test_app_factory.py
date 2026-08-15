@@ -4,6 +4,10 @@ No Postgres needed: jobcannon.host.init_engine_seams/load_host_config and
 clerk_backend_api.Clerk are stubbed at their call-time import seams, so these
 tests exercise the real create_app()/build_clerk_verifier() code paths
 without a live database or a real Clerk backend.
+
+The four CLERK_* values flow through HostConfig (issue #47), not monkeypatched
+os.environ — _stub_seams/_clerk_host_config below build the HostConfig
+directly rather than setting env vars build_clerk_verifier no longer reads.
 """
 
 import pytest
@@ -29,23 +33,27 @@ class _FakeClerk:
         return _FakeState(is_signed_in=True, payload={"sub": "user_x", "org_id": None})
 
 
-def _stub_seams(monkeypatch, *, secret_key="sk_flask_test"):
+def _clerk_host_config(**overrides) -> HostConfig:
+    fields = dict(
+        database_url="postgresql:///stub",
+        secret_key="sk_flask_test",
+        clerk_sign_up_url="https://clerk.test/sign-up",
+        signup_wave="0",
+        clerk_secret_key="sk_test",
+        clerk_jwt_key="jwt_test",
+        clerk_authorized_parties="https://example.org",
+        clerk_webhook_signing_secret="whsec_dGVzdA==",
+    )
+    fields.update(overrides)
+    return HostConfig(**fields)
+
+
+def _stub_seams(monkeypatch, **overrides):
     monkeypatch.setattr("jobcannon.host.init_engine_seams", lambda *a, **kw: None)
     monkeypatch.setattr(
         "jobcannon.host.load_host_config",
-        lambda: HostConfig(
-            database_url="postgresql:///stub",
-            secret_key=secret_key,
-            clerk_sign_up_url="https://clerk.test/sign-up",
-            signup_wave="0",
-        ),
+        lambda: _clerk_host_config(**overrides),
     )
-
-
-def _set_clerk_env(monkeypatch, *, jwt_key="jwt_test", authorized_parties="https://example.org"):
-    monkeypatch.setenv("CLERK_SECRET_KEY", "sk_test")
-    monkeypatch.setenv("CLERK_JWT_KEY", jwt_key)
-    monkeypatch.setenv("CLERK_AUTHORIZED_PARTIES", authorized_parties)
 
 
 def test_create_app_wires_verify_request_when_seams_stubbed(monkeypatch):
@@ -53,8 +61,6 @@ def test_create_app_wires_verify_request_when_seams_stubbed(monkeypatch):
     build_clerk_verifier() output, not left None."""
     _stub_seams(monkeypatch)
     monkeypatch.setattr("clerk_backend_api.Clerk", _FakeClerk)
-    _set_clerk_env(monkeypatch)
-    monkeypatch.setenv("CLERK_WEBHOOK_SIGNING_SECRET", "whsec_dGVzdA==")
 
     from jobcannon.web import create_app
 
@@ -75,8 +81,7 @@ def test_create_app_raises_on_missing_webhook_secret(monkeypatch):
     would be identical either way, and the comment at the SECRET_KEY call
     site in jobcannon/web/__init__.py claiming this test pins the ordering
     would be false."""
-    _stub_seams(monkeypatch, secret_key="")
-    monkeypatch.delenv("CLERK_WEBHOOK_SIGNING_SECRET", raising=False)
+    _stub_seams(monkeypatch, secret_key="", clerk_webhook_signing_secret="")
 
     from jobcannon.web import create_app
 
@@ -90,7 +95,6 @@ def test_create_app_raises_on_missing_flask_secret_key(monkeypatch):
     rationale and shape as the webhook-secret fail-fast above, and ordered
     after it (see the comment at the call site in jobcannon/web/__init__.py)."""
     _stub_seams(monkeypatch, secret_key="")
-    monkeypatch.setenv("CLERK_WEBHOOK_SIGNING_SECRET", "whsec_dGVzdA==")
 
     from jobcannon.web import create_app
 
@@ -100,36 +104,49 @@ def test_create_app_raises_on_missing_flask_secret_key(monkeypatch):
 
 def test_build_clerk_verifier_returns_callable_and_identity(monkeypatch):
     monkeypatch.setattr("clerk_backend_api.Clerk", _FakeClerk)
-    _set_clerk_env(monkeypatch)
+    host_config = _clerk_host_config()
 
     from jobcannon.web.auth import ClerkIdentity, build_clerk_verifier
 
-    verify = build_clerk_verifier()
+    verify = build_clerk_verifier(host_config)
     assert callable(verify)
 
     identity = verify(object())  # request is never inspected by the fake SDK
     assert identity == ClerkIdentity(user_id="user_x", claims={"sub": "user_x", "org_id": None})
 
 
+def test_build_clerk_verifier_raises_on_blank_secret_key(monkeypatch):
+    """A blank CLERK_SECRET_KEY (surfaced via HostConfig.clerk_secret_key)
+    must fail fast rather than initializing the Clerk SDK with an empty
+    bearer token."""
+    monkeypatch.setattr("clerk_backend_api.Clerk", _FakeClerk)
+    host_config = _clerk_host_config(clerk_secret_key="")
+
+    from jobcannon.web.auth import build_clerk_verifier
+
+    with pytest.raises(RuntimeError, match="CLERK_SECRET_KEY"):
+        build_clerk_verifier(host_config)
+
+
 def test_build_clerk_verifier_raises_on_blank_authorized_parties(monkeypatch):
     """Pins F1: unset/blank CLERK_AUTHORIZED_PARTIES must fail fast rather
     than silently disabling the SDK's azp (replay) check."""
     monkeypatch.setattr("clerk_backend_api.Clerk", _FakeClerk)
-    _set_clerk_env(monkeypatch, authorized_parties="")
+    host_config = _clerk_host_config(clerk_authorized_parties="")
 
     from jobcannon.web.auth import build_clerk_verifier
 
     with pytest.raises(RuntimeError, match="CLERK_AUTHORIZED_PARTIES"):
-        build_clerk_verifier()
+        build_clerk_verifier(host_config)
 
 
 def test_build_clerk_verifier_raises_on_blank_jwt_key(monkeypatch):
     """Pins F2: unset/blank CLERK_JWT_KEY must fail fast rather than
     silently falling back to a per-request JWKS network fetch."""
     monkeypatch.setattr("clerk_backend_api.Clerk", _FakeClerk)
-    _set_clerk_env(monkeypatch, jwt_key="")
+    host_config = _clerk_host_config(clerk_jwt_key="")
 
     from jobcannon.web.auth import build_clerk_verifier
 
     with pytest.raises(RuntimeError, match="CLERK_JWT_KEY"):
-        build_clerk_verifier()
+        build_clerk_verifier(host_config)
