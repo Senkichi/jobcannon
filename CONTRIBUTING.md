@@ -33,3 +33,4 @@ of whether your `CONTRIBUTORS.md` line has landed yet.
 - One logical change per PR. Conventional commit style (`feat:`, `fix:`,
   `test:`, `chore:`) for commit messages.
 - CI (lint + tests) must pass before merge.
+
