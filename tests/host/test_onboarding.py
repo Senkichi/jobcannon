@@ -8,6 +8,9 @@ tests/host/ module reads inside a rollback-isolated transaction.
 
 from __future__ import annotations
 
+import random
+import string
+
 import psycopg
 import pytest
 from psycopg.rows import dict_row
@@ -16,6 +19,25 @@ from jobcannon.web.onboarding import MAX_TITLE_LENGTH, MAX_TITLES_PER_SELECTION,
 from tests.host.conftest import create_throwaway_db, drop_throwaway_db, requires_postgres
 
 pytestmark = requires_postgres
+
+# RFC 6265's commonly-enforced per-cookie ceiling: browsers may silently drop
+# a Set-Cookie header past this size. The picker's whole selection round-trips
+# through a signed Flask session cookie (jobcannon/web/anon_session.py's
+# set_pending_picker), so a boundary-case submission that writes to Postgres
+# successfully but blows this budget would still break /preview for a real
+# visitor — see MAX_TITLES_PER_SELECTION's module comment on onboarding.py.
+_COMMON_BROWSER_COOKIE_LIMIT = 4093
+
+
+def _non_repeating_title(seed: int, length: int) -> str:
+    """Deterministic but non-repeating text. A single repeated character
+    compresses to almost nothing under itsdangerous's zlib session encoding,
+    which would make a cookie-size assertion measure the wrong thing — the
+    caps were sized against realistic, low-redundancy text (see
+    MAX_TITLES_PER_SELECTION's module comment), not a degenerate input."""
+    rng = random.Random(seed)
+    alphabet = string.ascii_letters + " "
+    return "".join(rng.choice(alphabet) for _ in range(length))
 
 
 SEEDED_COMPANY = "Onboarding Test Co"
@@ -267,15 +289,24 @@ def test_non_string_title_is_rejected_by_type_check():
 def test_title_selections_at_the_cap_boundary_write_successfully(app):
     """Happy path at both boundaries inclusive: MAX_TITLES_PER_SELECTION
     titles, each exactly MAX_TITLE_LENGTH characters, must still succeed —
-    the caps reject strictly-over, not at-the-limit, submissions."""
+    the caps reject strictly-over, not at-the-limit, submissions. Also the
+    regression guard for the caps' actual sizing rationale: this exact
+    boundary case must fit in one session cookie (see
+    _COMMON_BROWSER_COOKIE_LIMIT above and MAX_TITLES_PER_SELECTION's
+    module comment) — a cap that lets Postgres accept a submission the
+    visitor's own browser then silently drops is still broken."""
     client = app.test_client()
-    titles = [("t" * (MAX_TITLE_LENGTH - 3)) + f"{i:03d}" for i in range(MAX_TITLES_PER_SELECTION)]
+    titles = [_non_repeating_title(i, MAX_TITLE_LENGTH) for i in range(MAX_TITLES_PER_SELECTION)]
     resp = client.post(
         "/start",
         data={"titles": titles, "seniority_level": "mid", "workplace_type": "any"},
     )
 
     assert resp.status_code in (302, 303)
+    cookie_bytes = sum(len(h) for h in resp.headers.get_all("Set-Cookie"))
+    assert cookie_bytes < _COMMON_BROWSER_COOKIE_LIMIT, (
+        f"session cookie ({cookie_bytes}B) exceeds the common browser per-cookie limit"
+    )
 
     row = _profile_row_for_anon(app.config["_TEST_DSN"])
     assert row is not None

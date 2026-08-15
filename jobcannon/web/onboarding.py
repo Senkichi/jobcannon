@@ -95,18 +95,31 @@ MAX_YEARS_OF_EXPERIENCE = 60
 # actually rendered, so nothing else bounds a submission's size before it
 # reaches upsert_profile's target_titles jsonb column (issue #54).
 #
-# MAX_TITLES_PER_SELECTION mirrors distinct_titles()'s own `limit=50`
-# corpus-option-window size (jobcannon/db/_feed.py): a real visitor manually
-# checking boxes in the rendered picker can select at most that many, so a
-# larger count is not a plausible human selection.
-MAX_TITLES_PER_SELECTION = 50
+# Both bounds are sized against a second, tighter constraint than Postgres:
+# every accepted selection also round-trips through set_pending_picker into
+# the signed Flask session COOKIE (client-side storage), and RFC 6265
+# browsers commonly support only ~4093 bytes per cookie — Werkzeug warns and
+# the browser silently drops the cookie past that, which would degrade
+# /preview to "no selections" for a real visitor. Measured empirically
+# against this route (itsdangerous zlib+base64 non-repeating text roughly
+# breaks even byte-for-byte): MAX_TITLES_PER_SELECTION titles at exactly
+# MAX_TITLE_LENGTH chars each serializes to ~3.3KB, leaving headroom under
+# the ~4093-byte ceiling for the picker's other session-held fields. Sizing
+# to the corpus's own `distinct_titles(limit=50)` option-window instead would
+# put the same worst case over 10KB — verified against this exact route
+# during review, not merely calculated.
+MAX_TITLES_PER_SELECTION = 20
 
-# No real job title observed in the corpus runs anywhere near this long
-# (postings.title has no DB-level length constraint — it's `text`). A fixed,
-# generous bound: comfortable headroom over realistic titles while still
-# closing off pasting an email address or an arbitrary text blob into a
-# field meant to carry short corpus-derived job titles.
-MAX_TITLE_LENGTH = 200
+# postings.title has no DB-level length constraint (`text`), so this is a
+# policy choice, not an observed corpus maximum — sized against this
+# repo's own established plausible-title-length precedent
+# (jobcannon/engine/careers_crawler/_title_filters.py's `_MAX_TITLE_LEN = 140`:
+# "Real titles top out around 110 chars even with senior/staff/principal
+# modifiers + parenthesized scopes. Beyond 140 the candidate is almost
+# certainly a metadata blob.") rather than an arbitrarily larger "generous"
+# number — see MAX_TITLES_PER_SELECTION's comment for why a bigger bound
+# would break the session-cookie round trip anyway.
+MAX_TITLE_LENGTH = 140
 
 # The form speaks lowercase ("remote"); postings.workplace_type (written by
 # jobcannon/db/_jobs.py from jobcannon/engine/location_canonical.py's
