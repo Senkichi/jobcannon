@@ -1,8 +1,20 @@
 import pytest
+from psycopg.types.json import Jsonb
 
 from tests.host.conftest import requires_postgres
 
 pytestmark = requires_postgres
+
+# Trailing-ellipsis snippet: clears the I-13 density gate (>=200 chars, no
+# junk prefix) but trips jd_content_reject's truncation signal. Verified via
+# a REPL check: jd_content_reject(snippet, None, None) ==
+# ("jd_full_truncated", "trailing_ellipsis").
+TRUNCATED_JD = "A" * 227 + "..."
+
+# Clears the I-13 gate and doesn't start with a junk prefix, but trips the
+# I-17 head-block/wiki signal. Verified via REPL:
+# jd_content_reject(WIKI_JD, None, None) == ("jd_full_offsite", "head_block_or_wiki").
+WIKI_JD = "From Wikipedia, the free encyclopedia. City in California. " * 8
 
 GOOD_JD = (
     "We are hiring a Staff Data Engineer to build our analytics platform. "
@@ -120,3 +132,58 @@ def test_rejects_title_zero_overlap_content(db_conn, posting):
         "SELECT jd_full FROM postings WHERE dedup_key = %s", (posting,)
     ).fetchone()
     assert row["jd_full"] is None
+
+
+def test_content_reject_truncated_appends_reason(db_conn, posting):
+    """A trailing-ellipsis snippet is rejected and the row is flagged for review."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    assert set_jd_full(_svc_conn(db_conn), posting, TRUNCATED_JD, source="test") is False
+    row = db_conn.execute(
+        "SELECT jd_full, unresolved_reasons FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["jd_full"] is None
+    assert "jd_full_truncated" in row["unresolved_reasons"]
+
+
+def test_content_reject_offsite_appends_reason(db_conn, posting):
+    """An offsite body rejected at the write gate is flagged in unresolved_reasons."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    assert set_jd_full(_svc_conn(db_conn), posting, WIKI_JD, source="test") is False
+    row = db_conn.execute(
+        "SELECT jd_full, unresolved_reasons FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["jd_full"] is None
+    assert "jd_full_offsite" in row["unresolved_reasons"]
+
+
+def test_content_reject_clears_jd_content_reason_on_success(db_conn, posting):
+    """A successful write heals a prior jd_full_truncated quarantine flag."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    db_conn.execute(
+        "UPDATE postings SET unresolved_reasons = %s WHERE dedup_key = %s",
+        (Jsonb(["jd_full_truncated"]), posting),
+    )
+    assert set_jd_full(_svc_conn(db_conn), posting, GOOD_JD, source="test") is True
+    row = db_conn.execute(
+        "SELECT jd_full, unresolved_reasons FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["jd_full"] is not None
+    assert row["unresolved_reasons"] == []
+
+
+def test_content_reject_keeps_non_jd_content_reasons_on_success(db_conn, posting):
+    """A successful write clears only I-18 reason codes, preserving others."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    db_conn.execute(
+        "UPDATE postings SET unresolved_reasons = %s WHERE dedup_key = %s",
+        (Jsonb(["jd_full_truncated", "location_missing"]), posting),
+    )
+    assert set_jd_full(_svc_conn(db_conn), posting, GOOD_JD, source="test") is True
+    row = db_conn.execute(
+        "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["unresolved_reasons"] == ["location_missing"]

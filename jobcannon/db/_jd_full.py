@@ -14,6 +14,15 @@ per-posting LLM score tuple yet (structural axes are Wave-2 work and are
 recomputed at ingest, not invalidated here). Revisit when owner-fit scoring
 lands (Phase 2).
 
+A second Wave-1 divergence, same shape: the private original also resets a
+terminal ``enrichment_tier`` to NULL when a truncated body is rejected, so
+the row re-enters its multi-tier resumable enrichment pipeline. The hosted
+schema has no ``enrichment_tier`` column and no resumable-tier pipeline
+writing back to ``postings`` in Wave 1 (``jobcannon.engine.enrichment_states``
+is ported for its tier vocabulary only, consumed as a plain parameter by
+``classification.py``, never persisted) — so only the reason-code append
+below is ported; the tier reset has no column to act on.
+
 Transaction-boundary note (recorded port deviation, matches _companies.py /
 _jobs.py): the write commits via pool.commit_unless_nested() rather than a
 bare raw.commit() call, so this also works when `conn` is already inside an
@@ -40,9 +49,16 @@ import logging
 import re
 from typing import Any
 
+from psycopg.types.json import Jsonb
+
+from jobcannon.db._unresolved_reasons import append_reason, remove_reasons
 from jobcannon.db.pool import commit_unless_nested
 from jobcannon.engine.description_formatter import strip_html_to_text
-from jobcannon.engine.jd_content_contract import _is_jd_junk, jd_content_reject
+from jobcannon.engine.jd_content_contract import (
+    JD_CONTENT_REASON_CODES,
+    _is_jd_junk,
+    jd_content_reject,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +82,16 @@ def set_jd_full(
     config. The scan-path caller (``ats_scanner/_run.py``) does not supply it
     — faithful to the private call site — so that path runs on the engine
     defaults today.
+
+    Content-contract side effects (parity with the private original's I-18
+    fix): a body rejected by ``jd_content_reject`` has its reason code
+    (``jd_full_offsite`` / ``jd_full_expired`` / ``jd_full_truncated``)
+    appended to ``unresolved_reasons`` so the row is flagged for review
+    instead of silently staying ``jd_full IS NULL``. A successful write
+    clears any stale I-18 reason codes from ``unresolved_reasons`` in the
+    same UPDATE as the ``jd_full`` write. See this module's docstring for the
+    ``enrichment_tier`` reset the private original also performs, which has
+    no column to act on in the Wave-1 hosted schema.
     """
     raw = conn.raw if hasattr(conn, "raw") else conn
     if not text:
@@ -77,15 +103,50 @@ def set_jd_full(
         return False
     rejection = jd_content_reject(text, title, config)
     if rejection is not None:
+        reason, signal = rejection
         logger.warning(
             "set_jd_full: content-gated [source=%s] reason=%s signal=%s prefix=%r",
             source,
-            rejection[0],
-            rejection[1],
+            reason,
+            signal,
             text.strip()[:60],
         )
+        _record_jd_content_reject(raw, dedup_key, reason)
         return False
+    existing = raw.execute(
+        "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (dedup_key,)
+    ).fetchone()
+    new_reasons = remove_reasons(
+        existing["unresolved_reasons"] if existing is not None else None,
+        list(JD_CONTENT_REASON_CODES),
+    )
     with raw.transaction():
-        raw.execute("UPDATE postings SET jd_full = %s WHERE dedup_key = %s", (text, dedup_key))
+        raw.execute(
+            "UPDATE postings SET jd_full = %s, unresolved_reasons = %s WHERE dedup_key = %s",
+            (text, Jsonb(new_reasons), dedup_key),
+        )
     commit_unless_nested(raw)
     return True
+
+
+def _record_jd_content_reject(raw: Any, dedup_key: str, reason: str) -> None:
+    """Append a jd-content reject reason to ``postings.unresolved_reasons``.
+
+    Mirrors the private original's ``_record_jd_content_reject``, minus the
+    ``enrichment_tier`` reset for ``JD_TRUNCATED`` — the hosted schema has no
+    such column in Wave 1 (see this module's docstring).
+    """
+    if reason not in JD_CONTENT_REASON_CODES:
+        return
+    existing = raw.execute(
+        "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (dedup_key,)
+    ).fetchone()
+    if existing is None:
+        return
+    new_reasons = append_reason(existing["unresolved_reasons"], reason)
+    with raw.transaction():
+        raw.execute(
+            "UPDATE postings SET unresolved_reasons = %s WHERE dedup_key = %s",
+            (Jsonb(new_reasons), dedup_key),
+        )
+    commit_unless_nested(raw)
