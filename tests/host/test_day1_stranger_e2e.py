@@ -114,7 +114,7 @@ def seeded_feed_corpus(app):
 def _authed(app, user_id: str) -> None:
     from jobcannon.web.auth import ClerkIdentity
 
-    app.config["VERIFY_REQUEST"] = lambda req: ClerkIdentity(
+    app.config["VERIFY_REQUEST"] = lambda _req: ClerkIdentity(
         user_id=user_id, claims={"sub": user_id}
     )
 
@@ -159,13 +159,18 @@ def test_day_one_stranger_journey_end_to_end(app, seeded_feed_corpus):
 
     # 4. GET /preview -> seeded titles appear (with the route's own
     # zero-match copy absent — the positive control that proves the corpus
-    # actually reached the page), at least one "why" chip renders, and the
-    # ordering label honestly says nothing has been ranked yet.
-    preview_html = client.get("/preview").get_data(as_text=True)
+    # actually reached the page), at least one "why" chip renders, the
+    # NULL-axes marker is absent (the only assertion that proves the
+    # fixture's structural-axes pass ran — the salary chip renders without
+    # it), and the ordering label honestly says nothing has been ranked yet.
+    preview_resp = client.get("/preview")
+    assert preview_resp.status_code == 200
+    preview_html = preview_resp.get_data(as_text=True)
     for title in seeded_feed_corpus["titles"]:
         assert title in preview_html
     assert "No postings match your selections yet." not in preview_html
     assert "salary listed" in preview_html
+    assert "signals still computing for this posting" not in preview_html
     assert "Sorted by recency" in preview_html
     assert "personalized ranking is not live yet" in preview_html
     assert "Ranked by" not in preview_html
@@ -193,9 +198,10 @@ def test_day_one_stranger_journey_end_to_end(app, seeded_feed_corpus):
     # The identity is provably synthetic (matches the fresh-uuid4 pattern
     # this test minted above) and is a separate assertion from proving it is
     # not the guest-demo sentinel — two different non-goals, not one check
-    # doing double duty.
-    assert _SYNTHETIC_ID_RE.match(stranger_id)
-    assert stranger_id != GUEST_USER_ID
+    # doing double duty. Both anchor on the database row, not the local
+    # variable, so they prove what actually landed.
+    assert _SYNTHETIC_ID_RE.match(stranger_profile["user_id"])
+    assert stranger_profile["user_id"] != GUEST_USER_ID
 
     signup_events = _events(dsn, stranger_id, "user_signed_up")
     assert len(signup_events) == 1
@@ -223,9 +229,12 @@ def test_day_one_stranger_journey_end_to_end(app, seeded_feed_corpus):
     # 7. GET / -> the ranked list renders, and one impression event exists
     # per rendered row, with feed_position values 1..N and a non-null
     # ranker-version value on every one.
-    feed_html = client.get("/").get_data(as_text=True)
+    feed_resp = client.get("/")
+    assert feed_resp.status_code == 200
+    feed_html = feed_resp.get_data(as_text=True)
     for title in seeded_feed_corpus["titles"]:
         assert title in feed_html
+    assert "signals still computing for this posting" not in feed_html
 
     impressions = _events(dsn, stranger_id, "posting_impression")
     n = len(seeded_feed_corpus["posting_ids"])
