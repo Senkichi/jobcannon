@@ -225,7 +225,7 @@ def _try_static_first_fallthrough(
     On success, promotes the company to the detected ATS or persists jobs from
     custom careers pages. Custom pages are NOT marked as 'hit' (that state
     requires a real ATS platform with platform+slug); instead they are marked
-    as 'miss' with scan_enabled=1 and jobs persisted, so the careers_crawler
+    as 'miss' with scan_enabled=TRUE and jobs persisted, so the careers_crawler
     picks them up for ongoing extraction. Sets specific miss_reason on failure.
 
     Args:
@@ -385,7 +385,7 @@ def _try_static_first_fallthrough(
             if len(static_jobs) > 0:
                 # Found jobs statically -> persist them and enable scan for custom careers page
                 # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
-                # scan_enabled=1 and a specific miss_reason, so careers_crawler picks it up.
+                # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up.
                 if db_path:
                     summary = ext.new_summary()
                     all_new_job_keys = []
@@ -413,7 +413,7 @@ def _try_static_first_fallthrough(
                 conn.execute(
                     """UPDATE companies
                        SET ats_probe_status = 'miss',
-                           scan_enabled = 1,
+                           scan_enabled = TRUE,
                            miss_reason = 'static_fallthrough_tier2_jobs_persisted',
                            updated_at = ?
                        WHERE id = ?""",
@@ -464,7 +464,7 @@ def _try_static_first_fallthrough(
             if len(json_jobs) > 0:
                 # Found jobs in embedded JSON -> persist them and enable scan for custom careers page
                 # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
-                # scan_enabled=1 and a specific miss_reason, so careers_crawler picks it up.
+                # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up.
                 if db_path:
                     summary = ext.new_summary()
                     all_new_job_keys = []
@@ -492,7 +492,7 @@ def _try_static_first_fallthrough(
                 conn.execute(
                     """UPDATE companies
                        SET ats_probe_status = 'miss',
-                           scan_enabled = 1,
+                           scan_enabled = TRUE,
                            miss_reason = 'static_fallthrough_tier3_jobs_persisted',
                            updated_at = ?
                        WHERE id = ?""",
@@ -552,7 +552,7 @@ def _try_static_first_fallthrough(
                     if len(playwright_jobs) > 0:
                         # Found jobs via Playwright -> persist them and enable scan for custom careers page
                         # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
-                        # scan_enabled=1 and a specific miss_reason, so careers_crawler picks it up.
+                        # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up.
                         if db_path:
                             summary = ext.new_summary()
                             all_new_job_keys = []
@@ -580,7 +580,7 @@ def _try_static_first_fallthrough(
                         conn.execute(
                             """UPDATE companies
                                SET ats_probe_status = 'miss',
-                                   scan_enabled = 1,
+                                   scan_enabled = TRUE,
                                    miss_reason = 'static_fallthrough_tier4_jobs_persisted',
                                    updated_at = ?
                                WHERE id = ?""",
