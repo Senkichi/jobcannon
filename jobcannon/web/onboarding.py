@@ -9,8 +9,10 @@ linking to GET /preview — an in-scope, independently-tested render, not a
 placeholder for a later PR.
 
 POST /start validates the submission at the boundary (an unknown seniority
-level or an out-of-range years-of-experience value re-renders the form with
-a 200, never a 500), then, in one transaction on one pooled connection: mints an
+level, an out-of-range years-of-experience value, or a title selection that
+fails shape validation — see MAX_TITLES_PER_SELECTION / MAX_TITLE_LENGTH
+below — re-renders the form with a 200, never a 500), then, in one
+transaction on one pooled connection: mints an
 anonymous `users` row (jobcannon.db._users.mint_anon_user) and upserts a
 `profiles` row through the existing single-writer seam
 (jobcannon.db._profiles.upsert_profile) — the same users-row-then-profile
@@ -62,6 +64,7 @@ attributes.
 from __future__ import annotations
 
 import logging
+import unicodedata
 from typing import Any
 
 from flask import Blueprint, current_app, redirect, render_template, request, url_for
@@ -84,6 +87,39 @@ onboarding_bp = Blueprint("onboarding", __name__)
 SENIORITY_LEVELS = ("entry", "mid", "senior", "staff", "principal")
 WORKPLACE_TYPES = ("any", "remote", "hybrid", "onsite")
 MAX_YEARS_OF_EXPERIENCE = 60
+
+# Title selections are corpus-derived but deliberately NOT membership-checked
+# against the rendered option window (a legitimate title outside the current
+# top-N window must remain selectable — see the module docstring). POST
+# /start still accepts an arbitrary form body regardless of what the picker
+# actually rendered, so nothing else bounds a submission's size before it
+# reaches upsert_profile's target_titles jsonb column (issue #54).
+#
+# Both bounds are sized against a second, tighter constraint than Postgres:
+# every accepted selection also round-trips through set_pending_picker into
+# the signed Flask session COOKIE (client-side storage), and RFC 6265
+# browsers commonly support only ~4093 bytes per cookie — Werkzeug warns and
+# the browser silently drops the cookie past that, which would degrade
+# /preview to "no selections" for a real visitor. Measured empirically
+# against this route (itsdangerous zlib+base64 non-repeating text roughly
+# breaks even byte-for-byte): MAX_TITLES_PER_SELECTION titles at exactly
+# MAX_TITLE_LENGTH chars each serializes to ~3.3KB, leaving headroom under
+# the ~4093-byte ceiling for the picker's other session-held fields. Sizing
+# to the corpus's own `distinct_titles(limit=50)` option-window instead would
+# put the same worst case over 10KB — verified against this exact route
+# during review, not merely calculated.
+MAX_TITLES_PER_SELECTION = 20
+
+# postings.title has no DB-level length constraint (`text`), so this is a
+# policy choice, not an observed corpus maximum — sized against this
+# repo's own established plausible-title-length precedent
+# (jobcannon/engine/careers_crawler/_title_filters.py's `_MAX_TITLE_LEN = 140`:
+# "Real titles top out around 110 chars even with senior/staff/principal
+# modifiers + parenthesized scopes. Beyond 140 the candidate is almost
+# certainly a metadata blob.") rather than an arbitrarily larger "generous"
+# number — see MAX_TITLES_PER_SELECTION's comment for why a bigger bound
+# would break the session-cookie round trip anyway.
+MAX_TITLE_LENGTH = 140
 
 # The form speaks lowercase ("remote"); postings.workplace_type (written by
 # jobcannon/db/_jobs.py from jobcannon/engine/location_canonical.py's
@@ -153,6 +189,37 @@ def _picker_context(*, error: str | None = None) -> dict[str, Any]:
     }
 
 
+def _has_control_char(value: str) -> bool:
+    """True if `value` contains a Unicode control character (category `Cc`:
+    C0 controls 0x00-0x1F, DEL 0x7F, or C1 controls 0x80-0x9F). A job title
+    has no legitimate use for these; rejecting them closes off embedding
+    e.g. raw newlines or NUL bytes in a corpus-derived free-text field that
+    reaches durable storage (issue #54)."""
+    return any(unicodedata.category(ch) == "Cc" for ch in value)
+
+
+def _parse_titles(form: Any) -> tuple[list[str] | None, str | None]:
+    """Shape-validate the submitted title selections before they can reach
+    upsert_profile's target_titles column: count cap, per-item length cap,
+    type check, and a control-character rejection (issue #54's proposal).
+    Deliberately NOT a membership check against the rendered option window
+    — see MAX_TITLES_PER_SELECTION's module-level rationale comment."""
+    raw_titles = [t for t in form.getlist("titles") if t]
+    if len(raw_titles) > MAX_TITLES_PER_SELECTION:
+        return None, f"too many titles selected (max {MAX_TITLES_PER_SELECTION})"
+
+    titles: list[str] = []
+    for title in raw_titles:
+        if not isinstance(title, str):
+            return None, "titles must be text values"
+        if len(title) > MAX_TITLE_LENGTH:
+            return None, f"title exceeds the {MAX_TITLE_LENGTH}-character limit"
+        if _has_control_char(title):
+            return None, "title contains invalid (control) characters"
+        titles.append(title)
+    return titles, None
+
+
 def _parse_submission(form: Any) -> tuple[dict[str, Any] | None, str | None]:
     """Validate the raw POST body. Returns (selections, error) — exactly one
     of the two is non-None."""
@@ -174,8 +241,18 @@ def _parse_submission(form: Any) -> tuple[dict[str, Any] | None, str | None]:
         if not (0 <= years_of_experience <= MAX_YEARS_OF_EXPERIENCE):
             return None, f"years of experience must be between 0 and {MAX_YEARS_OF_EXPERIENCE}"
 
+    titles, error = _parse_titles(form)
+    if error is not None:
+        return None, error
+
     selections = {
-        "titles": [t for t in form.getlist("titles") if t],
+        "titles": titles,
+        # `companies` selections never reach durable storage today — there
+        # is no target_companies column anywhere in this schema (upsert_profile
+        # doesn't accept one); this list only flows into the session via
+        # set_pending_picker for /preview's read-side filter. Left
+        # presence-filtered only, matching prior behavior — a durable sink
+        # would need the same cap treatment as titles above.
         "companies": [c for c in form.getlist("companies") if c],
         "skills": [s for s in form.getlist("skills") if s and s in SKILLS_OPTIONS],
         "seniority_level": seniority_level,
