@@ -5,8 +5,7 @@ on:
   pull_request:
 
 # Cancel superseded PR runs; pushes to main keep one run per commit (the
-# group keys on the unique SHA, so nothing groups or cancels). This matters
-# with a single self-hosted runner serving the whole queue.
+# group keys on the unique SHA, so nothing groups or cancels).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -16,46 +15,72 @@ permissions:
 
 jobs:
   test:
-    # Same-repo gate: keeps fork pull requests off the self-hosted runner.
-    # DEFENSE IN DEPTH ONLY — on pull_request events the workflow definition
-    # is read from the PR's merge ref, so a malicious fork PR can edit this
-    # file and bypass the gate entirely. The only real control is having no
-    # self-hosted runner registered while the repo is public.
-    # Never make this job a sole required status check: a job skipped by
-    # this condition SATISFIES branch protection, so a fork PR would show a
-    # green required check for code that never ran. Any future protection
-    # topology needs an always-reporting aggregate job.
-    # The event-name disjunct below is load-bearing — this workflow also
-    # triggers on push to main, where the pull_request context is null, so
-    # the head-repo comparison alone would evaluate false and silently
-    # disable CI for every push to main.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # SELF-HOSTED (2026-07-16): GitHub-hosted runners are billing-blocked
-    # account-wide, so CI runs on the operator's Windows box (runner
-    # jcpub-9800x3d-1, same fleet pattern as the private repo). Restore a
-    # hosted ubuntu leg for Linux coverage once billing is fixed.
-    # SECURITY: this MUST move off self-hosted before the repo flips public —
-    # fork PRs would otherwise execute arbitrary code on the operator's machine.
-    runs-on: self-hosted
+    # No fork-PR gate: GitHub-hosted runners are ephemeral, isolated
+    # per-job VMs, so running fork PR code here is safe and standard —
+    # unlike the self-hosted runner this replaced, which needed the gate
+    # (public PR #44) as a compensating control against arbitrary code
+    # execution on the operator's own machine.
+    #
+    # HOSTED RUNNERS (2026-08-14): GitHub-hosted ubuntu-latest runners were
+    # verified working today via a probe run that completed successfully —
+    # the prior billing-block was stale. The self-hosted runner was
+    # de-registered the same day. No Windows leg is added: the deploy
+    # target is Linux, so ubuntu-latest alone gives the coverage that
+    # matters.
+    runs-on: ubuntu-latest
+    services:
+      # pgvector/pgvector:pg18, not plain postgres — the schema uses
+      # vector(384) columns (jobcannon/db/migrations/m0005), which needs the
+      # pgvector extension's shared library present in the image. A stock
+      # postgres image can't CREATE EXTENSION vector at all.
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      # Explicit and hosted-runner-local now — no runner-machine .env to
+      # reach, so there is no expression-context blanking hazard to avoid.
+      POSTGRES_ADMIN_DSN: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-          # GitHub-cache mode adds a post-job `uv cache prune --ci` that can
-          # corrupt sibling jobs sharing this machine's local uv cache
-          # (observed on the private repo's fleet 2026-07-08). The local disk
-          # cache is persistent and already warm; network caching is overhead.
-          enable-cache: false
+          # Hosted runners are ephemeral with no shared local disk cache to
+          # corrupt (the self-hosted concern this guarded against no longer
+          # applies), so the GitHub Actions cache is safe and speeds up
+          # repeat installs.
+          enable-cache: true
       - run: uv sync --dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      # POSTGRES_ADMIN_DSN reaches pytest from the self-hosted runner's .env
-      # (local PostgreSQL Windows service): runner-process env flows to step
-      # processes automatically. Do NOT add an `env:` pass-through with
-      # ${{ env.POSTGRES_ADMIN_DSN }} — the expression context cannot see
-      # runner-machine variables, so it evaluates empty and BLANKS the var
-      # (observed: run 29614164172, host tests silently skipped). A future
-      # hosted-Linux leg should set it explicitly from a services: container.
-      # Without the variable, tests/host/ skips gracefully.
+      # jobcannon/db/migrations/m0005_postings_embedding.py runs
+      # `CREATE EXTENSION IF NOT EXISTS vector` as its first statement, so
+      # the fixture chain (tests/host/conftest.py postgres_test_dsn ->
+      # jobcannon.db.migrate.run_migrations) creates the extension itself;
+      # no separate psql step is needed.
       - run: uv run pytest -q --tb=short
+
+  tests-passed:
+    name: Tests passed
+    # Single check branch protection / merge automation should require: it
+    # always reports (if: always()), so it can never be skipped-green the
+    # way a conditional test job could satisfy a required check without
+    # actually running.
+    needs: [test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require test success
+        run: |
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "test job result: ${{ needs.test.result }}"
+            exit 1
+          fi
