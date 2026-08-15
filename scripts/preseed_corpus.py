@@ -1,4 +1,4 @@
-"""Corpus pre-seed (OD-10): upsert the wedge companies, then enqueue their
+"""Corpus pre-seed: upsert the wedge companies, then enqueue their
 scans THROUGH THE QUEUE — the pre-seed is the scheduler's first real-volume
 proof, so it must not bypass procrastinate with direct run_scan_task calls.
 

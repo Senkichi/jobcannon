@@ -109,7 +109,7 @@ def enqueue_due_scans(timestamp: int) -> dict:
 )
 @app.task(queue="maintenance", queueing_lock="db_storage_check")
 def db_storage_check(timestamp: int) -> dict:
-    """OD-18 periodic: report the DB storage percentage through the sanctioned
+    """Periodic: report the DB storage percentage through the sanctioned
     scan_health_log recorder so a nearing-tier-limit database shows up
     alongside every other health signal, not just in Render's own email."""
     from jobcannon.db import connection_factory

@@ -71,7 +71,7 @@ def test_health_check_path_responds_200_unauthenticated():
 
 
 def test_storage_limit_env_matches_disk_size():
-    """OD-18 drift guard: JC_DB_STORAGE_LIMIT_MB (jobcannon-worker) must stay
+    """Drift guard: JC_DB_STORAGE_LIMIT_MB (jobcannon-worker) must stay
     derived from jobcannon-db's diskSizeGB (5GB * 1024 = 5120MB), never a
     stale/hand-edited figure that silently diverges from real disk capacity."""
     bp = _blueprint()

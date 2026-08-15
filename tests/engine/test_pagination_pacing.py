@@ -1,19 +1,15 @@
-"""Inter-page pacing tests for paginating ATS platform scanners (U5).
+"""Inter-page pacing tests for paginating ATS platform scanners.
 
-Pre-F1 (commit b99e1d9) the LIST-endpoint cadence on Workday and
+Before the F1 pagination refactor, the LIST-endpoint cadence on Workday and
 SmartRecruiters was incidentally paced by the per-matched-posting
 detail-fetch sleep inside the same per-page loop. F1 split the title-
 match gate out of ``_fetch_postings``, which collapsed the inter-page
-delay to zero. U5 restored an explicit ``_PAGE_FETCH_SLEEP_S`` before
-each page after the first.
+delay to zero. An explicit ``_PAGE_FETCH_SLEEP_S`` was restored before
+each page after the first to keep that pacing intact.
 
 These tests assert: for N pages, ``time.sleep`` is called exactly N-1
 times with ``_PAGE_FETCH_SLEEP_S`` (one sleep before each page after
 the first). Total request count is unaffected.
-
-See .planning/specs/2026-05-26-polish-review-audit.md (MAJOR — Workday +
-SmartRecruiters pagination) and
-.planning/specs/2026-05-27-polish-review-followups-plan.md (U5).
 """
 
 from unittest.mock import MagicMock, patch
@@ -23,7 +19,7 @@ from tests.engine.helpers.ats_session import ats_session_method
 
 class TestWorkdayPagination:
     def test_fetch_sleeps_between_page_posts(self):
-        """U5: _fetch_postings sleeps _PAGE_FETCH_SLEEP_S before each page
+        """_fetch_postings sleeps _PAGE_FETCH_SLEEP_S before each page
         after the first; LIST endpoint is not hammered for multi-page tenants."""
         from jobcannon.engine.ats_platforms import _platforms_workday
 
@@ -64,7 +60,7 @@ class TestWorkdayPagination:
         assert len(result) == 40
 
     def test_single_page_does_not_sleep(self):
-        """U5 guard: single-page response triggers zero inter-page sleeps."""
+        """Guard: single-page response triggers zero inter-page sleeps."""
         from jobcannon.engine.ats_platforms import _platforms_workday
 
         single_page = {
@@ -94,7 +90,7 @@ class TestWorkdayPagination:
 
 class TestSmartRecruitersPagination:
     def test_fetch_sleeps_between_page_gets(self):
-        """U5: same contract as Workday, GET-paginated variant."""
+        """Same contract as Workday, GET-paginated variant."""
         from jobcannon.engine.ats_platforms import _platforms_smartrecruiters
 
         page_1 = {
@@ -127,7 +123,7 @@ class TestSmartRecruitersPagination:
         assert len(result) == 200
 
     def test_single_page_does_not_sleep(self):
-        """U5 guard: single-page response triggers zero inter-page sleeps."""
+        """Guard: single-page response triggers zero inter-page sleeps."""
         from jobcannon.engine.ats_platforms import _platforms_smartrecruiters
 
         single_page = {

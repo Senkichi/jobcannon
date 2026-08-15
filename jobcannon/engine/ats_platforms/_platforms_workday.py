@@ -5,9 +5,11 @@ Workday exposes a standardized POST JSON API across all tenants at
 (e.g. ``"walmart.wd5/WalmartExternal"``).
 
 Per-job description requires a secondary GET against the detail
-endpoint. ``_fetch_workday_description`` lives in ``ats_platforms.py``
-because it is imported directly by ``tests/test_workday_scanner.py``;
-this module calls it via a lazy import to avoid a circular dependency.
+endpoint. ``_fetch_workday_description`` lives in ``_detail_fetchers.py``
+(re-exported through ``ats_platforms/__init__.py``) because it is
+imported directly from the package namespace by
+``tests/engine/test_workday_scanner.py``; this module calls it via a lazy
+import to avoid a circular dependency.
 
 Layer-1 emission (Phase 48.02):
   - ``source_id``: the posting's ``externalPath`` (unique per job per
@@ -58,13 +60,11 @@ _PAGE_SIZE = 20
 _DEFAULT_MAX_PAGES = 100
 
 
-# Pacing for the LIST endpoint between successive page fetches. Pre-F1
-# (commit b99e1d9) the list-endpoint cadence was incidentally paced by
+# Pacing for the LIST endpoint between successive page fetches. Before the
+# F1 pagination refactor, the list-endpoint cadence was incidentally paced by
 # the per-matched-posting detail-fetch sleep in the same per-page loop.
 # Restoring an explicit inter-page delay preserves the polite-pacing
-# intent for high-page-count Workday tenants. See
-# .planning/specs/2026-05-26-polish-review-audit.md (MAJOR — Workday +
-# SmartRecruiters pagination).
+# intent for high-page-count Workday tenants.
 _PAGE_FETCH_SLEEP_S = 0.1
 
 
@@ -257,10 +257,14 @@ def _fetch_postings_with_completeness(
     ``([], True)`` (true zero): callers that must not mass-expire on a fetch
     failure key off ``complete``, not ``len(postings)``.
 
-    ``ats_reconciler.py`` calls this function directly today via a private
-    import, bypassing the ``PlatformScanner.fetch_postings_with_completeness``
-    registry field entirely. The field itself is forward-wiring for the
-    wider reconciler chain (issues #1030-1033) and currently has no callers.
+    In the private source, a dedicated ``ats_reconciler.py`` module called
+    this function directly via a private import, bypassing the
+    ``PlatformScanner.fetch_postings_with_completeness`` registry field
+    entirely; that module did not survive extraction into this engine port.
+    Reconciliation here is host-supplied instead (``services.py``'s
+    ``reconcile_company_ats`` field, driven from ``ats_scanner/_promote.py``),
+    and the registry field remains forward-wiring for the wider reconciler
+    chain (issues #1030-1033) with currently no callers.
 
     Args:
         slug: ``"subdomain/board"`` Workday slug.
@@ -477,10 +481,12 @@ def _detail_fetch(posting: dict) -> dict:
 
     This function is called by the ThreadPoolExecutor in run_platform_scan.
     """
-    # Lazy import — _fetch_workday_description lives in ats_platforms.py because
-    # tests/test_workday_scanner.py imports it directly, and the registry must
-    # not depend on the flat module at import time (would risk a cycle once
-    # the flat module delegates back to run_platform_scan).
+    # Lazy import — _fetch_workday_description lives in _detail_fetchers.py,
+    # re-exported through ats_platforms/__init__.py because
+    # tests/engine/test_workday_scanner.py imports it from the package
+    # namespace directly, and this module must not depend on the package's
+    # __init__ at import time (would risk a cycle once __init__ delegates
+    # back to run_platform_scan).
     from jobcannon.engine.ats_platforms import _fetch_workday_description
 
     subdomain = posting.get("__workday_subdomain", "")

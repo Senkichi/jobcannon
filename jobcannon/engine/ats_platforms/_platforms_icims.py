@@ -6,9 +6,10 @@ unauthenticated JSON endpoint, so they cannot ride the requests-only
 ``slug -> list`` with no room for a ``Browser`` argument). This module
 defines a **parallel** value object — ``PlaywrightPlatformScanner`` — whose
 ``fetch_postings`` takes the Playwright ``Browser`` as its explicit first
-parameter, mirroring ``careers_crawler/_playwright_tier.py``. The browser's
-lifetime is owned by the orchestrator (the ``sync_playwright()`` block in
-``ats_scanner/_run_playwright.py``), not by this module.
+parameter, mirroring the pattern used by the private source's
+``careers_crawler/_playwright_tier.py`` (not carried into this port). The
+browser's lifetime is owned by the orchestrator (the ``sync_playwright()``
+block in ``ats_scanner/_run_playwright.py``), not by this module.
 
 The render path is deliberately thin: navigate to the tenant's
 ``/jobs/search`` board, settle the JS, then DOM-extract anchors that match

@@ -49,11 +49,9 @@ TRIGGER_PREFIX_CAREERS_URL = "careers_url:"
 # some but not all of the cohort.
 #
 # These platforms can still be PROMOTED via the evidence-based reconcile path
-# (job_finder/web/ats_identity_reconcile.reconcile_company_ats), which requires
+# (``services.reconcile_company_ats``, see engine/services.py), which requires
 # corroborating job-URL evidence before writing `hit`. The per-platform probe
 # functions remain available and are used by reconcile's _verify_live step.
-#
-# This was the corollary of the v2 audit at .planning/ATS-COVERAGE-AUDIT-2026-05-27.md.
 _FP_PRONE_PLATFORMS: frozenset[str] = frozenset({"bamboohr", "personio", "recruitee", "breezy"})
 
 # (platform, probe_fn) pairs. Ordering matches the historical ladder:
@@ -266,9 +264,9 @@ def _reset_stale_collision_misses(conn: sqlite3.Connection, cooldown_hours: int)
 
     Only commits when a row actually changed. A no-op commit here would count
     as an extra ``commit()`` call on shared per-run connections, which would
-    trip the ``TestDemotionPromotionAtomicity`` invariant in
-    ``test_ats_bypass_writer_challenge.py`` (exactly one commit per atomic
-    demote+promote unit) even though this sweep touched nothing.
+    have tripped the private test suite's ``TestDemotionPromotionAtomicity``
+    invariant (exactly one commit per atomic demote+promote unit; that test
+    was not carried into this port) even though this sweep touched nothing.
     """
     cutoff = (datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=cooldown_hours)).isoformat()
     cur = conn.execute(

@@ -44,7 +44,7 @@ def test_upsert_profile_then_get_profile_roundtrip(db_conn):
 
 
 def test_upsert_profile_updates_in_place_and_preserves_unspecified_fields(db_conn):
-    """Single current row (OD-5): a second upsert updates in place (no second
+    """Single current row: a second upsert updates in place (no second
     row) and COALESCEs unspecified columns to their previous values — the
     second call only touches seniority_level, so skills must survive."""
     from jobcannon.db._profiles import get_profile, upsert_profile
@@ -60,7 +60,7 @@ def test_upsert_profile_updates_in_place_and_preserves_unspecified_fields(db_con
 
 def test_seed_guest_demo_is_idempotent(db_conn):
     """scripts/seed_guest_demo.py's seed(conn): running it twice must leave
-    exactly one users row and one current profile row (OD-5), unchanged by
+    exactly one users row and one current profile row, unchanged by
     the second call (users insert is ON CONFLICT DO NOTHING; upsert_profile
     is itself an upsert)."""
     from jobcannon.db._profiles import GUEST_USER_ID, get_profile

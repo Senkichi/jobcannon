@@ -24,4 +24,4 @@ def test_worker_main_wires_in_order(monkeypatch):
     assert [c[0] for c in calls] == ["migrate", "seams", "pschema", "run_worker"]
     kwargs = calls[-1][1]
     assert kwargs["queues"] == ["scan", "maintenance"]
-    assert kwargs["concurrency"] == 2  # JC_WORKER_CONCURRENCY default (OD-9 interim)
+    assert kwargs["concurrency"] == 2  # JC_WORKER_CONCURRENCY default

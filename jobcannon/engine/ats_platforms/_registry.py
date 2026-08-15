@@ -191,12 +191,16 @@ class PlatformScanner:
             callable that fetches postings with a completeness flag, so a
             caller can determine if a board was fully fetched. This field is
             forward-wiring for the reconciler chain (issues #1030-1033) and
-            currently has no callers — ``ats_reconciler.py`` imports the
+            currently has no callers in this engine port. In the private
+            source, a dedicated ``ats_reconciler.py`` module imported the
             Workday and SmartRecruiters completeness functions directly by
             private name instead of reading this field off the scanner, and
-            Microsoft/Eightfold aren't wired into the reconciler at all yet.
-            Platforms with paginated list endpoints (Workday, SmartRecruiters,
-            Microsoft, Eightfold, Oracle Cloud) should provide this.
+            Microsoft/Eightfold were never wired into that reconciler either;
+            that module did not survive extraction — reconciliation here is
+            host-supplied instead (see ``services.py``'s
+            ``reconcile_company_ats`` field). Platforms with paginated list
+            endpoints (Workday, SmartRecruiters, Microsoft, Eightfold,
+            Oracle Cloud) should provide this.
     """
 
     name: str
@@ -279,8 +283,9 @@ def run_platform_scan(
             API response is recorded via ``extraction_health.record(...)``
             with ``detect=True`` so an empty response on a previously-productive
             platform is detected as a true break.  The ~19 callers in
-            ``ats_platforms/__init__.py`` and ``ats_reconciler.py`` omit
-            this argument (``conn=None``) and are unaffected.
+            ``ats_platforms/__init__.py`` omit this argument (``conn=None``)
+            and are unaffected; the private source's ``ats_reconciler.py``
+            (not carried into this port) did the same historically.
         return_raw: When True, also return the full pre-title-gate list of
             job dicts so callers can cache the entire board.  This keeps the
             default 2-tuple return unchanged for the ~19 existing callers.

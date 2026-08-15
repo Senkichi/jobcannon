@@ -15,7 +15,7 @@ databases:
   - name: jobcannon-db
     # `plan` selects the RAM/compute tier ("256mb" names RAM, not disk).
     # Disk capacity is `diskSizeGB` below, and it's what JC_DB_STORAGE_LIMIT_MB
-    # (jobcannon-worker env, OD-18) is calibrated against — Render defaults an
+    # (jobcannon-worker env) is calibrated against — Render defaults an
     # omitted diskSizeGB to 15GB on the Basic tier, which would silently
     # miscalibrate the storage alert if left implicit. Valid values are 1 or
     # any multiple of 5; 5GB is ample headroom for the 1B corpus at trivial

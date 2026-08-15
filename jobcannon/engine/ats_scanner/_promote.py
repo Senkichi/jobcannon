@@ -1,6 +1,6 @@
 """Source-URL based ATS promotion for miss/error/pending companies.
 
-Uses centralized ``reconcile_company_ats`` (.planning/ATS-RECONCILIATION-PLAN Phase B).
+Uses centralized ``reconcile_company_ats`` (Phase B batch reconciliation).
 Aggregates per-job ``source_urls`` with precedence ranking, verifies with live API
 calls, writes audited evidence columns — never trusts URL shape alone.
 
