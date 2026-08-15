@@ -4,6 +4,6 @@ merge_rules:
   preconditions:
     number_of_approvals: 0
     required_checks:
-      - "test"
+      - "Tests passed"
   merge_strategy:
     name: "squash"
