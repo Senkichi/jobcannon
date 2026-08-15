@@ -34,11 +34,17 @@ Render dashboard). None of them are committed anywhere in this repo.
 | `CLERK_JWT_KEY` | web | Clerk dashboard → API Keys → Advanced → JWT public key (enables networkless RS256 verification — required, see `jobcannon/web/auth.py`) |
 | `CLERK_AUTHORIZED_PARTIES` | web | Comma-separated list of the origins allowed to present a session token for this deploy (e.g. the Render web service's public URL). This is an operator-chosen value, not something copied verbatim from Clerk — it is Clerk's `azp` replay-defense check. |
 | `CLERK_WEBHOOK_SIGNING_SECRET` | web | Clerk dashboard → Webhooks → the endpoint created in step 4 → Signing Secret (`whsec_...`) |
-| `POSTHOG_API_KEY` | web | PostHog project settings → Project API Key |
-| `POSTHOG_HOST` | web | Optional — only set for EU or self-hosted PostHog routing; unset defaults to PostHog's US cloud (see `jobcannon/host/wiring.py`) |
+| `POSTHOG_API_KEY` | web, worker | PostHog project settings → Project API Key |
 
 `DATABASE_URL` is wired automatically on both services via `render.yaml`'s
 `fromDatabase` reference — never set it manually.
+
+`POSTHOG_HOST` is committed in `render.yaml` (not `sync: false`) on both
+services, routing PostHog ingestion to the EU region
+(`https://eu.i.posthog.com`) — it's a routing choice, not a secret, so it
+doesn't need per-deploy filling in. Both services build their own PostHog
+client through the same seam (`jobcannon/host/wiring.py`), so the value
+must stay identical on both.
 
 ## 3. First boot ordering
 
