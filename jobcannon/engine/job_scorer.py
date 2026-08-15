@@ -79,7 +79,7 @@ def _derive_max_jd_chars(config: dict | None) -> int:
         max_jd_chars = available_tokens * chars_per_token
 
     This ensures that raising num_ctx actually extends visible JD content,
-    fixing the issue #1081 silent ceiling where 24k was hardcoded regardless
+    fixing a prior silent ceiling where 24k was hardcoded regardless
     of num_ctx setting.
 
     Args:
@@ -184,19 +184,21 @@ def _build_system_prompt(
 
     candidate_context is REQUIRED — the v3 location_fit / comp_fit / etc.
     anchors are unscorable without knowing the candidate's target locations,
-    floor, and background. The orchestrator's
-    ``_resolve_candidate_context(config)`` is the single source of truth in
-    production; tests inject a stub. The pre-Phase-2a no-context fallback
-    was removed in this refactor — it silently produced wrong scores (e.g.
-    rating an on-site Bangalore role as a 'feasible hybrid' = 4 for a
-    Remote/SF-only candidate) and existed only because the wiring across
-    six of seven call sites had never been completed.
+    floor, and background. This engine has no orchestrator of its own (see
+    module docstring); a host builds this string and passes it in, e.g. via
+    ``jobcannon.host.candidate_context.build_candidate_context(profile)``
+    (or ``resolve_candidate_context(conn, user_id)`` to load the profile row
+    first). Tests inject a stub directly. The pre-Phase-2a no-context
+    fallback was removed in this refactor — it silently produced wrong
+    scores (e.g. rating an on-site Bangalore role as a 'feasible hybrid' = 4
+    for a Remote/SF-only candidate) and existed only because the wiring
+    across six of seven call sites had never been completed.
     """
     if not candidate_context:
         raise ValueError(
             "_build_system_prompt: candidate_context is required. "
-            "Use scoring_orchestrator._resolve_candidate_context(config) "
-            "in production, or pass an explicit test stub."
+            "Build it via jobcannon.host.candidate_context.build_candidate_context(profile), "
+            "or pass an explicit test stub."
         )
     mod = _resolve_variant_module(_variant_name(config))
     header = getattr(mod, "V3_SCORING_PROMPT_HEADER", None) or mod.V3_SCORING_PROMPT
@@ -219,7 +221,7 @@ def _build_user_message(job: dict, config: dict | None = None) -> str:
       prompt. As a pure safety net against a pathological / poorly-cleaned
       posting, anything past the derived max_jd_chars is hard-truncated WITH a
       logged warning (never a silent section-drop). The max is derived from
-      num_ctx per issue #1081, so raising num_ctx actually extends visible JD
+      num_ctx, so raising num_ctx actually extends visible JD
       content. Removing superfluous content properly is an upstream-extraction
       job (Layer 2).
     - Compensation: the salary_min/max range is always shown; richer
@@ -267,7 +269,7 @@ def _build_user_message(job: dict, config: dict | None = None) -> str:
 class _IncompleteAssessmentError(ValueError):
     """A dispatcher payload was missing or uncoercible on a required axis.
 
-    Issue #227 (mechanism 2 — fail-closed coercion). Raised by
+    Fail-closed coercion. Raised by
     ``_coerce_assessment`` instead of silently dropping an axis and producing
     a partial sub-score vector that ``derive_classification`` could then read
     as ``apply``. ``score_job`` catches this and returns status="error" so the
@@ -347,19 +349,18 @@ def scoring_precheck(job: dict) -> str | None:
                                 already carry ``"location_missing"`` in
                                 ``unresolved_reasons`` (P3.2).
 
-    Both the live scorer (``score_job``) and the candidate-counting predicate
-    (``exclusion_filter.count_scorable`` and the batch-scoring worker loop) gate
-    on this. Keeping the definition in one place is what stops the dashboard
-    "N unscored" count, the batch session ``total``, and the rows the worker
-    actually scores from advertising a job the scorer will silently no-op — the
-    desync that produced "205/174 processed" and a Score-Now button that never
-    decremented. ``exclusion_filter`` mirrors this gate in SQL; the parity test
-    ``TestCountScorable.test_matches_scoring_precheck`` pins the two together.
+    ``score_job`` is the only in-tree caller. This engine ships no
+    candidate-counting predicate of its own to keep in sync — a host that
+    surfaces an "N unscored" style count (dashboard, batch-session total,
+    a Score-Now button, etc.) should call this function directly, or mirror
+    its exact conditions, rather than re-deriving them; that discipline is
+    what prevents the count from desyncing from what ``score_job`` will
+    actually score. See ``tests/engine/test_scoring_precheck.py`` for this
+    function's contract in isolation from ``score_job``.
     """
     # jd_full gate (SCORER-05). Strip before testing so a whitespace-only body
-    # ('   ') is treated as absent — it is garbage-in for the scorer and it is
-    # exactly the shape count_scorable's ``TRIM(jd_full) != ''`` excludes, so
-    # gating on the same condition keeps the two in lockstep.
+    # ('   ') is treated as absent — garbage-in for the scorer. A host
+    # mirroring this gate in SQL wants the same condition (``TRIM(jd_full) != ''``).
     if not (job.get("jd_full") or "").strip():
         return "awaiting_jd"
 
@@ -446,12 +447,12 @@ def score_job(
             v3 rubric anchors (location_fit, comp_fit, etc.) reference
             candidate-specific facts (target locations, comp floor, target
             titles) — scoring without this block silently produces wrong
-            scores. Production callers route through
-            ``scoring_orchestrator.score_and_persist_job``, which resolves
-            this from config via the memoized
-            ``_resolve_candidate_context(config)``. Direct callers (eval
-            harness, tests) must build it explicitly via
-            ``build_candidate_context(config, profile)``.
+            scores. This engine has no orchestrator of its own; hosts build
+            this string themselves, e.g. via
+            ``jobcannon.host.candidate_context.build_candidate_context(profile)``
+            or ``resolve_candidate_context(conn, user_id)``. Direct callers
+            (eval harness, tests) may build it the same way or pass an
+            explicit stub.
         call_model: REQUIRED keyword-only model-dispatch callable, matching
             the private repo's ``model_provider.call_model`` signature
             (``tier=``, ``system=``, ``messages=``, ``conn=``, ``config=``,

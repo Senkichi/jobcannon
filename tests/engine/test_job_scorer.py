@@ -105,12 +105,12 @@ def config():
 
 
 # ---------------------------------------------------------------------------
-# Tests: JD truncation (issue #1081)
+# Tests: JD truncation
 # ---------------------------------------------------------------------------
 
 
 class TestJDTruncation:
-    """JD truncation is derived from num_ctx, not hardcoded (issue #1081)."""
+    """JD truncation is derived from num_ctx, not hardcoded."""
 
     def test_derive_max_jd_chars_default_config(self):
         """Default num_ctx=12288 yields expected max_jd_chars."""
@@ -522,7 +522,7 @@ class TestSchemaContract:
 
 
 class TestQualityFloorCoercion:
-    """_coerce_assessment fails closed on partial/uncoercible vectors (#227)."""
+    """_coerce_assessment fails closed on partial/uncoercible vectors."""
 
     def test_coerce_raises_on_missing_axis(self):
         """A missing required axis raises instead of producing a partial vector."""
@@ -545,7 +545,7 @@ class TestQualityFloorCoercion:
     def test_partial_vector_does_not_classify_apply(self):
         """A partial high-score vector must NOT survive into an apply verdict.
 
-        Pre-#227 bug: dropping an axis left a partial dict that
+        Historical bug: dropping an axis left a partial dict that
         derive_classification read with all(v >= 3 ...) passing vacuously over
         the surviving axes → spurious apply. Now coercion fails closed first.
         """

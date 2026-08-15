@@ -176,7 +176,7 @@ def _to_canonical(posting: dict) -> list[JobLocation]:
     return dedupe_locations(results)
 
 
-# Relative postedOn strings — what most real tenants emit (#364). At audit
+# Relative postedOn strings — what most real tenants emit. At audit
 # time (2026-06-11) 734 of the last 30 days' Workday jobs had NULL
 # posted_date because only the two absolute formats below were recognised.
 # "30+" parses as a 30-day floor: genuinely lossy, still a useful
@@ -194,8 +194,8 @@ def _parse_posted_date(value: str | None) -> tuple[datetime | None, str | None]:
       - ``"MM/DD/YYYY"`` / ``"YYYY-MM-DD"`` absolute dates → ``'exact'``
       - ``"Posted Today"`` / ``"Posted Yesterday"`` /
         ``"Posted N Days Ago"`` / ``"Posted 30+ Days Ago"`` relative
-        strings → date-level value computed against UTC now, ``'approximate'``
-        (#364). This parses what the platform actually said — it is NOT
+        strings → date-level value computed against UTC now, ``'approximate'``.
+        This parses what the platform actually said — it is NOT
         synthesis from first_seen (D-08).
 
     Anything else (or empty) → ``(None, None)``; a NULL is written to
@@ -264,7 +264,7 @@ def _fetch_postings_with_completeness(
     Reconciliation here is host-supplied instead (``services.py``'s
     ``reconcile_company_ats`` field, driven from ``ats_scanner/_promote.py``),
     and the registry field remains forward-wiring for the wider reconciler
-    chain (issues #1030-1033) with currently no callers.
+    chain with currently no callers.
 
     Args:
         slug: ``"subdomain/board"`` Workday slug.
@@ -540,7 +540,7 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     source_id: str | None = external_path if external_path else None
 
     # posted_date: parsed from postedOn (varies by tenant format). Relative
-    # strings yield 'approximate' precision; absolute dates 'exact' (#364).
+    # strings yield 'approximate' precision; absolute dates 'exact'.
     posted_date, posted_date_precision = _parse_posted_date(posting.get("postedOn"))
 
     # locations_structured: Layer-1 parse of locationsText with
@@ -548,7 +548,7 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     locations_structured = _to_canonical(posting)
     # -----------------------------------------------------------------------
 
-    # ── Structured-field CAPTURE (#451) — raw-as-provided, no synthesis ───────
+    # ── Structured-field CAPTURE — raw-as-provided, no synthesis ──────────────
     # The Workday CXS list payload does not reliably surface remote /
     # employment-type / department fields; read the candidate keys defensively
     # so any tenant that does emit them is captured, and fall to None otherwise.

@@ -303,8 +303,8 @@ class TestTerminalTierPassthrough:
 class TestLocationMissingPassthrough:
     """Jobs tagged location_missing in unresolved_reasons are never gated forever.
 
-    "location_missing" is the unresolved_reasons code introduced by P2.3/P2.4
-    (issues #388/#389). When present it signals that all available evidence was
+    "location_missing" is the unresolved_reasons code introduced by P2.3/P2.4.
+    When present it signals that all available evidence was
     exhausted without resolving a location — blocking would orphan the row.
     """
 

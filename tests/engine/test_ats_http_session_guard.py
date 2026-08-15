@@ -151,7 +151,7 @@ def test_no_stale_ats_scanner_or_ats_platforms_requests_patches_in_tests():
     """Regression guard: no test anywhere under tests/ may mock.patch the dead
     bare-requests seam on ats_scanner or ats_platforms.
 
-    Both packages were migrated (PR #1065, issue #1026) to route HTTP calls through
+    Both packages were migrated to route HTTP calls through
     a shared pooled requests.Session via get_session(), so `requests.get`/`.post`/etc.
     are no longer called directly on those modules. A test that still does
     `patch("...ats_scanner.requests.get")`,

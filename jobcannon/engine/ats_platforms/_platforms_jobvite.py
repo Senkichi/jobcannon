@@ -41,7 +41,7 @@ def _fetch_postings(_slug: str, max_pages: int | None = None) -> list[dict]:
         max_pages: Unused (this scanner is a permanent stub). Accepted for
             signature compatibility with ``run_platform_scan``, which
             unconditionally calls ``scanner.fetch_postings(slug,
-            max_pages=max_pages)`` (see #1029).
+            max_pages=max_pages)``.
     """
     return []
 

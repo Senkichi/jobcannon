@@ -122,7 +122,7 @@ class TestNormalizeTitle:
 
         SERP count-tile titles like "84Data Scientist Jobs" should collapse to
         the same normalized form as "84 Data Scientist Jobs" so they hit the
-        same dedup_key. Issue #212.
+        same dedup_key.
         """
         from jobcannon.engine.dedup_normalizer import normalize_title
 
@@ -136,7 +136,7 @@ class TestNormalizeTitle:
         """Normal titles without digit/letter adjacency are untouched.
 
         Negative case: ordinary titles (no digits adjacent to letters) must not
-        be perturbed by the new boundary rule. Issue #212.
+        be perturbed by the new boundary rule.
         """
         from jobcannon.engine.dedup_normalizer import normalize_title
 
@@ -150,7 +150,6 @@ class TestNormalizeTitle:
         The two implementations are duplicated by design (foundation cannot
         depend on web). If they diverge on the digit/letter boundary case,
         dedup_key derivation in different code paths would silently disagree.
-        Issue #212.
         """
         from jobcannon.engine.dedup_normalizer import normalize_title as web_normalize
         from jobcannon.engine.normalizers import normalize_title as foundation_normalize
@@ -207,7 +206,7 @@ class TestNormalizedDedupKey:
         """Missing-separator title variants converge to a single dedup_key.
 
         The two Capital One rows ("84Data..." vs "84 Data...") that surfaced
-        the dedup hole must now produce identical keys. Issue #212.
+        the dedup hole must now produce identical keys.
         """
         from jobcannon.engine.models import Job
 
@@ -306,13 +305,13 @@ class TestNormalizerVersionCanary:
     re-arms the standing re-key operation) AND update the pinned hash — never
     silently update the hash to match new behavior without a version bump.
 
-    This is the enforcement that #238's stranded-key gap can never recur: a
+    This is the enforcement that a stranded-key gap can never recur: a
     normalizer change that strands existing dedup_keys is now impossible to
     merge without also bumping the version that triggers re-derivation.
     """
 
     # Corpus exercises every normalize branch: suffixes, abbreviations, level
-    # strips, legal-entity prefixes, HTML, the digit<->letter boundary (#212).
+    # strips, legal-entity prefixes, HTML, the digit<->letter boundary.
     CORPUS_COMPANY = [
         "Klaviyo Inc.",
         "Intuit, Inc.",

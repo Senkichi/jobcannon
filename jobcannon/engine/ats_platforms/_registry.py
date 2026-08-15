@@ -125,11 +125,11 @@ class BoardGoneError(Exception):
         super().__init__(f"ATS board gone (HTTP {status}): {slug}")
 
 
-# ── Structured-field CAPTURE helpers (#451) ──────────────────────────────────
+# ── Structured-field CAPTURE helpers ─────────────────────────────────────────
 # Shared raw-as-provided extraction for the is_remote / employment_type /
 # department capture columns. Both helpers are pure and return None when the
 # value is absent — capture never synthesizes a value the payload does not
-# carry (epic #393, CAPTURE stage).
+# carry (CAPTURE stage).
 
 
 def coerce_remote_bool(value: Any) -> bool | None:
@@ -190,7 +190,7 @@ class PlatformScanner:
         fetch_postings_with_completeness: Optional ``(slug, max_pages) -> (list[dict], bool)``
             callable that fetches postings with a completeness flag, so a
             caller can determine if a board was fully fetched. This field is
-            forward-wiring for the reconciler chain (issues #1030-1033) and
+            forward-wiring for the reconciler chain and
             currently has no callers in this engine port. In the private
             source, a dedicated ``ats_reconciler.py`` module imported the
             Workday and SmartRecruiters completeness functions directly by

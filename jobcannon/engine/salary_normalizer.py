@@ -15,7 +15,7 @@ Design constraints (binding):
   * **Engine-pure: no imports from any host layer** (enforced by
     ``tests/engine/test_boundary.py``). This module is a leaf dependency that the
     capture sites (ATS scanners, SERP/feed sources, email parsers) and the existing
-    ``salary_extractor`` will delegate to in sibling PRs (#380, #382, #383). It must
+    ``salary_extractor`` will delegate to in follow-on work. It must
     stay importable without pulling in Flask/app state.
   * **Pure functions, no I/O.** The only side effect permitted is the module logger.
   * **Immutability.** Both dataclasses are ``frozen``; functions return new objects.

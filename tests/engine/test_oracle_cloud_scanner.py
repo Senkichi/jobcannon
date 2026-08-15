@@ -176,7 +176,7 @@ def test_scan_oracle_cloud_title_gate(mock_get_session):
     assert [j["title"] for j in jobs] == ["Senior Data Analyst"]
 
 
-# ── Parallel page-fetch concurrency (issue #1029) ────────────────────────────
+# ── Parallel page-fetch concurrency ──────────────────────────────────────────
 
 
 def _offset_of(url: str) -> int:
@@ -357,7 +357,7 @@ def test_parallel_pages_assembled_in_offset_order_despite_completion_order(mock_
     assert ids == sorted(ids)
 
 
-# ── Completeness signal (issue #1092) ─────────────────────────────────────────
+# ── Completeness signal ───────────────────────────────────────────────────────
 
 
 @patch("jobcannon.engine.ats_platforms._platforms_oracle_cloud.get_session")

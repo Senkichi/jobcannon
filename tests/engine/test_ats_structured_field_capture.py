@@ -1,4 +1,4 @@
-"""ATS structured-field CAPTURE unit tests (#451).
+"""ATS structured-field CAPTURE unit tests.
 
 Each of the five ATS scanners' ``_posting_to_job`` must extend the canonical
 job dict with three raw-as-provided capture keys — ``is_remote`` /

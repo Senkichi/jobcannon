@@ -16,8 +16,8 @@ CI failure (a scannable platform with no probe, a scanner missing from dispatch,
 etc.), exemptable only via an explicit capability flag — never a hardcoded skip.
 
 **Scatter map (all facets now derive from the registry):**
-- PR-4 (#650): URL detection metadata (patterns, extractors, specificity)
-- PR-5 (#655): Posting-id patterns (expiry_checker, ats_reconciler)
+- PR-4: URL detection metadata (patterns, extractors, specificity)
+- PR-5: Posting-id patterns (expiry_checker, ats_reconciler)
 - PR-6 (this PR): Domain facets (ATS_DOMAINS, redirect patterns, PRIORITY_DOMAINS)
 
 The one documented exception: PRIORITY_DOMAINS includes 4 non-ATS job boards
@@ -701,7 +701,7 @@ SCANNABLE_TARGET_PLATFORMS: frozenset[str] = SCANNABLE_PLATFORMS - NON_SCANNABLE
 # and embed shapes) MUST route through extract_greenhouse_posting_id() so that
 # ats_reconciler, expiry_checker, and the backfill migration cannot diverge.
 # (Previously each carried its own copy and only the reconciler's was complete —
-# custom-domain and EU-host greenhouse postings silently failed to resolve, #644.)
+# custom-domain and EU-host greenhouse postings silently failed to resolve.)
 #
 # Two shape tiers:
 #   DISCRIMINATING — a greenhouse.io host+path, or the branded gh_jid= query param.
@@ -890,7 +890,7 @@ def is_direct_ats_platform(platform_key: str) -> bool:
     and is not marked ``non_scannable``. This is equivalent to
     ``SCANNABLE_TARGET_PLATFORMS - KEYWORD_ADAPTER_PLATFORMS``.
 
-    This predicate is used by the posting sub-entity upsert logic (#640) to
+    This predicate is used by the posting sub-entity upsert logic to
     determine which sightings should mint a posting descriptor. Keyword adapters
     (Amazon, Microsoft, Eightfold) and non-scannable stubs (jobvite, google,
     taleo, etc.) do NOT mint postings.

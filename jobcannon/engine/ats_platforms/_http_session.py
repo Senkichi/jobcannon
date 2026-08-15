@@ -4,7 +4,7 @@ Every ATS platform HTTP call uses the same Session object with connection poolin
 avoiding repeated TCP+TLS handshakes in tight loops against the same host.
 The Session is a lazy singleton, thread-safe for concurrent requests.
 
-Issue #1030 adds per-host request pacing here (not in ats_scanner/_run.py):
+Per-host request pacing lives here (not in ats_scanner/_run.py):
 every ``_platforms_*.py`` file routes its HTTP calls through ``get_session()``
 (verified by ``tests/test_ats_http_session_guard.py`` — no file calls bare
 ``requests.get``/``.post``), so this is the single point where a host-based
@@ -33,7 +33,7 @@ _POOL_MAXSIZE: Final = 16
 _session: requests.Session | None = None
 _session_lock = threading.Lock()
 
-# Per-host pacing semaphores (issue #1030), keyed by the request URL's netloc.
+# Per-host pacing semaphores, keyed by the request URL's netloc.
 # Lazily created on first request to a given host; shared across every caller
 # of get_session() (Phase A's board-level worker pool, page-fetch pools,
 # detail-fetch pools, the reconciler, ...) since they all share one Session.
@@ -126,7 +126,7 @@ def get_session() -> requests.Session:
     The Session is created on first call and reused for all subsequent calls.
     HTTPAdapter with connection pooling is mounted for https:// to avoid
     repeated TCP+TLS handshakes. The returned Session also paces concurrent
-    requests per destination host (issue #1030) — see ``_PacedSession``.
+    requests per destination host — see ``_PacedSession``.
 
     Returns:
         The shared requests.Session object.

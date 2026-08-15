@@ -622,7 +622,7 @@ class TestUnverifiableArchivalBranches:
         assert result["unverifiable_archived"] == 0
 
 
-# ---------- Issue #1077: retroactive opaque-source stamp and decay-clock fix ----------
+# ---------- Retroactive opaque-source stamp and decay-clock fix -----------------------
 #
 # The private repo's tests below drive a REAL code path — the actual
 # migration's `.py` helper via a live MigrationContext (_run_m205891047), or

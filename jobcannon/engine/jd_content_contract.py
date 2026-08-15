@@ -214,7 +214,7 @@ _JD_POSITIVE_RE = re.compile(
 )
 
 
-# --- jd_full completeness thresholds (issue #1295) ---
+# --- jd_full completeness thresholds ---
 # Minimum characters for a job description to be accepted as the full jd_full.
 # A body below this floor, or ending in a trailing ellipsis/…, is treated as a
 # truncated snippet and routed back to enrichment.
@@ -230,13 +230,26 @@ DEFAULT_JD_FULL_REJECT_TRAILING_ELLIPSIS = True
 def get_jd_full_thresholds(config: dict | None = None) -> tuple[int, bool]:
     """Resolve jd_full completeness thresholds from config.
 
+    Config-shape defense only (issue #37): a null/non-dict ``enrichment`` or
+    ``jd_full`` section, or a ``min_chars`` leaf that doesn't coerce to int,
+    degrades to the module defaults instead of raising. This does not change
+    the resolved value for any config shape that already resolved
+    successfully — it only defines behavior for shapes that previously threw
+    (``AttributeError`` / ``ValueError`` / ``TypeError``) inside the
+    ``jd_content_reject`` storage/ingest gate.
+
     Returns:
         (min_chars, reject_trailing_ellipsis) with safe defaults.
     """
     if config is None:
         config = {}
-    jd_cfg = config.get("enrichment", {}).get("jd_full", {}) or {}
-    min_chars = int(jd_cfg.get("min_chars", DEFAULT_JD_FULL_MIN_CHARS))
+    jd_cfg = (config.get("enrichment") or {}).get("jd_full") or {}
+    if not isinstance(jd_cfg, dict):
+        jd_cfg = {}
+    try:
+        min_chars = int(jd_cfg.get("min_chars", DEFAULT_JD_FULL_MIN_CHARS))
+    except (TypeError, ValueError):
+        min_chars = DEFAULT_JD_FULL_MIN_CHARS
     reject_ellipsis = bool(
         jd_cfg.get("reject_trailing_ellipsis", DEFAULT_JD_FULL_REJECT_TRAILING_ELLIPSIS)
     )
@@ -384,8 +397,8 @@ def jd_content_reject(
     if _EXPIRED_RE.search(low):
         return (JD_EXPIRED, "expired_or_filled")
 
-    # Serialized configuration / markup with no prose job description (issue
-    # #1558). A long JSON blob (Eightfold/Netflix micro-site config, empty
+    # Serialized configuration / markup with no prose job description.
+    # A long JSON blob (Eightfold/Netflix micro-site config, empty
     # ``job_description``) fools the length gate; reject at the content layer
     # so the scorer never sees it.
     if _is_json_config_blob(stripped):

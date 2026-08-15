@@ -1,4 +1,4 @@
-"""Tests for the liveness gate for second-tier aggregators (issue #1058).
+"""Tests for the liveness gate for second-tier aggregators.
 
 Ported from tests/test_liveness_gate.py's TestIsGatedSource class only — the
 pure registry-level predicate is_gated_source, which has zero DB/migration

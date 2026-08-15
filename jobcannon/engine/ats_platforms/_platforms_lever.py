@@ -97,7 +97,7 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
     title = resolve_title(posting, "lever") or ""
     source_url = resolve_url(posting, "lever") or ""
 
-    # ── Structured-field CAPTURE (#451) — raw-as-provided, no synthesis ───────
+    # ── Structured-field CAPTURE — raw-as-provided, no synthesis ──────────────
     # Lever's only remote signal is the top-level ``workplaceType`` enum
     # (kebab-case); derive the tri-state bool from it (REMOTE → True,
     # ONSITE/HYBRID → False, unspecified/absent → None). Employment type rides

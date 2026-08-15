@@ -1,4 +1,4 @@
-"""Shared concurrency bounds/clamps for ATS platform scanning (issues #1028-1030).
+"""Shared concurrency bounds/clamps for ATS platform scanning.
 
 Workday, SmartRecruiters, and Oracle Cloud each fetch page 1 serially to
 learn the total, then fan the remaining pages out across a bounded
@@ -8,7 +8,7 @@ is used instead of one copy per platform file — the clamp ceiling already had
 to be corrected (8 -> 6) across all three copies in lockstep once during
 review, which is exactly the drift risk a shared helper avoids.
 
-``get_scan_concurrency`` (issue #1030) governs the outermost layer: how many
+``get_scan_concurrency`` governs the outermost layer: how many
 companies (boards) Phase A scans concurrently. ``HOST_PACING_LIMIT`` bounds
 how many of those concurrent company-workers may hit the *same* API host at
 once — see ``_http_session.py`` for where it's enforced.
@@ -24,19 +24,19 @@ DEFAULT_PAGE_FETCH_CONCURRENCY: Final = 4
 _MIN_PAGE_FETCH_CONCURRENCY: Final = 1
 _MAX_PAGE_FETCH_CONCURRENCY: Final = 6
 
-# Board-level scan concurrency (issue #1030). Default 1 preserves today's
+# Board-level scan concurrency. Default 1 preserves today's
 # strictly serial Phase A loop byte-for-byte (including the 0.5s inter-company
 # sleep). Ceiling matches page_fetch_concurrency / detail_fetch_concurrency's
 # range (1-6) for the same shared-resource-budget reason documented on
 # get_page_fetch_concurrency below: these knobs all draw from the one pooled
-# Session (pool_maxsize=16 in _http_session.py). See the PR description for
-# this issue's stacking-math note on why 6 is a deliberately conservative
-# ceiling for the outermost multiplier rather than a tight bin-pack of 16.
+# Session (pool_maxsize=16 in _http_session.py). 6 is a deliberately
+# conservative ceiling for the outermost multiplier rather than a tight
+# bin-pack of 16.
 DEFAULT_SCAN_CONCURRENCY: Final = 1
 _MIN_SCAN_CONCURRENCY: Final = 1
 _MAX_SCAN_CONCURRENCY: Final = 6
 
-# Per-host request pacing (issue #1030). A handful of platforms (Greenhouse's
+# Per-host request pacing. A handful of platforms (Greenhouse's
 # boards-api.greenhouse.io alone backs ~571 boards) share one API host across
 # many companies; without a gate, raising scan_concurrency fans every one of
 # those companies' requests out to the same host simultaneously. This is a

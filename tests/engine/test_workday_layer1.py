@@ -158,7 +158,7 @@ class TestWorkdayPostedDate:
         assert result["posted_date_precision"] is None
 
     def test_relative_string_yields_approximate_date(self):
-        """'Posted 3 Days Ago' → UTC-today − 3d at date precision (#364)."""
+        """'Posted 3 Days Ago' → UTC-today − 3d at date precision."""
         from datetime import UTC, datetime, timedelta
 
         posting = {**_BASE_POSTING, "postedOn": "Posted 3 Days Ago"}

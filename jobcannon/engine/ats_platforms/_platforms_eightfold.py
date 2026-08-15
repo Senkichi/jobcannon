@@ -78,8 +78,7 @@ def _fetch_postings_with_completeness(
     collected raises :class:`BoardGoneError`; a mid-pagination error returns the
     partial set as incomplete.
 
-    The completeness signal is forward-wiring for the reconciler chain
-    (issues #1030-1033): nothing currently calls this through the
+    The completeness signal is forward-wiring for the reconciler chain: nothing currently calls this through the
     ``PlatformScanner.fetch_postings_with_completeness`` registry field, and
     Eightfold is not yet one of ``ats_reconciler``'s reconcilable platforms.
 
