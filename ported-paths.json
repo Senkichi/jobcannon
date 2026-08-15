@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-15T18:42:33Z",
+  "generated_at": "2026-08-15T19:41:20Z",
   "roots": [
     "engine",
     "db",
@@ -20,6 +20,14 @@
         {
           "line": 9,
           "text": "The malformed-name predicate is isalnum()-based like the private original"
+        },
+        {
+          "line": 19,
+          "text": "Recorded divergence (Wave-1, name-collision scope ruling): the private"
+        },
+        {
+          "line": 20,
+          "text": "original's full name-normalization + denylist identity work is Phase-2"
         }
       ]
     },
@@ -64,6 +72,14 @@
         {
           "line": 21,
           "text": "gates the private repo's auto-reopen logic, which has no hosted counterpart"
+        },
+        {
+          "line": 59,
+          "text": "# of the append-only salary_observations JSON array (mirrors the private"
+        },
+        {
+          "line": 60,
+          "text": "# original's cap; oldest entries are dropped first once the cap is hit)."
         }
       ]
     },
@@ -78,6 +94,24 @@
         {
           "line": 7,
           "text": "enforcing array shape long-term. Unlike the private original, which stores"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/compat.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 67,
+          "text": "surface but a private-schema delta, recorded so the resync surface"
+        },
+        {
+          "line": 68,
+          "text": "stays complete. A private-schema `jobs` column (private migration"
+        },
+        {
+          "line": 71,
+          "text": "by the private location-enrichment chain (`enrichment_tiers.py:818`"
         }
       ]
     },
@@ -102,6 +136,10 @@
         {
           "line": 1,
           "text": "\"\"\"Migration dataclasses — Postgres flavor of the private repo's ledger pattern."
+        },
+        {
+          "line": 3,
+          "text": "Differences from the private (SQLite) original, all deliberate:"
         }
       ]
     },
@@ -110,8 +148,24 @@
       "root": "engine",
       "markers": [
         {
+          "line": 4,
+          "text": "across the ATS platform scanners (Greenhouse, Lever, …). In the private"
+        },
+        {
+          "line": 5,
+          "text": "source these were also shared with a generic careers-page AI navigator"
+        },
+        {
           "line": 22,
           "text": "# Host-injectable override-loader seam (was job_finder.web.autoheal.override_loader)."
+        },
+        {
+          "line": 24,
+          "text": "# module contract). Hosts inject an object with the same interface the private"
+        },
+        {
+          "line": 25,
+          "text": "# repo's autoheal.override_loader module exposes at the two call sites below."
         }
       ]
     },
@@ -132,6 +186,10 @@
         {
           "line": 61,
           "text": "In the private source, a dedicated ``ats_reconciler.py`` module called"
+        },
+        {
+          "line": 62,
+          "text": "this function directly via a private import, bypassing the"
         }
       ]
     },
@@ -142,6 +200,10 @@
         {
           "line": 260,
           "text": "In the private source, a dedicated ``ats_reconciler.py`` module called"
+        },
+        {
+          "line": 261,
+          "text": "this function directly via a private import, bypassing the"
         }
       ]
     },
@@ -150,12 +212,50 @@
       "root": "engine",
       "markers": [
         {
+          "line": 194,
+          "text": "currently has no callers in this engine port. In the private"
+        },
+        {
+          "line": 195,
+          "text": "source, a dedicated ``ats_reconciler.py`` module imported the"
+        },
+        {
+          "line": 196,
+          "text": "Workday and SmartRecruiters completeness functions directly by"
+        },
+        {
+          "line": 197,
+          "text": "private name instead of reading this field off the scanner, and"
+        },
+        {
           "line": 287,
           "text": "and are unaffected; the private source's ``ats_reconciler.py``"
         },
         {
           "line": 340,
           "text": "# forwards to a host-registered recorder (e.g. the private repo's"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/ats_prober.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 21,
+          "text": "# Host-injectable extension bundle (None-default seam). Replaces the private"
+        },
+        {
+          "line": 22,
+          "text": "# source's lazy imports of ats_identity_reconcile / ats_slug_challenge /"
+        },
+        {
+          "line": 24,
+          "text": "# object exposing the nine callables below (same signatures as the private"
+        },
+        {
+          "line": 25,
+          "text": "# functions they stand in for). With no bundle registered, the static-first"
         }
       ]
     },
@@ -253,7 +353,7 @@
         },
         {
           "line": 110,
-          "text": "introduced by issue #1213: in the private original, the assessment writer"
+          "text": "in the private original, the assessment writer"
         }
       ]
     },
@@ -290,7 +390,7 @@
       "root": "engine",
       "markers": [
         {
-          "line": 461,
+          "line": 474,
           "text": "# re-homed from job_finder/db/_jd_full.py (plan Task 1 Step 6 amendment):"
         }
       ]
@@ -312,11 +412,15 @@
           "text": "# Re-homed from the private repo's providers/ollama_provider.py; provider-tuning"
         },
         {
-          "line": 429,
+          "line": 430,
           "text": "``job_finder.web.model_provider.call_model`` in the private repo, which"
         },
         {
-          "line": 456,
+          "line": 431,
+          "text": "inherited schema retry, cascade fallback, rate limiting, and provider"
+        },
+        {
+          "line": 457,
           "text": "the private repo's ``model_provider.call_model`` signature"
         }
       ]
@@ -368,6 +472,10 @@
           "text": "The private repo's scan orchestration reached sideways into Flask-side"
         },
         {
+          "line": 10,
+          "text": "Required callables MUST match the signatures of the private-repo functions"
+        },
+        {
           "line": 49,
           "text": "#   matches job_finder.db._jobs.upsert_job(conn, parsed, *, company_id=None,"
         },
@@ -398,7 +506,7 @@
       "root": "engine",
       "markers": [
         {
-          "line": 66,
+          "line": 65,
           "text": "job_finder.db._queries._liveness_gate_sql — same predicate logic (same"
         }
       ]

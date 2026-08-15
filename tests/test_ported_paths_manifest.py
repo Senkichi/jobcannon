@@ -2,15 +2,29 @@
 
 The manifest at repo root maps every jobcannon/{engine,db,host,web,worker}
 .py file that carries a provenance comment (see scripts/derive_ported_paths.py
-for the exact convention and PROVENANCE_RE) to the comment line(s) that
-earned it a place. test_manifest_matches_fresh_scan fails whenever the
+for the exact detector contract and PROVENANCE_RE) to the comment line(s)
+that earned it a place. test_manifest_matches_fresh_scan fails whenever the
 checked-in manifest drifts from a fresh scan of the tree — including the
 completeness gap this manifest exists to close: a provenance-bearing file
-silently absent from the manifest. The remaining tests are a sabotage
-self-test (proving the checker actually fires on a synthetic gap, matching
-tests/engine/test_boundary.py's established pattern) and positive/negative
-controls on PROVENANCE_RE itself, since the whole guard is only as good as
-that regex's precision and recall.
+silently absent from the manifest.
+
+test_manifest_matches_fresh_scan is necessarily circular (it re-runs the
+same detector the manifest was derived with, so it can prove drift but can
+never prove the detector itself has adequate recall). The remaining tests
+are the non-circular controls that guard the detector's actual recall
+surface:
+  * a sabotage self-test with a plain single-line phrase (matching
+    tests/engine/test_boundary.py's established pattern);
+  * a sabotage self-test with a phrase that WRAPS across a comment's line
+    break — the exact shape of the jobcannon/engine/ats_prober.py miss;
+  * a sabotage self-test with a novel code-artifact noun the original
+    four-phrase regex never covered — the exact shape of the
+    jobcannon/db/compat.py miss;
+  * a ground-truth pin asserting those two known-provenance files are
+    actually present in the checked-in manifest, so a future regression in
+    the detector (not just a stale manifest) fails loudly;
+  * positive/negative controls on PROVENANCE_RE itself, since the whole
+    guard is only as good as that regex's precision and recall.
 """
 
 from __future__ import annotations
@@ -77,6 +91,130 @@ def test_checker_catches_provenance_file_missing_from_manifest(tmp_path):
 
     assert not ok
     assert any("jobcannon/engine/ported_thing.py" in f for f in failures)
+
+
+def test_checker_catches_wrapped_provenance_phrase(tmp_path):
+    """Non-circular recall control for the exact shape of the
+    jobcannon/engine/ats_prober.py miss: a provenance phrase that line-wraps
+    inside a comment ("...the private" / "source's helper...") must still be
+    detected. A per-line scan (the pre-fix implementation) cannot see this —
+    each half of the phrase is unremarkable on its own line — so this test
+    fails under the old per-line PROVENANCE_RE.search(line) approach and
+    only passes once matching runs against joined comment/docstring blocks.
+    """
+    (tmp_path / "jobcannon" / "engine").mkdir(parents=True)
+    (tmp_path / "jobcannon" / "engine" / "wrapped_thing.py").write_text(
+        "# Host-injectable seam. Replaces the private\n"
+        "# source's helper that does not port to the engine.\n"
+        "_thing = None\n",
+        encoding="utf-8",
+    )
+    empty_manifest = tmp_path / "ported-paths.json"
+    empty_manifest.write_text(
+        json.dumps({"schema_version": 1, "generated_at": "x", "roots": [], "entries": []}),
+        encoding="utf-8",
+    )
+
+    ok, failures = dpp.check(tmp_path, empty_manifest)
+
+    assert not ok
+    assert any("jobcannon/engine/wrapped_thing.py" in f for f in failures)
+
+
+def test_checker_catches_novel_noun_phrase(tmp_path):
+    """Non-circular recall control for the exact shape of the
+    jobcannon/db/compat.py miss: a provenance phrase using a code-artifact
+    noun ("schema") outside the original hand-picked four-phrase set
+    (repo/source/original/deployment) must still be detected. This fails
+    under the pre-fix hardcoded-phrase PROVENANCE_RE and only passes once
+    the detector generalizes to proximity-based noun matching.
+    """
+    (tmp_path / "jobcannon" / "db").mkdir(parents=True)
+    (tmp_path / "jobcannon" / "db" / "novel_noun_thing.py").write_text(
+        '"""Records a private-schema delta not on the port surface."""\n',
+        encoding="utf-8",
+    )
+    empty_manifest = tmp_path / "ported-paths.json"
+    empty_manifest.write_text(
+        json.dumps({"schema_version": 1, "generated_at": "x", "roots": [], "entries": []}),
+        encoding="utf-8",
+    )
+
+    ok, failures = dpp.check(tmp_path, empty_manifest)
+
+    assert not ok
+    assert any("jobcannon/db/novel_noun_thing.py" in f for f in failures)
+
+
+def test_manifest_pins_known_provenance_files():
+    """Ground-truth pin: these two files are unambiguously provenance-
+    bearing (jobcannon/db/compat.py names a private migration id and a
+    private-schema delta; jobcannon/engine/ats_prober.py's provenance phrase
+    wraps across a comment line break). Both were misses of the original
+    per-line, four-phrase detector.
+
+    Deliberately calls find_provenance_files() directly — a fresh scan —
+    rather than reading the checked-in ported-paths.json. Reading the JSON
+    would only prove the file hasn't gone stale (test_manifest_matches_fresh_scan
+    already covers that); it would keep passing even if PROVENANCE_RE
+    regressed to stop matching these files, as long as nobody reran derive.
+    Also pins the specific matched lines, not just file presence, so a
+    detector that keeps these files in the manifest for an unrelated /
+    coincidental reason still fails this check.
+    """
+    found = dpp.find_provenance_files(REPO_ROOT)
+    assert "jobcannon/db/compat.py" in found
+    assert "jobcannon/engine/ats_prober.py" in found
+
+    compat_lines = {m["line"] for m in found["jobcannon/db/compat.py"]}
+    assert {67, 68} & compat_lines, (
+        "expected the private-schema/private-migration lines in compat.py's "
+        f"markers, got lines {sorted(compat_lines)}"
+    )
+
+    prober_lines = {m["line"] for m in found["jobcannon/engine/ats_prober.py"]}
+    assert 21 in prober_lines, (
+        "expected line 21 (the wrapped 'the private' / 'source's lazy "
+        f"imports' phrase) in ats_prober.py's markers, got lines {sorted(prober_lines)}"
+    )
+
+
+def test_tight_gap_excludes_unrelated_local_filename_near_private():
+    """Regression guard for the noun-gap/tight-gap split in PROVENANCE_RE.
+
+    jobcannon/engine/ats_scanner/__init__.py's module docstring says "...live
+    in private sibling modules: `_upsert.py` ..." — ordinary Python
+    underscore-privacy describing THIS repo's own sibling files, not a
+    cross-repo reference — sitting a few words from an unrelated `.py`
+    filename. An earlier version of this detector (single wide proximity
+    window for every artifact type) matched it. These three real sentences
+    from the tree, plus that one, must NOT match on their own; if a future
+    change collapses the tight/noun gap split back into one budget, this is
+    what would go red (the other 10 tests would stay green, since none of
+    them exercises this specific ambiguity).
+    """
+    found = dpp.find_provenance_files(REPO_ROOT)
+    for path in (
+        "jobcannon/engine/ats_platforms/_title_match.py",
+        "jobcannon/engine/stale_detector.py",
+        "jobcannon/engine/ats_scanner/_run_html.py",
+    ):
+        assert path not in found, f"{path} should not be provenance-bearing"
+
+
+def test_provenance_regex_rejects_local_underscore_privacy_near_filename():
+    """Isolated regex-level version of the same tight-gap regression,
+    reproducing jobcannon/engine/ats_scanner/__init__.py's exact phrasing on
+    its own — not through find_provenance_files() — so this fails cleanly
+    even in a hypothetical world where that file also carries a genuine,
+    unrelated provenance line elsewhere (as it currently does, which is why
+    the file-level test above targets three *other* real files instead)."""
+    block = (
+        "The package's first-party concerns live in private sibling modules:\n"
+        "\n"
+        "- `_upsert.py`   — `is_company_tracked`: company tracking check.\n"
+    )
+    assert not dpp.PROVENANCE_RE.search(block), block
 
 
 def test_checker_accepts_complete_manifest(tmp_path):
