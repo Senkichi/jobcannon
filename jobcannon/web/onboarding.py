@@ -272,11 +272,29 @@ def _ordering_label(rows: list[Any]) -> dict[str, Any]:
     for /preview specifically this is unconditionally the unranked branch
     today. Written as a real check on the rows, rather than a bare constant,
     so the same logic stays correct if a later authenticated consumer of
-    _feed_list.html ever passes ranked rows through it."""
+    _feed_list.html ever passes ranked rows through it.
+
+    A row with rank_score set counts as "ranked" even when only some of
+    `rows` qualify — deliberately: jobcannon/web/pages.py's own
+    _ordering_label (the twin already wired to the real authed feed, and
+    covered by tests/host/test_feed_page.py's
+    test_feed_reads_rank_score_and_ranker_version_from_feed_state, which
+    seeds 2 rows with only 1 ranked and still expects the version to
+    render) treats a partially-ranked result set as personalized. Diverging
+    here would falsify the docstring's own promise that this copy's logic
+    "stays correct" once reused. What IS guarded is `ranker_version`
+    itself: a mixed set of versions across the ranked rows, or a single
+    consistent but falsy value (`None` or `''` — `ranker_version` is an
+    unconstrained nullable `text` column, so both are representable),
+    must never be presented as personalized — that combination is what let
+    preview.html's unguarded `Ranked by {{ ordering.ranker_version }}.`
+    render the bare "Ranked by ."."""
     ranked_versions = [r["ranker_version"] for r in rows if r["rank_score"] is not None]
     if not ranked_versions:
         return {"personalized": False, "ranker_version": None}
     version = ranked_versions[0] if len(set(ranked_versions)) == 1 else None
+    if not version:
+        return {"personalized": False, "ranker_version": None}
     return {"personalized": True, "ranker_version": version}
 
 

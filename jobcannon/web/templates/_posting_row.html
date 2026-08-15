@@ -39,7 +39,7 @@
   </p>
   {% if entry.row.salary_min or entry.row.salary_max %}
     <p class="text-sm text-neutral-400">
-      {{ entry.row.salary_currency }}
+      {%- if entry.row.salary_currency and entry.row.salary_currency != "UNKNOWN" %}{{ entry.row.salary_currency }}{% endif %}
       {%- if entry.row.salary_min %} {{ entry.row.salary_min }}{% endif %}
       {%- if entry.row.salary_max %}&ndash;{{ entry.row.salary_max }}{% endif %}
       {%- if entry.row.salary_period and entry.row.salary_period != "unknown" %} / {{ entry.row.salary_period }}{% endif %}
