@@ -1,11 +1,11 @@
 """Procrastinate task-shape declarations for the hosted job taxonomy, plus the
-periodic enqueue tick, storage-check tick, orphaned-job reclaim tick, and
-anon-user reap tick that fire on a schedule.
+periodic enqueue tick, storage-check tick, orphaned-job reclaim tick,
+anon-user reap tick, and events-retention reap tick that fire on a schedule.
 
-Task shapes (`scan`, `expiry_check`, `stale_detect`) and the four periodics
+Task shapes (`scan`, `expiry_check`, `stale_detect`) and the five periodics
 (`enqueue_due_scans`, `db_storage_check`, `reclaim_orphaned_jobs`,
-`reap_anon_users`, each declared with `@app.periodic` + `@app.task` below)
-all live here. 'enrich' is intentionally not defined: no enrich hook exists
+`reap_anon_users`, `reap_old_events`, each declared with `@app.periodic` +
+`@app.task` below) all live here. 'enrich' is intentionally not defined: no enrich hook exists
 to run. Defining a periodic task's SHAPE is not the same as RUNNING it: this
 module still never runs a worker or applies procrastinate's schema at import
 time — `jobcannon.worker.__main__` owns both (it applies procrastinate's
@@ -44,6 +44,7 @@ import procrastinate
 
 from procrastinate import exceptions as procrastinate_exceptions
 
+from jobcannon.db._events import delete_expired_events
 from jobcannon.db._users import reap_unconverted_anon_users
 from jobcannon.host import scan_tasks as _scan_tasks
 from jobcannon.host.scan_tasks import (
@@ -56,6 +57,13 @@ from jobcannon.host.storage_check import check_db_storage
 app = procrastinate.App(
     connector=procrastinate.PsycopgConnector(conninfo=os.environ.get("DATABASE_URL", ""))
 )
+
+# Default retention window for non-anon `events` rows (the events-retention
+# issue), overridable via the JC_EVENTS_RETENTION_DAYS env var. A named
+# module-level constant (rather than an inline literal default, unlike
+# JC_ANON_RETENTION_DAYS's "30" above) so the default is one grep away
+# instead of buried in a call to os.environ.get.
+DEFAULT_EVENTS_RETENTION_DAYS = 365
 
 
 @app.task(queue="scan")
@@ -184,4 +192,27 @@ def reap_anon_users(timestamp: int) -> dict:
     retention_days = int(os.environ.get("JC_ANON_RETENTION_DAYS", "30"))
     with connection_factory() as conn:
         reaped_ids = reap_unconverted_anon_users(conn, retention_days=retention_days)
+    return {"reaped": len(reaped_ids), "retention_days": retention_days}
+
+
+@app.periodic(
+    cron=os.environ.get("JC_EVENTS_REAP_CRON", "51 6 * * *"),
+    periodic_id="reap_old_events",
+)
+@app.task(queue="maintenance", queueing_lock="reap_old_events")
+def reap_old_events(timestamp: int) -> dict:
+    """Periodic reaper (the events-retention issue): deletes `events` rows
+    for non-anon user ids once they are older than the retention window,
+    excluding every type in events_schema.DURABLE_EVENT_TYPES —
+    `consent_recorded` (the audit trail) and `user_signed_up` (durable
+    signup attribution) — see jobcannon.db._events.delete_expired_events for
+    the full predicate. Returns a count, not the reaped ids — procrastinate
+    persists task results into the same database being reaped."""
+    from jobcannon.db import connection_factory
+
+    retention_days = int(
+        os.environ.get("JC_EVENTS_RETENTION_DAYS", str(DEFAULT_EVENTS_RETENTION_DAYS))
+    )
+    with connection_factory() as conn:
+        reaped_ids = delete_expired_events(conn, retention_days=retention_days)
     return {"reaped": len(reaped_ids), "retention_days": retention_days}

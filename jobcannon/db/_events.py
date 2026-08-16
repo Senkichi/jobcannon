@@ -1,5 +1,5 @@
-"""insert_event / read_consent_state / record_consent — the single sanctioned
-events-table writer (1B Wave 2 PR 8).
+"""insert_event / read_consent_state / record_consent / delete_expired_events
+— the single sanctioned events-table writer/deleter (1B Wave 2 PR 8).
 
 No other module may write to `events` or `users.analytics_consent` with raw
 SQL — tests/host/test_events_single_writer.py AST-scans jobcannon/host,
@@ -25,6 +25,29 @@ hasattr(conn, "raw") else conn` so callers can pass either an
 EngineCompatConnection-wrapped connection (connection_factory()'s pooled
 connections) or a bare psycopg connection (tests/host/conftest.py's db_conn
 fixture) — both support `.execute(sql, params)`.
+
+`delete_expired_events(conn, retention_days=...)` is a periodic maintenance
+DELETE (the events-retention issue), not a request-path write — the DELETE
+lives here rather than jobcannon/host/tasks.py because this module is the
+events table's sole sanctioned writer/deleter, same reasoning that keeps
+reap_unconverted_anon_users inside jobcannon/db/_users.py rather than tasks.py.
+Named distinctly from jobcannon.host.tasks.reap_old_events (the periodic task
+that calls it) so importing it at module scope in tasks.py can't shadow the
+task function's own name — same split as reap_unconverted_anon_users (DAL)
+vs. reap_anon_users (task).
+The predicate excludes two things deliberately: anon-namespaced user ids
+(mirrors jobcannon/db/_users.py's `ANON_ID_PREFIX` — those rows are expected
+to be cascade-deleted when reap_unconverted_anon_users reaps the parent
+`users` row, not trimmed in place here) and every type in
+events_schema.DURABLE_EVENT_TYPES at any age — not just `consent_recorded`
+(the consent audit trail) but also `user_signed_up`, which
+has_signed_up_event (below) durably keys off of to avoid re-emitting signup
+attribution for a returning user whose cookie jar was cleared; reaping it
+would silently re-open that gap on a long enough retention window.
+`user_id IS NOT NULL` is spelled out even though `NOT LIKE` on NULL already
+evaluates to NULL/excluded — an explicit predicate makes "anonymous-session
+rows are left alone" a readable part of the WHERE clause rather than an
+accidental side effect of NULL semantics.
 """
 
 from __future__ import annotations
@@ -34,6 +57,8 @@ from typing import Any
 from psycopg.types.json import Jsonb
 
 from jobcannon.db import events_schema
+from jobcannon.db._users import ANON_ID_PREFIX
+from jobcannon.db.pool import commit_unless_nested
 
 
 def insert_event(
@@ -212,6 +237,30 @@ def record_consent(
         (granted, consent_version, user_id),
     )
     insert_event(raw, event_type="consent_recorded", user_id=user_id, payload=payload)
+
+
+def delete_expired_events(conn: Any, *, retention_days: int) -> list[int]:
+    """Hard-delete `events` rows older than the retention window for
+    non-anon user ids, excluding every type in
+    events_schema.DURABLE_EVENT_TYPES (see this module's docstring). Returns
+    the reaped event ids so a caller can log/count them; the periodic task
+    itself must summarize this to a count before returning (procrastinate
+    persists task return values into the same database being reaped)."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    # `_` is a LIKE wildcard (matches any single char); escape the literal
+    # underscore in ANON_ID_PREFIX so the pattern can't accidentally widen.
+    like_pattern = ANON_ID_PREFIX.replace("_", "\\_") + "%"
+    rows = raw.execute(
+        "DELETE FROM events "
+        "WHERE user_id IS NOT NULL "
+        "AND user_id NOT LIKE %s ESCAPE '\\' "
+        "AND NOT (event_type = ANY(%s)) "
+        "AND occurred_at < now() - make_interval(days => %s) "
+        "RETURNING id",
+        (like_pattern, list(events_schema.DURABLE_EVENT_TYPES), retention_days),
+    ).fetchall()
+    commit_unless_nested(raw)
+    return [row["id"] for row in rows]
 
 
 def list_events_for_user(conn: Any, user_id: str) -> list[Any]:
