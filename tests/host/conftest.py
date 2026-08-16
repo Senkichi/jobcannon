@@ -26,6 +26,25 @@ requires_postgres = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _reset_analytics_pseudonym_salt():
+    """jobcannon.host.posthog_client's pseudonymization salt is a module-level
+    global — reset it to None (unconfigured, fail-closed) after every test in
+    this directory so a salt set by one test can never leak into the next.
+
+    Deliberately reset-ONLY, not defaulted to a fixed value: the fail-closed
+    posture (no salt -> no PostHog fan-out) is meant to be the ambient state
+    a test gets for free. The handful of tests that assert a PostHog capture
+    actually happens opt in explicitly via
+    jobcannon.host.posthog_client.set_analytics_salt(...) in their own
+    fixture/body, so that opt-in stays visible at the point it matters
+    instead of being silently supplied here for the whole directory."""
+    from jobcannon.host import posthog_client
+
+    yield
+    posthog_client.set_analytics_salt(None)
+
+
 def _dsn_for(db_name: str) -> str:
     # Swap ONLY dbname, preserving host/credentials/query-params/keyword-DSN
     # form — naive rpartition("/") string surgery breaks on DSNs that carry

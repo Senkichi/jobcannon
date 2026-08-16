@@ -35,6 +35,21 @@ class HostConfig:
     posthog_host: str | None = field(
         default=None, metadata={"env": "POSTHOG_HOST", "declare_on": ()}
     )
+    # Deterministic-pseudonym HMAC key for the PostHog distinct_id
+    # (jobcannon/host/posthog_client.py's pseudonymize()) — declared on BOTH
+    # services because the worker builds its own PostHog client through the
+    # same wiring.py seam as the web service. Deliberately its OWN env var,
+    # never the Flask session secret (secret_key below): reusing that key
+    # would tie analytics pseudonymization's blast radius to session-signing
+    # material, and rotating one for one purpose would silently rotate the
+    # other. Requiredness is enforced where it's consumed, not here (same
+    # rationale as secret_key) — an unset salt must still produce a valid
+    # HostConfig; posthog_client.pseudonymize() fails closed (returns None,
+    # never the raw id) when it is.
+    analytics_pseudonym_salt: str | None = field(
+        default=None,
+        metadata={"env": "JC_ANALYTICS_PSEUDONYM_SALT", "declare_on": ("web", "worker")},
+    )
     # Flask session signing key. Requiredness is enforced where it's
     # consumed (jobcannon.web.create_app's fail-fast), not here — an unset
     # var must still produce a valid HostConfig so load_host_config's only
@@ -106,11 +121,13 @@ def load_host_config() -> HostConfig:
             ) from exc
     posthog_api_key = (os.environ.get("POSTHOG_API_KEY") or "").strip() or None
     posthog_host = (os.environ.get("POSTHOG_HOST") or "").strip() or None
+    analytics_pseudonym_salt = (os.environ.get("JC_ANALYTICS_PSEUDONYM_SALT") or "").strip() or None
     return HostConfig(
         database_url=database_url,
         runtime=runtime,
         posthog_api_key=posthog_api_key,
         posthog_host=posthog_host,
+        analytics_pseudonym_salt=analytics_pseudonym_salt,
         secret_key=os.environ.get("JC_SECRET_KEY", ""),
         clerk_sign_up_url=os.environ.get("CLERK_SIGN_UP_URL", ""),
         signup_wave=os.environ.get("JC_SIGNUP_WAVE", "0"),

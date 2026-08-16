@@ -70,6 +70,13 @@ services:
       # across regions.
       - key: POSTHOG_HOST
         value: https://eu.i.posthog.com
+      # Deterministic-pseudonym HMAC key (jobcannon/host/posthog_client.py's
+      # pseudonymize()) — a DEDICATED secret, never the Flask session key
+      # above. Declared on both services (worker builds its own PostHog
+      # client too). If unset, analytics fan-out fails closed rather than
+      # ever sending the raw Clerk user id to PostHog.
+      - key: JC_ANALYTICS_PSEUDONYM_SALT
+        sync: false
 
   - type: worker
     name: jobcannon-worker
@@ -103,3 +110,9 @@ services:
         sync: false
       - key: POSTHOG_HOST
         value: https://eu.i.posthog.com
+      # Same dedicated secret as jobcannon-web's declaration above — both
+      # services must be set to the SAME value (they pseudonymize the same
+      # Clerk user ids), and this is a real secret so it stays sync: false
+      # rather than a committed literal.
+      - key: JC_ANALYTICS_PSEUDONYM_SALT
+        sync: false

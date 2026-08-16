@@ -3,13 +3,21 @@
 1. services.set_services(ScanServices(...))      — persistence/hook seam
 2. runtime_config.set_config_provider(provider)  — scan-tuning knob seam
 3. extraction_health.set_recorder(...)           — health-log seam
-4. posthog_client.set_posthog_client(...)        — analytics fan-out seam
+4. posthog_client.set_posthog_client(...)        — analytics fan-out seam,
+   plus posthog_client.set_analytics_salt(...) riding along in the same
+   step: the pseudonymization salt gates whether that fan-out ever reaches
+   PostHog with an identifier at all (posthog_client.pseudonymize's
+   fail-closed contract) — it is not a fifth seam, just the other half of
+   seam 4's configuration.
 ScanServices.prober_extensions stays None (spec §3.6 ruling: fail-closed;
 multi-tenant identity is a Phase 2 design item, consequence C-2).
 
 The PostHog seam is inert (None) unless POSTHOG_API_KEY is set — dev/CI runs
 with no PostHog account keep log_event's fan-out a documented no-op; setting
-the key on Render turns it on without any code change.
+the key on Render turns it on without any code change. Setting
+POSTHOG_API_KEY without also setting JC_ANALYTICS_PSEUDONYM_SALT does NOT
+turn fan-out on: log_event fails closed (no salt -> no distinct_id -> no
+capture call) rather than ever sending the raw Clerk user id.
 """
 
 from __future__ import annotations
@@ -75,9 +83,11 @@ def init_engine_seams(host_config: HostConfig) -> None:
     # ATS-only host every API response — including [] — is meaningful.
     extraction_health.set_recorder(record_scan_health)
     posthog_client.set_posthog_client(_build_posthog_client(host_config))
+    posthog_client.set_analytics_salt(host_config.analytics_pseudonym_salt)
 
 
 def teardown_engine_seams() -> None:
+    posthog_client.set_analytics_salt(None)
     posthog_client.set_posthog_client(None)
     extraction_health.set_recorder(None)
     runtime_config.set_config_provider(None)

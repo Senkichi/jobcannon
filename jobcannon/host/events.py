@@ -38,6 +38,17 @@ called from inside a Flask request; callers outside a request context
 flask.has_app_context() guards both `g` reads here so a caller that forgets
 to pass consent_granted outside a request degrades to the safe default
 (False / anonymous) instead of raising RuntimeError.
+
+The PostHog `distinct_id` for an identified user is never the raw `user_id`:
+this is the one call site that resolves it, via
+jobcannon.host.posthog_client.pseudonymize(user_id), and there is no
+parameter here to bypass that with a caller-supplied raw id — a future
+caller that genuinely needs a different identifier should add one deliberately
+rather than this chokepoint growing a quiet escape hatch. pseudonymize()
+fails closed (returns None) when no salt is configured; this function treats
+that as "skip the PostHog fan-out for this event," never as "send the raw id
+instead." The Postgres write above is unaffected either way — pseudonymization
+only gates the PostHog leg.
 """
 
 from __future__ import annotations
@@ -70,7 +81,6 @@ def log_event(
     interleave_experiment_id: str | None = None,
     interleave_team: str | None = None,
     payload: dict | None = None,
-    distinct_id: str | None = None,
 ) -> None:
     events_schema.validate_payload(event_type, payload)
 
@@ -104,7 +114,16 @@ def log_event(
     elif event_type in _FIRST_PARTY_ALWAYS and not consent_granted:
         return  # first-party write landed above; PostHog fan-out stays consent-gated
 
-    posthog_client.capture(distinct_id or user_id or _anon_id(), event_type, dict(payload or {}))
+    if user_id is not None:
+        pseudonym = posthog_client.pseudonymize(user_id)
+        if pseudonym is None:
+            # No JC_ANALYTICS_PSEUDONYM_SALT configured: fail closed, never
+            # fall back to the raw user_id (see module docstring above).
+            return
+    else:
+        pseudonym = _anon_id()
+
+    posthog_client.capture(pseudonym, event_type, dict(payload or {}))
 
 
 def _consent_from_context() -> bool:

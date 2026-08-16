@@ -130,3 +130,38 @@ def test_teardown_clears_all_seams(postgres_test_dsn, monkeypatch):
         services.get_services()
     with pytest.raises(RuntimeError):
         pool_mod.get_pool()
+
+
+def test_seam4_analytics_salt_threaded_from_host_config(postgres_test_dsn, monkeypatch):
+    """init_engine_seams must actually thread HostConfig.analytics_pseudonym_salt
+    through to posthog_client.pseudonymize — env var set explicitly in this
+    test's own body (not inherited from another fixture) so the assertion
+    does not depend on fixture execution order."""
+    import hashlib
+    import hmac
+
+    from jobcannon.host import posthog_client
+    from jobcannon.host.config import load_host_config
+    from jobcannon.host.wiring import init_engine_seams, teardown_engine_seams
+
+    monkeypatch.setenv("DATABASE_URL", postgres_test_dsn)
+    monkeypatch.setenv("JC_ANALYTICS_PSEUDONYM_SALT", "wiring-test-salt")
+    init_engine_seams(load_host_config())
+    try:
+        expected = hmac.new(b"wiring-test-salt", b"user_x", hashlib.sha256).hexdigest()
+        assert posthog_client.pseudonymize("user_x") == expected
+    finally:
+        teardown_engine_seams()
+
+
+def test_seam4_analytics_salt_cleared_on_teardown(postgres_test_dsn, monkeypatch):
+    from jobcannon.host import posthog_client
+    from jobcannon.host.config import load_host_config
+    from jobcannon.host.wiring import init_engine_seams, teardown_engine_seams
+
+    monkeypatch.setenv("DATABASE_URL", postgres_test_dsn)
+    monkeypatch.setenv("JC_ANALYTICS_PSEUDONYM_SALT", "wiring-test-salt-2")
+    init_engine_seams(load_host_config())
+    teardown_engine_seams()
+
+    assert posthog_client.pseudonymize("user_x") is None

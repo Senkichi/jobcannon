@@ -32,7 +32,17 @@ from jobcannon.host import posthog_client
 @pytest.fixture(autouse=True)
 def _clean_posthog_client():
     """posthog_client._client is a module-level global — reset it after every
-    test so a client wired by one test can never leak into the next."""
+    test so a client wired by one test can never leak into the next.
+
+    Also opts this whole file in to a fixed analytics pseudonymization salt:
+    most tests below assert that a PostHog fan-out actually happens, which
+    (post-pseudonymization) requires a salt to be configured or every call
+    fails closed (see tests/host/conftest.py's directory-wide reset-only
+    default). Tests that specifically exercise the no-salt fail-closed path
+    override this with posthog_client.set_analytics_salt(None) in their own
+    body; conftest's autouse fixture resets to None again after this test
+    regardless, so no salt state leaks into the next test either way."""
+    posthog_client.set_analytics_salt("test-salt-events")
     yield
     posthog_client.set_posthog_client(None)
 
@@ -218,6 +228,69 @@ def test_posthog_failure_does_not_propagate_and_insert_already_happened(
     log_event("posting_saved", user_id="user_1", consent_granted=True)  # must not raise
 
     assert order == ["insert", "capture_attempted"]
+
+
+# ---- log_event: PostHog identifier pseudonymization --------------------
+
+
+def test_posthog_fanout_uses_pseudonym_never_the_raw_user_id(
+    fake_connection_factory, mock_insert_event, mock_capture
+):
+    from jobcannon.host.events import log_event
+
+    log_event(
+        "posting_apply_clicked",
+        user_id="user_1",
+        posting_id=1,
+        consent_granted=True,
+        payload={"apply_destination": "boards.greenhouse.io"},
+    )
+
+    assert mock_capture.call_count == 1
+    distinct_id, event_type, properties = mock_capture.call_args.args
+    assert distinct_id == posthog_client.pseudonymize("user_1")
+    assert distinct_id != "user_1"
+    assert "user_1" not in (distinct_id, event_type, *properties.values())
+
+
+def test_pseudonym_is_deterministic_for_the_same_user(
+    fake_connection_factory, mock_insert_event, mock_capture
+):
+    from jobcannon.host.events import log_event
+
+    log_event("posting_saved", user_id="user_1", consent_granted=True)
+    log_event("posting_dismissed", user_id="user_1", consent_granted=True)
+
+    first_id, second_id = (call.args[0] for call in mock_capture.call_args_list)
+    assert first_id == second_id
+
+
+def test_pseudonym_differs_for_different_users(
+    fake_connection_factory, mock_insert_event, mock_capture
+):
+    from jobcannon.host.events import log_event
+
+    log_event("posting_saved", user_id="user_1", consent_granted=True)
+    log_event("posting_saved", user_id="user_2", consent_granted=True)
+
+    first_id, second_id = (call.args[0] for call in mock_capture.call_args_list)
+    assert first_id != second_id
+
+
+def test_posthog_fanout_disabled_when_salt_unset_postgres_write_still_happens(
+    fake_connection_factory, mock_insert_event, mock_capture
+):
+    """The fail-closed contract: an operator who sets POSTHOG_API_KEY without
+    also setting JC_ANALYTICS_PSEUDONYM_SALT gets silence from PostHog, never
+    a raw-id leak — and the first-party Postgres write is unaffected."""
+    from jobcannon.host.events import log_event
+
+    posthog_client.set_analytics_salt(None)
+
+    log_event("posting_saved", user_id="user_1", consent_granted=True)  # must not raise
+
+    assert mock_insert_event.call_count == 1
+    assert mock_capture.call_count == 0
 
 
 # ---- record_consent: payload validation --------------------------------
