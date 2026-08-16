@@ -37,6 +37,7 @@ Render dashboard). None of them are committed anywhere in this repo.
 | `JC_SECRET_KEY` | web | Operator-generated random secret (Flask session-signing key) — not sourced from any external dashboard, unlike the Clerk/PostHog rows. The web service refuses to boot without it. |
 | `CLERK_SIGN_UP_URL` | web | Operator-chosen value: the Clerk-hosted sign-up page URL for this deploy (Clerk dashboard → your application's hosted pages; typically `https://<your-clerk-subdomain>.accounts.dev/sign-up` or your custom domain equivalent). The 401 page's sign-up link renders from it. |
 | `POSTHOG_API_KEY` | web, worker | PostHog project settings → Project API Key |
+| `JC_ANALYTICS_PSEUDONYM_SALT` | web, worker | Operator-generated random secret, same shape as `JC_SECRET_KEY` — but a DIFFERENT value from it; this is the HMAC key `jobcannon/host/posthog_client.py` uses to derive the pseudonymous identifier sent to PostHog, so it must not double as session-signing material. Required on both services (each builds its own PostHog client). If left unset, PostHog fan-out disables itself silently — events still write to Postgres, and the raw Clerk user id is never sent as a fallback. |
 
 `DATABASE_URL` is wired automatically on both services via `render.yaml`'s
 `fromDatabase` reference — never set it manually.

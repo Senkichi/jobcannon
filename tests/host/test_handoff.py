@@ -23,6 +23,11 @@ CLERK_ID = "user_clerk_1"
 
 @pytest.fixture(autouse=True)
 def _clean_posthog_client():
+    """Opts this file in to a fixed analytics pseudonymization salt: the
+    fan-out assertions below need one configured or every PostHog call fails
+    closed (tests/host/conftest.py's directory-wide default is unconfigured/
+    None, and it resets back to that after this fixture's own teardown)."""
+    posthog_client.set_analytics_salt("test-salt-handoff")
     yield
     posthog_client.set_posthog_client(None)
 
@@ -158,6 +163,9 @@ def test_new_signup_produces_no_posthog_capture_and_a_consenting_user_does(app):
 
     assert len(fake.captured) == 1
     assert fake.captured[0]["event"] == "user_signed_up"
+    # The raw Clerk user id must never reach PostHog as distinct_id.
+    assert fake.captured[0]["distinct_id"] != "user_consented"
+    assert fake.captured[0]["distinct_id"] == posthog_client.pseudonymize("user_consented")
 
 
 def test_signup_event_passes_consent_explicitly_not_from_stale_g(app, monkeypatch):
