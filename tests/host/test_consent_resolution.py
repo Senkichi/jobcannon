@@ -71,10 +71,17 @@ def test_consent_granted_true_reaches_g_consent_granted(app_with_pool):
     from flask import g
 
     app, dsn = app_with_pool
+    # analytics_consent_version = 'v1' matches CONSENT_VERSION
+    # (jobcannon/web/consent.py) — a grant with no stored version (or a
+    # stale one) is what record_consent produces BEFORE any grant is ever
+    # made / what a version bump leaves behind, and correctly reads as not
+    # consented (jobcannon/db/_events.py::read_consent_state). This test is
+    # about _resolve_consent's plumbing, not version staleness, so it seeds
+    # a grant that is current.
     with psycopg.connect(dsn) as conn:
         conn.execute(
-            "INSERT INTO users (id, email, analytics_consent) VALUES "
-            "('user_consented', 'a@example.org', true)"
+            "INSERT INTO users (id, email, analytics_consent, analytics_consent_version) VALUES "
+            "('user_consented', 'a@example.org', true, 'v1')"
         )
         conn.commit()
 

@@ -158,8 +158,19 @@ def run_handoff_if_pending() -> Any:
             # after the commit, before it returns to the pool — but only
             # when the emission below will actually use it.
             if should_emit:
-                consent_granted = _events.read_consent_state(conn.raw, clerk_id)
-                choice_made = _events.read_consent_choice_made(conn.raw, clerk_id)
+                # Local import (not module-level): call-time, not
+                # import-time, so a test's monkeypatch.setattr on
+                # jobcannon.web.consent.CONSENT_VERSION — or a real version
+                # bump between deploys — is observed on THIS call, matching
+                # jobcannon.web._resolve_consent's identical pattern.
+                from jobcannon.web.consent import CONSENT_VERSION
+
+                consent_granted = _events.read_consent_state(
+                    conn.raw, clerk_id, current_version=CONSENT_VERSION
+                )
+                choice_made = _events.read_consent_choice_made(
+                    conn.raw, clerk_id, current_version=CONSENT_VERSION
+                )
                 # Durable per-user check — only reached once the cheap
                 # session marker has already said "maybe emit". See module
                 # docstring, phase 2.
