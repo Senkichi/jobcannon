@@ -50,8 +50,12 @@ def _read_consent_context() -> dict:
     try:
         with connection_factory() as conn:
             return {
-                "consent_granted": _events.read_consent_state(conn.raw, user_id),
-                "choice_made": _events.read_consent_choice_made(conn.raw, user_id),
+                "consent_granted": _events.read_consent_state(
+                    conn.raw, user_id, current_version=CONSENT_VERSION
+                ),
+                "choice_made": _events.read_consent_choice_made(
+                    conn.raw, user_id, current_version=CONSENT_VERSION
+                ),
             }
     except Exception:
         logger.warning(
