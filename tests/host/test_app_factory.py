@@ -70,6 +70,31 @@ def test_create_app_wires_verify_request_when_seams_stubbed(monkeypatch):
     assert callable(verify)
 
 
+def test_create_app_wires_and_shares_one_clerk_client(monkeypatch):
+    """CLERK_CLIENT must land on app.config as the SAME instance handed to
+    build_clerk_verifier — jobcannon.web.account reuses that object for its
+    user-delete management call rather than constructing a second client.
+    Counting constructions (not just asserting non-None) is what actually
+    pins "shared", since a naive re-implementation could build two clients
+    and still leave a non-None CLERK_CLIENT behind."""
+    _stub_seams(monkeypatch)
+    calls = []
+
+    class _CountingFakeClerk(_FakeClerk):
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("clerk_backend_api.Clerk", _CountingFakeClerk)
+
+    from jobcannon.web import create_app
+
+    app = create_app(config={})
+
+    assert len(calls) == 1
+    assert isinstance(app.config["CLERK_CLIENT"], _CountingFakeClerk)
+
+
 def test_create_app_raises_on_missing_webhook_secret(monkeypatch):
     """F3a: an unset CLERK_WEBHOOK_SIGNING_SECRET must fail fast at startup,
     non-TESTING, before any request is served.
@@ -113,6 +138,27 @@ def test_build_clerk_verifier_returns_callable_and_identity(monkeypatch):
 
     identity = verify(object())  # request is never inspected by the fake SDK
     assert identity == ClerkIdentity(user_id="user_x", claims={"sub": "user_x", "org_id": None})
+
+
+def test_build_clerk_verifier_reuses_a_passed_in_client(monkeypatch):
+    """When a client is supplied, build_clerk_verifier must not construct a
+    second one — pinned here by a blank CLERK_SECRET_KEY, which
+    build_clerk_client would reject, not raising because the passed client
+    bypasses that construction path entirely."""
+    constructed = []
+    monkeypatch.setattr(
+        "clerk_backend_api.Clerk",
+        lambda **kw: constructed.append(kw) or _FakeClerk(**kw),
+    )
+    host_config = _clerk_host_config(clerk_secret_key="")
+    client = _FakeClerk()
+
+    from jobcannon.web.auth import build_clerk_verifier
+
+    verify = build_clerk_verifier(host_config, client=client)
+
+    assert constructed == []
+    assert callable(verify)
 
 
 def test_build_clerk_verifier_raises_on_blank_secret_key(monkeypatch):
