@@ -61,11 +61,13 @@ def test_record_consent_writes_column_and_audit_event_in_one_transaction(db_conn
     )
 
     user_row = db_conn.execute(
-        "SELECT analytics_consent, analytics_consent_updated_at FROM users WHERE id = %s",
+        "SELECT analytics_consent, analytics_consent_updated_at, analytics_consent_version "
+        "FROM users WHERE id = %s",
         (user_id,),
     ).fetchone()
     assert user_row["analytics_consent"] is True
     assert user_row["analytics_consent_updated_at"] is not None
+    assert user_row["analytics_consent_version"] == "v1"
 
     event_row = db_conn.execute(
         "SELECT payload FROM events WHERE user_id = %s AND event_type = 'consent_recorded'",
@@ -108,14 +110,60 @@ def test_record_consent_decline_still_writes_audit_event(db_conn):
 def test_read_consent_state_reflects_column(db_conn):
     user_id = "user_read_consent"
     db_conn.execute(
-        "INSERT INTO users (id, email, analytics_consent) VALUES (%s, 'c@example.org', true)",
+        "INSERT INTO users (id, email, analytics_consent, analytics_consent_version) "
+        "VALUES (%s, 'c@example.org', true, 'v1')",
         (user_id,),
     )
-    assert _events.read_consent_state(db_conn, user_id) is True
+    assert _events.read_consent_state(db_conn, user_id, current_version="v1") is True
 
 
 def test_read_consent_state_false_for_unknown_user(db_conn):
-    assert _events.read_consent_state(db_conn, "no_such_user") is False
+    assert _events.read_consent_state(db_conn, "no_such_user", current_version="v1") is False
+
+
+def test_read_consent_state_false_when_stored_version_differs_from_current(db_conn):
+    """The version-enforcement gap this migration closes: a grant recorded
+    at an older version must stop authorizing tracking against a newer
+    CONSENT_VERSION, with no user action."""
+    user_id = "user_read_consent_stale"
+    db_conn.execute(
+        "INSERT INTO users (id, email, analytics_consent, analytics_consent_version) "
+        "VALUES (%s, 'd@example.org', true, 'v1')",
+        (user_id,),
+    )
+    assert _events.read_consent_state(db_conn, user_id, current_version="v2") is False
+
+
+def test_read_consent_state_false_for_a_legacy_grant_with_no_stored_version(db_conn):
+    """Every row that predates m0006 has analytics_consent_version = NULL.
+    A pre-existing grant must not silently keep authorizing tracking under a
+    version it was never recorded against."""
+    user_id = "user_read_consent_legacy"
+    db_conn.execute(
+        "INSERT INTO users (id, email, analytics_consent) VALUES (%s, 'e@example.org', true)",
+        (user_id,),
+    )
+    assert _events.read_consent_state(db_conn, user_id, current_version="v1") is False
+
+
+def test_read_consent_choice_made_false_for_a_stale_grant_true_for_a_stale_decline(db_conn):
+    """The asymmetry issue #93 requires: a version-mismatched GRANT needs
+    re-prompting (choice_made False); a version-mismatched DECLINE does not
+    (choice_made True) — a decline is version-independent by design."""
+    granter, decliner = "user_choice_stale_grant", "user_choice_stale_decline"
+    db_conn.execute(
+        "INSERT INTO users (id, email, analytics_consent, analytics_consent_updated_at, "
+        "analytics_consent_version) VALUES (%s, 'f@example.org', true, now(), 'v1')",
+        (granter,),
+    )
+    db_conn.execute(
+        "INSERT INTO users (id, email, analytics_consent, analytics_consent_updated_at, "
+        "analytics_consent_version) VALUES (%s, 'g@example.org', false, now(), 'v1')",
+        (decliner,),
+    )
+
+    assert _events.read_consent_choice_made(db_conn, granter, current_version="v2") is False
+    assert _events.read_consent_choice_made(db_conn, decliner, current_version="v2") is True
 
 
 def test_set_posthog_client_none_is_pure_noop():

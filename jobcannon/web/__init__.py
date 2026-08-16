@@ -6,7 +6,8 @@ adds the anon-to-authed handoff (jobcannon.web.handoff) and the consent
 surface it can redirect to (jobcannon.web.consent); adds an HTML body for
 401 responses via the errorhandler below, replacing Werkzeug's default
 plain-text body; adds the authed save/dismiss/apply mutation routes
-(jobcannon.web.actions); adds the self-service account-deletion trigger
+(jobcannon.web.actions); adds the authed, read-only self-service data-export
+route (jobcannon.web.export) and the self-service account-deletion trigger
 (jobcannon.web.account), sharing one Clerk SDK client between the JWT
 verifier and that route's user-delete management call)."""
 
@@ -29,6 +30,12 @@ def _resolve_consent(identity) -> bool:
     chokepoint's consent gate (jobcannon/host/events.py) up front so route
     handlers never have to think about it.
 
+    Reads jobcannon.web.consent.CONSENT_VERSION fresh on every call (a local
+    import, not a module-level one) so a grant recorded at a stale version
+    is re-evaluated against the CURRENT version on every request — a version
+    bump takes effect immediately, with no user action and no cache to
+    invalidate.
+
     Fail-closed on any error (missing/unopened connection pool — e.g. a
     TESTING config that never calls init_engine_seams, same as
     tests/host/test_auth.py's lightweight identity-only tests — or a genuine
@@ -37,10 +44,13 @@ def _resolve_consent(identity) -> bool:
     """
     from jobcannon.db import _events
     from jobcannon.db.pool import connection_factory
+    from jobcannon.web.consent import CONSENT_VERSION
 
     try:
         with connection_factory() as conn:
-            return _events.read_consent_state(conn.raw, identity.user_id)
+            return _events.read_consent_state(
+                conn.raw, identity.user_id, current_version=CONSENT_VERSION
+            )
     except Exception:
         logger.warning(
             "consent lookup failed for user %s (defaulting to no consent)",
@@ -196,6 +206,8 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(actions_bp)
 
     from jobcannon.web.account import account_bp
+    from jobcannon.web.export import export_bp
 
     app.register_blueprint(account_bp)
+    app.register_blueprint(export_bp)
     return app
