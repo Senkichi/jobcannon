@@ -120,3 +120,33 @@ def dismiss_posting(conn: Any, user_id: str, posting_id: int) -> None:
 
 def mark_applied(conn: Any, user_id: str, posting_id: int) -> None:
     _set_pipeline_status(conn, user_id, posting_id, "applied", set_applied_at=True)
+
+
+def list_watchlist_entries(conn: Any, user_id: str) -> list[Any]:
+    """Read-only: every `watchlists` row for this user (saved postings and/or
+    saved companies), oldest first. Unlike `jobcannon.db._feed.list_feed_postings`'s
+    LEFT JOIN (which only surfaces a boolean `saved` flag per posting), this
+    returns the raw rows themselves — the shape a self-service export needs.
+    The account-export route (jobcannon/web/export.py) is the first caller;
+    no other route lists this table today."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    return raw.execute(
+        "SELECT id, posting_id, company_id, notes, created_at FROM watchlists "
+        "WHERE user_id = %s ORDER BY created_at",
+        (user_id,),
+    ).fetchall()
+
+
+def list_pipeline_status_entries(conn: Any, user_id: str) -> list[Any]:
+    """Read-only: every `pipeline_status` row for this user, including
+    dismissed postings — unlike `jobcannon.db._feed.list_feed_postings`,
+    which excludes `status = 'dismissed'` rows for feed display, a
+    self-service export must include them (a user's own dismissal is still
+    their own data). The account-export route (jobcannon/web/export.py) is
+    the first caller."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    return raw.execute(
+        "SELECT posting_id, status, status_changed_at, applied_at, notes "
+        "FROM pipeline_status WHERE user_id = %s ORDER BY status_changed_at",
+        (user_id,),
+    ).fetchall()

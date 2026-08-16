@@ -1,0 +1,117 @@
+"""jobcannon/web/export.py — GET /account/export: the authed-only, read-only
+self-service data-export route (closes the "No data-export route for an
+authenticated user's own data" issue).
+
+Ships ONE JSON document, served as a file download (`Content-Disposition:
+attachment`, filename carrying a date stamp), joining every per-user row
+this product stores under the requesting Clerk user id: profile
+(`jobcannon.db._profiles.get_profile`, the existing single reader), watchlist
+entries and pipeline status (both read via new narrow functions in
+`jobcannon.db._user_actions` — the single WRITER module for both tables per
+its own docstring, so a new reader belongs there too, not in
+`jobcannon.db._feed`, which only reads them incidentally to build the feed
+join), the user's consent record (the payload of their most recent
+`consent_recorded` event — `jobcannon.db._events.read_latest_consent_record`,
+new), and the user's own `events` rows
+(`jobcannon.db._events.list_events_for_user`, new). Both `_events.py`
+additions are plain SELECT statements — never a write — so neither trips
+`tests/host/test_events_single_writer.py`'s AST guard, which is scoped to
+writes only.
+
+Not listed in `jobcannon.web.PUBLIC_PATHS`, so `jobcannon/web/__init__.py`'s
+`before_request` gate already 401s an unauthenticated request before this
+module is ever reached — no separate auth check needed here.
+
+Read-only: no migration, no write of any kind, on any request this route
+handles. A brand-new user with no profile/watchlist/pipeline/consent/events
+rows still gets a valid document — `profile` and `consent` degrade to
+`null`, the list sections degrade to `[]` — rather than raising or omitting
+a key, so the empty state is a real, always-producible shape.
+
+`generated_at` is read from the database's own clock
+(`jobcannon.db._events.db_now_iso`, the same helper `jobcannon/web/consent.py`
+already uses for `consented_at`) rather than a Python wall-clock call,
+matching this codebase's no-process-clock-in-persisted-or-authoritative-
+timestamps convention. The download filename's date stamp is sliced from
+that SAME value (`generated_at[:10]`) instead of a second, independent clock
+read, so the two can never disagree.
+"""
+
+from __future__ import annotations
+
+import datetime
+import decimal
+import json
+from typing import Any
+
+from flask import Blueprint, Response, g
+
+from jobcannon.db._events import db_now_iso, list_events_for_user, read_latest_consent_record
+from jobcannon.db._profiles import get_profile
+from jobcannon.db._user_actions import list_pipeline_status_entries, list_watchlist_entries
+from jobcannon.db.pool import connection_factory
+
+export_bp = Blueprint("export", __name__)
+
+# Bumped whenever the document's top-level shape changes (a key added,
+# removed, or renamed) — NOT on every route change. Exported so a future
+# consumer of this document (or a test) can import the literal instead of
+# retyping it.
+SCHEMA_VERSION = "1"
+
+
+def _row_to_dict(row: Any) -> dict[str, Any]:
+    """`HybridRow` (jobcannon/db/rows.py) is a `Sequence`, not a `Mapping` —
+    a bare `dict(row)` would try to unpack each element as a 2-tuple and
+    raise. `row.keys()` is the STRING-KEY access every DAL module in this
+    package already relies on (see e.g. jobcannon/db/_feed.py's module
+    docstring), so this works identically for the pooled `HybridRow` and the
+    test fixtures' `dict_row` (already a plain dict, for which this is a
+    no-op copy)."""
+    return {key: row[key] for key in row.keys()}
+
+
+def _json_default(value: Any) -> Any:
+    """`json.dumps`'s `default=` hook for the two non-JSON-native types
+    these tables can hand back: `timestamptz` columns (`watchlists.created_at`,
+    `pipeline_status.status_changed_at`/`applied_at`, `events.occurred_at`)
+    surface as `datetime.datetime`/`datetime.date`, and `profiles`'
+    `numeric` `years_of_experience` surfaces as `decimal.Decimal`. `jsonb`
+    columns (`skills`, `target_titles`, `payload`, ...) are already plain
+    dict/list/str/bool/None by the time psycopg hands them back, so they
+    never reach this hook."""
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return value.isoformat()
+    if isinstance(value, decimal.Decimal):
+        return float(value)
+    raise TypeError(f"not JSON serializable: {type(value)!r}")
+
+
+def _build_export_document(conn: Any, user_id: str) -> dict[str, Any]:
+    profile = get_profile(conn, user_id)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": db_now_iso(conn),
+        "user_id": user_id,
+        "profile": _row_to_dict(profile) if profile is not None else None,
+        "watchlist": [_row_to_dict(r) for r in list_watchlist_entries(conn, user_id)],
+        "pipeline_status": [_row_to_dict(r) for r in list_pipeline_status_entries(conn, user_id)],
+        "consent": read_latest_consent_record(conn, user_id),
+        "events": [_row_to_dict(r) for r in list_events_for_user(conn, user_id)],
+    }
+
+
+@export_bp.get("/account/export", strict_slashes=False)
+def export_account_data():
+    user_id = g.clerk_user.user_id
+    with connection_factory() as conn:
+        document = _build_export_document(conn, user_id)
+
+    body = json.dumps(document, default=_json_default, indent=2)
+    date_stamp = document["generated_at"][:10]  # "YYYY-MM-DD" prefix of db_now_iso's output
+    filename = f"jobcannon-account-export-{date_stamp}.json"
+    return Response(
+        body,
+        mimetype="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
