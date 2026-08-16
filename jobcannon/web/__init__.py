@@ -28,6 +28,12 @@ def _resolve_consent(identity) -> bool:
     chokepoint's consent gate (jobcannon/host/events.py) up front so route
     handlers never have to think about it.
 
+    Reads jobcannon.web.consent.CONSENT_VERSION fresh on every call (a local
+    import, not a module-level one) so a grant recorded at a stale version
+    is re-evaluated against the CURRENT version on every request — a version
+    bump takes effect immediately, with no user action and no cache to
+    invalidate.
+
     Fail-closed on any error (missing/unopened connection pool — e.g. a
     TESTING config that never calls init_engine_seams, same as
     tests/host/test_auth.py's lightweight identity-only tests — or a genuine
@@ -36,10 +42,13 @@ def _resolve_consent(identity) -> bool:
     """
     from jobcannon.db import _events
     from jobcannon.db.pool import connection_factory
+    from jobcannon.web.consent import CONSENT_VERSION
 
     try:
         with connection_factory() as conn:
-            return _events.read_consent_state(conn.raw, identity.user_id)
+            return _events.read_consent_state(
+                conn.raw, identity.user_id, current_version=CONSENT_VERSION
+            )
     except Exception:
         logger.warning(
             "consent lookup failed for user %s (defaulting to no consent)",

@@ -177,12 +177,12 @@ def test_never_chosen_is_distinguishable_from_declined(app):
     client = _seeded_client(app, dsn)
 
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        assert _events.read_consent_choice_made(conn, USER_ID) is False
+        assert _events.read_consent_choice_made(conn, USER_ID, current_version="v1") is False
 
     client.post("/consent", data={"choice": "decline"})
 
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        assert _events.read_consent_choice_made(conn, USER_ID) is True
+        assert _events.read_consent_choice_made(conn, USER_ID, current_version="v1") is True
 
 
 def test_consent_route_is_authed_only(app):
