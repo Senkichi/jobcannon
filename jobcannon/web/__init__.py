@@ -6,7 +6,9 @@ adds the anon-to-authed handoff (jobcannon.web.handoff) and the consent
 surface it can redirect to (jobcannon.web.consent); adds an HTML body for
 401 responses via the errorhandler below, replacing Werkzeug's default
 plain-text body; adds the authed save/dismiss/apply mutation routes
-(jobcannon.web.actions))."""
+(jobcannon.web.actions); adds the self-service account-deletion trigger
+(jobcannon.web.account), sharing one Clerk SDK client between the JWT
+verifier and that route's user-delete management call)."""
 
 from __future__ import annotations
 
@@ -101,11 +103,18 @@ def create_app(config: dict | None = None) -> Flask:
     app.config["SESSION_COOKIE_SECURE"] = not (app.testing or app.debug)
 
     verify = app.config.get("VERIFY_REQUEST")
+    clerk_client = app.config.get("CLERK_CLIENT")
     if verify is None and not app.config.get("TESTING"):
-        from jobcannon.web.auth import build_clerk_verifier
+        from jobcannon.web.auth import build_clerk_client, build_clerk_verifier
 
-        verify = build_clerk_verifier(host_config)
+        # One client, shared: built once here and handed to the verifier
+        # below, then stashed on app.config so jobcannon.web.account's
+        # user-delete management call reuses the same credentialed instance
+        # instead of constructing a second one.
+        clerk_client = clerk_client or build_clerk_client(host_config)
+        verify = build_clerk_verifier(host_config, client=clerk_client)
         app.config["VERIFY_REQUEST"] = verify
+    app.config["CLERK_CLIENT"] = clerk_client
 
     @app.get("/healthz")
     def healthz():
@@ -185,4 +194,8 @@ def create_app(config: dict | None = None) -> Flask:
     from jobcannon.web.actions import actions_bp
 
     app.register_blueprint(actions_bp)
+
+    from jobcannon.web.account import account_bp
+
+    app.register_blueprint(account_bp)
     return app
