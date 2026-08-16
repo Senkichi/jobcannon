@@ -69,10 +69,23 @@ def insert_event(
     )
 
 
-def read_consent_state(conn: Any, user_id: str) -> bool:
+def read_consent_state(conn: Any, user_id: str, *, current_version: str) -> bool:
+    """True only for a GRANT recorded at `current_version` (m0006). A grant
+    recorded at any other stored version — including NULL, the value every
+    row that predates version tracking carries — reads as not consented,
+    forcing a re-grant before analytics resumes. A decline is unaffected by
+    `current_version` by construction: `analytics_consent` is already false
+    for a decline, so the version comparison is never reached for one.
+    `current_version` is keyword-only so it can never be transposed with
+    `user_id` at a call site — both are plain strings."""
     raw = conn.raw if hasattr(conn, "raw") else conn
-    row = raw.execute("SELECT analytics_consent FROM users WHERE id = %s", (user_id,)).fetchone()
-    return bool(row and row["analytics_consent"])
+    row = raw.execute(
+        "SELECT analytics_consent, analytics_consent_version FROM users WHERE id = %s",
+        (user_id,),
+    ).fetchone()
+    if not row or not row["analytics_consent"]:
+        return False
+    return row["analytics_consent_version"] == current_version
 
 
 def has_signed_up_event(conn: Any, user_id: str) -> bool:
@@ -128,25 +141,34 @@ def db_now_iso(conn: Any) -> str:
     return row["now_iso"]
 
 
-def read_consent_choice_made(conn: Any, user_id: str) -> bool:
-    """ "Has a choice been recorded?" — False for BOTH no-choice cases: the
-    row exists but analytics_consent_updated_at is NULL (never chosen), and
-    no row exists at all (unknown user). The two are deliberately collapsed
-    because every caller today does the same thing with either answer: show
-    the consent surface. This is the only way to distinguish "never chose"
-    from "declined" — both leave analytics_consent = false; only this
-    column, and only record_consent, ever sets it.
+def read_consent_choice_made(conn: Any, user_id: str, *, current_version: str) -> bool:
+    """ "Has a choice been recorded that still stands?" — False for the two
+    original no-choice cases (row exists but analytics_consent_updated_at is
+    NULL — never chosen — or no row exists at all — unknown user) PLUS one
+    more that m0006 adds: a GRANT recorded at a version other than
+    `current_version`. That third case is deliberately asymmetric with
+    decline: re-consent exists to re-ask people whose grant predates new
+    tracking, not to nag decliners, so a decline at any stored version — or
+    NULL, for a decline recorded before version tracking existed — still
+    reads as "choice made" and is never re-prompted. Only a stale GRANT
+    forces this back to False, which re-fires the existing
+    handoff.py redirect the next time `_pending()` allows it to run.
 
-    Do not branch callers on which of the two no-choice cases applies. If a
-    future caller needs that distinction, add a separate reader rather than
+    Do not branch callers on which no-choice case applies. If a future
+    caller needs that distinction, add a separate reader rather than
     changing this one's return type.
     """
     raw = conn.raw if hasattr(conn, "raw") else conn
     row = raw.execute(
-        "SELECT analytics_consent_updated_at IS NOT NULL AS choice_made FROM users WHERE id = %s",
+        "SELECT analytics_consent, analytics_consent_updated_at, analytics_consent_version "
+        "FROM users WHERE id = %s",
         (user_id,),
     ).fetchone()
-    return bool(row and row["choice_made"])
+    if not row or row["analytics_consent_updated_at"] is None:
+        return False
+    if row["analytics_consent"] and row["analytics_consent_version"] != current_version:
+        return False
+    return True
 
 
 def record_consent(
@@ -158,11 +180,19 @@ def record_consent(
     consent_version: str,
     consented_at: str,
 ) -> None:
-    """Update the current-consent column AND insert the consent_recorded
+    """Update the current-consent columns AND insert the consent_recorded
     audit event against the SAME connection, so both writes land in one
     transaction under the caller's commit boundary (mirrors _companies.py /
     _jobs.py: no commit here — the caller wraps this in connection_factory()
     + pool.commit_unless_nested(), or a test's rollback-isolated db_conn).
+
+    `analytics_consent_version` (m0006) is set unconditionally, on a decline
+    as well as a grant — the version stored on a decline row is never
+    consulted by read_consent_state/read_consent_choice_made (a decline's
+    analytics_consent is already false, which short-circuits both readers
+    before the version comparison), so this is inert for a decline and is
+    the only column that lets a later grant's version-mismatch check work at
+    all.
 
     The payload is validated against events_schema's PII allowlist + 200-char
     cap BEFORE either write is issued — the same validation every log_event
@@ -177,8 +207,8 @@ def record_consent(
     events_schema.validate_payload("consent_recorded", payload)
     raw = conn.raw if hasattr(conn, "raw") else conn
     raw.execute(
-        "UPDATE users SET analytics_consent = %s, analytics_consent_updated_at = now() "
-        "WHERE id = %s",
-        (granted, user_id),
+        "UPDATE users SET analytics_consent = %s, analytics_consent_updated_at = now(), "
+        "analytics_consent_version = %s WHERE id = %s",
+        (granted, consent_version, user_id),
     )
     insert_event(raw, event_type="consent_recorded", user_id=user_id, payload=payload)
