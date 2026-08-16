@@ -180,6 +180,9 @@ def test_version_bump_revokes_consent_and_gates_posthog_fanout_until_regrant(app
 
     fake = _FakePosthog()
     posthog_client.set_posthog_client(fake)
+    # Post-pseudonymization, fan-out fails closed without a salt; opt in the
+    # same way test_events.py does (conftest's autouse reset clears it after).
+    posthog_client.set_analytics_salt("test-salt-consent-version")
 
     @app.get("/emit")
     def emit():
