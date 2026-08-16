@@ -22,8 +22,10 @@ Not listed in `jobcannon.web.PUBLIC_PATHS`, so `jobcannon/web/__init__.py`'s
 `before_request` gate already 401s an unauthenticated request before this
 module is ever reached — no separate auth check needed here.
 
-Read-only: no migration, no write of any kind, on any request this route
-handles. A brand-new user with no profile/watchlist/pipeline/consent/events
+Read-only handler: no migration, and the handler itself performs no write
+(app-level `before_request` hooks may still write — session-id provisioning
+and the signup handoff run before any authed route, this one included).
+A brand-new user with no profile/watchlist/pipeline/consent/events
 rows still gets a valid document — `profile` and `consent` degrade to
 `null`, the list sections degrade to `[]` — rather than raising or omitting
 a key, so the empty state is a real, always-producible shape.
