@@ -23,6 +23,21 @@ _ALLOWED_KEYS: dict[str, set[str]] = {
     "consent_recorded": {"consent_type", "granted", "consent_version", "consented_at"},
 }
 
+# Event types that ARE themselves the durable record of something that
+# already happened, independent of the decision/consent state they describe
+# — must survive regardless of age or consent. Single source of truth for
+# two independent consumers that would otherwise drift: jobcannon/host/
+# events.py's log_event reads this to decide which types write to Postgres
+# unconditionally (bypassing the per-request consent gate — see that
+# module's `_FIRST_PARTY_ALWAYS`), and jobcannon/db/_events.py's
+# delete_expired_events reads it to decide which types the retention reaper
+# must never touch. `consent_recorded` is the audit trail of a consent
+# decision (including a decline); `user_signed_up` is signup attribution
+# that jobcannon/db/_events.py's has_signed_up_event durably keys off of to
+# avoid re-emitting on a cleared cookie jar — reaping either would silently
+# reopen the exact gap each mechanism exists to close.
+DURABLE_EVENT_TYPES = frozenset({"consent_recorded", "user_signed_up"})
+
 _ENUMS: dict[tuple[str, str], set[str]] = {
     ("user_exit_surveyed", "exit_reason"): {"hired", "gave-up", "still-searching"},
 }

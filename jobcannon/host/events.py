@@ -54,8 +54,11 @@ from jobcannon.host import posthog_client
 # fan-out is NOT included in this exemption — it stays consent-gated for
 # both, generalizing the shape consent_recorded already had rather than
 # scattering a second conditional. Not a widened events_schema allowlist —
-# just which types skip the early consent-gated return below.
-_FIRST_PARTY_ALWAYS = frozenset({"consent_recorded", "user_signed_up"})
+# just which types skip the early consent-gated return below. Sourced from
+# events_schema.DURABLE_EVENT_TYPES rather than a second hardcoded literal
+# set, so this and the retention reaper's never-touch predicate
+# (jobcannon/db/_events.py's delete_expired_events) can't drift apart.
+_FIRST_PARTY_ALWAYS = events_schema.DURABLE_EVENT_TYPES
 
 
 def log_event(
