@@ -145,10 +145,15 @@ def test_new_signup_produces_no_posthog_capture_and_a_consenting_user_does(app):
     assert fake.captured == []
 
     # A second account, already consenting BEFORE its first authed request.
+    # analytics_consent_version = 'v1' matches CONSENT_VERSION
+    # (jobcannon/web/consent.py): a stored grant with no version, or a stale
+    # one, now reads as not consented (jobcannon/db/_events.py::
+    # read_consent_state) — this test is about the emission's fan-out gate,
+    # not version staleness, so the seeded grant is current.
     with psycopg.connect(dsn) as conn:
         conn.execute(
-            "INSERT INTO users (id, analytics_consent, analytics_consent_updated_at) "
-            "VALUES ('user_consented', true, now())"
+            "INSERT INTO users (id, analytics_consent, analytics_consent_updated_at, "
+            "analytics_consent_version) VALUES ('user_consented', true, now(), 'v1')"
         )
         conn.commit()
 
