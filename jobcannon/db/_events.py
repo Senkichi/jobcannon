@@ -182,3 +182,37 @@ def record_consent(
         (granted, user_id),
     )
     insert_event(raw, event_type="consent_recorded", user_id=user_id, payload=payload)
+
+
+def list_events_for_user(conn: Any, user_id: str) -> list[Any]:
+    """Read-only: every `events` row for this user, oldest first. A SELECT,
+    not an INSERT/UPDATE, so it does not trip
+    tests/host/test_events_single_writer.py's AST guard (see that test's own
+    `_is_forbidden_events_sql` predicate coverage, which explicitly asserts a
+    bare SELECT is not flagged). The account-export route
+    (jobcannon/web/export.py) is the first caller."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    return raw.execute(
+        "SELECT id, event_type, posting_id, feed_position, ranker_version, "
+        "feed_session_id, interleave_experiment_id, interleave_team, occurred_at, payload "
+        "FROM events WHERE user_id = %s ORDER BY occurred_at, id",
+        (user_id,),
+    ).fetchall()
+
+
+def read_latest_consent_record(conn: Any, user_id: str) -> dict | None:
+    """Read-only: the payload of this user's most recent `consent_recorded`
+    event — `{consent_type, granted, consent_version, consented_at}` — the
+    same four keys `record_consent` writes. None if the user has never
+    recorded a choice (mirrors `read_consent_choice_made`'s False case,
+    which is the cheaper column-only check for the same fact; this function
+    exists because a self-service export additionally needs the version and
+    exact timestamp, which only live in the event payload, not on `users`).
+    The account-export route (jobcannon/web/export.py) is the first caller."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    row = raw.execute(
+        "SELECT payload FROM events WHERE user_id = %s AND event_type = 'consent_recorded' "
+        "ORDER BY occurred_at DESC, id DESC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+    return row["payload"] if row is not None else None

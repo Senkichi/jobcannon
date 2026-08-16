@@ -6,7 +6,8 @@ adds the anon-to-authed handoff (jobcannon.web.handoff) and the consent
 surface it can redirect to (jobcannon.web.consent); adds an HTML body for
 401 responses via the errorhandler below, replacing Werkzeug's default
 plain-text body; adds the authed save/dismiss/apply mutation routes
-(jobcannon.web.actions))."""
+(jobcannon.web.actions); adds the authed, read-only self-service data-export
+route (jobcannon.web.export))."""
 
 from __future__ import annotations
 
@@ -185,4 +186,8 @@ def create_app(config: dict | None = None) -> Flask:
     from jobcannon.web.actions import actions_bp
 
     app.register_blueprint(actions_bp)
+
+    from jobcannon.web.export import export_bp
+
+    app.register_blueprint(export_bp)
     return app
