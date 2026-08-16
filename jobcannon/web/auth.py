@@ -26,13 +26,26 @@ class ClerkIdentity:
     claims: dict
 
 
-def build_clerk_verifier(host_config: HostConfig) -> Callable[[Any], ClerkIdentity | None]:
+def build_clerk_client(host_config: HostConfig) -> Any:
+    """The one Clerk SDK client construction site. `build_clerk_verifier`
+    below calls this when it isn't handed an existing client, and
+    `jobcannon.web.__init__.create_app` calls it once and shares the result
+    between the verifier and `jobcannon.web.account` (the user-delete
+    management call) — both hold the same credentialed client instance
+    rather than each minting its own."""
     from clerk_backend_api import Clerk
-    from clerk_backend_api.security.types import AuthenticateRequestOptions
 
     if not host_config.clerk_secret_key:
         raise RuntimeError("CLERK_SECRET_KEY is required (Clerk backend API secret)")
-    sdk = Clerk(bearer_auth=host_config.clerk_secret_key)
+    return Clerk(bearer_auth=host_config.clerk_secret_key)
+
+
+def build_clerk_verifier(
+    host_config: HostConfig, client: Any | None = None
+) -> Callable[[Any], ClerkIdentity | None]:
+    from clerk_backend_api.security.types import AuthenticateRequestOptions
+
+    sdk = client if client is not None else build_clerk_client(host_config)
     jwt_key = host_config.clerk_jwt_key
     if not jwt_key:
         # An unset key silently falls back to a per-request JWKS network
