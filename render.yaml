@@ -94,8 +94,19 @@ services:
         fromDatabase:
           name: jobcannon-db
           property: connectionString
+      # Dropped from 2 to 1 after the OD-9 staging load test (spec §8, deploy
+      # runbook step 5): concurrency=2 crash-looped the worker roughly every
+      # 2 jobs on the starter plan (512MB) — the embedding model load
+      # (fastembed/onnxruntime, jobcannon.engine.job_scorer) under two
+      # concurrent `scan` jobs pushed memory over the limit, silently OOM-
+      # killing the container (Render surfaces this only as "Instance
+      # restarted", no explicit OOM log line) and leaving each in-flight job
+      # orphaned in procrastinate_jobs (status='doing', worker_id=NULL —
+      # issue #19 tracks cleanup tooling for that state, not prevention of
+      # it). Revisit alongside a plan upgrade if throughput at 1 proves
+      # insufficient once corpus volume grows.
       - key: JC_WORKER_CONCURRENCY
-        value: "2"
+        value: "1"
       # Derived from jobcannon-db's diskSizeGB above (5GB * 1024) — must stay
       # in lockstep with it; tests/host/test_render_config.py guards the two
       # against drift.
