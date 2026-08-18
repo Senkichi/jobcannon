@@ -26,7 +26,7 @@ def _stub_fill(text: str) -> float:
 
 
 class _StubModel:
-    def embed(self, texts):
+    def embed(self, texts, batch_size=256):
         for t in texts:
             yield np.full(EMBEDDING_DIM, _stub_fill(t), dtype=np.float32)
 
