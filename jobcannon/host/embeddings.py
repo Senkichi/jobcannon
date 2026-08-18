@@ -74,10 +74,21 @@ class EmbeddingUnavailableError(RuntimeError):
 def _construct_model() -> Any:
     """Build the TextEmbedding model. fastembed downloads the ONNX model
     (~130 MB) to its cache on first use. Imported here (not at module top) so
-    onnxruntime stays out of the import graph until embedding actually runs."""
+    onnxruntime stays out of the import graph until embedding actually runs.
+
+    providers/threads pinned to CPU + a single-thread session: the default
+    (cuda=Device.AUTO, threads=None) lets onnxruntime auto-size its intra/
+    inter-op thread pools to the container's visible CPU count, and each
+    thread carries its own arena/scratch buffers on top of graph-optimized
+    session init. On the worker's 512Mi Render plan this construction burst
+    was enough to OOM-kill the whole process on nearly every cold start
+    (confirmed via Render's events API: every restart tagged
+    oomKilled/memoryLimit:512Mi) — and because the kill takes the process
+    with it, the next scan's cold start pays the same burst again, a
+    self-sustaining crash loop independent of JC_WORKER_CONCURRENCY."""
     from fastembed import TextEmbedding
 
-    return TextEmbedding(model_name=_MODEL_NAME)
+    return TextEmbedding(model_name=_MODEL_NAME, providers=["CPUExecutionProvider"], threads=1)
 
 
 def _get_model() -> Any:
