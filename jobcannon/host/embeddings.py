@@ -54,6 +54,18 @@ EMBEDDING_DIM = 384
 
 _RETRY_BACKOFF_S = int(os.environ.get("JC_EMBED_RETRY_BACKOFF_S", "3600"))
 
+# fastembed's TextEmbedding.embed() defaults its OWN internal batch_size to
+# 256 -- separate from embed_pending_postings' batch_size (the outer SQL
+# claim LIMIT below) and never previously overridden. Measured directly
+# (scratch harness, BAAI/bge-small-en-v1.5, CPUExecutionProvider,
+# threads=1): a 462-text call at the default 256 peaks process RSS at ~5.3GB;
+# capped to 4 it peaks at ~365MB regardless of total text count (462 vs the
+# 500-row claim ceiling below measured the same). This -- not concurrency,
+# not onnxruntime's thread pool -- is what was OOM-killing the worker on its
+# 512Mi Render plan on nearly every scan, including small companies well
+# under 256 postings.
+_EMBED_BATCH_SIZE = int(os.environ.get("JC_EMBED_BATCH_SIZE", "4"))
+
 __all__ = [
     "EMBEDDING_MODEL_VERSION",
     "EMBEDDING_DIM",
@@ -198,7 +210,10 @@ def embed_pending_postings(conn: Any, config: Any, *, batch_size: int = 500) -> 
         register_vector(raw)
         # .embed() yields float32 ndarrays aligned 1:1 with input order; fastembed
         # truncates each text to the model's 512-token window internally.
-        vectors = list(model.embed([row["jd_full"] for row in pending]))
+        # batch_size explicitly capped -- see _EMBED_BATCH_SIZE above.
+        vectors = list(
+            model.embed([row["jd_full"] for row in pending], batch_size=_EMBED_BATCH_SIZE)
+        )
         for row, vec in zip(pending, vectors):
             raw.execute(
                 "UPDATE postings SET embedding = %s, embedding_model_version = %s, "

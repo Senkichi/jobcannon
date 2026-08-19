@@ -13,7 +13,7 @@ from tests.host.conftest import requires_postgres
 
 
 class _StubModel:
-    def embed(self, texts):
+    def embed(self, texts, batch_size=256):
         for t in texts:
             yield np.full(384, float(len(t) % 7) / 10.0, dtype=np.float32)
 
