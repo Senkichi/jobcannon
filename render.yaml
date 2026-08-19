@@ -81,7 +81,13 @@ services:
   - type: worker
     name: jobcannon-worker
     runtime: python
-    plan: starter
+    # Starter (512Mi) was OOM-killing the worker even after capping fastembed's
+    # batch_size (#111): the process's own steady-state baseline (procrastinate
+    # + DB pool + 27 ATS scanner module imports + the embedding model, none of
+    # it a single avoidable spike) sits within single-digit MB of 512Mi under
+    # normal operation. A dashboard-only plan change is reverted by the next
+    # blueprint sync since `plan` isn't `sync: false` -- must be committed here.
+    plan: standard
     buildCommand: pip install uv && uv sync --locked --no-dev
     startCommand: uv run --no-sync python -m jobcannon.worker
     envVars:
