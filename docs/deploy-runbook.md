@@ -191,11 +191,15 @@ This is handled automatically: `reclaim_orphaned_jobs` is a periodic task on
 the worker (default `*/15 * * * *` UTC, override via `JC_RECLAIM_CRON`,
 `periodic_id="reclaim_orphaned_jobs"`) that selects exactly the rows the
 query above finds and retries each one through procrastinate's `JobManager`
-(`doing` -> `todo`, so a worker picks it back up on the next tick). To
-inspect a run's result, find that task's `job_processed` line in the worker
-log — the periodic tick logs its return value inline, e.g. `{"reclaimed": 2,
-"disposition": "retry", "job_ids": [123, 124]}` — or run the query above
-directly; a healthy fleet keeps it empty between ticks.
+(`doing` -> `todo`, so a worker picks it back up on the next tick). Each
+retry is isolated: `retry_job_v2` never touches `queueing_lock`, so an
+orphan can collide with an unrelated `todo` job already holding the same
+lock — that row is logged and skipped rather than aborting the tick, and the
+count shows up in `skipped`. To inspect a run's result, find that task's
+`job_processed` line in the worker log — the periodic tick logs its return
+value inline, e.g. `{"reclaimed": 2, "skipped": 0, "disposition": "retry",
+"job_ids": [123, 124]}` — or run the query above directly; a healthy fleet
+keeps it empty between ticks.
 
 ## 9. Guest demo
 
