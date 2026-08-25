@@ -30,6 +30,30 @@ pytestmark = requires_postgres
 USER_A = "user_export_a"
 USER_B = "user_export_b"
 
+# #105: the exact `profiles` columns get_profile() (jobcannon/db/_profiles.py)
+# selects and therefore surfaces in this export, union any column a
+# maintainer has explicitly decided to withhold. get_profile()'s explicit
+# column list (no more `SELECT *`) means a bare migration can no longer
+# silently WIDEN this export -- an unlisted column is simply absent from the
+# query result, not a decision anyone made. test_profiles_table_columns_are_
+# all_classified_for_export below is what makes that decision unavoidable:
+# it compares this pair of sets against postgres's live `profiles` schema,
+# so a new column must be added to one of them (and, if exported, to
+# get_profile()'s SELECT) before the suite goes green again.
+_PROFILE_EXPORT_COLUMNS = frozenset(
+    {
+        "user_id",
+        "skills",
+        "experience_summary",
+        "target_titles",
+        "target_locations",
+        "seniority_level",
+        "years_of_experience",
+        "updated_at",
+    }
+)
+_PROFILE_EXCLUDED_FROM_EXPORT: frozenset[str] = frozenset()
+
 
 @pytest.fixture()
 def app():
@@ -209,17 +233,18 @@ def test_export_consent_record_carries_granted_version_and_timestamp(app):
 
 
 def test_export_document_pins_expected_key_sets(app):
-    """Schema-pinning test for #105: `get_profile` (jobcannon/db/_profiles.py)
-    used to be `SELECT *`, so a future `profiles` migration would silently
-    widen this export the moment the column landed — no one would have
-    decided that the new field belongs in a user's self-service data
-    export. Every section below is asserted against its EXACT key set (not
-    a subset check) so schema growth anywhere in the export's join — not
-    just `profiles` — fails this test loudly instead of passing quietly
-    with an extra field a maintainer never reviewed. A green run here means
-    "the export's shape is unchanged"; a failure means a conscious
-    add-to-export-or-exclude decision is owed, matching the fix note left
-    on issue #105.
+    """Shape-pinning test for #105: every reader this export document is
+    built from (`get_profile`, `list_watchlist_entries`,
+    `list_pipeline_status_entries`, `read_latest_consent_record`,
+    `list_events_for_user`) now uses an explicit column list rather than
+    `SELECT *`, so the document's shape can only change via a deliberate
+    code edit to one of those readers or to `_build_export_document` itself
+    — this test pins that shape exactly (not a subset check) so such an
+    edit fails loudly here rather than passing quietly with a field no
+    reviewer connected back to this export. It does NOT, by itself, catch a
+    `profiles` migration that adds a column nobody wired up anywhere —
+    `test_profiles_table_columns_are_all_classified_for_export` below is
+    the test that forces that decision.
     """
     dsn = app.config["_TEST_DSN"]
     posting_id = _shared_posting(dsn)
@@ -288,6 +313,30 @@ def test_export_document_pins_expected_key_sets(app):
         "occurred_at",
         "payload",
     }
+
+
+def test_profiles_table_columns_are_all_classified_for_export(app):
+    """Live-schema check for #105: get_profile()'s explicit column list
+    closes off `SELECT *`-style widening, but on its own it would let a
+    future `profiles` migration add a column that simply never appears
+    anywhere -- not exported, not deliberately excluded, just unaddressed.
+    This queries postgres's actual `information_schema.columns` for
+    `profiles` and requires every column to be accounted for in exactly one
+    of the two sets above. Add a column to `profiles` and this test fails
+    until a maintainer places it in `_PROFILE_EXPORT_COLUMNS` (and adds it
+    to get_profile()'s SELECT) or in `_PROFILE_EXCLUDED_FROM_EXPORT` with a
+    reason -- the "add-to-export vs exclude" decision issue #105 asked for.
+    """
+    dsn = app.config["_TEST_DSN"]
+    with psycopg.connect(dsn) as conn:
+        live_columns = {
+            row[0]
+            for row in conn.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'profiles'"
+            ).fetchall()
+        }
+
+    assert live_columns == _PROFILE_EXPORT_COLUMNS | _PROFILE_EXCLUDED_FROM_EXPORT
 
 
 def test_export_for_user_with_no_data_still_produces_valid_document(app):
