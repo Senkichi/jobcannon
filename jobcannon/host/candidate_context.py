@@ -60,9 +60,31 @@ def _fmt_scalar(value: Any) -> str:
 
 
 def _fmt_list(value: Any) -> str:
+    """#28 item 3: unreachable via `upsert_profile` today (its `list |
+    None` type hints and `Jsonb(...)` wrapping only ever produce a real
+    list or None), but nothing stops a jsonb column from holding something
+    else once a row is written any other way, so this validates at the
+    boundary rather than trusting the shape:
+
+    - a JSON `null` inside the array (`item is None`) used to survive
+      `str(item).strip()` as the literal string "None" and render as if it
+      were a real skill/title/location; now dropped like an empty string.
+    - a jsonb object or nested array as a list ELEMENT would `str()` to a
+      Python repr (e.g. "{'level': 'senior'}"); dropped the same way.
+    - a jsonb object as the WHOLE column value (a "list-shaped" column
+      that isn't actually list-shaped) used to fall through to
+      `_fmt_scalar` and emit that same repr; now renders "Not specified"
+      instead of a repr no model should see.
+    """
     if isinstance(value, (list, tuple)):
-        items = [str(item).strip() for item in value if str(item).strip()]
+        items = [
+            str(item).strip()
+            for item in value
+            if item is not None and not isinstance(item, (dict, list, tuple)) and str(item).strip()
+        ]
         return ", ".join(items) if items else _NOT_SPECIFIED
+    if isinstance(value, dict):
+        return _NOT_SPECIFIED
     return _fmt_scalar(value)
 
 
