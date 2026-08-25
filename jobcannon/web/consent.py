@@ -20,7 +20,10 @@ this route's writes describe the same vocabulary the existing tests pin.
 
 Ships the mechanism only: no policy copy, no legal text, no retention
 statement, and no preferences dashboard beyond this single grant/decline
-surface — a repeat visit simply records a new decision.
+surface — a repeat visit simply records a new decision. consent.html
+links out to /privacy (jobcannon.web.privacy) for policy text, but that
+route is itself a placeholder scaffold (issue #94) — this route still
+carries no legal text of its own.
 """
 
 from __future__ import annotations
