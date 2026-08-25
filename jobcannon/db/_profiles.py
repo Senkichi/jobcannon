@@ -82,5 +82,17 @@ def upsert_profile(
 
 
 def get_profile(conn: Any, user_id: str) -> Any:
+    """Explicit column list (not `SELECT *`, #105): `jobcannon/web/export.py`'s
+    self-service account export is a direct consumer of this row via
+    `_row_to_dict`, and a data-minimization decision — does a new `profiles`
+    column belong in that export? — must be made consciously here, not
+    inherited automatically the moment a migration adds the column.
+    `tests/host/test_account_export.py` pins the export document's per-section
+    key sets (including this one) so a schema change that silently widens
+    either this function or the export fails loudly instead of passing."""
     raw = conn.raw if hasattr(conn, "raw") else conn
-    return raw.execute("SELECT * FROM profiles WHERE user_id = %s", (user_id,)).fetchone()
+    return raw.execute(
+        "SELECT user_id, skills, experience_summary, target_titles, target_locations, "
+        "seniority_level, years_of_experience, updated_at FROM profiles WHERE user_id = %s",
+        (user_id,),
+    ).fetchone()

@@ -208,6 +208,88 @@ def test_export_consent_record_carries_granted_version_and_timestamp(app):
     assert consent["consented_at"]
 
 
+def test_export_document_pins_expected_key_sets(app):
+    """Schema-pinning test for #105: `get_profile` (jobcannon/db/_profiles.py)
+    used to be `SELECT *`, so a future `profiles` migration would silently
+    widen this export the moment the column landed — no one would have
+    decided that the new field belongs in a user's self-service data
+    export. Every section below is asserted against its EXACT key set (not
+    a subset check) so schema growth anywhere in the export's join — not
+    just `profiles` — fails this test loudly instead of passing quietly
+    with an extra field a maintainer never reviewed. A green run here means
+    "the export's shape is unchanged"; a failure means a conscious
+    add-to-export-or-exclude decision is owed, matching the fix note left
+    on issue #105.
+    """
+    dsn = app.config["_TEST_DSN"]
+    posting_id = _shared_posting(dsn)
+    _seed_full_account(dsn, USER_A, posting_id)
+    client = _seeded_client(app, dsn, USER_A)
+
+    doc = client.get("/account/export").get_json()
+
+    assert set(doc.keys()) == {
+        "schema_version",
+        "generated_at",
+        "user_id",
+        "profile",
+        "watchlist",
+        "pipeline_status",
+        "consent",
+        "events",
+    }
+
+    assert set(doc["profile"].keys()) == {
+        "user_id",
+        "skills",
+        "experience_summary",
+        "target_titles",
+        "target_locations",
+        "seniority_level",
+        "years_of_experience",
+        "updated_at",
+    }
+
+    assert len(doc["watchlist"]) == 1
+    assert set(doc["watchlist"][0].keys()) == {
+        "id",
+        "posting_id",
+        "company_id",
+        "notes",
+        "created_at",
+    }
+
+    assert len(doc["pipeline_status"]) == 1
+    assert set(doc["pipeline_status"][0].keys()) == {
+        "posting_id",
+        "status",
+        "status_changed_at",
+        "applied_at",
+        "notes",
+    }
+
+    assert set(doc["consent"].keys()) == {
+        "consent_type",
+        "granted",
+        "consent_version",
+        "consented_at",
+    }
+
+    assert len(doc["events"]) == 2
+    assert set(doc["events"][0].keys()) == {
+        "id",
+        "event_type",
+        "posting_id",
+        "feed_position",
+        "ranker_version",
+        "feed_session_id",
+        "interleave_experiment_id",
+        "interleave_team",
+        "occurred_at",
+        "payload",
+    }
+
+
 def test_export_for_user_with_no_data_still_produces_valid_document(app):
     dsn = app.config["_TEST_DSN"]
     client = _seeded_client(app, dsn, "user_export_empty")
