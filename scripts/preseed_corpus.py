@@ -7,6 +7,11 @@ DATABASE_URL set):
     python scripts/preseed_corpus.py data/seed_companies.csv           # upsert + enqueue
     python scripts/preseed_corpus.py data/seed_companies.csv --verify  # GET-check board URLs, no writes
     python scripts/preseed_corpus.py data/seed_companies.csv --limit 8 # staging-scan subset (spec §8)
+
+Note on --verify timing: each row now gets up to 3 attempts at a 6s read
+timeout with backoff between them (#106), so a run against a CSV with many
+genuinely-dead boards can take noticeably longer than a quick spot check —
+budget minutes, not seconds, on the full corpus.
 """
 
 from __future__ import annotations
@@ -15,9 +20,40 @@ import argparse
 import csv
 import logging
 import re
+import time
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("preseed_corpus")
+
+# --verify's whole point is to distinguish "board URL is actually dead" from
+# "network had a slow moment." A tight timeout collapses that distinction
+# (#106: non-overlapping failure sets across two runs against the same CSV
+# from the same network — pure timeout flakiness, not real unreachability).
+# 6s read timeout + a couple of retries absorbs ordinary Greenhouse latency
+# variance without materially slowing down a genuinely-dead-board verdict.
+_VERIFY_TIMEOUT_S = 6
+_VERIFY_MAX_ATTEMPTS = 3
+_VERIFY_BACKOFF_BASE_S = 1.0
+
+
+def _get_with_retries(url: str, *, timeout: float, attempts: int, backoff_base: float):
+    """GET with a small retry-with-backoff loop, dependency-free (stdlib
+    ``time.sleep`` — no urllib3 Retry/HTTPAdapter wiring, no tenacity).
+    Retries only on network-level failures (timeout, connection reset) —
+    those are the transient case; an actual HTTP error status is returned
+    as-is on the first attempt, not retried, since it's not flaky."""
+    import requests
+
+    last_exc: requests.RequestException | None = None
+    for attempt in range(attempts):
+        try:
+            return requests.get(url, timeout=timeout, allow_redirects=True)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            last_exc = exc
+            if attempt < attempts - 1:
+                time.sleep(backoff_base * (attempt + 1))
+    raise last_exc  # type: ignore[misc]  # loop always sets last_exc before exhausting attempts
+
 
 _BOARD_URL_BUILDERS = {
     "greenhouse": lambda slug: f"https://boards.greenhouse.io/{slug}",
@@ -57,7 +93,12 @@ def _verify(rows: list[dict[str, str]]) -> int:
         try:
             # GET, not HEAD: Ashby's title-based discrimination (below) needs
             # a real body, and some boards 404 on HEAD but 200 on GET anyway.
-            resp = requests.get(url, timeout=2, allow_redirects=True)
+            resp = _get_with_retries(
+                url,
+                timeout=_VERIFY_TIMEOUT_S,
+                attempts=_VERIFY_MAX_ATTEMPTS,
+                backoff_base=_VERIFY_BACKOFF_BASE_S,
+            )
             ok = resp.status_code < 400
             if ok and row["ats_platform"] == "ashby":
                 m = re.search(r"<title>(.*?)</title>", resp.text)
