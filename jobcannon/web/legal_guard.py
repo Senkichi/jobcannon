@@ -10,9 +10,13 @@ counts as leftover drafting matter" exists anywhere else in the repo.
 
 Every rule below exists to catch one concrete way non-publication matter
 could survive into the committed markdown: an HTML comment the strip pass
-missed, a `[PLACEHOLDER]` token nobody filled in, a phrase that only makes
-sense inside a drafting/review note, a raw commit SHA copied out of an audit
-citation, or a missing/malformed effective date. `FORBIDDEN_PHRASES` is
+missed, a `[Placeholder]` token nobody filled in (any case, not just
+ALL-CAPS — markdown link/reference syntax is excluded), a raw HTML tag that
+would render live through `markdown.markdown()` + `|safe`, a phrase that
+only makes sense inside a drafting/review note, a raw commit SHA copied out
+of an audit citation, or a missing/malformed effective date (and a
+malformed — though not a missing — last-updated date, when that line
+exists at all). `FORBIDDEN_PHRASES` is
 exported (not just used internally) specifically so the test suite's
 sabotage self-tests are parametrized off THIS list rather than a
 hand-maintained copy — a phrase added here with no accompanying positive
@@ -36,18 +40,38 @@ FORBIDDEN_PHRASES: tuple[str, ...] = (
     "owner:",
     "counsel",
     "audit §",
-    "appendix a",
+    "appendix",
     "pr #",
     "issue #",
     "gap register",
     "todo",
+    "to-do",
     "tbd",
 )
 
 _HTML_COMMENT_OPEN = "<!--"
 _HTML_COMMENT_CLOSE = "-->"
 
-_BRACKET_TOKEN = re.compile(r"\[[A-Z][A-Z /-]{2,}\]")
+# Mixed-case now (not just ALL-CAPS): `[Effective Date]` and `[Contact Email]`
+# are just as much an unfilled placeholder as `[EFFECTIVE DATE]`. Excludes
+# markdown link/reference syntax on both sides: the trailing lookahead skips
+# an inline link `[Privacy Policy](/privacy)`, a reference-style definition
+# `[text]: /privacy`, and a reference link's own opening half
+# `[text][ref]`'s `[text]`; the leading lookbehind additionally skips that
+# same reference link's second half, `[ref]`, which is immediately preceded
+# by the `]` of `[text]` and would otherwise still look like an unfilled
+# placeholder on its own. None of these are leftover drafting matter.
+_BRACKET_TOKEN = re.compile(r"(?<!\])\[[A-Za-z][A-Za-z /-]{2,}\](?![(:[])")
+
+# `<` immediately followed by a letter or `/` is the shape of an HTML tag
+# (open or close). markdown.markdown() passes raw HTML through unchanged and
+# the template renders the result with `|safe`, so any tag that slips into
+# the committed source renders live — this is defense in depth (the source
+# is repo-tracked, so a survivor here means someone hand-edited or a future
+# import script bug let it through), deliberately with no hardcoded tag
+# list: it isn't safe to allowlist "harmless" tags because attributes
+# (onerror=, onclick=, style=) can turn even a boring one dangerous.
+_RAW_HTML_TAG = re.compile(r"<[A-Za-z/]")
 
 # A commit-SHA-shaped token: 7-40 lowercase hex characters, word-bounded.
 # Requiring at least one digit AND at least one a-f letter in the SAME token
@@ -58,6 +82,7 @@ _BRACKET_TOKEN = re.compile(r"\[[A-Z][A-Z /-]{2,}\]")
 _HEX_TOKEN = re.compile(r"\b[0-9a-f]{7,40}\b")
 
 _EFFECTIVE_DATE_LINE = re.compile(r"^\**Effective date:\**\s*(.*)$", re.MULTILINE)
+_LAST_UPDATED_LINE = re.compile(r"^\**Last updated:\**\s*(.*)$", re.MULTILINE)
 _EFFECTIVE_DATE_VALUE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
@@ -70,8 +95,10 @@ def _looks_like_sha(token: str) -> bool:
 def check_published_text(text: str) -> list[str]:
     """Return every violation found in `text`. An empty list means clean —
     the text contains no HTML comment delimiter, no unfilled bracket
-    placeholder, none of FORBIDDEN_PHRASES (case-insensitive), no
-    commit-SHA-shaped token, and a well-formed 'Effective date:' line."""
+    placeholder, no raw HTML tag, none of FORBIDDEN_PHRASES
+    (case-insensitive), no commit-SHA-shaped token, a well-formed
+    'Effective date:' line, and — when a 'Last updated:' line is present at
+    all — a well-formed one."""
     violations: list[str] = []
 
     if _HTML_COMMENT_OPEN in text:
@@ -81,6 +108,9 @@ def check_published_text(text: str) -> list[str]:
 
     for match in _BRACKET_TOKEN.finditer(text):
         violations.append(f"contains an unfilled bracket placeholder: {match.group(0)!r}")
+
+    if _RAW_HTML_TAG.search(text):
+        violations.append("contains a raw HTML tag ('<' immediately followed by a letter or '/')")
 
     lowered = text.lower()
     for phrase in FORBIDDEN_PHRASES:
@@ -97,6 +127,15 @@ def check_published_text(text: str) -> list[str]:
     elif not _EFFECTIVE_DATE_VALUE.search(date_match.group(1)):
         violations.append(
             f"'Effective date:' line does not contain a YYYY-MM-DD date: {date_match.group(0)!r}"
+        )
+
+    last_updated_match = _LAST_UPDATED_LINE.search(text)
+    if last_updated_match is not None and not _EFFECTIVE_DATE_VALUE.search(
+        last_updated_match.group(1)
+    ):
+        violations.append(
+            f"'Last updated:' line does not contain a YYYY-MM-DD date: "
+            f"{last_updated_match.group(0)!r}"
         )
 
     return violations

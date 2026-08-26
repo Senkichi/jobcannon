@@ -15,7 +15,8 @@ The strip is deliberately MECHANICAL, not judgment-based: it removes only
 what the draft's own authoring convention marks as non-publication matter
 (the leading DRAFT blockquote banner, every HTML comment, and — for the
 privacy policy only — the Appendix A gap register), then fills in the one
-open placeholder ([EFFECTIVE DATE]) and does whitespace cleanup. It makes no
+open placeholder ([EFFECTIVE DATE], matched case-insensitively so a drafting
+variant like [Effective Date] is filled too) and does whitespace cleanup. It makes no
 decision about what the TEXT says; that is the ratification step, done
 before this script ever runs on a given draft.
 
@@ -47,6 +48,13 @@ _TARGET_FILENAMES = {"privacy": "privacy.md", "terms": "terms.md"}
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _EFFECTIVE_DATE_ARG = re.compile(r"\d{4}-\d{2}-\d{2}")
 _TRAILING_RULE_OR_BLANK = re.compile(r"^(-{3,})?\s*$")
+# Case-insensitive: the draft's own placeholder is written [EFFECTIVE DATE],
+# but legal_guard.check_published_text's bracket rule now also flags mixed
+# case ([Effective Date], [effective date], ...) as an unfilled placeholder
+# (issue #94 guard-hardening review) — a case-sensitive .replace() here would
+# leave a mixed-case variant unfilled and the guard call below refuses the
+# write, so this fills every case variant of the same placeholder.
+_EFFECTIVE_DATE_PLACEHOLDER = re.compile(r"\[effective date\]", re.IGNORECASE)
 
 
 def _strip_html_comments(text: str) -> str:
@@ -132,7 +140,7 @@ def build_published_text(raw: str, target: str, effective_date: str) -> str:
     if target == "privacy":
         text = _cut_from_heading_to_eof(text, "# Appendix A")
     text = _strip_trailing_rule_and_blank_lines(text)
-    text = text.replace("[EFFECTIVE DATE]", effective_date)
+    text = _EFFECTIVE_DATE_PLACEHOLDER.sub(effective_date, text)
     text = _collapse_blank_lines(text)
     text = "\n".join(line.rstrip() for line in text.split("\n"))
     return text.strip("\n") + "\n"

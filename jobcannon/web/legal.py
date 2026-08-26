@@ -14,10 +14,11 @@ jobcannon/web/legal/ (privacy.md, terms.md) — NOT in this module and not in
 any template. They are generated artifacts: scripts/import_legal_text.py
 mechanically strips drafting/review matter out of a ratified source draft
 and writes them; jobcannon.web.legal_guard.check_published_text is the
-standing structural gate (both at import time in that script, and as a
-committed-file check in tests/host/test_legal_pages.py) against
-non-publication matter surviving into what ships. Never hand-edit either
-.md file — the next import overwrites it.
+standing structural gate — at import time in that script, as a
+committed-file check in tests/host/test_legal_pages.py, AND (below,
+`_render`) at this module's own import time, so a hand-edited or corrupted
+.md fails app boot instead of silently serving. Never hand-edit either .md
+file — the next import overwrites it.
 
 Markdown -> HTML happens ONCE at import time, not per request: the source
 files are committed, ratified text, not per-request user input, so
@@ -47,6 +48,8 @@ import re
 import markdown
 from flask import Blueprint, render_template
 
+from jobcannon.web.legal_guard import check_published_text
+
 legal_bp = Blueprint("legal", __name__)
 
 _LEGAL_DIR = pathlib.Path(__file__).parent / "legal"
@@ -59,8 +62,19 @@ def _render(filename: str) -> tuple[str, str]:
     document's own H1 text, used for the browser-tab <title> — the H1 that
     actually appears on the page comes from `html` itself (markdown renders
     the source '# ...' line as a real <h1>), so there is no second,
-    separately-authored heading to keep in sync with it."""
+    separately-authored heading to keep in sync with it.
+
+    Calls the SAME `check_published_text` guard that
+    `scripts/import_legal_text.py` runs before it ever writes the file and
+    that `tests/host/test_legal_pages.py` runs as a standing CI gate against
+    the committed file — enforcement previously lived only in those two
+    places, so a hand-edited .md that reintroduced drafting/review matter
+    (or a corrupted commit) would boot the app and serve it. Raising here
+    instead means a bad file fails app boot rather than serving."""
     raw = (_LEGAL_DIR / filename).read_text(encoding="utf-8")
+    violations = check_published_text(raw)
+    if violations:
+        raise RuntimeError(f"legal_guard rejected {filename} at boot: " + "; ".join(violations))
     match = _H1_LINE.search(raw)
     title = match.group(1) if match else filename
     html = markdown.markdown(raw, extensions=_MD_EXTENSIONS)
