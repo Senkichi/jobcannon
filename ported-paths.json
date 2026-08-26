@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-26T23:15:53Z",
+  "generated_at": "2026-08-26T23:32:24Z",
   "roots": [
     "engine",
     "db",
@@ -412,7 +412,11 @@
       "root": "engine",
       "markers": [
         {
-          "line": 567,
+          "line": 78,
+          "text": "# private source's version integer for these same three rule changes is 5 (its"
+        },
+        {
+          "line": 897,
           "text": "# re-homed from job_finder/db/_jd_full.py (plan Task 1 Step 6 amendment):"
         }
       ]
