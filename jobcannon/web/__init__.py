@@ -12,7 +12,11 @@ route (jobcannon.web.export) and the self-service account-deletion trigger
 verifier and that route's user-delete management call; adds the public,
 scaffold-only /privacy placeholder (jobcannon.web.privacy, issue #94) —
 ships the mechanism and a clearly-marked placeholder page, not the
-policy text)."""
+policy text; adds the clerk-js frontend loader wiring (fail-fast
+CLERK_PUBLISHABLE_KEY validation + a context processor exposing
+clerk_publishable_key/clerk_frontend_api_host to every template, issue
+#149) that completes Clerk's cross-domain sign-in handshake, which the
+Python backend SDK alone cannot do)."""
 
 from __future__ import annotations
 
@@ -123,6 +127,47 @@ def create_app(config: dict | None = None) -> Flask:
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = not (app.testing or app.debug)
+
+    # Clerk frontend (clerk-js) wiring — issue #149. A blank or malformed
+    # publishable key must never silently reproduce #149 (clerk-js never
+    # loads -> the hosted Account Portal sign-in never hands this host a
+    # __session cookie -> every signed-in human 401s forever), so this
+    # fails fast at boot, same shape/rationale as WEBHOOK_SECRET and
+    # SECRET_KEY above. TESTING tolerates a blank key (most tests never
+    # care about the frontend loader) but still derives the FAPI host from
+    # a configured one, so tests exercising the loader don't need a second
+    # seam.
+    from jobcannon.web.clerk_frontend import frontend_api_host
+
+    # getattr, not direct access: TESTING config doubles (e.g.
+    # tests/host/test_empty_states.py's types.SimpleNamespace) may carry
+    # only the HOST_CONFIG attributes a given test cares about, same
+    # rationale as the 401 handler's clerk_sign_up_url read below.
+    clerk_publishable_key = getattr(host_config, "clerk_publishable_key", "")
+    clerk_frontend_api_host = ""
+    if not app.config.get("TESTING"):
+        if not clerk_publishable_key:
+            raise RuntimeError(
+                "CLERK_PUBLISHABLE_KEY is required (Clerk frontend publishable key; unset "
+                "means clerk-js never loads and a hosted sign-in never hands this host a "
+                "session — issue #149)"
+            )
+        try:
+            clerk_frontend_api_host = frontend_api_host(clerk_publishable_key)
+        except ValueError as exc:
+            raise RuntimeError(f"CLERK_PUBLISHABLE_KEY is malformed: {exc}") from exc
+    elif clerk_publishable_key:
+        try:
+            clerk_frontend_api_host = frontend_api_host(clerk_publishable_key)
+        except ValueError:
+            clerk_frontend_api_host = ""
+
+    @app.context_processor
+    def inject_clerk_frontend():
+        return {
+            "clerk_publishable_key": clerk_publishable_key,
+            "clerk_frontend_api_host": clerk_frontend_api_host,
+        }
 
     verify = app.config.get("VERIFY_REQUEST")
     clerk_client = app.config.get("CLERK_CLIENT")

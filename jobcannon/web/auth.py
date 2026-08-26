@@ -56,7 +56,19 @@ def build_clerk_verifier(
             "CLERK_JWT_KEY is required (networkless RS256 verification; unset forces "
             "per-request JWKS fetch)"
         )
-    authorized_parties = [p for p in host_config.clerk_authorized_parties.split(",") if p.strip()]
+    # Normalize each configured party to a bare origin: strip whitespace AND
+    # a trailing slash, drop anything left empty. The SDK checks the
+    # token's `azp` claim (a bare origin, e.g. "https://jobcannon.dev", no
+    # trailing slash) for exact membership in this list — an
+    # operator-entered value with a trailing slash (Render's
+    # CLERK_AUTHORIZED_PARTIES was set to "https://jobcannon.dev/") would
+    # otherwise reject every token with TOKEN_INVALID_AUTHORIZED_PARTIES
+    # even after #149's __session fix (issue #149 point 3).
+    authorized_parties = [
+        normalized
+        for p in host_config.clerk_authorized_parties.split(",")
+        if (normalized := p.strip().rstrip("/"))
+    ]
     if not authorized_parties:
         # Unset/blank -> `authorized_parties or None` below -> None -> the SDK
         # skips the azp (cross-origin token-replay) check silently. Fail fast

@@ -76,6 +76,19 @@ class HostConfig:
     clerk_jwt_key: str = field(
         default="", metadata={"env": "CLERK_JWT_KEY", "declare_on": ("web",)}
     )
+    # Frontend (clerk-js) publishable key — issue #149. Distinct from the
+    # four backend-verification fields above: those authenticate REQUESTS
+    # server-side, this loads clerk-js in the BROWSER so it can complete
+    # Clerk's cross-domain handshake (read the shared __client_uat cookie,
+    # talk to FAPI, and set/refresh __session on this host) — the Python
+    # backend SDK has no handshake support of its own
+    # (jobcannon.web.auth's docstring), so without this the hosted
+    # Account Portal sign-in never hands this host a session, ever.
+    # Requiredness is enforced at consumption (create_app, non-TESTING),
+    # same rationale as secret_key above.
+    clerk_publishable_key: str = field(
+        default="", metadata={"env": "CLERK_PUBLISHABLE_KEY", "declare_on": ("web",)}
+    )
     clerk_authorized_parties: str = field(
         default="", metadata={"env": "CLERK_AUTHORIZED_PARTIES", "declare_on": ("web",)}
     )
@@ -133,6 +146,7 @@ def load_host_config() -> HostConfig:
         signup_wave=os.environ.get("JC_SIGNUP_WAVE", "0"),
         clerk_secret_key=os.environ.get("CLERK_SECRET_KEY", ""),
         clerk_jwt_key=os.environ.get("CLERK_JWT_KEY", ""),
+        clerk_publishable_key=os.environ.get("CLERK_PUBLISHABLE_KEY", ""),
         clerk_authorized_parties=os.environ.get("CLERK_AUTHORIZED_PARTIES", ""),
         clerk_webhook_signing_secret=os.environ.get("CLERK_WEBHOOK_SIGNING_SECRET", ""),
     )

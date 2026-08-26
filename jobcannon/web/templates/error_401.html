@@ -12,3 +12,20 @@
   </p>
 {% endif %}
 {% endblock %}
+{% block clerk_after_load %}
+  // This host landed on the 401 page after a hosted Account Portal
+  // redirect, but clerk-js above may have just set/refreshed __session on
+  // THIS host (issue #149). If Clerk now sees a live session, reload once
+  // so the next request carries __session and clears the 401 — guarded by
+  // sessionStorage (skip within 30s of the last attempt) so an azp/config
+  // mistake can never turn this into a reload loop.
+  if (window.Clerk.session) {
+    var RELOAD_KEY = 'jc_clerk_401_reload_at';
+    var lastReload = Number(sessionStorage.getItem(RELOAD_KEY) || 0);
+    var now = Date.now();
+    if (now - lastReload > 30000) {
+      sessionStorage.setItem(RELOAD_KEY, String(now));
+      window.location.reload();
+    }
+  }
+{% endblock %}

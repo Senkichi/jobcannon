@@ -6,6 +6,26 @@
   <title>{% block title %}Job Cannon{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  {% if clerk_publishable_key %}
+  <script
+    async
+    crossorigin="anonymous"
+    data-clerk-publishable-key="{{ clerk_publishable_key }}"
+    src="https://{{ clerk_frontend_api_host }}/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
+  ></script>
+  <script>
+    window.addEventListener('load', async function () {
+      if (!window.Clerk) return;
+      // Reads the shared __client_uat cookie, talks to FAPI with the
+      // __client cookie, and sets/refreshes __session on THIS host — the
+      // mechanism that completes Clerk's cross-domain handshake after the
+      // hosted Account Portal sign-in redirect (issue #149). Also keeps
+      // the short-lived session JWT fresh while a tab stays open.
+      await window.Clerk.load();
+      {% block clerk_after_load %}{% endblock %}
+    });
+  </script>
+  {% endif %}
 </head>
 <body class="bg-neutral-950 text-neutral-100 min-h-screen antialiased">
   <header class="border-b border-neutral-800 px-6 py-4 flex items-center gap-6">
