@@ -11,6 +11,14 @@ Ported from the private repo's tests/test_derive_classification_domain.py.
 The redrive-script tests (scripts.redrive_classification batch reconciliation
 over a live DB) are NOT ported — that script lives outside this task's
 manifest.
+
+F7 delta (private #1620/#1903): the CLASSIFICATION_RULE_VERSION constant test
+is ported from tests/test_classification_rule_version.py — only the
+engine-pure assertion (the constant is a positive int) survives; every other
+test in that file exercises the stamp column, migration, and
+persist_job_assessment/invalidate_job_score write paths, none of which have a
+public counterpart (see jobcannon/engine/classification.py's docstring on
+CLASSIFICATION_RULE_VERSION).
 """
 
 from __future__ import annotations
@@ -18,6 +26,7 @@ from __future__ import annotations
 import pytest
 
 from jobcannon.engine.classification import (
+    CLASSIFICATION_RULE_VERSION,
     derive_classification,
     effective_sub_scores,
     get_effective_location_fit,
@@ -247,3 +256,10 @@ def test_is_non_degenerate_low_signal_false_with_some_threes():
     tell. Kills the mutant where the flat check degrades to any(v == 3)."""
     scores = {**dict.fromkeys(_ALL_KEYS, 3), "title_fit": 4}
     assert is_non_degenerate_low_signal(scores, None, 5000, 1500) is False
+
+
+def test_rule_version_constant_is_positive_int():
+    """The stamp must be a positive int so '<' comparisons (against a future
+    persisted classification_rule_version) are well-defined."""
+    assert isinstance(CLASSIFICATION_RULE_VERSION, int)
+    assert CLASSIFICATION_RULE_VERSION >= 1

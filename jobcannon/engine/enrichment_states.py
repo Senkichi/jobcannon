@@ -13,15 +13,24 @@ Two distinct predicates over tiers — they MUST stay distinct:
   ``TERMINAL`` — "stop re-enriching." A row at one of these tiers is fully drained
       of the enrichment pipeline and is excluded from backfill selection. Includes
       pipeline terminals (``serpapi``, ``agentic``), the explicit ``exhausted`` /
-      ``agentic_exhausted`` end-states, and the legacy ``mid`` / ``low`` / ``high``
-      tiers (m050). NOTE: a short JD at ``serpapi`` / ``mid`` is *not* low_signal —
-      those tiers stop the backfill but do not mark the JD unobtainable.
+      ``agentic_exhausted`` / ``expired`` end-states, and the legacy ``mid`` /
+      ``low`` / ``high`` tiers (m050). NOTE: a short JD at ``serpapi`` / ``mid`` is
+      *not* low_signal — those tiers stop the backfill but do not mark the JD
+      unobtainable.
 
   ``LOW_SIGNAL_TERMINAL`` — "JD genuinely unobtainable -> low_signal." A subset of
       TERMINAL where the *enrichment cascade itself* gave up trying to fetch a real
-      JD (``exhausted``, ``agentic``, ``agentic_exhausted``). Only these tiers feed
-      the ``derive_classification`` low_signal rule. Collapsing this into TERMINAL
-      would silently re-label live rows, so the two sets are kept separate.
+      JD (``exhausted``, ``agentic``, ``agentic_exhausted``, ``expired``). Only
+      these tiers feed the ``derive_classification`` low_signal rule. Collapsing
+      this into TERMINAL would silently re-label live rows, so the two sets are
+      kept separate. ``expired`` belongs in this set deliberately: in the private
+      original it is reached only after a bounded agentic-exhausted retry budget is
+      spent with no jd_full ever landing — the cascade gave up exactly like
+      ``agentic_exhausted`` does, just after more attempts, so the same low_signal
+      rule applies. The retry/expiry state machine that *writes* ``expired`` (a
+      cooldown-gated requeue against a hosted LLM enricher) has no public
+      counterpart yet — see the module docstring note below — so this port carries
+      only the vocabulary member and its membership in both predicate sets.
 
 Legacy tiers (``low`` / ``mid`` / ``high``) are enumerated as terminal members.
 They were written by the deleted haiku/sonnet synthesis tiers and renamed by m050;
@@ -43,7 +52,10 @@ class EnrichmentTier(StrEnum):
 
     Active pipeline tiers (cost-ordered): FREE -> DDG -> SERPAPI -> AGENTIC.
     End-states: EXHAUSTED (all pipeline tiers tried), AGENTIC_EXHAUSTED (written by
-    agentic_enricher after the agentic tier fails to fetch a JD).
+    agentic_enricher after the agentic tier fails to fetch a JD), EXPIRED (in the
+    private original: an AGENTIC_EXHAUSTED row that spent its bounded retry budget
+    with no jd_full ever recovered — the writer for this transition is unported,
+    see the module docstring).
     Legacy (m050, terminal): LOW / MID / HIGH — left by the deleted synthesis tiers.
     """
 
@@ -56,6 +68,16 @@ class EnrichmentTier(StrEnum):
     # Pipeline end-states
     EXHAUSTED = "exhausted"
     AGENTIC_EXHAUSTED = "agentic_exhausted"
+
+    # Terminal end-state reached after a bounded agentic_exhausted retry budget
+    # is spent with no jd_full ever recovered. Distinct from AGENTIC_EXHAUSTED
+    # (which is still retry-eligible) so a row's position in the retry lifecycle
+    # is never ambiguous from the tier alone. Nothing in this port writes this
+    # value yet (the retry/requeue sweep is unported — no hosted LLM caller to
+    # retry against); it is carried as vocabulary so a future hosted enricher
+    # has a stable name to write and so TERMINAL/LOW_SIGNAL_TERMINAL match the
+    # private rule exactly.
+    EXPIRED = "expired"
 
     # Legacy migration tiers (m050) — terminal, no normalization planned
     LOW = "low"
@@ -88,6 +110,7 @@ TERMINAL: frozenset[EnrichmentTier] = frozenset(
         EnrichmentTier.AGENTIC,
         EnrichmentTier.EXHAUSTED,
         EnrichmentTier.AGENTIC_EXHAUSTED,
+        EnrichmentTier.EXPIRED,
         EnrichmentTier.MID,
         EnrichmentTier.LOW,
         EnrichmentTier.HIGH,
@@ -104,6 +127,7 @@ LOW_SIGNAL_TERMINAL: frozenset[EnrichmentTier] = frozenset(
         EnrichmentTier.EXHAUSTED,
         EnrichmentTier.AGENTIC,
         EnrichmentTier.AGENTIC_EXHAUSTED,
+        EnrichmentTier.EXPIRED,
     }
 )
 
