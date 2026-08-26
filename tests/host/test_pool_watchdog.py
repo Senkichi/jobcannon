@@ -99,6 +99,11 @@ def test_watchdog_interval_env_knob(monkeypatch):
     assert pool_mod._watchdog_interval_s() == 0.25
     monkeypatch.setenv("JC_POOL_WATCHDOG_S", "garbage")
     assert pool_mod._watchdog_interval_s() == 15.0
+    # Non-finite floats parse but would kill the loop's time.sleep() —
+    # they must fall back to the default, not silently disable self-healing.
+    for raw in ("nan", "inf", "-inf", "infinity"):
+        monkeypatch.setenv("JC_POOL_WATCHDOG_S", raw)
+        assert pool_mod._watchdog_interval_s() == 15.0
 
 
 def test_recycle_swaps_in_fresh_pool_and_closes_old(monkeypatch):

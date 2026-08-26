@@ -45,6 +45,15 @@ def _reset_analytics_pseudonym_salt():
     posthog_client.set_analytics_salt(None)
 
 
+@pytest.fixture(autouse=True)
+def _pool_watchdog_disabled_by_default(monkeypatch):
+    """open_pool auto-starts the pool-watchdog daemon thread, which would leak
+    a live thread (first probe at t=15s) across every host test that opens a
+    pool. Disable it directory-wide; watchdog tests opt back in by setting
+    JC_POOL_WATCHDOG_S themselves (their in-test setenv overrides this)."""
+    monkeypatch.setenv("JC_POOL_WATCHDOG_S", "0")
+
+
 def _dsn_for(db_name: str) -> str:
     # Swap ONLY dbname, preserving host/credentials/query-params/keyword-DSN
     # form — naive rpartition("/") string surgery breaks on DSNs that carry
