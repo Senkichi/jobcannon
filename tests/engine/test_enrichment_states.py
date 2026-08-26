@@ -17,6 +17,12 @@ data_enricher TIER_ORDER cross-check is NOT ported — data_enricher is
 unported (Flask-side, out of this task's manifest); everything else is pure.
 The grep-gate's scan root is repointed from job_finder/ to jobcannon/ (the
 equivalent ported-package root) — the only non-trivial adaptation here.
+
+F7 delta (private #1766): the `expired` tier and its membership in both
+predicate sets are ported (pure vocabulary). The state machine that *writes*
+`expired` — a cooldown-gated bounded retry against a hosted agentic
+enricher, plus its supporting columns/migration — is WAIVED: no hosted LLM
+caller or schema-migration authority exists in this engine yet.
 """
 
 from __future__ import annotations
@@ -49,6 +55,16 @@ def test_low_signal_terminal_is_strict_subset_of_terminal():
     assert LOW_SIGNAL_TERMINAL < TERMINAL
 
 
+def test_expired_is_terminal_and_low_signal():
+    """'expired' (bounded agentic_exhausted retry budget spent with no jd_full
+    recovered, in the private original) is the terminal end-state — the cascade
+    gave up exactly like agentic_exhausted, so it belongs in both predicate
+    sets. The writer for this transition is unported (see the module
+    docstring); this pins the vocabulary membership only."""
+    assert EnrichmentTier.EXPIRED in TERMINAL
+    assert EnrichmentTier.EXPIRED in LOW_SIGNAL_TERMINAL
+
+
 def test_terminal_has_members_that_are_not_low_signal():
     """serpapi / mid stop re-enrichment but are NOT low_signal — preserves the
     pre-refactor split exactly."""
@@ -58,11 +74,13 @@ def test_terminal_has_members_that_are_not_low_signal():
 
 
 def test_low_signal_terminal_matches_legacy_frozenset():
-    """LOW_SIGNAL_TERMINAL == the historical _TERMINAL_ENRICHMENT_TIERS literal."""
+    """LOW_SIGNAL_TERMINAL == the historical _TERMINAL_ENRICHMENT_TIERS literal,
+    plus 'expired' (a gave-up terminal exactly like agentic_exhausted)."""
     assert {t.value for t in LOW_SIGNAL_TERMINAL} == {
         "exhausted",
         "agentic",
         "agentic_exhausted",
+        "expired",
     }
 
 
@@ -74,6 +92,7 @@ def test_terminal_matches_canonical_skip_set():
         "agentic",
         "mid",
         "agentic_exhausted",
+        "expired",
         "low",
         "high",
     }
@@ -101,7 +120,9 @@ def test_resume_index_exhausted_is_terminal():
     assert resume_index("exhausted") == len(PIPELINE_ORDER) + 1
 
 
-@pytest.mark.parametrize("tier", ["agentic_exhausted", "low", "high", "some_future_tier"])
+@pytest.mark.parametrize(
+    "tier", ["agentic_exhausted", "expired", "low", "high", "some_future_tier"]
+)
 def test_resume_index_unknown_or_legacy_is_fail_closed(tier):
     """Legacy/unknown tiers are terminal: index >= len(PIPELINE_ORDER) so no tier runs."""
     assert resume_index(tier) >= len(PIPELINE_ORDER)
@@ -166,6 +187,36 @@ def test_all_enrichment_tier_sql_literals_are_enum_members():
         "Off-vocabulary enrichment_tier literal(s) found — every tier string written "
         f"in jobcannon/ must be an EnrichmentTier member: {offenders}"
     )
+
+
+def test_expired_is_not_yet_written_anywhere():
+    """Adding EXPIRED to the enum widens the grep gate above's allowlist — it no
+    longer flags a write of enrichment_tier = 'expired' as off-vocabulary. This
+    port carries EXPIRED as vocabulary only (module docstring): no writer exists
+    yet (private original's retry/requeue sweep needs a hosted LLM caller, #139).
+    Pin that claim positively so it's enforced, not just asserted in prose.
+
+    Positive control (run against this codebase at port time): the matched-literal
+    set is EMPTY, not just missing 'expired' — jobcannon/ has no
+    ``enrichment_tier = '...'``-shaped write of ANY kind yet (no hosted
+    persist_job_assessment-equivalent; see the waived ledger in this PR). That
+    means this assertion — like the grep gate above it, which is equally empty
+    today — is currently vacuously true. It is not a currently-active guard; it
+    is a tripwire for the day *any* raw-literal enrichment_tier write lands, the
+    same design the pre-existing gate already uses. Both tests are honest about
+    this in their assertions rather than papering over it with a non-empty
+    fixture, since the codebase genuinely has zero such writes right now.
+
+    DELETE this test the day a hosted writer for 'expired' lands (issue #139) —
+    at that point a real write is expected and this assertion becomes false by
+    design."""
+    literals: set[str] = set()
+    for py in _JOB_FINDER_ROOT.rglob("*.py"):
+        if "__pycache__" in py.parts or "migrations" in py.parts:
+            continue
+        text = py.read_text(encoding="utf-8")
+        literals.update(m.group(1) for m in _TIER_LITERAL_RE.finditer(text))
+    assert "expired" not in literals
 
 
 # ---------------------------------------------------------------------------
