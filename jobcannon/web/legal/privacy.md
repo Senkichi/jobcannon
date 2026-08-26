@@ -299,12 +299,13 @@ account. It never contains a password or a credential.
 **Sign-in cookies set by Clerk.** Once you use the sign-in pages, Clerk (§6.1) sets its
 own cookies on `jobcannon.dev` and its subdomains so that we can tell you are signed in:
 `__session`, which holds your short-lived, signed sign-in token and is refreshed by
-Clerk's script while a page is open, and `__client_uat`, a timestamp Clerk uses to know
-whether a sign-in is active. Clerk's own hosts (`accounts.jobcannon.dev`,
+Clerk's script while a page is open; `__client_uat`, a timestamp Clerk uses to know
+whether a sign-in is active; and `clerk_active_context`, which records which account is
+active in this browser. Clerk's own hosts (`accounts.jobcannon.dev`,
 `clerk.jobcannon.dev`) carry additional Clerk cookies, and the network that serves
-Clerk's hosted sign-in pages sets a Cloudflare bot-protection cookie (`__cf_bm`) there.
-These cookies are strictly necessary for sign-in, are described in Clerk's privacy
-policy, and are not used for advertising or tracking.
+Clerk's pages sets Cloudflare bot-protection cookies (`__cf_bm`, `_cfuvid`) on those
+hosts. These cookies are strictly necessary for sign-in, are described in Clerk's
+privacy policy, and are not used for advertising or tracking.
 
 
 We set no advertising or tracking cookies.
