@@ -203,3 +203,162 @@ def test_demo_page_footer_carries_the_agpl_source_link(app_client_unauthed, monk
     html = app_client_unauthed.get("/demo").get_data(as_text=True)
     assert 'href="https://github.com/Senkichi/jobcannon"' in html
     assert ">Source<" in html
+
+
+# ---------------------------------------------------------------------------
+# Export-your-data footer link (issue #94 follow-up: privacy policy §9
+# promises self-service export; jobcannon/web/export.py's GET /account/export
+# is the real route, this pins the footer link to it and gates the link on
+# g.clerk_user the same way jobcannon/web/__init__.py's before_request hook
+# already sets it — None on every public/unauthed path, the identity object
+# on every authed one).
+# ---------------------------------------------------------------------------
+
+
+def test_footer_export_link_present_when_authenticated(app_client_authed, monkeypatch):
+    from jobcannon.web import pages
+
+    _patch_connection_factory(monkeypatch)
+    monkeypatch.setattr(
+        pages,
+        "corpus_stats",
+        lambda conn: {"postings": 0, "companies": 0, "freshest_last_seen": None},
+    )
+    monkeypatch.setattr(pages, "get_profile", lambda conn, user_id: None)
+
+    html = app_client_authed.get("/").get_data(as_text=True)
+    assert 'href="/account/export"' in html
+    assert "Export your data" in html
+    assert 'href="/account/delete"' in html
+    assert "Delete account" in html
+
+
+def test_footer_export_link_absent_on_401_page(app_client_unauthed):
+    """The unauthed 401 page (error_401.html) extends base.html the same as
+    every authed/public page — g.clerk_user is None on this path (set BEFORE
+    the abort(401), jobcannon/web/__init__.py), so the export link must not
+    render even though the same footer markup renders the persistent,
+    unconditional Source link right next to it. "Delete account" is gated
+    the same way (issue #94 guard-hardening review): an anonymous visitor
+    who clicked it would only get a 401, and privacy policy §9 says the
+    footer link "takes you to a confirmation page", which requires being
+    signed in first."""
+    resp = app_client_unauthed.get("/")
+    html = resp.get_data(as_text=True)
+    assert resp.status_code == 401
+    assert 'href="/account/export"' not in html
+    assert "Export your data" not in html
+    assert 'href="/account/delete"' not in html
+    assert "Delete account" not in html
+
+
+def test_footer_export_link_absent_on_public_demo_page(app_client_unauthed, monkeypatch):
+    from jobcannon.web import pages
+
+    _patch_connection_factory(monkeypatch)
+    monkeypatch.setattr(
+        pages,
+        "corpus_stats",
+        lambda conn: {"postings": 0, "companies": 0, "freshest_last_seen": None},
+    )
+    monkeypatch.setattr(pages, "get_profile", lambda conn, user_id: None)
+
+    html = app_client_unauthed.get("/demo").get_data(as_text=True)
+    assert 'href="/account/export"' not in html
+    assert "Export your data" not in html
+    assert 'href="/account/delete"' not in html
+    assert "Delete account" not in html
+
+
+def test_401_error_page_links_to_privacy_and_terms(app_client_unauthed):
+    """base.html's footer links /privacy and /terms unconditionally, same as
+    the AGPL Source link — a pre-signup visitor who lands on the 401 page
+    (e.g. a bookmarked authed URL) must still be able to reach both before
+    deciding whether to sign up (issue #94 guard-hardening review)."""
+    html = app_client_unauthed.get("/").get_data(as_text=True)
+    assert 'href="/privacy"' in html
+    assert 'href="/terms"' in html
+
+
+# ---------------------------------------------------------------------------
+# Footer "Source" link pinned to RENDER_GIT_COMMIT (issue #94 follow-up:
+# Terms of Service §8's AGPL Corresponding Source offer). Both branches of
+# jobcannon.web._source_link_context: unset (local/most test doubles, falls
+# back to the repo root URL — already exercised incidentally by the two
+# existing footer-source-link tests above, pinned explicitly here) and set
+# (a real Render deploy, HOST_CONFIG.render_git_commit populated).
+# ---------------------------------------------------------------------------
+
+
+def test_footer_source_link_falls_back_to_repo_root_when_commit_unset():
+    from jobcannon.web import create_app
+
+    app = create_app(
+        config={
+            "TESTING": True,
+            "VERIFY_REQUEST": lambda req: None,
+            "WEBHOOK_SECRET": "whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3Q=",
+        }
+    )
+    assert app.config["HOST_CONFIG"].render_git_commit == ""
+
+    html = app.test_client().get("/demo").get_data(as_text=True)
+    assert 'href="https://github.com/Senkichi/jobcannon"' in html
+    assert 'href="https://github.com/Senkichi/jobcannon/tree/' not in html
+    assert 'title="commit' not in html
+
+
+def test_footer_source_link_pins_to_render_git_commit_when_set():
+    from jobcannon.host.config import HostConfig
+    from jobcannon.web import create_app
+
+    host_config = HostConfig(
+        database_url="",
+        secret_key="sk_flask_test",
+        clerk_sign_up_url="https://clerk.test/sign-up",
+        signup_wave="0",
+        render_git_commit="0123456789abcdef0123456789abcdef01234567",
+    )
+    app = create_app(
+        config={
+            "TESTING": True,
+            "VERIFY_REQUEST": lambda req: None,
+            "WEBHOOK_SECRET": "whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3Q=",
+            "HOST_CONFIG": host_config,
+        }
+    )
+
+    html = app.test_client().get("/demo").get_data(as_text=True)
+    assert (
+        'href="https://github.com/Senkichi/jobcannon/tree/'
+        '0123456789abcdef0123456789abcdef01234567"' in html
+    )
+    assert 'title="commit 0123456"' in html
+    assert ">Source<" in html
+
+
+def test_footer_source_link_tolerates_a_bare_host_config_double():
+    """Regression guard: the context processor runs on EVERY request,
+    including the 401 path exercised by
+    tests/host/test_empty_states.py's bare
+    `types.SimpleNamespace(clerk_sign_up_url="")` HOST_CONFIG double, which
+    predates the render_git_commit attribute entirely. A bare attribute
+    access (`host_config.render_git_commit`) would raise AttributeError on
+    every such request; getattr with a default must not."""
+    import types
+
+    from jobcannon.web import create_app
+
+    host_config = types.SimpleNamespace(clerk_sign_up_url="")
+    app = create_app(
+        config={
+            "TESTING": True,
+            "VERIFY_REQUEST": lambda req: None,
+            "WEBHOOK_SECRET": "whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3Q=",
+            "HOST_CONFIG": host_config,
+        }
+    )
+
+    resp = app.test_client().get("/")
+    assert resp.status_code == 401
+    assert 'href="https://github.com/Senkichi/jobcannon"' in resp.get_data(as_text=True)

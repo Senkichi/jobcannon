@@ -13,10 +13,11 @@
   {% endif %}
 </p>
 <p class="text-neutral-500 text-sm mb-6">
-  Analytics help us see which parts of the feed are useful. Declining
-  changes nothing about how the product works for you. See our
-  <a href="/privacy" class="underline hover:text-neutral-300">privacy page</a>
-  — policy text is still pending, so nothing there is ratified yet.
+  Analytics are off unless you allow them here. If you do, usage events are
+  sent to PostHog's EU endpoint under a pseudonymous identifier derived from
+  your account, not your raw account id. See our
+  <a href="/privacy" class="underline hover:text-neutral-300">privacy policy</a>
+  for the full detail.
 </p>
 <form method="post" action="/consent" class="flex gap-4">
   <button type="submit" name="choice" value="grant"
