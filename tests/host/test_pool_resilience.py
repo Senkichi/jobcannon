@@ -80,8 +80,10 @@ def test_open_pool_wires_bounded_connect_and_liveness_check(monkeypatch):
         def open(self) -> None:
             captured["opened"] = True
 
+    monkeypatch.setenv("JC_POOL_WATCHDOG_S", "0")  # wiring test — no supervisor thread
     monkeypatch.setattr(pool_mod, "ConnectionPool", FakePool)
     monkeypatch.setattr(pool_mod, "_pool", None)
+    monkeypatch.setattr(pool_mod, "_pool_args", None)
     pool_mod.open_pool("postgresql://u:p@192.0.2.9/db")
     try:
         assert conninfo_to_dict(captured["conninfo"])["connect_timeout"] == "10"
