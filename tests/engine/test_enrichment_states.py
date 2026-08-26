@@ -196,6 +196,17 @@ def test_expired_is_not_yet_written_anywhere():
     yet (private original's retry/requeue sweep needs a hosted LLM caller, #139).
     Pin that claim positively so it's enforced, not just asserted in prose.
 
+    Positive control (run against this codebase at port time): the matched-literal
+    set is EMPTY, not just missing 'expired' — jobcannon/ has no
+    ``enrichment_tier = '...'``-shaped write of ANY kind yet (no hosted
+    persist_job_assessment-equivalent; see the waived ledger in this PR). That
+    means this assertion — like the grep gate above it, which is equally empty
+    today — is currently vacuously true. It is not a currently-active guard; it
+    is a tripwire for the day *any* raw-literal enrichment_tier write lands, the
+    same design the pre-existing gate already uses. Both tests are honest about
+    this in their assertions rather than papering over it with a non-empty
+    fixture, since the codebase genuinely has zero such writes right now.
+
     DELETE this test the day a hosted writer for 'expired' lands (issue #139) —
     at that point a real write is expected and this assertion becomes false by
     design."""
