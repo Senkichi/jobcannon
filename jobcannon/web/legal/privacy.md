@@ -26,8 +26,11 @@ their own copy is a separate controller whose practices we do not govern.
 - We collect what you type into the profile picker, the account details Clerk sends us
   when you sign up, and which postings you save, dismiss, or click apply on.
 
-- We use one cookie, it lasts only for your browser session, and we set no advertising
-  or tracking cookies.
+- Our own application sets one cookie, and it lasts only for your browser session. Once
+  you use the sign-in pages, Clerk, our sign-in provider, sets its own strictly necessary
+  sign-in cookies (see §10). We set no advertising or tracking cookies.
+
+
 - **Analytics are off by default.** If you do not opt in, we record no behavioral
   events at all — not in our own database, and not with any analytics provider.
 
@@ -273,7 +276,9 @@ Article 27.
 
 ## 10. Cookies
 
-The Service sets **one cookie**: a session cookie.
+Our own application sets **one cookie**: a session cookie. Clerk, our sign-in provider,
+sets its own sign-in cookies once you use the sign-in pages; those are described at the
+end of this section.
 
 
 It lasts for your browser session and is cleared when your browser session ends. It is
@@ -291,7 +296,18 @@ browser. This matters because the cookie holds your picker selections before you
 account. It never contains a password or a credential.
 
 
-We set no advertising, tracking, or third-party cookies.
+**Sign-in cookies set by Clerk.** Once you use the sign-in pages, Clerk (§6.1) sets its
+own cookies on `jobcannon.dev` and its subdomains so that we can tell you are signed in:
+`__session`, which holds your short-lived, signed sign-in token and is refreshed by
+Clerk's script while a page is open, and `__client_uat`, a timestamp Clerk uses to know
+whether a sign-in is active. Clerk's own hosts (`accounts.jobcannon.dev`,
+`clerk.jobcannon.dev`) carry additional Clerk cookies, and the network that serves
+Clerk's hosted sign-in pages sets a Cloudflare bot-protection cookie (`__cf_bm`) there.
+These cookies are strictly necessary for sign-in, are described in Clerk's privacy
+policy, and are not used for advertising or tracking.
+
+
+We set no advertising or tracking cookies.
 
 
 ## 11. Security
