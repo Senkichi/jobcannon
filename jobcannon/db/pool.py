@@ -251,7 +251,10 @@ def open_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> None:
             return
         _pool_args = (dsn, min_size, max_size)
         _pool = _build_pool(dsn, min_size=min_size, max_size=max_size)
-    _ensure_watchdog()
+        # Under the lock: two racing open_pool calls must not each pass the
+        # is_alive check and start duplicate watchdog loops (each loop keeps
+        # its own rate-limit clock, so duplicates could recycle-thrash).
+        _ensure_watchdog()
 
 
 def close_pool() -> None:
