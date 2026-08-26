@@ -38,11 +38,13 @@ registry (see tests/host/test_scan_tasks.py) must account for this.
 from __future__ import annotations
 
 import datetime
+import logging
 import os
 
 import procrastinate
 
 from procrastinate import exceptions as procrastinate_exceptions
+from procrastinate import manager as procrastinate_manager
 
 from jobcannon.db._events import delete_expired_events
 from jobcannon.db._users import reap_unconverted_anon_users
@@ -57,6 +59,8 @@ from jobcannon.host.storage_check import check_db_storage
 app = procrastinate.App(
     connector=procrastinate.PsycopgConnector(conninfo=os.environ.get("DATABASE_URL", ""))
 )
+
+logger = logging.getLogger(__name__)
 
 # Default retention window for non-anon `events` rows (the events-retention
 # issue), overridable via the JC_EVENTS_RETENTION_DAYS env var. A named
@@ -161,6 +165,24 @@ def reclaim_orphaned_jobs(timestamp: int) -> dict:
     set this query selects), and every task on this queue (scan,
     expiry_check, stale_detect) recomputes from source rather than applying
     incremental side effects, so re-running an interrupted one is safe.
+
+    Retry is per-row isolated (issue #110): `retry_job_v2` flips the job back
+    to 'todo' but never touches `queueing_lock`, so an orphan can still be
+    holding the same `queueing_lock` as an unrelated job a *live* worker
+    already re-enqueued (e.g. `enqueue_due_scans` deferred a fresh
+    `scan:CollideCo` while the old one was stuck 'doing'). Retrying that
+    orphan then collides with `procrastinate_jobs_queueing_lock_idx_v1`
+    (`WHERE status = 'todo'`) and raises `procrastinate.exceptions.
+    UniqueViolation` — verified empirically against 3.9.0 via a direct
+    `procrastinate_retry_job_v2` probe. Left uncaught, one poisoned row would
+    abort the whole tick and starve every other orphan behind it, so each
+    retry gets its own try/except: a queueing_lock collision is logged and
+    skipped (the surviving 'todo' row already covers that work), everything
+    else re-raises. The other partial unique index on this table,
+    `procrastinate_jobs_lock_idx_v1` (`WHERE status = 'doing'`), can't fire
+    from this call site — `retry_job_v2`'s UPDATE only ever writes
+    status='todo' or 'failed' — so the constraint-name check is provably
+    exhaustive for this call, not a guess.
     """
     from jobcannon.db import connection_factory
 
@@ -169,11 +191,31 @@ def reclaim_orphaned_jobs(timestamp: int) -> dict:
         rows = raw.execute(
             "SELECT id FROM procrastinate_jobs WHERE status = 'doing' AND worker_id IS NULL"
         ).fetchall()
-    job_ids = [row["id"] for row in rows]
+    candidate_ids = [row["id"] for row in rows]
     retry_at = datetime.datetime.now(tz=datetime.timezone.utc)
-    for job_id in job_ids:
-        app.job_manager.retry_job_by_id(job_id, retry_at=retry_at)
-    return {"reclaimed": len(job_ids), "disposition": "retry", "job_ids": job_ids}
+    reclaimed_ids = []
+    skipped = 0
+    for job_id in candidate_ids:
+        try:
+            app.job_manager.retry_job_by_id(job_id, retry_at=retry_at)
+        except procrastinate_exceptions.UniqueViolation as exc:
+            if exc.constraint_name != procrastinate_manager.QUEUEING_LOCK_CONSTRAINT:
+                raise
+            skipped += 1
+            logger.warning(
+                "reclaim_orphaned_jobs: skipped job %s, queueing_lock %r already "
+                "held by a live 'todo' job",
+                job_id,
+                exc.queueing_lock,
+            )
+            continue
+        reclaimed_ids.append(job_id)
+    return {
+        "reclaimed": len(reclaimed_ids),
+        "skipped": skipped,
+        "disposition": "retry",
+        "job_ids": reclaimed_ids,
+    }
 
 
 @app.periodic(
