@@ -61,15 +61,31 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
-from jobcannon.engine.normalizers import body_mentions_any_stem, significant_tokens
+from jobcannon.engine.normalizers import (
+    TITLE_STOPWORDS,
+    body_mentions_any_stem,
+    significant_tokens,
+)
 
 # ---------------------------------------------------------------------------
 # Version watermark (D-8). BUMP whenever the rules below change such that an
 # already-stored jd_full could newly pass or newly fail. Bumping re-arms the
 # standing re-sweep so the whole corpus is re-validated under the new version.
 # Mirrors NORMALIZER_VERSION / TITLE_HYGIENE_VERSION.
+#
+# DIVERGENCE FROM PRIVATE NUMBERING (F7 port — declared per the port-record
+# convention, precedent jobcannon/db/_jd_full.py): the
+# private source's version integer for these same three rule changes is 5 (its
+# own #1813), 6 (#1892), 6-unchanged (#1814, merged behind an independent
+# #1892 bump already at 6). Public was already at 5 for an UNRELATED earlier
+# port (#124 / private 5fd8807e, config-shape hardening) before this port
+# landed, so the private integers are not reusable here without colliding with
+# that unrelated bump. What matters for the re-sweep contract is monotonic
+# strictly-increasing, not numeric parity with private — so this port bumps
+# 5 -> 8 (one increment per verdict-changing rule change: company_absent,
+# short-token company stems, AMBIGUOUS-widening signals).
 # ---------------------------------------------------------------------------
-JD_CONTENT_VERSION: int = 5
+JD_CONTENT_VERSION: int = 8
 
 # Reason codes emitted into jobs.unresolved_reasons (the m078 quarantine surface).
 # Distinct from I-13's ``jd_full_junk`` (the length/density gate, owned by
@@ -124,6 +140,19 @@ _HEAD_BLOCK_RE = re.compile(
 #: posting's body.
 _LISTING_COUNT_RE = re.compile(
     r"\b\d[\d,]{0,4}\+?\s+[\w\s,&/+.\-]{0,40}?\bjobs\s+in\b",
+    re.IGNORECASE,
+)
+
+#: A job-search RESULTS listing captured as a posting: "50,048 results",
+#: "1,239 results". The ``<count> results`` header is the structural tell of a
+#: search-results index page and does not occur in a single posting's body.
+#: Sister of ``_LISTING_COUNT_RE`` for the "results" phrasing observed on
+#: Eightfold/Capital One style result pages (issue #1814). Evaluated against
+#: the WHOLE body by ``classify_jd_content`` (not just ``_HEAD_WINDOW``) — a
+#: real JD does not contain a result-count block anywhere — and routed to
+#: AMBIGUOUS, not REJECT, so the tight REJECT set is unchanged.
+_LISTING_RESULTS_RE = re.compile(
+    r"\b\d[\d,]{0,4}\+?\s+results\b",
     re.IGNORECASE,
 )
 
@@ -269,6 +298,151 @@ def get_jd_full_thresholds(config: dict | None = None) -> tuple[int, bool]:
 _TRAILING_ELLIPSIS_RE = re.compile(r"(?:\.\.\.|…)\s*$")
 
 
+#: Generic organizational / legal / structural words that appear in company
+#: names but carry no employer-identifying signal — "Highgate Hotels Corporate
+#: Office" is grounded by "Highgate" / "Hotels", not by "Corporate" or
+#: "Office". Filtered out of the company-stem presence check (issue #1813) so a
+#: wrong-employer body that happens to mention "office" or "corporate" is not
+#: silently let through as CLEAN. The union with ``TITLE_STOPWORDS`` (imported
+#: from the shared normalizers module) covers seniority/level words that also
+#: leak into company names ("co", "contract", "manager").
+_COMPANY_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "corp",
+        "corporate",
+        "corporation",
+        "inc",
+        "llc",
+        "ltd",
+        "company",
+        "companies",
+        "group",
+        "holdings",
+        "partners",
+        "office",
+        "offices",
+        "enterprise",
+        "enterprises",
+        "global",
+        "international",
+        "national",
+        "services",
+        "service",
+        "solutions",
+        "technologies",
+        "technology",
+        "systems",
+        "digital",
+    }
+)
+
+
+#: Alphanumeric runs of *any* length — company tokenization needs the >= 2
+#: floor (issue #1892), not the title tokenizer's >= 3 floor, so this module
+#: derives its own runs and filters by length locally rather than reusing
+#: ``_SIGNIFICANT_TOKEN_RE`` (which is calibrated for the *title* contract's
+#: own false-positive budget and must not change).
+_COMPANY_ALNUM_RUN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _company_acronym(company: str | None) -> str | None:
+    """Punctuation-stripped acronym stem of *company*, or None when not needed.
+
+    The whole name with non-alphanumeric characters removed, lowercased
+    (``AT&T`` -> ``att``, ``C3 IoT`` -> ``c3iot``). Emitted only when the name
+    has a token the 3-char title tokenizer would drop (an alphanumeric run
+    shorter than 3) OR internal punctuation — i.e. the cases where the brand
+    identity survives neither ``significant_tokens`` nor the >= 2 company
+    floor. A purely generic name whose every run is >= 3 and has no
+    punctuation (e.g. "The Corporate Group") yields no acronym, so the skip
+    branch still fires for names with nothing distinctive to be absent.
+    """
+    if not company:
+        return None
+    low = company.lower()
+    compacted = re.sub(r"[^a-z0-9]", "", low)
+    if len(compacted) < 2:
+        return None
+    runs = _COMPANY_ALNUM_RUN_RE.findall(low)
+    has_short_run = any(len(r) < 3 for r in runs)
+    has_punct = bool(re.search(r"[^a-z0-9\s]", low))
+    if not (has_short_run or has_punct):
+        return None
+    if compacted in TITLE_STOPWORDS or compacted in _COMPANY_STOPWORDS:
+        return None
+    return compacted
+
+
+def _company_stems(company: str | None) -> list[str]:
+    """Distinctive tokens of *company* for the cross-field presence check.
+
+    Company-specific tokenization (issue #1892): alphanumeric runs of length
+    >= 2 (the title tokenizer's 3-char floor drops employer-identifying
+    initialisms like ``AT&T`` / ``C3`` / ``3M``), minus ``_COMPANY_STOPWORDS``
+    and the shared ``TITLE_STOPWORDS``, PLUS a punctuation-stripped acronym
+    stem (``AT&T`` -> ``att``) so initialisms survive tokenization.
+
+    Returns ``[]`` when the name yields no employer-identifying stem (e.g. a
+    generic "The Corporate Group"), in which case the company-absence check
+    is skipped — absence cannot be asserted of a name with no distinctive
+    stem, and the row stays eligible for CLEAN on the existing title-grounding
+    + shape + length evidence.
+    """
+    if not company:
+        return []
+    low = company.lower()
+    tokens = [t for t in _COMPANY_ALNUM_RUN_RE.findall(low) if len(t) >= 2]
+    stems = [t for t in tokens if t not in _COMPANY_STOPWORDS and t not in TITLE_STOPWORDS]
+    acronym = _company_acronym(company)
+    if acronym and acronym not in stems:
+        stems.append(acronym)
+    return stems
+
+
+#: Optional single non-alphanumeric separator between acronym characters, so
+#: ``AT&T`` in the body matches the stem ``att`` (``\ba[^a-z0-9]?t[^a-z0-9]?t\b``)
+#: while ``attend`` / ``attack`` do not (no trailing boundary after ``att``).
+_ACRONYM_SEP = r"[^a-z0-9]?"
+
+
+def _acronym_mentioned(acronym: str, body_lower: str) -> bool:
+    """True if the punctuation-stripped *acronym* appears in *body_lower*.
+
+    Matches the acronym with an optional single non-alphanumeric separator
+    between each character and word boundaries at both ends. This lets a body
+    that writes the brand with its original punctuation (``AT&T``) match the
+    punctuation-stripped stem (``att``) while a body that merely contains a
+    word starting with the same letters (``attend``) does not — the trailing
+    ``\\b`` requires the acronym to end at a word boundary.
+    """
+    if not acronym or not body_lower:
+        return False
+    pattern = r"\b" + _ACRONYM_SEP.join(re.escape(c) for c in acronym) + r"\b"
+    return re.search(pattern, body_lower) is not None
+
+
+def _body_mentions_company(company: str | None, body_lower: str) -> bool:
+    """True if *body_lower* mentions a distinctive stem of *company*.
+
+    The company-absence cross-field presence check (issues #1813 / #1892).
+    Short stems (< ``TITLE_STEM_LEN``) are matched with word boundaries so
+    they cannot substring-match inside unrelated words (``iot`` vs
+    ``patriot``); the punctuation-stripped acronym is matched with optional
+    non-alphanumeric separators between its characters so ``AT&T`` in the
+    body matches the stem ``att``. Stems >= ``TITLE_STEM_LEN`` keep the
+    unanchored prefix-substring tolerance that holds the cross-field
+    false-positive rate near zero.
+    """
+    acronym = _company_acronym(company)
+    stems = _company_stems(company)
+    if not stems:
+        return False
+    regular = [s for s in stems if s != acronym]
+    if regular and body_mentions_any_stem(regular, body_lower, boundary_short=True):
+        return True
+    return bool(acronym) and _acronym_mentioned(acronym, body_lower)
+
+
 # Leading non-whitespace characters that indicate a serialized JSON payload.
 _JSON_START_CHARS: frozenset[str] = frozenset({"{", "["})
 
@@ -349,8 +523,8 @@ def _dict_has_description_prose(obj: dict) -> bool:
     return False
 
 
-def _is_json_config_blob(jd_full: str) -> bool:
-    """Return True when *jd_full* is a leading JSON object with no real prose.
+def _is_json_config_blob(jd_full: str, *, anchored: bool = True) -> bool:
+    """Return True when *jd_full* is a dominating JSON object with no real prose.
 
     Eightfold/Netflix micro-sites sometimes serve the entire page body as a
     configuration JSON blob (theme, fonts, supported locales, and an empty
@@ -358,9 +532,14 @@ def _is_json_config_blob(jd_full: str) -> bool:
     actual job description, so the scorer sees a long "JD" with no signal.
 
     Detection is intentionally tight:
-      * the stripped body must start with ``{`` or ``[``;
-      * the leading JSON value must parse and dominate the body (so a JD that
-        merely contains an inline JSON block is not rejected);
+      * a JSON value (``{`` or ``[``) must be locatable — at the very start of
+        the stripped body when ``anchored`` (the write-gate / REJECT path), or
+        anywhere when ``anchored=False`` (the AMBIGUOUS-widening path, issue
+        #1814: the blob may be preceded by a short markdown heading / nav
+        markup wrapper);
+      * the JSON value must parse and dominate the body (so a JD that merely
+        contains an inline JSON block is not flagged — the prose dominates,
+        not the JSON);
       * for an object, there must be no description-like key (``description``,
         ``jobDescription``/``job_description``, or ``content``, matched
         case-/separator-insensitively via ``_normalize_json_key``) carrying a
@@ -372,12 +551,30 @@ def _is_json_config_blob(jd_full: str) -> bool:
         posting served as JSON with a genuine, substantial prose description
         is left for the normal contract; a short label/tag under a
         description-like key does not count as prose and does not escape.
+
+    ``anchored=True`` backs the deterministic REJECT in ``jd_content_reject``
+    (a leading config blob). ``anchored=False`` backs the AMBIGUOUS signal in
+    ``classify_jd_content`` for a config blob that is not the leading value —
+    it never adds a REJECT member and never fires at the write gate.
     """
     stripped = jd_full.strip()
-    if not stripped or stripped[0] not in _JSON_START_CHARS:
+    if not stripped:
         return False
+    if anchored:
+        if stripped[0] not in _JSON_START_CHARS:
+            return False
+        start = 0
+    else:
+        # First JSON start char anywhere — a config blob may be preceded by a
+        # short markdown heading / nav markup wrapper (issue #1814).
+        start = min(
+            (i for i in (stripped.find(c) for c in _JSON_START_CHARS) if i >= 0),
+            default=-1,
+        )
+        if start < 0:
+            return False
     try:
-        obj, end = json.JSONDecoder().raw_decode(stripped, 0)
+        obj, end = json.JSONDecoder().raw_decode(stripped, start)
     except json.JSONDecodeError:
         return False
 
@@ -386,6 +583,15 @@ def _is_json_config_blob(jd_full: str) -> bool:
     # pure serialized blob.
     if end < len(stripped) - 20:
         return False
+
+    if not anchored:
+        # The non-JSON leading prefix must be small relative to the JSON value
+        # so a real JD whose body happens to contain an inline JSON block
+        # (prose dominates, JSON is a minority) is not flagged. The JSON value
+        # itself must be the large majority of the body.
+        json_len = end - start
+        if start > len(stripped) // 5 or json_len < (len(stripped) * 4) // 5:
+            return False
 
     if not isinstance(obj, dict):
         if isinstance(obj, list):
@@ -490,10 +696,13 @@ def jd_content_reject(
     if _EXPIRED_RE.search(low):
         return (JD_EXPIRED, "expired_or_filled")
 
-    # Serialized configuration / markup with no prose job description.
-    # A long JSON blob (Eightfold/Netflix micro-site config, empty
+    # Serialized configuration / markup with no prose job description. A
+    # LEADING JSON blob (Eightfold/Netflix micro-site config, empty
     # ``job_description``) fools the length gate; reject at the content layer
-    # so the scorer never sees it.
+    # so the scorer never sees it. The un-anchored (non-leading) case is an
+    # AMBIGUOUS-widening signal handled by ``classify_jd_content`` (issue
+    # #1814) and deliberately NOT enforced here, so the REJECT set gains no
+    # new member and no new write-time rejection is introduced.
     if _is_json_config_blob(stripped):
         return (JD_OFFSITE, "json_config_blob")
 
@@ -503,6 +712,83 @@ def jd_content_reject(
         tokens = significant_tokens(title)
         if len(tokens) >= _XFIELD_MIN_TOKENS and not body_mentions_any_stem(tokens, low):
             return (JD_OFFSITE, "title_zero_overlap")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# AMBIGUOUS-widening signals (issue #1814). These do NOT join the REJECT set —
+# they route a previously-CLEAN body to the AMBIGUOUS->LLM adjudication lane so
+# the tight, high-precision REJECT set is unchanged and no new write-time
+# rejection is introduced at the storage gate. Each is a co-occurring-marker
+# signal (single-marker bodies must not trip) calibrated against the observed
+# non-posting captures that scored as real requisitions.
+# ---------------------------------------------------------------------------
+
+#: Career-explainer / SEO topic markers — a page whose title (or leading H1) is
+#: a question/topic about a role rather than the role itself. Observed on
+#: Randstad marketing/SEO pages (issue #1814): "what is a data scientist",
+#: "salary of a data scientist", "data scientist profile page", "data scientist
+#: career path", "how to become a data scientist". Checked against the job
+#: title AND the body (the H1 may live in the body when the title field is just
+#: the bare role name, e.g. ``randstad|data scientist``).
+_EXPLAINER_TOPIC_RE = re.compile(
+    r"\bwhat\s+is\s+(?:a|an)\b"
+    r"|\bsalary\s+of\s+(?:a|an)\b"
+    r"|\bprofile\s+page\b"
+    r"|\bcareer\s+path\b"
+    r"|\bhow\s+to\s+become\s+(?:a|an)\b",
+    re.IGNORECASE,
+)
+
+#: Aggregate-salary language — national/BLS statistics cited instead of an
+#: actual employer offer. The co-occurring marker that distinguishes an
+#: explainer/SEO page from a real requisition: a real JD states a role's
+#: duties/requirements and (when it lists comp) a specific offer, not a Bureau
+#: of Labor Statistics national median.
+_AGGREGATE_SALARY_RE = re.compile(
+    r"\bnational\s+average\b"
+    r"|\bBLS\b"
+    r"|\bmedian\s+salary\s+in\s+the\b",
+    re.IGNORECASE,
+)
+
+
+def _ambiguous_widening_signal(stripped: str, low: str, title: str | None) -> str | None:
+    """Return an AMBIGUOUS-widening signal tag, or None (issue #1814).
+
+    These signals route a body that the deterministic REJECT set lets through
+    — and that the plain shape+grounded+substantial test would otherwise CLEAN
+    — to the AMBIGUOUS->LLM adjudication lane. They NEVER join the REJECT set
+    and never fire at the write gate (``jd_content_reject`` does not call this).
+    Each is a co-occurring-marker signal so a single-marker body does not trip.
+
+    Returns one of ``"json_config_blob_unanchored"``, ``"listing_index"``,
+    ``"career_explainer_seo"`` — or None when no widening signal fires.
+    """
+    # A dominating JSON config blob that is NOT the leading value (a leading
+    # blob was already caught as REJECT by jd_content_reject). The blob may be
+    # preceded by a short markdown heading / nav markup wrapper.
+    if _is_json_config_blob(stripped, anchored=False):
+        return "json_config_blob_unanchored"
+
+    # A job-listing INDEX captured as a posting. ``_LISTING_COUNT_RE`` ("jobs
+    # in <place>") and ``_LISTING_RESULTS_RE`` ("<count> results") are both
+    # evaluated against the WHOLE body here — the head-only "jobs in" REJECT
+    # already fired in jd_content_reject, so this catches the same structural
+    # tell beyond the head window and the "results" phrasing anywhere. A real
+    # JD does not contain a result-count-plus-dozens-of-titles block anywhere.
+    if _LISTING_COUNT_RE.search(low) or _LISTING_RESULTS_RE.search(low):
+        return "listing_index"
+
+    # Career-explainer / SEO page: an explainer-shaped topic (in the title OR
+    # the body) co-occurring with aggregate-salary language. BOTH markers are
+    # required — a single-marker body must not trip (a real JD can mention a
+    # national average, and a real JD's body can quote a role's title in a
+    # "what is a ..." FAQ snippet, but not both at once).
+    if _EXPLAINER_TOPIC_RE.search(title or "") or _EXPLAINER_TOPIC_RE.search(low):
+        if _AGGREGATE_SALARY_RE.search(low):
+            return "career_explainer_seo"
+
     return None
 
 
@@ -540,9 +826,36 @@ def classify_jd_content(
     no title is available, the company name is the only fallback. Anything short
     of CLEAN — but not a deterministic REJECT — is AMBIGUOUS for the LLM tie-breaker.
 
-    ``company`` is currently unused by the deterministic split (kept in the
-    signature because the LLM adjudicator the AMBIGUOUS path feeds needs it, and
-    callers already have it to hand).
+    ``company`` additionally feeds a negative cross-field counter-signal
+    (issue #1813): a substantial, JD-shaped, title-grounded body that contains
+    NO distinctive stem of the listing's own company name is downgraded from
+    CLEAN to AMBIGUOUS (signal ``company_absent``) for LLM adjudication. This
+    catches the wrong-employer contamination case — a genuine Northrop Grumman
+    requisition attached to a Highgate Hotels listing shares the generic "Data
+    Scientist" title stems, so it passes every title-grounded CLEAN gate while
+    being about a different employer. It is deliberately NOT a hard REJECT
+    (the module's discipline: AMBIGUOUS is where uncertainty goes); company
+    *absence* is the cheap deterministic half, and a body that names a
+    *different* employer is left for the LLM to weigh. A company name with no
+    distinctive stem (e.g. "The Corporate Group") skips the check — absence
+    cannot be asserted of a name with nothing to be absent.
+
+    The company stem derivation is company-specific (issue #1892): it accepts
+    alphanumeric runs of length >= 2 (not the title tokenizer's >= 3 floor)
+    and additionally emits a punctuation-stripped acronym (``AT&T`` -> ``att``)
+    so initialisms survive tokenization, and short stems are matched with word
+    boundaries so they cannot substring-match inside unrelated words (``iot``
+    vs ``patriot``). The title contract's ``TITLE_STEM_LEN`` /
+    ``_SIGNIFICANT_TOKEN_RE`` are unchanged — they have their own calibrated
+    false-positive budget.
+
+    AMBIGUOUS-widening signals (issue #1814) run AFTER the deterministic REJECT
+    and BEFORE the CLEAN test. A body that the tight REJECT set lets through but
+    that carries a non-posting structural tell (a dominating non-leading JSON
+    config blob, a listing-index result-count block, or a career-explainer/SEO
+    page) is routed to AMBIGUOUS even when it would otherwise satisfy
+    shape+grounded+substantial — so the LLM adjudicator, not the scorer, decides.
+    These signals add no REJECT member and introduce no write-time rejection.
     """
     rej = jd_content_reject(jd_full, title, config)
     if rej is not None:
@@ -552,6 +865,11 @@ def classify_jd_content(
 
     stripped = jd_full.strip()
     low = stripped.lower()
+
+    widen = _ambiguous_widening_signal(stripped, low, title)
+    if widen is not None:
+        return JdContentResult(JdVerdict.AMBIGUOUS, None, widen)
+
     has_shape = has_recognizable_jd_shape(low)
     substantial = len(stripped) >= _CLEAN_MIN_CHARS
 
@@ -559,6 +877,18 @@ def classify_jd_content(
     grounded = body_mentions_any_stem(ground_tokens, low)
 
     if has_shape and grounded and substantial:
+        # Cross-field counter-signal (issues #1813 / #1892): a substantial,
+        # JD-shaped, title-grounded body that contains NO distinctive stem of
+        # the listing's own company is the wrong-employer contamination case.
+        # Downgrade to AMBIGUOUS for the LLM tie-breaker — never a hard REJECT
+        # (the module's discipline: AMBIGUOUS is where uncertainty goes).
+        # ``_body_mentions_company`` derives its own stems (alphanumeric runs
+        # >= 2 + a punctuation-stripped acronym) instead of reusing the title
+        # tokenizer's 3-char floor, so brands like AT&T / C3 / 3M are
+        # representable (#1892); short stems match with word boundaries so
+        # they cannot substring-match inside unrelated words.
+        if _company_stems(company) and not _body_mentions_company(company, low):
+            return JdContentResult(JdVerdict.AMBIGUOUS, None, "company_absent")
         return JdContentResult(JdVerdict.CLEAN, None, "shape+grounded")
     return JdContentResult(JdVerdict.AMBIGUOUS, None, "needs_adjudication")
 

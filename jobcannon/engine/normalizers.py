@@ -458,14 +458,35 @@ def significant_tokens(text: str) -> list[str]:
 
 
 def body_mentions_any_stem(
-    tokens: list[str], body_lower: str, stem_len: int = TITLE_STEM_LEN
+    tokens: list[str],
+    body_lower: str,
+    stem_len: int = TITLE_STEM_LEN,
+    *,
+    boundary_short: bool = False,
 ) -> bool:
     """True if any token's stem prefix appears in *body_lower*.
 
     ``body_lower`` MUST already be lowercased by the caller — both callers
     (``title_jd_mismatch`` and the jd-content contract) hold a lowercased body
     on the hot path, so this avoids re-scanning a multi-KB string per row.
+
+    When ``boundary_short`` is True, a token whose stem prefix is shorter than
+    ``stem_len`` is matched with a word-boundary regex (``\\b{stem}\\b``)
+    instead of an unanchored substring test. This keeps short
+    employer-identifying stems (e.g. ``c3``, ``iot``) in the jd-content
+    company-absence cross-field check from substring-matching inside
+    unrelated words (``patriot``, ``riot``) — issue #1892. Stems of length
+    >= ``stem_len`` keep the unanchored prefix-substring behaviour that
+    tolerates morphological variants and holds the cross-field false-positive
+    rate near zero.
     """
     if not tokens or not body_lower:
         return False
-    return any(tok[:stem_len] in body_lower for tok in tokens)
+    for tok in tokens:
+        stem = tok[:stem_len]
+        if boundary_short and len(stem) < stem_len:
+            if re.search(rf"\b{re.escape(stem)}\b", body_lower):
+                return True
+        elif stem in body_lower:
+            return True
+    return False
