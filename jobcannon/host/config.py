@@ -95,6 +95,19 @@ class HostConfig:
     clerk_webhook_signing_secret: str = field(
         default="", metadata={"env": "CLERK_WEBHOOK_SIGNING_SECRET", "declare_on": ("web",)}
     )
+    # Render auto-injects this on every deploy (render.com/docs/environment-
+    # variables#all-runtimes) — it is NOT a var this repo declares in
+    # render.yaml (declare_on=() exempts it from
+    # test_render_config.py's "every required var is declared" derivation,
+    # same reasoning as posthog_api_key/posthog_host above, which ARE
+    # declared but via their own dedicated test rather than the generic
+    # derivation). Empty locally and in any test double that doesn't set it
+    # (jobcannon.web's footer context processor falls back to the repo root
+    # URL via getattr's default, mirroring clerk_sign_up_url's tolerance of
+    # a bare SimpleNamespace double in tests/host/test_empty_states.py).
+    render_git_commit: str = field(
+        default="", metadata={"env": "RENDER_GIT_COMMIT", "declare_on": ()}
+    )
 
 
 def _put_int(mapping: dict, section: str, key: str, env_var: str) -> None:
@@ -149,4 +162,5 @@ def load_host_config() -> HostConfig:
         clerk_publishable_key=os.environ.get("CLERK_PUBLISHABLE_KEY", "").strip(),
         clerk_authorized_parties=os.environ.get("CLERK_AUTHORIZED_PARTIES", ""),
         clerk_webhook_signing_secret=os.environ.get("CLERK_WEBHOOK_SIGNING_SECRET", ""),
+        render_git_commit=os.environ.get("RENDER_GIT_COMMIT", ""),
     )
