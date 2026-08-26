@@ -214,3 +214,51 @@ def test_build_candidate_context_none_and_empty_values_render_placeholders():
         }
     )
     assert context.count("Not specified") == 6
+
+
+def test_fmt_list_drops_json_null_items_instead_of_literal_none_string():
+    """#28 item 3(a): a JSON null surviving inside a jsonb array used to
+    render as the literal string "None", indistinguishable from a real
+    skill. Unreachable via upsert_profile (list | None type hints only
+    ever pass a real list or None) -- this is a boundary-validation test,
+    passing the malformed shape directly since build_candidate_context
+    accepts any Mapping."""
+    from jobcannon.host.candidate_context import build_candidate_context
+
+    context = build_candidate_context({"skills": ["python", None, "sql"]})
+    assert "python, sql" in context
+    assert "None" not in context
+
+
+def test_fmt_list_all_none_items_render_not_specified():
+    from jobcannon.host.candidate_context import build_candidate_context
+
+    context = build_candidate_context({"skills": [None, None]})
+    assert "Skills: Not specified" in context
+    assert "None" not in context
+
+
+def test_fmt_list_drops_dict_items_within_a_list_shaped_column():
+    """#28 item 3(b), element form: a jsonb object as one element of an
+    otherwise list-shaped column used to `str()` into a Python dict repr
+    inside the prompt."""
+    from jobcannon.host.candidate_context import build_candidate_context
+
+    context = build_candidate_context(
+        {"target_titles": ["Data Engineer", {"level": "senior"}, "Platform Engineer"]}
+    )
+    assert "Data Engineer, Platform Engineer" in context
+    assert "{" not in context
+    assert "'level'" not in context
+
+
+def test_fmt_list_dict_as_whole_column_value_renders_not_specified():
+    """#28 item 3(b), whole-value form: a jsonb object where the column is
+    supposed to be list-shaped used to fall through to `_fmt_scalar` and
+    emit a Python dict repr instead of a placeholder."""
+    from jobcannon.host.candidate_context import build_candidate_context
+
+    context = build_candidate_context({"target_locations": {"city": "Remote"}})
+    assert "Target locations: Not specified" in context
+    assert "{" not in context
+    assert "city" not in context
