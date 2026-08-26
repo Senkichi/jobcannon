@@ -9,10 +9,11 @@ plain-text body; adds the authed save/dismiss/apply mutation routes
 (jobcannon.web.actions); adds the authed, read-only self-service data-export
 route (jobcannon.web.export) and the self-service account-deletion trigger
 (jobcannon.web.account), sharing one Clerk SDK client between the JWT
-verifier and that route's user-delete management call; adds the public,
-scaffold-only /privacy placeholder (jobcannon.web.privacy, issue #94) —
-ships the mechanism and a clearly-marked placeholder page, not the
-policy text)."""
+verifier and that route's user-delete management call; adds the public
+/privacy and /terms routes (jobcannon.web.legal, issue #94) serving the
+ratified privacy policy and terms of service, rendered once at import
+time from committed markdown under jobcannon/web/legal/ and gated by
+jobcannon.web.legal_guard against leftover drafting matter)."""
 
 from __future__ import annotations
 
@@ -26,7 +27,7 @@ from jobcannon.web.handoff import run_handoff_if_pending
 
 logger = logging.getLogger(__name__)
 
-PUBLIC_PATHS = frozenset({"/healthz", "/demo", "/start", "/preview", "/privacy"})
+PUBLIC_PATHS = frozenset({"/healthz", "/demo", "/start", "/preview", "/privacy", "/terms"})
 
 
 def _resolve_consent(identity) -> bool:
@@ -259,7 +260,7 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(account_bp)
     app.register_blueprint(export_bp)
 
-    from jobcannon.web.privacy import privacy_bp
+    from jobcannon.web.legal import legal_bp
 
-    app.register_blueprint(privacy_bp)
+    app.register_blueprint(legal_bp)
     return app

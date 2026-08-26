@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — Job Cannon{% endblock %}
+{% block content %}
+<style>
+  /* Tailwind's CDN build has no @apply and its preflight strips default
+     heading/table styling, so bare markdown output (h1-h3, p, table, a,
+     blockquote, hr) needs real CSS here rather than utility classes —
+     there is nothing to attach a class to inside the |safe-inserted HTML.
+     Scoped to .legal-prose so it never leaks onto the rest of the app. */
+  .legal-prose h1 { font-size: 1.5rem; font-weight: 600; color: #f5f5f5; margin-bottom: 0.75rem; }
+  .legal-prose h2 { font-size: 1.15rem; font-weight: 600; color: #e5e5e5; margin-top: 2rem; margin-bottom: 0.5rem; }
+  .legal-prose h3 { font-size: 1rem; font-weight: 600; color: #d4d4d4; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+  .legal-prose p, .legal-prose li { color: #a3a3a3; line-height: 1.65; margin-bottom: 0.75rem; }
+  .legal-prose ul, .legal-prose ol { margin-left: 1.25rem; margin-bottom: 0.75rem; }
+  .legal-prose strong { color: #e5e5e5; }
+  .legal-prose a { color: #d4d4d4; text-decoration: underline; }
+  .legal-prose a:hover { color: #f5f5f5; }
+  .legal-prose table { width: 100%; border-collapse: collapse; margin: 1rem 0 1.5rem; font-size: 0.875rem; }
+  .legal-prose th, .legal-prose td { border: 1px solid #404040; padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; }
+  .legal-prose th { background: #171717; color: #e5e5e5; }
+  .legal-prose blockquote { border-left: 3px solid #404040; padding-left: 1rem; color: #737373; margin: 1rem 0; }
+  .legal-prose hr { border: none; border-top: 1px solid #262626; margin: 2rem 0; }
+</style>
+<div class="legal-prose">
+{{ body_html|safe }}
+</div>
+{% endblock %}
