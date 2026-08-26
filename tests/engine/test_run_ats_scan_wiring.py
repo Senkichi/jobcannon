@@ -77,7 +77,6 @@ def _patch_all_phases():
         patch("jobcannon.engine.ats_scanner._run._run_homepage_discovery_phase"),
         patch("jobcannon.engine.ats_scanner._run._run_html_fallback_scan"),
         patch("jobcannon.engine.ats_scanner._run._score_new_ats_jobs"),
-        patch("jobcannon.engine.ats_scanner._run._log_ats_scan_run"),
     )
 
 
@@ -177,7 +176,6 @@ def test_run_ats_scan_wires_and_restores_prober_extensions():
             patch("jobcannon.engine.ats_scanner._run._run_homepage_discovery_phase"),
             patch("jobcannon.engine.ats_scanner._run._run_html_fallback_scan"),
             patch("jobcannon.engine.ats_scanner._run._score_new_ats_jobs"),
-            patch("jobcannon.engine.ats_scanner._run._log_ats_scan_run"),
         ):
             _run.run_ats_scan("fake.db", {"profile": {"target_titles": []}})
     finally:

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-16T00:40:02Z",
+  "generated_at": "2026-08-26T00:10:13Z",
   "roots": [
     "engine",
     "db",
@@ -292,15 +292,15 @@
       "root": "engine",
       "markers": [
         {
-          "line": 181,
+          "line": 180,
           "text": "The private original summed six per-candidate LLM owner-fit axes from"
         },
         {
-          "line": 252,
+          "line": 251,
           "text": "`threshold` is accepted for call-site parity with the private source but is"
         },
         {
-          "line": 394,
+          "line": 392,
           "text": "the private source beyond the ScanServices seam rewires below.\"\"\""
         }
       ]

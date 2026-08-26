@@ -1,10 +1,9 @@
-"""ATS scan orchestrator + Phase A/B/D/E helpers.
+"""ATS scan orchestrator + Phase A/B/D helpers.
 
 run_ats_scan is the public entry; the underscore-prefixed helpers below
-implement four of the five scan phases (A: ATS API, B: Homepage discovery,
-D: Scoring, E: Activity-feed log). Phase C (HTML fallback) lives in
-_run_html.py because its careers_scraper import-graph is independent of
-the ATS-API path.
+implement three of the four scan phases (A: ATS API, B: Homepage discovery,
+D: Scoring). Phase C (HTML fallback) lives in _run_html.py because its
+careers_scraper import-graph is independent of the ATS-API path.
 
 Each phase helper mutates `summary` (and where relevant, `all_new_job_keys`)
 in place to match the original inline-loop semantics. Refactoring to a
@@ -337,8 +336,7 @@ def run_ats_scan(
     5. Collect dedup_keys of newly-discovered jobs
     6. Score new jobs via scoring_orchestrator (v3.0 unified `run_scoring`)
     7. Insert company_scan_log row and update company.last_scanned_at
-    8. Insert activity feed entry into runs table
-    9. Return summary dict
+    8. Return summary dict
         db_path: Absolute path to the SQLite database file.
         config: Application config dict. Reads TESTING flag, profile section.
         company_names: Optional list of company names to scan. If None, scans all enabled companies.
@@ -553,9 +551,6 @@ def _run_ats_scan_body(
 
         # Phase D — Auto-scoring for newly discovered jobs across both phases.
         _score_new_ats_jobs(conn, config, all_new_job_keys, summary, score_deadline)
-
-        # Phase E — Activity feed entry so Dashboard Recent Activity shows 'ats_scan'.
-        _log_ats_scan_run(conn, summary)
 
     # --- Post-scan detection pass (mirrors pipeline_runner.py:280-291) ---
     # Runs after the connection_factory block has closed, so run_detection
@@ -1526,21 +1521,3 @@ def _score_new_ats_jobs(
 
     except Exception as score_err:
         logger.warning("ATS scan scoring failed (non-fatal): %s", score_err)
-
-
-def _log_ats_scan_run(conn: sqlite3.Connection, summary: dict) -> None:
-    """Phase E: insert one runs-table row so Dashboard Recent Activity shows the scan."""
-    try:
-        conn.execute(
-            "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored) VALUES (?, ?, ?, ?, ?)",
-            (
-                utc_now_iso(),
-                "ats_scan",
-                summary["jobs_discovered"],
-                summary["jobs_new"],
-                summary.get("scored", 0),
-            ),
-        )
-        conn.commit()
-    except Exception as runs_err:
-        logger.warning("Failed to insert ATS scan activity feed entry: %s", runs_err)
