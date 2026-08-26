@@ -119,6 +119,11 @@ services:
       # issue #19 tracks cleanup tooling for that state, not prevention of
       # it). Revisit alongside a plan upgrade if throughput at 1 proves
       # insufficient once corpus volume grows.
+      # 2026-08-26: re-confirmed at production corpus scale (deploy
+      # runbook §7 rulings): the full company rotation completes daily at
+      # concurrency 1 and the block report surfaced no platform-level
+      # signal arguing for a change — the binding constraint remains this
+      # plan's memory, so raise only alongside a plan re-evaluation.
       - key: JC_WORKER_CONCURRENCY
         value: "1"
       # Derived from jobcannon-db's diskSizeGB above (5GB * 1024) — must stay
