@@ -84,8 +84,9 @@ accepts connections, independent of the worker's migration authority. If the
 probe fails, `/healthz` returns 503 and Render's health checks replace the
 instance instead of leaving a wedged one in rotation (2026-08-26 incident:
 a web instance whose DB path died post-boot kept serving corpus-empty pages
-behind a static healthz indefinitely). Each 503 also logs the probe
-exception plus pool stats at WARNING. Clerk auth + consent resolution still
+behind a static healthz indefinitely). Each 503 also logs the failure
+detail (exception type, or the hang-timeout note when the probe never
+returned) plus pool stats at WARNING. Clerk auth + consent resolution still
 fail closed (no session / no consent) without a live schema, and routes that
 read/write `postings`, `companies`, etc. will error until the worker has
 applied both schemas; that window is normally seconds on a fresh deploy and

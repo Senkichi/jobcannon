@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 
 from flask import Flask, abort, current_app, g, render_template, request
 
@@ -153,27 +154,56 @@ def create_app(config: dict | None = None) -> Flask:
         connections, independent of the worker's migration authority. With
         no pool opened (tests, DB-free local runs) this stays the static
         OK it always was.
+
+        The wall-clock bound is a daemon-thread join, NOT the pool's
+        timeout= parameter: psycopg_pool's timeout bounds only connection
+        ACQUISITION — the checkout liveness probe (check=check_connection),
+        the SELECT 1, and the implicit commit are network round-trips with
+        no client-side bound, and on a silently blackholed socket (the
+        2026-08-26 mode: established TCP, peer gone, no RST) they hang
+        until TCP retransmission gives up. The thread bound converts that
+        hang into a 503 here regardless. Trade-off, accepted: a hung probe
+        thread strands its pooled connection — bounded in aggregate,
+        because once the pool is drained, later probes fail fast at the
+        2.0 s acquisition deadline instead, and a 503-ing instance is
+        being replaced by the platform anyway. tcp_user_timeout/keepalives
+        in the pool DSN defaults (jobcannon/db/pool.py) bound the same
+        dead-socket mode for every OTHER route at the TCP layer.
         """
         from jobcannon.db import pool as db_pool
 
         if not db_pool.is_open():
             return {"status": "ok", "db": "not-configured"}
-        try:
-            with db_pool.get_pool().connection(timeout=2.5) as conn:
-                conn.execute("SELECT 1")
-        except Exception as ex:
+        result: dict = {}
+
+        def _probe() -> None:
             try:
-                stats = db_pool.get_pool().get_stats()
-            except Exception:
-                stats = {}
-            logger.warning(
-                "healthz DB probe failed: %s: %s (pool stats: %s)",
-                type(ex).__name__,
-                ex,
-                stats,
-            )
-            return {"status": "unhealthy", "db": "unreachable"}, 503
-        return {"status": "ok", "db": "ok"}
+                # 2.0 s acquisition deadline inside the 2.5 s wall-clock
+                # bound, so acquisition-path failures surface with their
+                # real exception type instead of as a bare join timeout.
+                with db_pool.get_pool().connection(timeout=2.0) as conn:
+                    conn.execute("SELECT 1")
+                result["ok"] = True
+            except Exception as ex:
+                result["error"] = ex
+
+        probe = threading.Thread(target=_probe, daemon=True, name="healthz-db-probe")
+        probe.start()
+        probe.join(2.5)
+        if result.get("ok"):
+            return {"status": "ok", "db": "ok"}
+        ex = result.get("error")
+        detail = (
+            f"{type(ex).__name__}: {ex}"
+            if ex is not None
+            else "probe did not complete within 2.5s (hung socket or wedged pool)"
+        )
+        try:
+            stats = db_pool.get_pool().get_stats()
+        except Exception:
+            stats = {}
+        logger.warning("healthz DB probe failed: %s (pool stats: %s)", detail, stats)
+        return {"status": "unhealthy", "db": "unreachable"}, 503
 
     @app.errorhandler(401)
     def unauthorized(_error):
