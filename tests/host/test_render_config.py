@@ -45,6 +45,19 @@ def test_web_start_command_app_target_resolves():
     assert callable(getattr(mod, m.group(2).replace("()", "")))
 
 
+def test_web_start_command_preloads_app():
+    """--preload is load-bearing, not an optimization: the fork-safety hook
+    in jobcannon.db.pool is registered when the gunicorn master imports the
+    app pre-fork, and each worker rebuilds its own pool in the
+    after_in_child callback. Without the flag the topology is whatever the
+    platform happens to do (production preloaded even without it — 2026-08-26
+    incident); with it, the topology the hook assumes is pinned. Removing
+    this flag must be a deliberate act that also revisits the hook."""
+    bp = _blueprint()
+    web = next(s for s in bp["services"] if s["type"] == "web")
+    assert "--preload" in web["startCommand"].split()
+
+
 def test_health_check_path_is_a_registered_db_free_route():
     bp = _blueprint()
     web = next(s for s in bp["services"] if s["type"] == "web")
