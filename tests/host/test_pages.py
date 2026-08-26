@@ -229,6 +229,8 @@ def test_footer_export_link_present_when_authenticated(app_client_authed, monkey
     html = app_client_authed.get("/").get_data(as_text=True)
     assert 'href="/account/export"' in html
     assert "Export your data" in html
+    assert 'href="/account/delete"' in html
+    assert "Delete account" in html
 
 
 def test_footer_export_link_absent_on_401_page(app_client_unauthed):
@@ -236,12 +238,18 @@ def test_footer_export_link_absent_on_401_page(app_client_unauthed):
     every authed/public page — g.clerk_user is None on this path (set BEFORE
     the abort(401), jobcannon/web/__init__.py), so the export link must not
     render even though the same footer markup renders the persistent,
-    unconditional Source link right next to it."""
+    unconditional Source link right next to it. "Delete account" is gated
+    the same way (issue #94 guard-hardening review): an anonymous visitor
+    who clicked it would only get a 401, and privacy policy §9 says the
+    footer link "takes you to a confirmation page", which requires being
+    signed in first."""
     resp = app_client_unauthed.get("/")
     html = resp.get_data(as_text=True)
     assert resp.status_code == 401
     assert 'href="/account/export"' not in html
     assert "Export your data" not in html
+    assert 'href="/account/delete"' not in html
+    assert "Delete account" not in html
 
 
 def test_footer_export_link_absent_on_public_demo_page(app_client_unauthed, monkeypatch):
@@ -258,6 +266,18 @@ def test_footer_export_link_absent_on_public_demo_page(app_client_unauthed, monk
     html = app_client_unauthed.get("/demo").get_data(as_text=True)
     assert 'href="/account/export"' not in html
     assert "Export your data" not in html
+    assert 'href="/account/delete"' not in html
+    assert "Delete account" not in html
+
+
+def test_401_error_page_links_to_privacy_and_terms(app_client_unauthed):
+    """base.html's footer links /privacy and /terms unconditionally, same as
+    the AGPL Source link — a pre-signup visitor who lands on the 401 page
+    (e.g. a bookmarked authed URL) must still be able to reach both before
+    deciding whether to sign up (issue #94 guard-hardening review)."""
+    html = app_client_unauthed.get("/").get_data(as_text=True)
+    assert 'href="/privacy"' in html
+    assert 'href="/terms"' in html
 
 
 # ---------------------------------------------------------------------------
