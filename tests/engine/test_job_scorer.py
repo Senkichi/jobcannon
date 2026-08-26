@@ -24,6 +24,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from jobcannon.engine.classification import JobAssessment
+from jobcannon.engine.jd_content_contract import JD_CONTENT_VERSION, JdVerdict
 from jobcannon.engine.job_scorer import (
     JOB_ASSESSMENT_SCHEMA,
     ScoringResult,
@@ -211,6 +212,65 @@ class TestSkipPrecondition:
         result = score_job(job, mock_conn, config, _TEST_CTX, call_model=mock_call)
         assert result.status == "skipped"
         mock_call.assert_not_called()
+
+
+class TestJdContentGate:
+    """D5/#1742 (F7 port of private #1794): score_job defers a row whose
+    PERSISTED jd_content_verdict is not CLEAN and the adjudicator has not
+    vouched for it. ``_good_job()`` does not set jd_content_verdict, so
+    every other test in this file exercises the fail-open path unaffected
+    (no host on this engine stamps the column yet — see
+    ``scoring_precheck``'s docstring); these tests set it explicitly to
+    simulate a row a host's set_jd_full has already stamped.
+
+    The pure-function contract (every branch of ``scoring_precheck`` in
+    isolation) is pinned in ``tests/engine/test_scoring_precheck.py`` —
+    this class only covers the end-to-end wiring through score_job's
+    ScoringResult envelope."""
+
+    def test_content_rejected_non_adjudicated_row_awaits_adjudication(self, mock_conn, config):
+        """A row with a persisted AMBIGUOUS verdict and no adjudication stamp
+        is deferred -- no call_model invocation."""
+        job = _good_job()
+        job["jd_content_verdict"] = JdVerdict.AMBIGUOUS.value
+        mock_call = MagicMock()
+        result = score_job(job, mock_conn, config, _TEST_CTX, call_model=mock_call)
+        assert result.status == "skipped"
+        assert result.reason == "awaiting_jd_adjudication"
+        mock_call.assert_not_called()
+
+    def test_reject_verdict_non_adjudicated_row_awaits_adjudication(self, mock_conn, config):
+        """A row with a persisted REJECT verdict and no adjudication stamp is
+        deferred."""
+        job = _good_job()
+        job["jd_content_verdict"] = JdVerdict.REJECT.value
+        mock_call = MagicMock()
+        result = score_job(job, mock_conn, config, _TEST_CTX, call_model=mock_call)
+        assert result.status == "skipped"
+        assert result.reason == "awaiting_jd_adjudication"
+        mock_call.assert_not_called()
+
+    def test_adjudicated_non_clean_row_is_scored(self, mock_conn, config):
+        """A row with a persisted non-CLEAN verdict but a jd_adjudicated_version
+        stamped at-or-above JD_CONTENT_VERSION passes through -- the
+        adjudicator's LLM tie-break vouched for it, so the gate must not
+        re-block a row it already resolved."""
+        job = _good_job()
+        job["jd_content_verdict"] = JdVerdict.AMBIGUOUS.value
+        job["jd_adjudicated_version"] = JD_CONTENT_VERSION
+        mock_call = MagicMock(return_value=_good_model_result())
+        result = score_job(job, mock_conn, config, _TEST_CTX, call_model=mock_call)
+        assert result.status == "ok"
+        mock_call.assert_called_once()
+
+    def test_clean_verdict_row_is_scored(self, mock_conn, config):
+        """A row with a persisted CLEAN verdict is not gated."""
+        job = _good_job()
+        job["jd_content_verdict"] = JdVerdict.CLEAN.value
+        mock_call = MagicMock(return_value=_good_model_result())
+        result = score_job(job, mock_conn, config, _TEST_CTX, call_model=mock_call)
+        assert result.status == "ok"
+        mock_call.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

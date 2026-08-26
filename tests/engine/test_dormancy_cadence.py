@@ -347,6 +347,7 @@ def test_phase_a_count_matches_real_selection_query(db_with_dormancy_fixtures):
         summary,
         keys,
         workday_max_pages=None,
+        config=None,
     ):
         scanned_companies.append(company["name_raw"])
 
