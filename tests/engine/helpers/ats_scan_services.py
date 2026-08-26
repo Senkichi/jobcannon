@@ -164,7 +164,7 @@ def make_fake_upsert_job():
 
 
 def make_fake_set_jd_full():
-    def fake_set_jd_full(conn, dedup_key, jd_full, *, source=None):
+    def fake_set_jd_full(conn, dedup_key, jd_full, *, source=None, title=None, config=None):
         conn.execute("UPDATE jobs SET jd_full = ? WHERE dedup_key = ?", (jd_full, dedup_key))
         conn.commit()
 

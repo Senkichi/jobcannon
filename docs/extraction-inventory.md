@@ -3,6 +3,7 @@
 Classification of the private predecessor's modules for the hosted rebuild.
 PORT = extract as-is into the engine package. ADAPT = extract with named rework.
 HOLD = valuable, not in v1 (stays private until wired). DIES = not ported.
+OPEN = surfaced but unclassified; awaiting owner decision.
 
 | Module (private repo) | Verdict | Notes |
 |---|---|---|
@@ -23,6 +24,8 @@ HOLD = valuable, not in v1 (stays private until wired). DIES = not ported.
 | `job_finder/web/nightly_monitor/` | DIES | Owner-ops apparatus. Path verified as-is (8 files, 921 LOC). |
 | Resume pipeline (`resume_drafts`, tailoring, experience bank) | DIES | Owner-personal; PII-heavy (spec 3). `resume_drafts.py`, `resume_tailor.py`, `experience_bank.py` all confirmed under `job_finder/web/`. |
 | Process lifecycle (`_takeover`, `_pidfile`, supervisor, tray) | DIES | Single-instance desktop concerns; meaningless hosted. `_takeover.py`, `_pidfile.py`, `supervisor.py` confirmed under `job_finder/web/`; `tray.py` is top-level (`job_finder/tray.py`), not under `web/`. |
+| `job_finder/scoring/` (`JobScorer`, legacy pre-v3.0 scorer) | OPEN | 2 files, 200 LOC (verified: `__init__.py` 1 LOC + `scorer.py` 199 LOC). Live import at `job_finder/web/pipeline_runner.py:24` (`from job_finder.scoring.scorer import JobScorer`, verified). Was below the 2026-07-16 appendix's 20-row cutoff, so it never got an independent verdict; it now appears there (see appendix below) at the same count as the row it displaced. **OPEN - owner classification pending (F7 2026-08-26).** |
+| `job_finder/db/_company_state.py` | OPEN | New module, no entry in the private `.planning/ported-paths.json` R-8 disposition manifest (one-hop import gap: `job_finder/web/ats_scanner/_run.py` imports it, verified). Part of the WI company-merge/identity-reconciliation epic's scope decision - see public issue #138. **OPEN - owner classification pending (F7 2026-08-26).** |
 
 ## Coupling risks Phase 1 must plan around (verified by import inspection)
 
@@ -81,66 +84,66 @@ HOLD = valuable, not in v1 (stays private until wired). DIES = not ported.
 
 ## Verified listing appendix
 
-(Per-directory totals, generated 2026-07-16:)
+(Per-directory totals, generated 2026-08-26:)
 
 ```
-job_finder total: 108,916 LOC across all *.py files (excl. __pycache__)
+job_finder total: 138,317 LOC across all *.py files (excl. __pycache__)
 
 Per-directory file counts (top 20 by file count):
-    153 job_finder/web/migrations
-    107 job_finder/web
+    181 job_finder/web/migrations
+    114 job_finder/web
      35 job_finder/web/ats_platforms
-     18 job_finder/db
-     16 job_finder
-     15 job_finder/web/careers_crawler
+     25 job_finder/db
+     17 job_finder
+     16 job_finder/web/careers_crawler
      15 job_finder/web/blueprints
-     12 job_finder/web/providers
-     12 job_finder/web/autoheal
      12 job_finder/parsers
-      9 job_finder/web/scheduler
+     12 job_finder/web/autoheal
+     12 job_finder/web/nightly_monitor
+     12 job_finder/web/providers
+     11 job_finder/web/scheduler
       9 job_finder/sources
       8 job_finder/web/onboarding
-      8 job_finder/web/nightly_monitor
-      7 job_finder/web/pipeline_detector
       7 job_finder/web/ats_scanner
-      5 job_finder/scripts
+      7 job_finder/web/pipeline_detector
       5 job_finder/eval
+      5 job_finder/scripts
       3 job_finder/web/scoring_prompts/variants
-      2 job_finder/web/scoring_prompts
+      2 job_finder/scoring
 
 Per-directory LOC totals (dirs named in the classification table above;
 job_finder/web is recursive - it includes ats_platforms, ats_scanner,
 careers_crawler, nightly_monitor, blueprints, migrations, etc. as
 subdirectories, so its total is not additive with the others below it):
-  job_finder/web                      89,563 LOC
-  job_finder/web/ats_platforms         7,131 LOC
-  job_finder/db                        5,149 LOC
-  job_finder/web/careers_crawler       4,610 LOC
+  job_finder/web                     114,228 LOC
+  job_finder/web/ats_platforms         7,123 LOC
+  job_finder/db                        8,059 LOC
+  job_finder/web/careers_crawler       5,469 LOC
   job_finder/parsers                   3,465 LOC
-  job_finder/web/ats_scanner           2,845 LOC
-  job_finder/sources                   2,804 LOC
-  job_finder/web/nightly_monitor         921 LOC
+  job_finder/web/ats_scanner           3,533 LOC
+  job_finder/sources                   3,201 LOC
+  job_finder/web/nightly_monitor       5,526 LOC
   job_finder/models.py                   117 LOC (single file)
 
 Top 20 largest individual modules (job_finder/*.py, excl. __pycache__):
-   1969 job_finder/web/onboarding/blueprint.py
-   1933 job_finder/web/blueprints/jobs.py
-   1892 job_finder/web/ats_prober.py
-   1531 job_finder/web/homepage_discoverer.py
-   1492 job_finder/web/scheduler/_runners.py
-   1448 job_finder/web/ats_scanner/_run.py
-   1269 job_finder/web/data_enricher.py
-   1230 job_finder/web/scheduler/_jobs.py
-   1178 job_finder/sources/portal_search_source.py
-   1170 job_finder/web/ingestion_runner.py
-   1136 job_finder/web/resume_grounding.py
-   1134 job_finder/db/_jobs.py
-   1119 job_finder/web/model_provider.py
-   1113 job_finder/__main__.py
-   1092 job_finder/web/expiry_checker.py
-   1086 job_finder/demo_data.py
-   1084 job_finder/web/claude_client.py
-   1060 job_finder/web/blueprints/companies.py
-   1004 job_finder/web/resume_review.py
-    982 job_finder/web/enrichment_tiers.py
+   2309 job_finder/web/nightly_monitor/_morning.py
+   2255 job_finder/web/onboarding/blueprint.py
+   2153 job_finder/web/scheduler/_runners.py
+   2147 job_finder/web/blueprints/jobs.py
+   2088 job_finder/web/ai_career_navigator.py
+   2081 job_finder/web/scheduler/_jobs.py
+   2053 job_finder/web/ats_scanner/_run.py
+   1898 job_finder/web/ats_prober.py
+   1890 job_finder/web/company_dedup.py
+   1862 job_finder/web/supervisor.py
+   1612 job_finder/web/data_enricher.py
+   1592 job_finder/config.py
+   1535 job_finder/web/homepage_discoverer.py
+   1410 job_finder/web/model_provider.py
+   1402 job_finder/web/ingestion_runner.py
+   1352 job_finder/sources/portal_search_source.py
+   1346 job_finder/__main__.py
+   1292 job_finder/web/claude_client.py
+   1275 job_finder/db/_jobs.py
+   1175 job_finder/web/enrichment_tiers.py
 ```
