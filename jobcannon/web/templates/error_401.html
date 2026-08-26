@@ -15,16 +15,22 @@
 {% block clerk_after_load %}
   // This host landed on the 401 page after a hosted Account Portal
   // redirect, but clerk-js above may have just set/refreshed __session on
-  // THIS host (issue #149). If Clerk now sees a live session, reload once
-  // so the next request carries __session and clears the 401 — guarded by
-  // sessionStorage (skip within 30s of the last attempt) so an azp/config
-  // mistake can never turn this into a reload loop.
+  // THIS host (issue #149). If Clerk now sees a live session, reload so
+  // the next request carries __session and clears the 401. Bounded two
+  // ways via sessionStorage: at most one attempt per 30s, and at most
+  // MAX_RELOADS attempts per tab session — so an azp/JWT-key/config
+  // mistake (server keeps rejecting a token clerk-js considers live)
+  // degrades to a static 401 page instead of a slow reload loop.
   if (window.Clerk.session) {
-    var RELOAD_KEY = 'jc_clerk_401_reload_at';
-    var lastReload = Number(sessionStorage.getItem(RELOAD_KEY) || 0);
+    var RELOAD_AT_KEY = 'jc_clerk_401_reload_at';
+    var RELOAD_COUNT_KEY = 'jc_clerk_401_reload_count';
+    var MAX_RELOADS = 2;
+    var lastReload = Number(sessionStorage.getItem(RELOAD_AT_KEY) || 0);
+    var reloads = Number(sessionStorage.getItem(RELOAD_COUNT_KEY) || 0);
     var now = Date.now();
-    if (now - lastReload > 30000) {
-      sessionStorage.setItem(RELOAD_KEY, String(now));
+    if (reloads < MAX_RELOADS && now - lastReload > 30000) {
+      sessionStorage.setItem(RELOAD_AT_KEY, String(now));
+      sessionStorage.setItem(RELOAD_COUNT_KEY, String(reloads + 1));
       window.location.reload();
     }
   }

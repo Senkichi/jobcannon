@@ -160,6 +160,10 @@ def create_app(config: dict | None = None) -> Flask:
         try:
             clerk_frontend_api_host = frontend_api_host(clerk_publishable_key)
         except ValueError:
+            # Blank BOTH so the template's `{% if clerk_publishable_key %}`
+            # gate skips the loader entirely instead of emitting a script
+            # tag with an empty host ("https:///npm/...").
+            clerk_publishable_key = ""
             clerk_frontend_api_host = ""
 
     @app.context_processor

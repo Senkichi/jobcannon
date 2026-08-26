@@ -146,7 +146,7 @@ def load_host_config() -> HostConfig:
         signup_wave=os.environ.get("JC_SIGNUP_WAVE", "0"),
         clerk_secret_key=os.environ.get("CLERK_SECRET_KEY", ""),
         clerk_jwt_key=os.environ.get("CLERK_JWT_KEY", ""),
-        clerk_publishable_key=os.environ.get("CLERK_PUBLISHABLE_KEY", ""),
+        clerk_publishable_key=os.environ.get("CLERK_PUBLISHABLE_KEY", "").strip(),
         clerk_authorized_parties=os.environ.get("CLERK_AUTHORIZED_PARTIES", ""),
         clerk_webhook_signing_secret=os.environ.get("CLERK_WEBHOOK_SIGNING_SECRET", ""),
     )

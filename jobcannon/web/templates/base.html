@@ -16,11 +16,13 @@
   <script>
     window.addEventListener('load', async function () {
       if (!window.Clerk) return;
-      // Reads the shared __client_uat cookie, talks to FAPI with the
-      // __client cookie, and sets/refreshes __session on THIS host — the
-      // mechanism that completes Clerk's cross-domain handshake after the
-      // hosted Account Portal sign-in redirect (issue #149). Also keeps
-      // the short-lived session JWT fresh while a tab stays open.
+      // clerk-js makes a credentialed call to the Frontend API host
+      // (clerk.<domain>); the browser attaches the __client/__client_uat
+      // cookies set on that host, FAPI returns the session token, and
+      // clerk-js writes it as __session on THIS host — the mechanism that
+      // completes Clerk's cross-domain handshake after the hosted Account
+      // Portal sign-in redirect (issue #149). Also keeps the short-lived
+      // session JWT fresh while a tab stays open.
       await window.Clerk.load();
       {% block clerk_after_load %}{% endblock %}
     });
