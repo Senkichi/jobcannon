@@ -258,9 +258,10 @@ def derive_classification(
             ingestion-time scam/exclusion detection flagged this row.
         enrichment_tier: value of jobs.enrichment_tier ('free' | 'ddg' | 'low'
             | 'serpapi' | 'mid' | 'exhausted' | 'agentic' | 'agentic_exhausted'
-            | None). Only terminal tiers (those in _TERMINAL_ENRICHMENT_TIERS:
-            'exhausted', 'agentic', 'agentic_exhausted') participate in the
-            low_signal rule; other tiers are still re-enrichment candidates.
+            | 'expired' | None). Only terminal tiers (those in
+            _TERMINAL_ENRICHMENT_TIERS: 'exhausted', 'agentic',
+            'agentic_exhausted', 'expired') participate in the low_signal rule;
+            other tiers are still re-enrichment candidates.
         jd_full_length: character length of jobs.jd_full (0 when NULL).
         low_signal_threshold: jd_full_length below this triggers low_signal
             when enrichment is exhausted. Configurable via

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-26T22:23:20Z",
+  "generated_at": "2026-08-26T22:24:50Z",
   "roots": [
     "engine",
     "db",
@@ -372,6 +372,24 @@
         {
           "line": 44,
           "text": "the cross-copy parity assertions in the private repo's"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/enrichment_states.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 26,
+          "text": "kept separate. ``expired`` belongs in this set deliberately: in the private"
+        },
+        {
+          "line": 27,
+          "text": "original it is reached only after a bounded agentic-exhausted retry budget is"
+        },
+        {
+          "line": 56,
+          "text": "private original: an AGENTIC_EXHAUSTED row that spent its bounded retry budget"
         }
       ]
     },
