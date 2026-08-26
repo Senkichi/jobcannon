@@ -1,0 +1,109 @@
+{# One posting row. Included once per entry ({"row": ..., "chips": ...}) by
+   _feed_list.html, which is itself shared by /preview, /, and /demo. The
+   save/dismiss/apply controls below render only when the caller passes
+   show_actions=True (the authenticated feed's own render, and the fragment
+   jobcannon/web/actions.py re-renders after a mutation) — /preview and
+   /demo entries carry no `saved` / `apply_url` keys and never set
+   show_actions, so this block is skipped there. Save and dismiss target
+   THIS row's own `data-posting-row` root with hx-swap="outerHTML" (never
+   204 — jobcannon/web/actions.py's fragment routes always return 200),
+   matching the accordion-row convention this codebase already uses
+   elsewhere. Apply is the one control that does NOT use hx-post/hx-swap —
+   see the comment at its markup below for why a real outbound <a href>
+   cannot also carry an htmx AJAX trigger on the same click.
+
+   The "signals still computing" marker below is keyed on
+   entry.row.structural_axes being NULL — a real, transient state (the
+   structural-axes batch caps at 500 rows per scan tick) rather than on
+   entry.chips being empty: why_chips() returns salary/title-overlap chips
+   independently of structural_axes, so a row can have real chips AND still
+   be missing its axis-derived signals. Rendering the marker only when chips
+   is empty would silently hide that gap whenever another chip happened to
+   be present; keying it on the actual NULL column instead means the axis
+   absence is never hidden and never backfilled with a fabricated value.
+   Single-sourced here (not in jobcannon/web/pages.py or
+   jobcannon/web/onboarding.py) so both consuming routes render it
+   identically. This marker branch emits no event of any kind — per-row
+   posting_impression logging lives in the authed route in
+   jobcannon/web/pages.py, never in this template. #}
+<article class="border border-neutral-800 rounded-lg p-4 space-y-2" data-posting-row>
+  <div class="flex items-baseline justify-between gap-4">
+    <h2 class="text-lg font-medium text-neutral-100">{{ entry.row.title }}</h2>
+    {% if entry.row.workplace_type %}
+      <span class="text-xs uppercase tracking-wide text-neutral-500">{{ entry.row.workplace_type }}</span>
+    {% endif %}
+  </div>
+  <p class="text-sm text-neutral-400">
+    {{ entry.row.company }}
+    {%- if entry.row.location %} &middot; {{ entry.row.location }}{% endif %}
+  </p>
+  {% if entry.row.salary_min or entry.row.salary_max %}
+    <p class="text-sm text-neutral-400">
+      {%- if entry.row.salary_currency and entry.row.salary_currency != "UNKNOWN" %}{{ entry.row.salary_currency }}{% endif %}
+      {%- if entry.row.salary_min %} {{ entry.row.salary_min }}{% endif %}
+      {%- if entry.row.salary_max %}&ndash;{{ entry.row.salary_max }}{% endif %}
+      {%- if entry.row.salary_period and entry.row.salary_period != "unknown" %} / {{ entry.row.salary_period }}{% endif %}
+    </p>
+  {% endif %}
+  {% if entry.row.structural_axes is none %}
+    <p class="text-xs text-neutral-500 italic" data-signals-pending>signals still computing for this posting</p>
+  {% endif %}
+  {% if entry.chips %}
+    <ul class="flex flex-wrap gap-2 text-xs text-neutral-300" data-why-chips>
+      {% for chip in entry.chips %}
+        <li class="bg-neutral-900 border border-neutral-700 rounded-full px-2 py-1">{{ chip }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  {% if show_actions %}
+    <div class="flex gap-3 text-xs pt-1" data-posting-actions>
+      <button type="button"
+              hx-post="{{ url_for('actions.save', posting_id=entry.row.id) }}"
+              hx-target="closest [data-posting-row]"
+              hx-swap="outerHTML"
+              class="underline text-neutral-300"
+              data-action-save>
+        {{ "Saved" if entry.saved else "Save" }}
+      </button>
+      <button type="button"
+              hx-post="{{ url_for('actions.dismiss', posting_id=entry.row.id) }}"
+              hx-target="closest [data-posting-row]"
+              hx-swap="outerHTML"
+              class="underline text-neutral-300"
+              data-action-dismiss>
+        Dismiss
+      </button>
+      {% if entry.apply_url %}
+        {# Deliberately NOT hx-post: htmx installs its own click handler on
+           any element carrying hx-get/hx-post/etc and calls
+           evt.preventDefault() on it (this is htmx's documented behavior
+           for cancelling the browser's default action so its own AJAX
+           request can stand in for it) — on an <a href> that unconditionally
+           blocks the real navigation, so the outbound link would never
+           fire. hx-on:click is a plain addEventListener wrapper with no
+           such interception, so the browser's normal navigation (respecting
+           target="_blank", ctrl/middle-click, etc.) proceeds untouched while
+           a fire-and-forget POST still reaches the SAME mutation route
+           (mark_applied + posting_apply_clicked, both server-side and
+           unchanged) so applying is still recorded. keepalive keeps that
+           request alive past the click even though the tab's focus moves
+           away immediately. There is no row swap for this control: nothing
+           in this entry's rendered shape (jobcannon/web/feed_entries.py)
+           depends on apply state, so there is nothing for a swap to
+           update. #}
+        <a href="{{ entry.apply_url }}"
+           target="_blank"
+           rel="noopener noreferrer"
+           hx-on:click="fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true})"
+           class="underline text-neutral-300"
+           data-action-apply>
+          Apply
+        </a>
+      {% else %}
+        <span class="text-neutral-600" data-apply-degraded aria-disabled="true">
+          No application link available
+        </span>
+      {% endif %}
+    </div>
+  {% endif %}
+</article>

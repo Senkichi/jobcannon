@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Sign-in required — Job Cannon{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-3">Sign-in required</h1>
+<p class="text-neutral-400 mb-4">
+  This page needs a signed-in account.
+  <a href="/start" class="underline">Start with the picker</a> if you're new here.
+</p>
+{% if clerk_sign_up_url %}
+  <p class="text-neutral-400">
+    <a href="{{ clerk_sign_up_url }}" class="underline text-neutral-100">Sign in or sign up</a>
+  </p>
+{% endif %}
+{% endblock %}

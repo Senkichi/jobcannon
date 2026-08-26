@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Job Cannon{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+</head>
+<body class="bg-neutral-950 text-neutral-100 min-h-screen antialiased">
+  <header class="border-b border-neutral-800 px-6 py-4 flex items-center gap-6">
+    <span class="font-semibold text-lg tracking-tight">Job Cannon</span>
+    <nav class="flex gap-4 text-sm text-neutral-400">
+      <a href="/" class="hover:text-neutral-100">Feed</a>
+      <a href="/demo" class="hover:text-neutral-100">Demo</a>
+    </nav>
+  </header>
+  <main class="max-w-3xl mx-auto px-6 py-16">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="border-t border-neutral-800 px-6 py-4 text-sm text-neutral-500 flex gap-4">
+    <a href="/consent" class="hover:text-neutral-300">Analytics preferences</a>
+    <a href="/privacy" class="hover:text-neutral-300">Privacy</a>
+    <a href="/account/delete" class="hover:text-neutral-300">Delete account</a>
+    <a href="https://github.com/Senkichi/jobcannon" target="_blank" rel="noopener noreferrer" class="hover:text-neutral-300">Source</a>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Feed — Job Cannon{% endblock %}
+{% block content %}
+{% if not profile %}
+  <h1 class="text-2xl font-semibold mb-3">Your feed isn't wired up yet</h1>
+  <p class="text-neutral-400">Job Cannon is in its corpus-building phase. Profiles and the ranked feed arrive in the next release — the scanner is already filling the shared corpus below.</p>
+{% elif stats.postings == 0 %}
+  {% include "_corpus_empty.html" %}
+{% else %}
+  {# Live now that an authed Clerk user's profile actually gets written
+     (jobcannon/web/onboarding.py's picker, or the anon-to-authed handoff)
+     instead of always being None: the real, server-filtered feed list,
+     replacing the placeholder "live corpus" copy this branch rendered
+     before any authed-user profile writer existed. #}
+  <h1 class="text-2xl font-semibold mb-3">Your feed</h1>
+  <p class="text-sm text-neutral-500 mb-4" data-ordering-label>
+    {% if ordering.personalized %}
+      Ranked by {{ ordering.ranker_version }}.
+    {% else %}
+      Sorted by recency &mdash; personalized ranking is not live yet ({{ ordering.ranker_version }}).
+    {% endif %}
+  </p>
+  {% include "_feed_list.html" %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,9 @@
+{# Shared "corpus is warming up" copy — the corpus-empty designed empty
+   state. Included by both feed.html (authed, profile present, but
+   stats.postings == 0) and demo.html (public guest, same condition) so the
+   wording lives in exactly one place instead of being retyped per
+   consuming page. This is the "no postings scanned yet at all" state,
+   distinct from the zero-match state in _feed_list.html (a populated
+   corpus whose filters/selections match nothing). #}
+<h1 class="text-2xl font-semibold mb-3">The corpus is warming up</h1>
+<p class="text-neutral-400">No postings scanned yet. Once the first scan cycle completes, live counts appear here.</p>
