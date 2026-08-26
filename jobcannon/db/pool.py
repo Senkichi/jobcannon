@@ -205,8 +205,10 @@ def _pin_hostaddr(params: dict) -> None:
                 if info[0] == family:
                     params["hostaddr"] = info[4][0]
                     # pid included so the process topology is legible in
-                    # production logs: expect one line for the pre-fork
-                    # build plus one per post-fork rebuild.
+                    # production logs: under gunicorn --preload
+                    # (render.yaml), expect one line for the master's
+                    # pre-fork build plus one per worker's post-fork
+                    # rebuild.
                     logger.info(
                         "pinned DB hostaddr %s for %r (pid %d)",
                         info[4][0],
@@ -285,7 +287,10 @@ def close_pool() -> None:
 # Fork safety (gunicorn pre-fork model)
 #
 # 2026-08-26 incident, actual root cause: the web app — and with it this
-# pool — is built once BEFORE gunicorn forks its workers. A forked child
+# pool — is built once BEFORE gunicorn forks its workers (explicit via
+# --preload in render.yaml; production exhibited pre-fork load even before
+# the flag was added, so the flag pins the topology this hook assumes
+# rather than introducing it). A forked child
 # inherits the pool OBJECT but none of its THREADS: psycopg_pool's three
 # background workers and our watchdog simply do not exist in the child
 # (their Thread handles are stale husks that can still report is_alive()),
@@ -301,8 +306,11 @@ def close_pool() -> None:
 # The fix: after every fork, the child abandons the inherited pool and
 # builds its own. Abandon, never close — close() would write a Terminate
 # message into the socket the parent is still using. The inherited object
-# is stashed so it is never garbage-collected, for the same reason:
-# psycopg's Connection.__del__ also writes into the shared socket.
+# is stashed so it is never garbage-collected: psycopg 3.3.4 pid-guards
+# PGconn.__del__ (a child's GC won't finish a parent-created libpq
+# handle), but that guard is an implementation detail of the C wrapper,
+# not a contract — keeping the husk alive costs a few KB and removes the
+# dependency on it entirely.
 # ---------------------------------------------------------------------------
 
 _orphaned_prefork_pools: list = []
@@ -331,9 +339,23 @@ def _reinit_after_fork() -> None:
         logger.exception("post-fork pool rebuild failed in pid %d", os.getpid())
 
 
-_register_at_fork = getattr(os, "register_at_fork", None)
-if _register_at_fork is not None:  # POSIX only; nothing forks on Windows dev
-    _register_at_fork(after_in_child=_reinit_after_fork)
+def _install_fork_hook() -> bool:
+    """Register _reinit_after_fork for every child this process forks.
+
+    Runs at import time, so any process that imports this module before
+    forking — e.g. the gunicorn master under --preload — has the hook in
+    place. A process that never imports it pre-fork also cannot leak a
+    pool into its children, so the hook and the failure it fixes have
+    identical activation conditions.
+    """
+    register = getattr(os, "register_at_fork", None)
+    if register is None:  # POSIX only; nothing forks on Windows dev
+        return False
+    register(after_in_child=_reinit_after_fork)
+    return True
+
+
+_FORK_HOOK_INSTALLED = _install_fork_hook()
 
 
 def probe_pool(*, acquire_timeout: float = 2.0, wall_timeout: float = 2.5) -> str | None:

@@ -165,7 +165,10 @@ def test_watchdog_recycles_after_consecutive_failures_then_rate_limits(monkeypat
     loop.start()
     try:
         deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline and not built_cls.built:
+        # Wait for the recycle to COMPLETE (old pool close included): built
+        # is appended in __init__, before the recycler swaps and closes, so
+        # asserting closed_with the instant built is non-empty is a race.
+        while time.monotonic() < deadline and (not built_cls.built or not wedged.closed_with):
             time.sleep(0.01)
         assert len(built_cls.built) == 1  # K failures -> exactly one recycle
         assert wedged.closed_with == [5.0]

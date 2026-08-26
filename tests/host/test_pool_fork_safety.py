@@ -3,15 +3,22 @@ own (2026-08-26 root cause: the web app is built before gunicorn forks, so
 workers inherit a pool whose background threads don't exist in the child and
 whose connection socket is shared across processes).
 
-_reinit_after_fork is exercised directly — os.register_at_fork doesn't exist
-on Windows and actually forking is a POSIX-only concern; the hook body is
-plain code either way. Construction-level only: fakes, no live Postgres.
+_reinit_after_fork's BODY is exercised directly — os.register_at_fork doesn't
+exist on Windows and actually forking is a POSIX-only concern; the hook body
+is plain code either way. The WIRING is covered separately: the registration
+tests below prove _install_fork_hook binds _reinit_after_fork as the
+after_in_child callback (and did so at import on POSIX), and
+tests/host/test_render_config.py pins --preload in the web startCommand so
+the gunicorn master is the process that imports this module pre-fork.
+Construction-level only: fakes, no live Postgres.
 """
 
 import contextlib
+import os
 import threading
 import time
 
+import pytest
 from psycopg_pool import ConnectionPool
 
 from jobcannon.db import pool as pool_mod
@@ -64,6 +71,35 @@ def _isolate(monkeypatch, *, pool, args):
     monkeypatch.setattr(pool_mod, "_orphaned_prefork_pools", [])
 
 
+def test_install_fork_hook_wires_reinit_as_after_in_child(monkeypatch):
+    """The wiring half of the L3 story: registration must bind the real
+    _reinit_after_fork, not merely happen. Faked on both platforms so the
+    assertion runs on Windows dev too."""
+    calls: list = []
+    monkeypatch.setattr(
+        pool_mod.os,
+        "register_at_fork",
+        lambda **kwargs: calls.append(kwargs),
+        raising=False,
+    )
+    assert pool_mod._install_fork_hook() is True
+    assert calls == [{"after_in_child": pool_mod._reinit_after_fork}]
+
+
+def test_install_fork_hook_declines_without_register_at_fork(monkeypatch):
+    monkeypatch.delattr(pool_mod.os, "register_at_fork", raising=False)
+    assert pool_mod._install_fork_hook() is False
+
+
+def test_fork_hook_was_installed_at_import_on_posix():
+    """On any platform that can fork, importing the module must already have
+    registered the hook — a gunicorn master under --preload does nothing
+    beyond importing the app before it forks."""
+    if not hasattr(os, "register_at_fork"):
+        pytest.skip("platform cannot fork; hook install is a POSIX concern")
+    assert pool_mod._FORK_HOOK_INSTALLED is True
+
+
 def test_reinit_abandons_inherited_pool_and_rebuilds(monkeypatch):
     built_cls = _make_built_cls()
     inherited = _InheritedPool()
@@ -83,7 +119,8 @@ def test_reinit_abandons_inherited_pool_and_rebuilds(monkeypatch):
         assert pool_mod._pool_args == (_DSN, 2, 8)
         # The inherited pool is NEVER closed (close() writes a Terminate
         # message into the socket the parent still uses) and never becomes
-        # garbage (Connection.__del__ writes into the socket too).
+        # garbage (the stash removes any reliance on GC finalizer behavior
+        # around the shared socket).
         assert inherited.closed_with == []
         assert inherited in pool_mod._orphaned_prefork_pools
         # The child gets its own watchdog.
@@ -159,7 +196,12 @@ def test_reinit_then_watchdog_recycle_uses_child_machinery(monkeypatch):
     pool_mod._reinit_after_fork()
     try:
         deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline and len(WedgedBuilt.built) < 2:
+        # Wait for the recycle to COMPLETE (old pool close included), not
+        # merely for the replacement build to appear — asserting closed_with
+        # the instant built[1] exists races the recycler's close call.
+        while time.monotonic() < deadline and (
+            len(WedgedBuilt.built) < 2 or not WedgedBuilt.built[0].closed_with
+        ):
             time.sleep(0.01)
         # Build 1 = the post-fork rebuild; build 2 = the child watchdog's
         # recycle after K consecutive probe failures.
