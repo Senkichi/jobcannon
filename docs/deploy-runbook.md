@@ -30,6 +30,7 @@ Render dashboard). None of them are committed anywhere in this repo.
 
 | Env var | Service(s) | Source |
 |---|---|---|
+| `DATABASE_URL` | web | jobcannon-db → Connect → **External** connection string. Temporarily `sync: false` (2026-08-26 incident): the web service's private-network path to the DB blackholed connections (hung connects never reaching the server, surviving restarts and fresh deploys) while the worker and one-off containers connected cleanly, so web routes over the external endpoint until the platform path is fixed. The worker keeps the normal `fromDatabase` internal wiring. To restore: revert web's block in `render.yaml` to the worker's `fromDatabase` form and delete the dashboard value. |
 | `CLERK_SECRET_KEY` | web | Clerk dashboard → API Keys → Secret key |
 | `CLERK_JWT_KEY` | web | Clerk dashboard → API Keys → Advanced → JWT public key (enables networkless RS256 verification — required, see `jobcannon/web/auth.py`) |
 | `CLERK_AUTHORIZED_PARTIES` | web | Comma-separated list of the origins allowed to present a session token for this deploy (e.g. the Render web service's public URL). This is an operator-chosen value, not something copied verbatim from Clerk — it is Clerk's `azp` replay-defense check. |
