@@ -65,6 +65,14 @@ services:
         sync: false
       - key: CLERK_JWT_KEY
         sync: false
+      # Frontend (clerk-js) publishable key — issue #149. Loads clerk-js in
+      # the browser so it can complete Clerk's cross-domain handshake and
+      # set __session on this host; publishable keys are public by design
+      # (safe to ship to the browser) but still sync:false to keep every
+      # CLERK_* var's provenance in one place (the Clerk dashboard), not
+      # split between here and there.
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
       - key: CLERK_AUTHORIZED_PARTIES
         sync: false
       - key: CLERK_WEBHOOK_SIGNING_SECRET

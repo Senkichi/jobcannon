@@ -41,6 +41,8 @@ def _clerk_host_config(**overrides) -> HostConfig:
         signup_wave="0",
         clerk_secret_key="sk_test",
         clerk_jwt_key="jwt_test",
+        # base64("clerk.test$") == "Y2xlcmsudGVzdCQ=" -> FAPI host "clerk.test".
+        clerk_publishable_key="pk_test_Y2xlcmsudGVzdCQ=",
         clerk_authorized_parties="https://example.org",
         clerk_webhook_signing_secret="whsec_dGVzdA==",
     )
@@ -127,6 +129,34 @@ def test_create_app_raises_on_missing_flask_secret_key(monkeypatch):
         create_app(config={})
 
 
+def test_create_app_raises_on_missing_clerk_publishable_key(monkeypatch):
+    """Issue #149: a blank CLERK_PUBLISHABLE_KEY must fail fast at startup,
+    non-TESTING — the same shape as the other CLERK_*/SECRET_KEY fail-fasts
+    above. Silently booting without it would silently reproduce #149
+    (clerk-js never loads, so the hosted sign-in never hands this host a
+    session)."""
+    _stub_seams(monkeypatch, clerk_publishable_key="")
+    monkeypatch.setattr("clerk_backend_api.Clerk", _FakeClerk)
+
+    from jobcannon.web import create_app
+
+    with pytest.raises(RuntimeError, match="CLERK_PUBLISHABLE_KEY"):
+        create_app(config={})
+
+
+def test_create_app_raises_on_malformed_clerk_publishable_key(monkeypatch):
+    """A non-blank but malformed key (no pk_live_/pk_test_ prefix, bad
+    base64, missing '$' sentinel) must also fail fast rather than boot with
+    a broken/empty FAPI host that would load clerk-js against nothing."""
+    _stub_seams(monkeypatch, clerk_publishable_key="not-a-real-clerk-key")
+    monkeypatch.setattr("clerk_backend_api.Clerk", _FakeClerk)
+
+    from jobcannon.web import create_app
+
+    with pytest.raises(RuntimeError, match="CLERK_PUBLISHABLE_KEY"):
+        create_app(config={})
+
+
 def test_build_clerk_verifier_returns_callable_and_identity(monkeypatch):
     monkeypatch.setattr("clerk_backend_api.Clerk", _FakeClerk)
     host_config = _clerk_host_config()
@@ -184,6 +214,38 @@ def test_build_clerk_verifier_raises_on_blank_authorized_parties(monkeypatch):
 
     with pytest.raises(RuntimeError, match="CLERK_AUTHORIZED_PARTIES"):
         build_clerk_verifier(host_config)
+
+
+def test_build_clerk_verifier_normalizes_authorized_parties(monkeypatch):
+    """Issue #149 point 3: Render's CLERK_AUTHORIZED_PARTIES was set to
+    "https://jobcannon.dev/" (trailing slash), which would exact-match-fail
+    against every token's bare-origin `azp` claim
+    (TOKEN_INVALID_AUTHORIZED_PARTIES) even after the __session fix. Each
+    configured party must be trimmed of whitespace AND a trailing slash
+    before being handed to the SDK. The expected list below is a literal,
+    not re-derived via the same split/strip/rstrip the code under test
+    uses."""
+    captured = {}
+
+    class _CapturingFakeClerk(_FakeClerk):
+        def authenticate_request(self, request, options):
+            captured["authorized_parties"] = options.authorized_parties
+            return super().authenticate_request(request, options)
+
+    monkeypatch.setattr("clerk_backend_api.Clerk", _CapturingFakeClerk)
+    host_config = _clerk_host_config(
+        clerk_authorized_parties="https://jobcannon.dev/, https://www.jobcannon.dev"
+    )
+
+    from jobcannon.web.auth import build_clerk_verifier
+
+    verify = build_clerk_verifier(host_config)
+    verify(object())  # request is never inspected by the fake SDK
+
+    assert captured["authorized_parties"] == [
+        "https://jobcannon.dev",
+        "https://www.jobcannon.dev",
+    ]
 
 
 def test_build_clerk_verifier_raises_on_blank_jwt_key(monkeypatch):
