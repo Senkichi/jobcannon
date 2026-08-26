@@ -29,6 +29,18 @@ def test_connect_timeout_defaulted_and_dsn_fields_preserved(monkeypatch):
     assert out["dbname"] == "jobcannon"
 
 
+def test_application_name_defaulted_from_service_env(monkeypatch):
+    # IP-literal hosts skip resolution, isolating the attribution default.
+    monkeypatch.setenv("RENDER_SERVICE_NAME", "jobcannon-web")
+    out = conninfo_to_dict(_conninfo_with_defaults("postgresql://u:p@192.0.2.5/db"))
+    assert out["application_name"] == "jobcannon-web"
+
+    explicit = conninfo_to_dict(
+        _conninfo_with_defaults("postgresql://u:p@192.0.2.5/db?application_name=custom")
+    )
+    assert explicit["application_name"] == "custom"
+
+
 def test_explicit_connect_timeout_in_dsn_wins():
     # IP-literal host: exercises the timeout default without touching resolution.
     out = conninfo_to_dict(

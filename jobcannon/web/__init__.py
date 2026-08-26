@@ -17,6 +17,7 @@ policy text)."""
 from __future__ import annotations
 
 import logging
+import os
 
 from flask import Flask, abort, current_app, g, render_template, request
 
@@ -68,6 +69,14 @@ def create_app(config: dict | None = None) -> Flask:
     app.config.update(config or {})
 
     if not app.config.get("TESTING"):
+        # Deployed processes get INFO-level logging on stderr, mirroring
+        # jobcannon/worker/__main__.py. Without this only WARNING+ escapes
+        # via Python's lastResort handler — which hid the pool's boot-time
+        # "pinned DB hostaddr" INFO line (and every other INFO breadcrumb)
+        # from platform logs during the 2026-08-26 incident. Placed BEFORE
+        # init_engine_seams so pool-open logging is already visible.
+        # basicConfig is a no-op when the root logger has handlers already.
+        logging.basicConfig(level=os.environ.get("JC_LOG_LEVEL", "INFO"))
         from jobcannon.host import init_engine_seams, load_host_config
 
         host_config = app.config.get("HOST_CONFIG") or load_host_config()
@@ -131,7 +140,40 @@ def create_app(config: dict | None = None) -> Flask:
 
     @app.get("/healthz")
     def healthz():
-        return {"status": "ok"}
+        """Instance health for the platform's health checks (render.yaml
+        healthCheckPath). DB-aware by design — 2026-08-26 incident: the web
+        instance's DB path died post-boot while the process kept serving,
+        and a static healthz kept the wedged instance in rotation
+        indefinitely. A bounded pooled probe turns that state into a 503 so
+        the platform replaces the instance, and the failure log carries the
+        exception + pool stats the incident diagnosis had to go without.
+
+        SELECT 1 needs no schema, so first-boot ordering still holds: the
+        web service goes healthy as soon as the DATABASE accepts
+        connections, independent of the worker's migration authority. With
+        no pool opened (tests, DB-free local runs) this stays the static
+        OK it always was.
+        """
+        from jobcannon.db import pool as db_pool
+
+        if not db_pool.is_open():
+            return {"status": "ok", "db": "not-configured"}
+        try:
+            with db_pool.get_pool().connection(timeout=2.5) as conn:
+                conn.execute("SELECT 1")
+        except Exception as ex:
+            try:
+                stats = db_pool.get_pool().get_stats()
+            except Exception:
+                stats = {}
+            logger.warning(
+                "healthz DB probe failed: %s: %s (pool stats: %s)",
+                type(ex).__name__,
+                ex,
+                stats,
+            )
+            return {"status": "unhealthy", "db": "unreachable"}, 503
+        return {"status": "ok", "db": "ok"}
 
     @app.errorhandler(401)
     def unauthorized(_error):

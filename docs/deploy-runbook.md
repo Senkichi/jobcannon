@@ -77,14 +77,20 @@ On every subsequent boot, `run_migrations` logs nothing new (already-applied
 migrations are skipped) and the procrastinate probe finds
 `procrastinate_jobs` already present, so neither schema step re-runs.
 
-**The web service is DB-free until the worker has booted at least once.**
-`/healthz` returns a static dict with no DB touch, and Clerk auth + consent
-resolution both fail closed (no session / no consent) without a live schema
-— so `jobcannon-web` starts and serves `/healthz` green even if it wins the
-race against the worker's first boot. Routes that read/write `postings`,
-`companies`, etc. will error until the worker has applied both schemas; this
-window is normally seconds on a fresh deploy and is otherwise closed once
-the worker service reports healthy in the Render dashboard.
+**The web service needs the database, but not the schema, to report
+healthy.** `/healthz` runs a bounded (2.5 s) pooled `SELECT 1` — schema-free
+by design, so the web service goes green as soon as the database itself
+accepts connections, independent of the worker's migration authority. If the
+probe fails, `/healthz` returns 503 and Render's health checks replace the
+instance instead of leaving a wedged one in rotation (2026-08-26 incident:
+a web instance whose DB path died post-boot kept serving corpus-empty pages
+behind a static healthz indefinitely). Each 503 also logs the probe
+exception plus pool stats at WARNING. Clerk auth + consent resolution still
+fail closed (no session / no consent) without a live schema, and routes that
+read/write `postings`, `companies`, etc. will error until the worker has
+applied both schemas; that window is normally seconds on a fresh deploy and
+is otherwise closed once the worker service reports healthy in the Render
+dashboard.
 
 ## 4. Webhook endpoint registration
 
