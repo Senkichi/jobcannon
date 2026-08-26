@@ -165,7 +165,7 @@ def test_concurrent_deadline_mid_drain_success_branch_truncates_not_deadlocks(
 
     gate = threading.Event()
 
-    def fake_worker(company, _db, _tt, _te, _wmp, abort):
+    def fake_worker(company, _db, _tt, _te, _wmp, abort, _config=None):
         if abort is not None and abort.is_set():
             return _skipped_result(company)
         if company["name_raw"] == "Co0":
@@ -233,7 +233,7 @@ def test_concurrent_deadline_during_submit_truncates_not_deadlocks(tmp_path, mon
     gate = threading.Event()
     entered = threading.Semaphore(0)
 
-    def fake_worker(company, _db, _tt, _te, _wmp, abort):
+    def fake_worker(company, _db, _tt, _te, _wmp, abort, _config=None):
         if abort is not None and abort.is_set():
             return _skipped_result(company)
         entered.release()
@@ -293,7 +293,7 @@ def test_concurrent_deadline_mid_drain_except_branch_truncates_not_deadlocks(tmp
 
     gate = threading.Event()
 
-    def fake_worker(company, _db, _tt, _te, _wmp, abort):
+    def fake_worker(company, _db, _tt, _te, _wmp, abort, _config=None):
         if abort is not None and abort.is_set():
             return _skipped_result(company)
         if company["name_raw"] == "Co0":

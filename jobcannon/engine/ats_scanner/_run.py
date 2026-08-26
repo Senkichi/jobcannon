@@ -510,6 +510,7 @@ def _run_ats_scan_body(
             workday_max_pages,
             scan_concurrency,
             deadline_monotonic=scan_deadline,
+            config=config,
         )
 
         # Phase A2 — Playwright-class scan (iCIMS): JS-rendered, no-API boards.
@@ -595,6 +596,7 @@ def _scan_one_company_worker(
     title_exclusions: list,
     workday_max_pages: int | None,
     abort: threading.Event | None = None,
+    config: dict | None = None,
 ) -> _CompanyScanResult:
     """Worker task: scan one company with its own DB connection and return delta result.
 
@@ -615,6 +617,11 @@ def _scan_one_company_worker(
             tripped, so return a ``deadline_skipped`` no-op without opening a
             connection or touching the network. Not re-checked mid-scan — a
             worker that has started is always allowed to finish.
+        config: Forwarded to ``_upsert_one_ats_api_job``'s ``svc.set_jd_full``
+            call so a live config override (e.g. a jd_full content-threshold
+            tuning key) applies on this concurrent worker path the same as
+            every other jd_full writer, instead of silently falling back to
+            defaults.
 
     Returns:
         A _CompanyScanResult with the delta from this company scan.
@@ -712,6 +719,7 @@ def _scan_one_company_worker(
                     local_all_new_job_keys,
                     company_id=company_id,
                     ats_platform=platform,
+                    config=config,
                 )
 
                 jobs_new.extend(local_all_new_job_keys)
@@ -813,6 +821,7 @@ def _run_ats_api_scan(
     workday_max_pages: int | None = None,
     scan_concurrency: int = 1,
     deadline_monotonic: float | None = None,
+    config: dict | None = None,
 ) -> None:
     """Phase A: scan confirmed-hit companies (and retry-eligible errors) via ATS API.
 
@@ -820,6 +829,12 @@ def _run_ats_api_scan(
     computed once in ``run_ats_scan`` and shared across Phases A/A2/C. When
     set, the phase stops submitting new companies once ``time.monotonic()``
     passes it; in-flight workers are still drained and merged.
+
+    ``config`` is threaded through to ``set_jd_full``'s
+    ``classify_jd_content`` call at the ATS description promotion site (both
+    the serial and concurrent branches), so a live config override applies on
+    this path the same as every other ``jd_full`` writer, instead of silently
+    falling back to defaults.
     """
     # Query companies with confirmed ATS slug (hit) AND error companies eligible
     # for retry (past their retry_after backoff window). Gated by the
@@ -876,6 +891,7 @@ def _run_ats_api_scan(
                 summary,
                 all_new_job_keys,
                 workday_max_pages,
+                config=config,
             )
             if tracker is not None:
                 tracker.tick()
@@ -929,6 +945,7 @@ def _run_ats_api_scan(
                     title_exclusions,
                     workday_max_pages,
                     abort_scan,
+                    config,
                 )
                 future_to_company[future] = company
 
@@ -1034,6 +1051,7 @@ def _scan_one_company_via_ats_api(
     summary: dict,
     all_new_job_keys: list,
     workday_max_pages: int | None = None,
+    config: dict | None = None,
 ) -> None:
     """Scan a single company via its ATS API; upsert + log + retry-track."""
     company_id = company["id"]
@@ -1113,6 +1131,7 @@ def _scan_one_company_via_ats_api(
                     all_new_job_keys,
                     company_id=company_id,
                     ats_platform=platform,
+                    config=config,
                 )
 
         # Log company scan with skipped_title_filter count
@@ -1204,6 +1223,7 @@ def _upsert_one_ats_api_job(
     *,
     company_id: int | None = None,
     ats_platform: str | None = None,
+    config: dict | None = None,
 ) -> None:
     """Upsert a single ATS-API-discovered job; promote jd_full + comp_data_json on first-seen."""
     svc = get_services()
@@ -1317,6 +1337,8 @@ def _upsert_one_ats_api_job(
                         job.dedup_key,
                         clean_desc[: svc.jd_storage_max_chars],
                         source="ats_scanner_run",
+                        title=job.title,
+                        config=config,
                     )
             except Exception as e:
                 logger.warning(

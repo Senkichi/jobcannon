@@ -14,6 +14,7 @@ score_job-level tests exercise (added per PR #3 review finding 2).
 
 from __future__ import annotations
 
+from jobcannon.engine.jd_content_contract import JD_CONTENT_VERSION, JdVerdict
 from jobcannon.engine.job_scorer import scoring_precheck
 
 
@@ -78,6 +79,62 @@ class TestLocationGate:
             unresolved_reasons='["location_missing"]',
         )
         assert scoring_precheck(job) is None
+
+
+class TestJdContentGate:
+    """D5/#1742 (F7 port of private #1794): scoring_precheck defers a row whose
+    PERSISTED jd_content_verdict is not CLEAN and the adjudicator has not
+    vouched for it. The gate reads the column only — it never recomputes
+    classify_jd_content here (that cost belongs at a host's set_jd_full write
+    chokepoint). A NULL verdict (no host has stamped this row) fails OPEN."""
+
+    def test_clean_verdict_passes(self):
+        job = _base_job(jd_content_verdict=JdVerdict.CLEAN.value)
+        assert scoring_precheck(job) is None
+
+    def test_null_verdict_fails_open(self):
+        """No jd_content_verdict key at all (the common case on this engine
+        today, since no public jd_full writer stamps it yet) is NOT gated."""
+        job = _base_job()
+        assert "jd_content_verdict" not in job
+        assert scoring_precheck(job) is None
+
+    def test_ambiguous_verdict_non_adjudicated_gates(self):
+        job = _base_job(jd_content_verdict=JdVerdict.AMBIGUOUS.value)
+        assert scoring_precheck(job) == "awaiting_jd_adjudication"
+
+    def test_reject_verdict_non_adjudicated_gates(self):
+        job = _base_job(jd_content_verdict=JdVerdict.REJECT.value)
+        assert scoring_precheck(job) == "awaiting_jd_adjudication"
+
+    def test_adjudicated_non_clean_verdict_passes(self):
+        """jd_adjudicated_version stamped at-or-above the current contract
+        version means the adjudicator already vouched for this row — the
+        gate must not re-block a row it already resolved."""
+        job = _base_job(
+            jd_content_verdict=JdVerdict.AMBIGUOUS.value,
+            jd_adjudicated_version=JD_CONTENT_VERSION,
+        )
+        assert scoring_precheck(job) is None
+
+    def test_adjudicated_at_stale_version_still_gates(self):
+        """A jd_adjudicated_version below the CURRENT contract version does
+        not count as adjudicated — a contract-version bump re-arms the gate
+        for rows only an older contract version vouched for."""
+        job = _base_job(
+            jd_content_verdict=JdVerdict.REJECT.value,
+            jd_adjudicated_version=JD_CONTENT_VERSION - 1,
+        )
+        assert scoring_precheck(job) == "awaiting_jd_adjudication"
+
+    def test_non_int_adjudicated_version_treated_as_not_adjudicated(self):
+        """A malformed jd_adjudicated_version (e.g. a stringly-typed value
+        from a bad write path) fails safe: not treated as adjudicated."""
+        job = _base_job(
+            jd_content_verdict=JdVerdict.AMBIGUOUS.value,
+            jd_adjudicated_version="5",
+        )
+        assert scoring_precheck(job) == "awaiting_jd_adjudication"
 
 
 class TestMalformedJsonFailsSafe:
