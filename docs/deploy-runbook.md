@@ -143,6 +143,25 @@ Use the report to make two decisions:
 - **Static outbound IP:** decide whether a static IP add-on is
   warranted based on the platform-level block/error shares in the report.
 
+**Rulings (2026-08-26, production corpus):** both decisions were made
+against block reports over a multi-day window and a single-day window with
+the full company corpus rotating daily.
+
+- **Worker concurrency stays at 1.** The observed platform-level
+  error/block shares did not argue for a change in either direction, and
+  the full rotation completes comfortably within its daily window — the
+  binding constraint on raising concurrency is worker memory on the
+  current plan (see the `JC_WORKER_CONCURRENCY` comment in `render.yaml`),
+  not throughput or anti-bot pressure. Revisit alongside a plan
+  re-evaluation, not independently of one.
+- **Static outbound IP: not warranted at current posture.** The report
+  showed no egress-reputation signal that a dedicated IP would address.
+  Revisit only if scan health degrades in a way that implicates
+  shared-egress reputation specifically (per-platform block shares rising
+  without a corresponding code or corpus change). The underlying report
+  numbers live in the operator's private ops notes, deliberately not in
+  this repo.
+
 ## 8. Storage alert
 
 `db_storage_check` (a daily periodic on the worker, default `17 6 * * *`
