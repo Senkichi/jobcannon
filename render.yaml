@@ -46,18 +46,21 @@ services:
       # with whatever Python version(s) CI tests as that changes.
       - key: PYTHON_VERSION
         value: "3.13.5"
-      # 2026-08-26 incident: originally diagnosed as a platform network
-      # fault on the private DB path, so this was switched to sync:false
-      # with the endpoint managed via the dashboard/API. The real root
-      # cause turned out to be gunicorn pre-fork pool inheritance (fixed
-      # by the fork hook in jobcannon/db/pool.py + --preload above) — the
-      # endpoint was never the fault; both endpoints wedged identically.
-      # Kept sync:false through the fix's first deploy so recovery is
-      # attributable to one variable; restoring the worker's fromDatabase
-      # form below (and deleting the dashboard value) is the follow-up
-      # once the fix is proven live.
+      # Restored to the declarative fromDatabase form (mirroring the
+      # worker's) after the 2026-08-26 incident closed. History: the fault
+      # was originally misdiagnosed as a platform network problem on the
+      # private DB path, so this key spent the incident as sync:false with
+      # the endpoint managed via the dashboard/API. The real root cause
+      # was gunicorn pre-fork pool inheritance (fork hook in
+      # jobcannon/db/pool.py + --preload above; both endpoints wedged
+      # identically, so the endpoint was never the fault). The dashboard
+      # value was already the internal connection string — the same value
+      # this resolves to — so this change is config hygiene, not a
+      # behavior change.
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: jobcannon-db
+          property: connectionString
       - key: CLERK_SECRET_KEY
         sync: false
       - key: CLERK_JWT_KEY
