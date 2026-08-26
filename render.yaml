@@ -142,6 +142,22 @@ services:
       # against drift.
       - key: JC_DB_STORAGE_LIMIT_MB
         value: "5120"
+      # Pinned explicitly (issue #94 follow-up) so the retention windows
+      # the published privacy policy promises (§9: 365-day event retention,
+      # 30-day anonymous-user retention) are anchored in this committed
+      # config rather than jobcannon/host/tasks.py's os.environ.get(...)
+      # fallback defaults — a later code change to either default would
+      # otherwise silently drift the deployed value away from what the
+      # policy states, with no diff anywhere to catch it. Read by
+      # reap_old_events / reap_anon_users (jobcannon/host/tasks.py); neither
+      # is a HostConfig field (both read os.environ directly), so
+      # tests/host/test_render_config.py's generic HostConfig-derived
+      # required-var guard does not cover them — this comment is the
+      # traceability instead.
+      - key: JC_EVENTS_RETENTION_DAYS
+        value: "365"
+      - key: JC_ANON_RETENTION_DAYS
+        value: "30"
       # PostHog wiring parity with jobcannon-web: the worker builds its own
       # client through the same wiring.py seam (init_engine_seams is called
       # unconditionally from jobcannon/worker/__main__.py). Previously
