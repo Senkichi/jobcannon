@@ -27,6 +27,47 @@ carry threads into the child, so an inherited client's consumer is dead on
 arrival in every worker — capture() calls enqueue into a queue nothing
 drains, silently. See _install_posthog_fork_hook / _reinit_posthog_after_fork
 below.
+
+Verdict on jobcannon#132 ("does the inherited husk's own atexit(join) —
+registered by the SDK itself, never rebuilt, never unregistered — block a
+real worker's exit?"): NON-ISSUE. CPython's own
+os.register_at_fork(after_in_child=threading._after_fork), registered
+internally since 3.7, resets every non-current thread's join state AT FORK
+TIME — before the after_in_child hook above even runs — so the dead husk's
+Consumer.join() returns immediately rather than blocking. (The SDK's
+atexit-registered callable is Client.join, which is consumer.pause() — a
+bare attribute set — then consumer.join() = Thread.join(), then
+poller.stop() only if a feature-flag Poller exists; Poller is also a Thread,
+so the same reset applies, and the poller is None on a client that never
+loaded flags. queue.join() lives only in flush(), which is not registered.)
+Traced in
+threading.py on both Python versions this app runs: 3.12.11 (threading.py:
+1649 _after_fork -> _reset_internal_locks(False) sets
+_is_stopped=True/_tstate_lock=None [955-959] -> join's
+_wait_for_tstate_lock finds lock is None, asserts _is_stopped, returns
+[1149-1166] — never acquires) and 3.13.5 (threading.py:1555 _after_fork ->
+Thread._after_fork()'s non-current-thread branch [937-940], whose own code
+comment states the C-level _PyThread_AfterFork() already marked the handle
+done at fork time — that step is confirmed here by the Python-level source
+read plus an imposed-state join measurement, not by reading
+_PyThread_AfterFork's C implementation directly).
+tests/host/test_posthog_fork_atexit.py is the empirical, end-to-end closure:
+a real fork() + this real after_in_child hook + real atexit handlers,
+asserting the child reaches os._exit(0) well under gunicorn's
+graceful_timeout — plus a second, confounder-free variant that joins only
+the inherited husk directly, bypassing atexit entirely. This repo's CI
+(.github/workflows/ci.yml) runs a single Python 3.12 leg, so a green run
+closes the 3.12.11 chain end-to-end; the 3.13.5 chain (this app's actual
+Render deploy target) is closed by the citation above, not by a 3.13 CI run.
+Because of all this, the husk is deliberately left alone — never
+shutdown()/flush()/join()ed manually — leaving its already-harmless
+atexit(join) in place costs nothing, while calling shutdown()/flush() on it
+would risk a stray POST attempt from a dead consumer thread for no benefit.
+See jobcannon#137 for a separate, real finding this verdict does NOT cover:
+the *rebuilt live* client's own atexit(join) can block up to ~67s flushing
+against a down PostHog endpoint, which DOES exceed gunicorn's default
+graceful_timeout (30s) — that risk lives in the live client B, not this
+husk, so it needs its own fix.
 """
 
 from __future__ import annotations
