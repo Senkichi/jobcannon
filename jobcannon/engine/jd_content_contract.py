@@ -69,7 +69,7 @@ from jobcannon.engine.normalizers import body_mentions_any_stem, significant_tok
 # standing re-sweep so the whole corpus is re-validated under the new version.
 # Mirrors NORMALIZER_VERSION / TITLE_HYGIENE_VERSION.
 # ---------------------------------------------------------------------------
-JD_CONTENT_VERSION: int = 4
+JD_CONTENT_VERSION: int = 5
 
 # Reason codes emitted into jobs.unresolved_reasons (the m078 quarantine surface).
 # Distinct from I-13's ``jd_full_junk`` (the length/density gate, owned by
@@ -230,22 +230,28 @@ DEFAULT_JD_FULL_REJECT_TRAILING_ELLIPSIS = True
 def get_jd_full_thresholds(config: dict | None = None) -> tuple[int, bool]:
     """Resolve jd_full completeness thresholds from config.
 
-    Config-shape defense only (issue #37): a null/non-dict ``enrichment`` or
-    ``jd_full`` section, or a ``min_chars`` leaf that doesn't coerce to int,
-    degrades to the module defaults instead of raising. This does not change
-    the resolved value for any config shape that already resolved
-    successfully — it only defines behavior for shapes that previously threw
-    (``AttributeError`` / ``ValueError`` / ``TypeError``) inside the
-    ``jd_content_reject`` storage/ingest gate.
+    Every level of the lookup chain is normalized independently (``isinstance``
+    + fallback), not just the outermost default (issue #37): a null/non-dict
+    ``config``, ``enrichment``, or ``jd_full`` section, or a ``min_chars`` leaf
+    that doesn't coerce to int, all degrade to the module defaults instead of
+    raising. A single ``or {}`` at the outer level alone is not enough — a YAML
+    section whose children are all commented out parses to ``None``, so
+    ``{"enrichment": None}`` is a realistic shape, and a truthy non-dict
+    ``enrichment`` (e.g. a stray scalar) would otherwise reach ``.get()`` on a
+    non-dict and raise ``AttributeError``. This does not change the resolved
+    value for any config shape that already resolved successfully — it only
+    defines behavior for shapes that previously threw (``AttributeError`` /
+    ``ValueError`` / ``TypeError``) inside the ``jd_content_reject``
+    storage/ingest gate.
 
     Returns:
         (min_chars, reject_trailing_ellipsis) with safe defaults.
     """
-    if config is None:
-        config = {}
-    jd_cfg = (config.get("enrichment") or {}).get("jd_full") or {}
-    if not isinstance(jd_cfg, dict):
-        jd_cfg = {}
+    config = config if isinstance(config, dict) else {}
+    enrichment_cfg = config.get("enrichment")
+    enrichment_cfg = enrichment_cfg if isinstance(enrichment_cfg, dict) else {}
+    jd_cfg = enrichment_cfg.get("jd_full")
+    jd_cfg = jd_cfg if isinstance(jd_cfg, dict) else {}
     try:
         min_chars = int(jd_cfg.get("min_chars", DEFAULT_JD_FULL_MIN_CHARS))
     except (TypeError, ValueError):
@@ -266,6 +272,82 @@ _TRAILING_ELLIPSIS_RE = re.compile(r"(?:\.\.\.|…)\s*$")
 # Leading non-whitespace characters that indicate a serialized JSON payload.
 _JSON_START_CHARS: frozenset[str] = frozenset({"{", "["})
 
+#: Keys (case- and separator-insensitive) that mark a JD-prose field inside a
+#: leading JSON object — the escape hatch in ``_is_json_config_blob`` that
+#: keeps a real JSON-served posting from being misclassified as a config
+#: blob (issue #37). Widened beyond snake_case ``job_description``/
+#: ``description`` to also recognize camelCase (``jobDescription``, which
+#: normalizes the same as ``job_description`` once separators are stripped)
+#: and the generic ``content`` key some ATS micro-sites use for the prose
+#: body. Compared via ``_normalize_json_key`` so ``job_description``,
+#: ``jobDescription``, and ``JobDescription`` all match the same alias.
+_DESCRIPTION_KEY_ALIASES: frozenset[str] = frozenset({"jobdescription", "description", "content"})
+
+#: Recursion depth cap for ``_has_prose`` — a JD payload nests a handful of
+#: levels deep at most (e.g. ``{"description": {"raw": "...", "html": "..."}}``);
+#: bounding the walk keeps it from following a pathological/adversarial
+#: structure unboundedly.
+_PROSE_SEARCH_MAX_DEPTH = 3
+
+#: Minimum stripped length for a string leaf under a description-like key to
+#: count as real JD prose. Without this floor, a config blob whose
+#: description field carries an unrelated short string -- a format tag
+#: (``{"description": {"format": "html", "text": ""}}``), a section label
+#: (``{"content": {"header": "Careers", "footer": "..."}}``) -- trips the
+#: escape hatch and a genuine config blob (REJECT) is misclassified as real
+#: prose. Deliberately well below a full JD's length (``_CLEAN_MIN_CHARS``):
+#: this only needs to rule out single-word/label-length filler, not validate
+#: that the leaf is a complete posting on its own.
+_PROSE_LEAF_MIN_CHARS = 40
+
+
+def _normalize_json_key(key: object) -> str:
+    """Fold a JSON key to a separator- and case-insensitive comparison form.
+
+    ``job_description``, ``jobDescription``, and ``JobDescription`` all
+    normalize to ``"jobdescription"`` so the description-key escape hatch
+    recognizes the same field across snake_case and camelCase payloads.
+    """
+    if not isinstance(key, str):
+        return ""
+    return re.sub(r"[_\-\s]", "", key).lower()
+
+
+def _has_prose(value: object, *, _depth: int = 0) -> bool:
+    """True if *value* contains a string leaf that reads as real JD prose.
+
+    Real JD prose is sometimes nested one level under a description-like key
+    rather than being the string value directly (e.g. some ATS JSON payloads
+    wrap the body as ``{"description": {"raw": "...", "html": "..."}}``, or
+    a JSON-LD posting is wrapped in a bare array of block objects). Recurses
+    a bounded depth into dicts and lists so that wrapping shape does not
+    defeat the escape hatch — a leading array whose element carries a real
+    ``description``/``content`` field with substantial text is real prose,
+    not a config blob, even though the top-level JSON value is a list.
+
+    A string leaf only counts once it clears ``_PROSE_LEAF_MIN_CHARS`` —
+    otherwise a config blob's own short filler under a description-like key
+    (a ``"format": "html"`` tag, a ``"header": "Careers"`` label) would trip
+    the escape hatch and hide a genuine config blob from REJECT.
+    """
+    if _depth > _PROSE_SEARCH_MAX_DEPTH:
+        return False
+    if isinstance(value, str):
+        return len(value.strip()) >= _PROSE_LEAF_MIN_CHARS
+    if isinstance(value, dict):
+        return any(_has_prose(v, _depth=_depth + 1) for v in value.values())
+    if isinstance(value, list):
+        return any(_has_prose(v, _depth=_depth + 1) for v in value)
+    return False
+
+
+def _dict_has_description_prose(obj: dict) -> bool:
+    """True if *obj* has a description-like key whose value carries prose."""
+    for key, val in obj.items():
+        if _normalize_json_key(key) in _DESCRIPTION_KEY_ALIASES and _has_prose(val):
+            return True
+    return False
+
 
 def _is_json_config_blob(jd_full: str) -> bool:
     """Return True when *jd_full* is a leading JSON object with no real prose.
@@ -279,9 +361,17 @@ def _is_json_config_blob(jd_full: str) -> bool:
       * the stripped body must start with ``{`` or ``[``;
       * the leading JSON value must parse and dominate the body (so a JD that
         merely contains an inline JSON block is not rejected);
-      * for an object, there must be no non-empty ``job_description`` or
-        ``description`` field. A real posting served as JSON with a genuine
-        prose description is left for the normal contract.
+      * for an object, there must be no description-like key (``description``,
+        ``jobDescription``/``job_description``, or ``content``, matched
+        case-/separator-insensitively via ``_normalize_json_key``) carrying a
+        string leaf of at least ``_PROSE_LEAF_MIN_CHARS`` — checked via
+        ``_dict_has_description_prose``/``_has_prose``, which also recurses a
+        bounded depth into nested dicts/lists (e.g.
+        ``{"description": {"raw": "..."}}``). For a bare array, the same
+        prose search runs over each element (a JSON-LD-style wrapper). A real
+        posting served as JSON with a genuine, substantial prose description
+        is left for the normal contract; a short label/tag under a
+        description-like key does not count as prose and does not escape.
     """
     stripped = jd_full.strip()
     if not stripped or stripped[0] not in _JSON_START_CHARS:
@@ -298,23 +388,26 @@ def _is_json_config_blob(jd_full: str) -> bool:
         return False
 
     if not isinstance(obj, dict):
-        # Leading arrays / scalars that dominate the body are also not prose.
+        if isinstance(obj, list):
+            # A bare array wrapping JSON-LD-style posting objects (e.g.
+            # ``[{"@type": "JobPosting", "description": "..."}]``) whose
+            # element carries real JD prose under a description-like key ->
+            # not a config blob, even though the top-level value is a list.
+            return not any(
+                isinstance(item, dict) and _dict_has_description_prose(item) for item in obj
+            )
+        # A leading scalar dominating the body is also not prose.
         return True
 
-    for key, val in obj.items():
-        if key.lower() in ("job_description", "description"):
-            if isinstance(val, str) and val.strip():
-                # Real prose description inside a JSON object -> not a config blob.
-                return False
-            # Empty/missing description in a leading JSON object -> config blob.
-    return True
+    # Real prose description (possibly camelCase-keyed or nested one level,
+    # e.g. {"description": {"raw": "..."}}) -> not a config blob. Empty or
+    # missing description in a leading JSON object -> config blob.
+    return not _dict_has_description_prose(obj)
 
 
 def _is_jd_truncated(
     jd_full: str | None,
     config: dict | None = None,
-    *,
-    check_min: bool = True,
 ) -> tuple[str, str] | None:
     """Return (JD_TRUNCATED, signal) if the body is a truncated snippet.
 
@@ -327,7 +420,7 @@ def _is_jd_truncated(
         return None
     stripped = jd_full.strip()
     min_chars, reject_ellipsis = get_jd_full_thresholds(config)
-    if check_min and len(stripped) < min_chars:
+    if len(stripped) < min_chars:
         return (JD_TRUNCATED, "too_short")
     if reject_ellipsis and _TRAILING_ELLIPSIS_RE.search(stripped):
         return (JD_TRUNCATED, "trailing_ellipsis")
@@ -377,7 +470,7 @@ def jd_content_reject(
         return None
     stripped = jd_full.strip()
 
-    truncated = _is_jd_truncated(stripped, config, check_min=True)
+    truncated = _is_jd_truncated(stripped, config)
     if truncated is not None:
         return truncated
 
