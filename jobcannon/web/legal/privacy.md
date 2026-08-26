@@ -75,7 +75,7 @@ call to Clerk on a request-by-request basis.
 | Behavioral analytics events — which postings were shown to you, their position in your feed, the ranking version used, and the surface you were on | **Only if you have granted analytics consent.** Without consent these are discarded before anything is written or sent  |
 | A signup record noting how you arrived: the channel, the **hostname** of the site that referred you (never the full address, path, or query), and the signup wave | At signup  |
 | A session identifier | On your first contact with the Service; held in the cookie only and not written to our database  |
-| A feed session identifier | On your first contact with the Service; held in the cookie and also recorded on the activity records tied to your account, so it appears in your data export  |
+| A feed session identifier | On your first contact with the Service; held in the cookie and recorded on your signup record, so it appears in your data export. It is not recorded on the individual activity records (postings shown, saved, dismissed, or applied to)   |
 
 **Before you have an account.** If you use the picker as a visitor, a provisional account
 and profile record is created for you server-side so your selections can be carried into a
@@ -209,7 +209,13 @@ this policy.
 
 ### 6.4 Nobody else
 
-No other third party receives personal data from the Service at runtime.
+No other third party receives personal data from our servers at runtime. When your
+browser loads a page, it fetches two open-source front-end libraries directly from public
+content-delivery networks — Tailwind CSS from `cdn.tailwindcss.com` and htmx from
+`unpkg.com` — and Clerk's sign-in script from `clerk.jobcannon.dev` (§6.1). In the ordinary
+course of serving those files, each of those hosts receives your IP address and the browser
+details that accompany any web request, under its own privacy policy. We send them nothing
+about you, and they receive nothing else from us.
 
 
 ## 7. International transfers
