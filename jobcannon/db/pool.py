@@ -16,6 +16,8 @@ Contract facts this file is built on (verified against engine d09f406):
 from __future__ import annotations
 
 import contextlib
+import ipaddress
+import socket
 from typing import Any
 
 import psycopg
@@ -42,7 +44,47 @@ def _conninfo_with_defaults(dsn: str) -> str:
     """
     params = conninfo_to_dict(dsn)
     params.setdefault("connect_timeout", "10")
+    _pin_hostaddr(params)
     return make_conninfo(**params)
+
+
+def _pin_hostaddr(params: dict) -> None:
+    """Resolve the DB hostname ONCE at pool-open time and pin `hostaddr`.
+
+    connect_timeout (above) bounds only libpq's timed phase; name
+    resolution happens before it and is unbounded. 2026-08-26 incident:
+    in-container DNS died shortly after boot while the network itself
+    stayed up — every post-boot connection attempt hung inside
+    getaddrinfo, before the timed phase, wedging the pool's worker
+    threads with nothing logged (internal and external DB hostnames
+    alike). Pinning hostaddr makes every later connect dial the IP
+    directly (libpq still uses `host` for TLS/auth), so a resolver that
+    dies after boot cannot take the pool down with it.
+
+    Trade-off, accepted deliberately: if the server's IP changes while an
+    instance is running (provider failover), connects fail until the
+    instance restarts and re-resolves. Skipped when the DSN already
+    carries hostaddr, has no host, uses an IP literal or a unix-socket
+    path, or lists multiple hosts; a failed boot-time resolution falls
+    back to dialing by name (the pre-pin behavior).
+    """
+    host = params.get("host")
+    if not host or "hostaddr" in params or "," in host or host.startswith("/"):
+        return
+    try:
+        ipaddress.ip_address(host)
+        return  # already an IP literal — nothing to pin
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return
+    for family in (socket.AF_INET, socket.AF_INET6):
+        for info in infos:
+            if info[0] == family:
+                params["hostaddr"] = info[4][0]
+                return
 
 
 def _configure(conn: psycopg.Connection) -> None:

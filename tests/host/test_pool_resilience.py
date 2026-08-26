@@ -53,3 +53,70 @@ def test_open_pool_wires_bounded_connect_and_liveness_check(monkeypatch):
         assert captured["opened"] is True
     finally:
         pool_mod._pool = None
+
+
+def _ai(family, ip):
+    # getaddrinfo tuple shape: (family, type, proto, canonname, sockaddr)
+    import socket as _s
+
+    addr = (ip, 0) if family == _s.AF_INET else (ip, 0, 0, 0)
+    return (family, _s.SOCK_STREAM, _s.IPPROTO_TCP, "", addr)
+
+
+def test_hostaddr_pinned_from_boot_resolution(monkeypatch):
+    import socket as _s
+
+    monkeypatch.setattr(
+        pool_mod.socket, "getaddrinfo", lambda *a, **k: [_ai(_s.AF_INET, "203.0.113.7")]
+    )
+    out = conninfo_to_dict(_conninfo_with_defaults("postgresql://u:p@db.internal/job"))
+    assert out["hostaddr"] == "203.0.113.7"
+    assert out["host"] == "db.internal"  # kept for TLS/auth
+
+
+def test_hostaddr_prefers_ipv4_over_ipv6(monkeypatch):
+    import socket as _s
+
+    monkeypatch.setattr(
+        pool_mod.socket,
+        "getaddrinfo",
+        lambda *a, **k: [_ai(_s.AF_INET6, "2001:db8::7"), _ai(_s.AF_INET, "203.0.113.9")],
+    )
+    out = conninfo_to_dict(_conninfo_with_defaults("postgresql://u:p@db.internal/job"))
+    assert out["hostaddr"] == "203.0.113.9"
+
+
+def test_hostaddr_not_pinned_for_ip_literal_host(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("getaddrinfo must not be called for an IP literal")
+
+    monkeypatch.setattr(pool_mod.socket, "getaddrinfo", boom)
+    out = conninfo_to_dict(_conninfo_with_defaults("postgresql://u:p@192.0.2.5/job"))
+    assert "hostaddr" not in out
+
+
+def test_hostaddr_respects_explicit_hostaddr_and_multihost(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("getaddrinfo must not be called")
+
+    monkeypatch.setattr(pool_mod.socket, "getaddrinfo", boom)
+    explicit = conninfo_to_dict(
+        _conninfo_with_defaults("host=db.internal hostaddr=198.51.100.2 user=u dbname=job")
+    )
+    assert explicit["hostaddr"] == "198.51.100.2"
+    multi = conninfo_to_dict(
+        _conninfo_with_defaults("host=a.internal,b.internal user=u dbname=job")
+    )
+    assert "hostaddr" not in multi
+
+
+def test_hostaddr_resolution_failure_falls_back_to_name(monkeypatch):
+    import socket as _s
+
+    def fail(*a, **k):
+        raise _s.gaierror("resolver down at boot")
+
+    monkeypatch.setattr(pool_mod.socket, "getaddrinfo", fail)
+    out = conninfo_to_dict(_conninfo_with_defaults("postgresql://u:p@db.internal/job"))
+    assert "hostaddr" not in out
+    assert out["host"] == "db.internal"
