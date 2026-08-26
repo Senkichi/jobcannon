@@ -34,7 +34,13 @@ real worker's exit?"): NON-ISSUE. CPython's own
 os.register_at_fork(after_in_child=threading._after_fork), registered
 internally since 3.7, resets every non-current thread's join state AT FORK
 TIME — before the after_in_child hook above even runs — so the dead husk's
-Consumer.join() returns immediately rather than blocking. Traced in
+Consumer.join() returns immediately rather than blocking. (The SDK's
+atexit-registered callable is Client.join, which is consumer.pause() — a
+bare attribute set — then consumer.join() = Thread.join(), then
+poller.stop() only if a feature-flag Poller exists; Poller is also a Thread,
+so the same reset applies, and the poller is None on a client that never
+loaded flags. queue.join() lives only in flush(), which is not registered.)
+Traced in
 threading.py on both Python versions this app runs: 3.12.11 (threading.py:
 1649 _after_fork -> _reset_internal_locks(False) sets
 _is_stopped=True/_tstate_lock=None [955-959] -> join's

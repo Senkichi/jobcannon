@@ -159,10 +159,11 @@ def test_atexit_after_real_fork_does_not_hang_worker_exit(monkeypatch):
     inherited husk's `Client.join()` nor the post-fork rebuilt client's
     `Client.join()` blocks worker exit.
 
-    `atexit` runs registered callbacks in LIFO order: the rebuilt client B is
-    registered AFTER the inherited husk A (B is only constructed inside the
-    fork hook, which runs after A already exists), so `atexit._run_exitfuncs()`
-    below runs B.join() first, then A.join() -- both must complete for the
+    `atexit` runs registered callbacks in LIFO order: the rebuilt clients are
+    registered AFTER the inherited husk A (one B is constructed inside the fork
+    hook, and `child_body` below builds a second, B', by calling the hook
+    function explicitly), so `atexit._run_exitfuncs()` runs B'.join(), then
+    B.join(), then A.join() -- all three must complete for the
     child to reach `os._exit(0)`. Reaching it at all, within the bound, is
     the proof: a `join()` that blocked forever would never let the child get
     there, so the parent's own bounded wait is what would fail instead.
