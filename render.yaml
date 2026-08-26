@@ -38,10 +38,18 @@ services:
       # with whatever Python version(s) CI tests as that changes.
       - key: PYTHON_VERSION
         value: "3.13.5"
+      # 2026-08-26 incident: this service's PRIVATE-network path to
+      # jobcannon-db began blackholing connection attempts (hung connects
+      # that never reach the server, across restarts AND fresh deploys),
+      # while the worker, one-off preDeploy containers, and external
+      # clients all connect cleanly. Until Render resolves that, the web
+      # service routes over the DB's EXTERNAL endpoint: sync:false means
+      # the value (the external connection string) is set in the
+      # dashboard/API, never committed here. To restore the internal
+      # route once the platform path is fixed, revert this block to the
+      # worker's fromDatabase form below and delete the dashboard value.
       - key: DATABASE_URL
-        fromDatabase:
-          name: jobcannon-db
-          property: connectionString
+        sync: false
       - key: CLERK_SECRET_KEY
         sync: false
       - key: CLERK_JWT_KEY
