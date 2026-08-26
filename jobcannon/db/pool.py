@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import contextlib
 import ipaddress
+import logging
 import socket
+import threading
+import time
 from typing import Any
 
 import psycopg
@@ -27,7 +30,17 @@ from psycopg_pool import ConnectionPool
 from jobcannon.db.compat import engine_sql_to_host
 from jobcannon.db.rows import hybrid_row
 
+logger = logging.getLogger(__name__)
+
 _pool: ConnectionPool | None = None
+
+# Boot-time resolution bounds (see _pin_hostaddr): each attempt gets its own
+# wall-clock budget because a HUNG resolver (the 2026-08-26 failure mode) never
+# returns at all — an unbounded call here would wedge worker boot instead of
+# failing it.
+_RESOLVE_ATTEMPTS = 3
+_RESOLVE_TIMEOUT_S = 5.0
+_RESOLVE_BACKOFF_S = 1.0
 
 
 def _conninfo_with_defaults(dsn: str) -> str:
@@ -48,6 +61,32 @@ def _conninfo_with_defaults(dsn: str) -> str:
     return make_conninfo(**params)
 
 
+def _getaddrinfo_bounded(host: str, timeout: float) -> list:
+    """getaddrinfo with a wall-clock bound, hang included.
+
+    socket.getaddrinfo has no timeout parameter, and the 2026-08-26 incident's
+    resolver didn't fail — it HUNG, which no try/except can bound. Running it
+    on a daemon thread converts a hang into a TimeoutError after `timeout`
+    seconds; the abandoned thread cannot block interpreter exit.
+    """
+    result: dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            result["infos"] = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+        except OSError as ex:
+            result["error"] = ex
+
+    worker = threading.Thread(target=_run, daemon=True, name=f"resolve-{host}")
+    worker.start()
+    worker.join(timeout)
+    if "infos" in result:
+        return result["infos"]
+    if "error" in result:
+        raise result["error"]
+    raise TimeoutError(f"resolution of {host!r} did not complete within {timeout:.0f}s")
+
+
 def _pin_hostaddr(params: dict) -> None:
     """Resolve the DB hostname ONCE at pool-open time and pin `hostaddr`.
 
@@ -61,12 +100,21 @@ def _pin_hostaddr(params: dict) -> None:
     directly (libpq still uses `host` for TLS/auth), so a resolver that
     dies after boot cannot take the pool down with it.
 
+    Resolution failure at boot is FATAL, by design. The first version of
+    this pin fell back to dialing by name, which silently re-admitted the
+    exact untimed getaddrinfo hang the pin exists to prevent (observed in
+    production the same day: the fallback engaged, nothing was logged, and
+    every request rode the pool's full acquire deadline again). A process
+    that cannot resolve its database at boot cannot serve anything useful,
+    so it must die loudly here — the platform's health checks then replace
+    the instance (and a zero-downtime deploy keeps the previous instance
+    serving) instead of leaving a permanently wedged one in rotation.
+
     Trade-off, accepted deliberately: if the server's IP changes while an
     instance is running (provider failover), connects fail until the
     instance restarts and re-resolves. Skipped when the DSN already
     carries hostaddr, has no host, uses an IP literal or a unix-socket
-    path, or lists multiple hosts; a failed boot-time resolution falls
-    back to dialing by name (the pre-pin behavior).
+    path, or lists multiple hosts.
     """
     host = params.get("host")
     if not host or "hostaddr" in params or "," in host or host.startswith("/"):
@@ -76,15 +124,36 @@ def _pin_hostaddr(params: dict) -> None:
         return  # already an IP literal — nothing to pin
     except ValueError:
         pass
-    try:
-        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-    except OSError:
-        return
-    for family in (socket.AF_INET, socket.AF_INET6):
-        for info in infos:
-            if info[0] == family:
-                params["hostaddr"] = info[4][0]
-                return
+    last_error: Exception | None = None
+    for attempt in range(1, _RESOLVE_ATTEMPTS + 1):
+        try:
+            infos = _getaddrinfo_bounded(host, _RESOLVE_TIMEOUT_S)
+        except (OSError, TimeoutError) as ex:
+            last_error = ex
+            logger.warning(
+                "boot-time resolution of DB host failed (attempt %d/%d): %s",
+                attempt,
+                _RESOLVE_ATTEMPTS,
+                ex,
+            )
+            if attempt < _RESOLVE_ATTEMPTS:
+                time.sleep(_RESOLVE_BACKOFF_S)
+            continue
+        for family in (socket.AF_INET, socket.AF_INET6):
+            for info in infos:
+                if info[0] == family:
+                    params["hostaddr"] = info[4][0]
+                    logger.info("pinned DB hostaddr %s for %r", info[4][0], host)
+                    return
+        last_error = OSError(f"no usable address family in resolution of {host!r}")
+        break
+    logger.critical(
+        "refusing to open DB pool: could not resolve %r at boot (%s) — "
+        "dialing by name would hang untimed if the resolver dies post-boot",
+        host,
+        last_error,
+    )
+    raise RuntimeError(f"could not resolve database host {host!r} at boot: {last_error}")
 
 
 def _configure(conn: psycopg.Connection) -> None:
