@@ -19,12 +19,30 @@ import contextlib
 from typing import Any
 
 import psycopg
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg_pool import ConnectionPool
 
 from jobcannon.db.compat import engine_sql_to_host
 from jobcannon.db.rows import hybrid_row
 
 _pool: ConnectionPool | None = None
+
+
+def _conninfo_with_defaults(dsn: str) -> str:
+    """Bound the connect phase of every pooled connection attempt.
+
+    libpq's default connect_timeout is unbounded (in practice the OS TCP
+    timeout, ~2 minutes), which sits behind the pool's 30 s acquire
+    deadline: one hung connect attempt silently consumes the entire window
+    and every waiting request times out with nothing logged and nothing
+    reaching the server. A bounded connect_timeout turns a blackholed
+    attempt into a fast failure the pool can retry (~3 attempts per acquire
+    window) and log. An explicit connect_timeout already present in the DSN
+    wins.
+    """
+    params = conninfo_to_dict(dsn)
+    params.setdefault("connect_timeout", "10")
+    return make_conninfo(**params)
 
 
 def _configure(conn: psycopg.Connection) -> None:
@@ -49,12 +67,16 @@ def open_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> None:
     if _pool is not None:
         return
     _pool = ConnectionPool(
-        conninfo=dsn,
+        conninfo=_conninfo_with_defaults(dsn),
         min_size=min_size,
         max_size=max_size,
         kwargs={"row_factory": hybrid_row},
         configure=_configure,
         reset=_reset,
+        # Checkout-time liveness probe: a pooled connection whose TCP flow
+        # died while idle is discarded and replaced instead of being handed
+        # to a request that would then fail mid-query.
+        check=ConnectionPool.check_connection,
         open=False,
     )
     _pool.open()
