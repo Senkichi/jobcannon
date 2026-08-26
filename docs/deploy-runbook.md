@@ -86,7 +86,24 @@ instance instead of leaving a wedged one in rotation (2026-08-26 incident:
 a web instance whose DB path died post-boot kept serving corpus-empty pages
 behind a static healthz indefinitely). Each 503 also logs the failure
 detail (exception type, or the hang-timeout note when the probe never
-returned) plus pool stats at WARNING. Clerk auth + consent resolution still
+returned) plus pool stats at WARNING.
+
+**A wedged pool self-heals without a redeploy.** Both services run a pool
+watchdog (`jobcannon/db/pool.py`): every `JC_POOL_WATCHDOG_S` seconds
+(default 15; `0` disables) it runs the same bounded probe `/healthz` uses,
+and after 3 consecutive failures it swaps in a freshly built pool
+(build-first, then a bounded close of the old one), rate-limited to one
+recycle per 60 s. This targets the 2026-08-26 terminal mode directly: an
+established connection that goes dark while its TCP flow keeps ACKing wedges
+psycopg_pool's untimed reset/check round-trips, and a wedged pool never
+attempts another connect on its own — even though fresh connects were proven
+to succeed on every instance restart. A recycle logs at CRITICAL with the
+last probe detail and pool stats; probes double as an app-level keepalive on
+the warm connection. Recycling recovers only what a fresh connect can reach
+— if the network path itself is down, probes keep failing, `/healthz` stays
+503, and platform replacement remains the backstop.
+
+Clerk auth + consent resolution still
 fail closed (no session / no consent) without a live schema, and routes that
 read/write `postings`, `companies`, etc. will error until the worker has
 applied both schemas; that window is normally seconds on a fresh deploy and
