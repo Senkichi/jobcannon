@@ -26,9 +26,10 @@ their own copy is a separate controller whose practices we do not govern.
 - We collect what you type into the profile picker, the account details Clerk sends us
   when you sign up, and which postings you save, dismiss, or click apply on.
 
-- Our own application sets one cookie, and it lasts only for your browser session. Once
-  you use the sign-in pages, Clerk, our sign-in provider, sets its own strictly necessary
-  sign-in cookies (see §10). We set no advertising or tracking cookies.
+- Our own application sets one cookie, and it lasts only for your browser session. Clerk,
+  our sign-in provider, sets its own strictly necessary sign-in cookies from your first
+  page view, whether or not you ever sign in (see §10). We set no advertising or tracking
+  cookies.
 
 
 - **Analytics are off by default.** If you do not opt in, we record no behavioral
@@ -61,10 +62,11 @@ us your **user identifier and email address**. That is all we receive and store 
 Clerk.
 
 
-Your password, your sign-in device details, and your IP address are handled by Clerk on
-Clerk's own hosted sign-in pages and are **never seen by our servers**. Our application
-verifies your session locally using a cryptographic signature check and makes no network
-call to Clerk on a request-by-request basis.
+Your password, your sign-in device details, and your IP address are handled by Clerk — on
+Clerk's own hosted sign-in pages, and through Clerk's script, which every page of the
+Service loads and which contacts Clerk's servers on each page view — and are **never seen
+by our servers**. Our application verifies your session locally using a cryptographic
+signature check and makes no network call to Clerk on a request-by-request basis.
 
 
 ### 3.3 Information generated as you use the Service
@@ -160,9 +162,10 @@ after they were recorded) or when your account is deleted, whichever comes first
 ### 6.1 Clerk — accounts and sign-in
 
 Clerk handles sign-up, sign-in, and account management. It holds your credentials and
-sees your device and network details on its own pages. It passes us your user id and
-email. This is required for the Service to function and is not an optional analytics
-choice.
+sees your device and network details on its own pages and, because every page of the
+Service loads Clerk's script, on each page view of the Service as well. It passes us your
+user id and email. This is required for the Service to function and is not an optional
+analytics choice.
 
 
 ### 6.2 PostHog — product analytics (only with your consent)
@@ -283,8 +286,8 @@ Article 27.
 ## 10. Cookies
 
 Our own application sets **one cookie**: a session cookie. Clerk, our sign-in provider,
-sets its own sign-in cookies once you use the sign-in pages; those are described at the
-end of this section.
+sets its own sign-in cookies from your first page view; those are described at the end of
+this section.
 
 
 It lasts for your browser session and is cleared when your browser session ends. It is
@@ -302,16 +305,18 @@ browser. This matters because the cookie holds your picker selections before you
 account. It never contains a password or a credential.
 
 
-**Sign-in cookies set by Clerk.** Once you use the sign-in pages, Clerk (§6.1) sets its
-own cookies on `jobcannon.dev` and its subdomains so that we can tell you are signed in:
-`__session`, which holds your short-lived, signed sign-in token and is refreshed by
-Clerk's script while a page is open; `__client_uat`, a timestamp Clerk uses to know
-whether a sign-in is active; and `clerk_active_context`, which records which account is
-active in this browser. Clerk's own hosts (`accounts.jobcannon.dev`,
-`clerk.jobcannon.dev`) carry additional Clerk cookies, and the network that serves
-Clerk's pages sets Cloudflare bot-protection cookies (`__cf_bm`, `_cfuvid`) on those
-hosts. These cookies are strictly necessary for sign-in, are described in Clerk's
-privacy policy, and are not used for advertising or tracking.
+**Sign-in cookies set by Clerk.** Every page of the Service loads Clerk's sign-in script
+from `clerk.jobcannon.dev` (§6.1). On your first page view — whether or not you ever sign
+in — that script sets `__client_uat` on `jobcannon.dev` and its subdomains, a timestamp
+Clerk uses to know whether a sign-in is active (it holds `0` until you sign in), and
+Clerk's host sets `__client`, an identifier for your browser's Clerk client, together with
+Cloudflare bot-protection cookies (`__cf_bm`, `_cfuvid`) from the network that serves
+Clerk. Once you sign in, Clerk adds `__session`, which holds your short-lived, signed
+sign-in token and is refreshed by Clerk's script while a page is open, and
+`clerk_active_context`, which records which account is active in this browser; Clerk's
+own sign-in pages (`accounts.jobcannon.dev`) carry the same kinds of cookies. These
+cookies are strictly necessary for sign-in, are described in Clerk's privacy policy, and
+are not used for advertising or tracking.
 
 
 We set no advertising or tracking cookies.
