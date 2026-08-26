@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import ipaddress
 import logging
+import os
 import socket
 import threading
 import time
@@ -57,6 +58,29 @@ def _conninfo_with_defaults(dsn: str) -> str:
     """
     params = conninfo_to_dict(dsn)
     params.setdefault("connect_timeout", "10")
+    # Server-side attribution: pg_stat_activity.application_name says WHICH
+    # service a backend belongs to (web/worker share this module, and Render's
+    # external-endpoint proxy rewrites client_addr, which made backends
+    # unattributable during the 2026-08-26 incident diagnosis). Render sets
+    # RENDER_SERVICE_NAME on every service; an explicit application_name in
+    # the DSN wins.
+    params.setdefault("application_name", os.environ.get("RENDER_SERVICE_NAME", "jobcannon"))
+    # connect_timeout bounds only connection ESTABLISHMENT. Once a
+    # connection exists, a silently blackholed socket (established TCP,
+    # peer gone, no RST — the 2026-08-26 mode) hangs every later
+    # round-trip (queries, the pool's checkout liveness probe, commits)
+    # until kernel TCP retransmission gives up (~15+ min). These bound
+    # that at the TCP layer: an active query on a dead socket aborts once
+    # unacked data is ~30 s old, and keepalives reap dead IDLE
+    # connections in ~60 s so the pool's next checkout gets a fast error
+    # instead of a hang. Both are no-ops where the OS lacks the option
+    # (tcp_user_timeout and keepalives_count are ignored on Windows dev
+    # boxes; production is Linux). Explicit DSN values win.
+    params.setdefault("tcp_user_timeout", "30000")
+    params.setdefault("keepalives", "1")
+    params.setdefault("keepalives_idle", "30")
+    params.setdefault("keepalives_interval", "10")
+    params.setdefault("keepalives_count", "3")
     _pin_hostaddr(params)
     return make_conninfo(**params)
 
@@ -198,6 +222,15 @@ def close_pool() -> None:
     if _pool is not None:
         _pool.close()
         _pool = None
+
+
+def is_open() -> bool:
+    """Whether open_pool has run in this process.
+
+    /healthz keys on this to keep the DB-free dev/test contract: no pool
+    configured means no probe, not an unhealthy verdict.
+    """
+    return _pool is not None
 
 
 def get_pool() -> ConnectionPool:

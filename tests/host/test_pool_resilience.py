@@ -29,6 +29,34 @@ def test_connect_timeout_defaulted_and_dsn_fields_preserved(monkeypatch):
     assert out["dbname"] == "jobcannon"
 
 
+def test_application_name_defaulted_from_service_env(monkeypatch):
+    # IP-literal hosts skip resolution, isolating the attribution default.
+    monkeypatch.setenv("RENDER_SERVICE_NAME", "jobcannon-web")
+    out = conninfo_to_dict(_conninfo_with_defaults("postgresql://u:p@192.0.2.5/db"))
+    assert out["application_name"] == "jobcannon-web"
+
+    explicit = conninfo_to_dict(
+        _conninfo_with_defaults("postgresql://u:p@192.0.2.5/db?application_name=custom")
+    )
+    assert explicit["application_name"] == "custom"
+
+
+def test_dead_socket_tcp_bounds_defaulted():
+    # connect_timeout bounds establishment only; these bound I/O on an
+    # ESTABLISHED socket whose peer silently vanished (2026-08-26 mode).
+    out = conninfo_to_dict(_conninfo_with_defaults("postgresql://u:p@192.0.2.5/db"))
+    assert out["tcp_user_timeout"] == "30000"
+    assert out["keepalives"] == "1"
+    assert out["keepalives_idle"] == "30"
+    assert out["keepalives_interval"] == "10"
+    assert out["keepalives_count"] == "3"
+
+    explicit = conninfo_to_dict(
+        _conninfo_with_defaults("postgresql://u:p@192.0.2.5/db?tcp_user_timeout=5000")
+    )
+    assert explicit["tcp_user_timeout"] == "5000"
+
+
 def test_explicit_connect_timeout_in_dsn_wins():
     # IP-literal host: exercises the timeout default without touching resolution.
     out = conninfo_to_dict(
