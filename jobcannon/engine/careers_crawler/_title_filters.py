@@ -46,6 +46,46 @@ _NAV_PATH_PREFIXES = (
 # filtering eats every tile on the listing page.
 _NAV_PREFIXES_WITH_SUBPATH_JOBS = ("/search",)
 
+# Path SEGMENTS that indicate non-job content wherever they appear in the URL
+# path — not just at the start. Catches employer sites that nest blog/advice
+# content under a job-seeker portal prefix (e.g. Randstad
+# `/job-seeker/career-advice/...`), which the prefix-only filter above misses
+# because the nav-like segment is not at position 0. Each entry is matched as
+# a complete path segment (slash-delimited), so `advice` won't false-match a
+# job detail path like `/jobs/lead-advisor-123`.
+_NAV_PATH_SEGMENTS = frozenset(
+    {
+        "career-advice",
+        "advice",
+        "blog",
+        "article",
+        "articles",
+        "insights",
+        "resources",
+        "guides",
+        "guide",
+        "tips",
+        "news",
+        "press",
+        "events",
+        "webinars",
+        "podcast",
+        "podcasts",
+        "faq",
+        "faqs",
+        "help",
+        "support",
+        "about",
+        "contact",
+        "privacy",
+        "terms",
+        "legal",
+        "cookie",
+        "accessibility",
+        "sitemap",
+    }
+)
+
 
 def _is_nav_path(path: str) -> bool:
     """Return True if `path` is a known navigation link (not a job listing).
@@ -55,6 +95,11 @@ def _is_nav_path(path: str) -> bool:
     `_NAV_PREFIXES_WITH_SUBPATH_JOBS` are filtered only when the path IS the
     prefix (optionally with a trailing slash); deeper paths under them are
     treated as job-detail URLs and let through.
+
+    Additionally, any path SEGMENT matching `_NAV_PATH_SEGMENTS` flags the
+    link as nav regardless of position — catches employer sites that nest
+    blog/advice content under a portal prefix (Randstad
+    `/job-seeker/career-advice/...`).
 
     See FOLLOWUPS round-15 Gap #3 (ByteDance `/search/<id>` tiles).
     """
@@ -68,7 +113,11 @@ def _is_nav_path(path: str) -> bool:
                 # `/search/<id>` — job detail, not nav.
                 continue
         return True
-    return False
+    # Segment-level check: split on '/' and test each segment against the
+    # known non-job content segments. Catches `/job-seeker/career-advice/...`
+    # where the nav segment is not at position 0.
+    segments = path_lower.strip("/").split("/")
+    return any(seg in _NAV_PATH_SEGMENTS for seg in segments)
 
 
 # Regex to strip trailing location text from concatenated title+location
