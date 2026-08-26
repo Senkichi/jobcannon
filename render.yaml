@@ -1,0 +1,148 @@
+# Render blueprint (spec §1 services layout). Deploying this is an OWNER
+# action (paid resources) — see docs/deploy-runbook.md. Field names verified
+# against Render's blueprint spec (render.com/docs/blueprint-spec) and its
+# published JSON Schema (render.com/schema/render.yaml.json) on 2026-07-18 —
+# no renames found (envVars items use `key`, not `name`; `fromDatabase.name`
+# + `property: connectionString`; `basic-256mb` is a valid database `plan`
+# enum value — that name denotes the RAM/instance tier only, NOT disk
+# capacity; see the databases block below for diskSizeGB). The CI guards in
+# tests/host/test_render_config.py keep the code-facing parts honest.
+# No envVarGroups block this wave (spec §9 item 9 names "env/secret groups"):
+# only jobcannon-web consumes the Clerk secrets and DATABASE_URL is already
+# shared via fromDatabase — a group adds indirection with a single consumer.
+# Revisit when a second service needs the same secret set.
+databases:
+  - name: jobcannon-db
+    # `plan` selects the RAM/compute tier ("256mb" names RAM, not disk).
+    # Disk capacity is `diskSizeGB` below, and it's what JC_DB_STORAGE_LIMIT_MB
+    # (jobcannon-worker env) is calibrated against — Render defaults an
+    # omitted diskSizeGB to 15GB on the Basic tier, which would silently
+    # miscalibrate the storage alert if left implicit. Valid values are 1 or
+    # any multiple of 5; 5GB is ample headroom for the 1B corpus at trivial
+    # incremental cost.
+    plan: basic-256mb
+    diskSizeGB: 5
+    postgresMajorVersion: "17"
+
+services:
+  - type: web
+    name: jobcannon-web
+    runtime: python
+    plan: starter
+    buildCommand: pip install uv && uv sync --locked --no-dev
+    startCommand: uv run --no-sync gunicorn --workers 2 --bind 0.0.0.0:$PORT "jobcannon.web:create_app()"
+    healthCheckPath: /healthz
+    envVars:
+      # Pinned so a new service doesn't silently pick up Render's current
+      # default (3.14.x — never exercised by this repo's CI). Keep in sync
+      # with whatever Python version(s) CI tests as that changes.
+      - key: PYTHON_VERSION
+        value: "3.13.5"
+      # 2026-08-26 incident: this service's PRIVATE-network path to
+      # jobcannon-db began blackholing connection attempts (hung connects
+      # that never reach the server, across restarts AND fresh deploys),
+      # while the worker, one-off preDeploy containers, and external
+      # clients all connect cleanly. Until Render resolves that, the web
+      # service routes over the DB's EXTERNAL endpoint: sync:false means
+      # the value (the external connection string) is set in the
+      # dashboard/API, never committed here. To restore the internal
+      # route once the platform path is fixed, revert this block to the
+      # worker's fromDatabase form below and delete the dashboard value.
+      - key: DATABASE_URL
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_JWT_KEY
+        sync: false
+      - key: CLERK_AUTHORIZED_PARTIES
+        sync: false
+      - key: CLERK_WEBHOOK_SIGNING_SECRET
+        sync: false
+      - key: JC_SECRET_KEY
+        sync: false
+      - key: CLERK_SIGN_UP_URL
+        sync: false
+      # First cohort's signup wave label; captured into every session's
+      # attribution at first contact (jobcannon.web.anon_session) so a later
+      # signup can be attributed back to a cohort. Literal value, not a
+      # secret.
+      - key: JC_SIGNUP_WAVE
+        value: "0"
+      - key: POSTHOG_API_KEY
+        sync: false
+      # EU ingestion routing (data residency): committed rather than
+      # sync:false since it's a routing choice, not a secret. Keep in
+      # lockstep with jobcannon-worker's POSTHOG_HOST below — both
+      # services build their own PostHog client through the same
+      # wiring.py seam, so a mismatch would silently split analytics
+      # across regions.
+      - key: POSTHOG_HOST
+        value: https://eu.i.posthog.com
+      # Deterministic-pseudonym HMAC key (jobcannon/host/posthog_client.py's
+      # pseudonymize()) — a DEDICATED secret, never the Flask session key
+      # above. Declared on both services (worker builds its own PostHog
+      # client too). If unset, analytics fan-out fails closed rather than
+      # ever sending the raw Clerk user id to PostHog.
+      - key: JC_ANALYTICS_PSEUDONYM_SALT
+        sync: false
+
+  - type: worker
+    name: jobcannon-worker
+    runtime: python
+    # Starter (512Mi) was OOM-killing the worker even after capping fastembed's
+    # batch_size (#111): the process's own steady-state baseline (procrastinate
+    # + DB pool + 27 ATS scanner module imports + the embedding model, none of
+    # it a single avoidable spike) sits within single-digit MB of 512Mi under
+    # normal operation. A dashboard-only plan change is reverted by the next
+    # blueprint sync since `plan` isn't `sync: false` -- must be committed here.
+    plan: standard
+    buildCommand: pip install uv && uv sync --locked --no-dev
+    startCommand: uv run --no-sync python -m jobcannon.worker
+    envVars:
+      # Pinned so a new service doesn't silently pick up Render's current
+      # default (3.14.x — never exercised by this repo's CI). Keep in sync
+      # with whatever Python version(s) CI tests as that changes.
+      - key: PYTHON_VERSION
+        value: "3.13.5"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: jobcannon-db
+          property: connectionString
+      # Dropped from 2 to 1 after the OD-9 staging load test (spec §8, deploy
+      # runbook step 5): concurrency=2 crash-looped the worker roughly every
+      # 2 jobs on the starter plan (512MB) — the embedding model load
+      # (fastembed/onnxruntime, jobcannon.engine.job_scorer) under two
+      # concurrent `scan` jobs pushed memory over the limit, silently OOM-
+      # killing the container (Render surfaces this only as "Instance
+      # restarted", no explicit OOM log line) and leaving each in-flight job
+      # orphaned in procrastinate_jobs (status='doing', worker_id=NULL —
+      # issue #19 tracks cleanup tooling for that state, not prevention of
+      # it). Revisit alongside a plan upgrade if throughput at 1 proves
+      # insufficient once corpus volume grows.
+      # 2026-08-26: re-confirmed at production corpus scale (deploy
+      # runbook §7 rulings): the full company rotation completes daily at
+      # concurrency 1 and the block report surfaced no platform-level
+      # signal arguing for a change — the binding constraint remains this
+      # plan's memory, so raise only alongside a plan re-evaluation.
+      - key: JC_WORKER_CONCURRENCY
+        value: "1"
+      # Derived from jobcannon-db's diskSizeGB above (5GB * 1024) — must stay
+      # in lockstep with it; tests/host/test_render_config.py guards the two
+      # against drift.
+      - key: JC_DB_STORAGE_LIMIT_MB
+        value: "5120"
+      # PostHog wiring parity with jobcannon-web: the worker builds its own
+      # client through the same wiring.py seam (init_engine_seams is called
+      # unconditionally from jobcannon/worker/__main__.py). Previously
+      # undeclared here, which left the worker's PostHog client silently
+      # inert/unrouted regardless of the web service's configuration.
+      - key: POSTHOG_API_KEY
+        sync: false
+      - key: POSTHOG_HOST
+        value: https://eu.i.posthog.com
+      # Same dedicated secret as jobcannon-web's declaration above — both
+      # services must be set to the SAME value (they pseudonymize the same
+      # Clerk user ids), and this is a real secret so it stays sync: false
+      # rather than a committed literal.
+      - key: JC_ANALYTICS_PSEUDONYM_SALT
+        sync: false

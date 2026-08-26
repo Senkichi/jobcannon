@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jobcannon"
+version = "0.0.1"
+description = "Job Cannon - the honest job feed. Public-track repo."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "AGPL-3.0-or-later" }
+dependencies = [
+    "beautifulsoup4>=4.12",
+    "requests>=2.31",
+    "pycountry>=24.0",
+    "geonamescache>=2.0",
+    "markupsafe>=2.1",
+    "trafilatura>=2.0,<3",
+    "defusedxml>=0.7,<0.8",
+    "psycopg[binary]>=3.3.4,<4.0",
+    "psycopg-pool>=3.3.1,<4.0",
+    "flask>=3.1,<4",
+    "clerk-backend-api>=7.0.0,<8.0.0",
+    "cryptography>=50.0.0",
+    "svix>=1.96.0,<2.0.0",
+    "posthog>=3.7,<4.0",
+    "procrastinate>=3.9.0,<4.0",
+    "fastembed>=0.4,<1.0",
+    "pgvector>=0.3,<1.0",
+    "gunicorn>=23,<24",
+]
+
+[project.optional-dependencies]
+playwright = [
+    "playwright>=1.40",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+    "pandas>=2.2",
+    "matplotlib>=3.9",
+    "lifelines>=0.29",
+    "tabulate>=0.9",
+    "jsonschema>=4.0.0",
+    "pytest-xdist>=3.5",
+    "pyyaml>=6",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["jobcannon"]

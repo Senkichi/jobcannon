@@ -1,0 +1,9 @@
+merge_rules:
+  labels:
+    trigger: "mergequeue"
+  preconditions:
+    number_of_approvals: 0
+    required_checks:
+      - "Tests passed"
+  merge_strategy:
+    name: "squash"
