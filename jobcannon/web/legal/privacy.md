@@ -1,8 +1,9 @@
 # Job Cannon — Privacy Policy
 
 
-**Effective date:** 2026-08-27
-**Last updated:** 2026-08-27
+**Effective date:** 2026-08-26
+
+**Last updated:** 2026-08-26
 
 ## 1. Who we are
 
@@ -11,8 +12,9 @@ controller of the personal data described in this policy. You can reach us at
 hello@jobcannon.dev.
 
 The Service is a job-search tool. It maintains a shared corpus of job postings gathered
-from employers' own careers pages and applicant-tracking systems, and presents you a
-ranked feed of those postings based on a profile you supply.
+from employers' own careers pages and applicant-tracking systems, and presents you a feed
+of those postings that you can filter by title, company, location, and workplace type,
+with short automated notes on how a posting relates to the profile you supply.
 
 
 The Service's source code is published under the GNU Affero General Public License v3.0.
@@ -32,11 +34,11 @@ their own copy is a separate controller whose practices we do not govern.
 - We do not collect your name, your resume, or your IP address in our application code.
 
 - We do not send your profile or your activity to any external AI or large-language-model
-  provider. The only model we run is a posting-similarity index that runs on our own
-  infrastructure over job-listing text — see §3.5.
+  provider. The only model we run computes text embeddings of job-listing text on our
+  own infrastructure — see §3.5.
 
 - You can **export your data** as a JSON download and **delete your account** directly
-  in the Service. See §8 and §9.
+  in the Service. See §8 (retention and deletion) and §9 (your rights, including export).
 
 
 ## 3. What we collect
@@ -45,8 +47,8 @@ their own copy is a separate controller whose practices we do not govern.
 
 | What | When | Where it goes |
 |---|---|---|
-| Your career profile: skills, target job titles, target locations, seniority level, years of experience, and a free-text experience summary | When you complete the profile picker, or later edit your profile | Stored in our database against your account  |
-| Your picker selections before you have an account (titles, companies, skills, seniority, years, workplace type) | While you are using the picker as a visitor | Held in the session cookie only, then written to your profile when you sign up  |
+| Your career profile: skills, target job titles, seniority level, and years of experience | When you complete the profile picker | Stored in our database against your account  |
+| Your picker selections before you have an account (titles, companies, skills, seniority, years, workplace type) | While you are using the picker as a visitor | Held in the session cookie only. When you sign up, your titles, skills, seniority, and years are written to your profile; your company and workplace-type selections are used only for the pre-signup preview and are not retained  |
 | Whether you granted or declined analytics consent, when, and which consent version | When you answer the consent prompt | Stored against your account, plus an audit record  |
 
 ### 3.2 Information Clerk gives us
@@ -69,7 +71,8 @@ call to Clerk on a request-by-request basis.
 | Which postings you saved, dismissed, or clicked apply on | Always — this is the product working; saving a posting is what a saved posting is  |
 | Behavioral analytics events — which postings were shown to you, their position in your feed, the ranking version used, and the surface you were on | **Only if you have granted analytics consent.** Without consent these are discarded before anything is written or sent  |
 | A signup record noting how you arrived: the channel, the **hostname** of the site that referred you (never the full address, path, or query), and the signup wave | At signup  |
-| A session identifier and a feed session identifier | On your first contact with the Service; held in the cookie, not written to our database  |
+| A session identifier | On your first contact with the Service; held in the cookie only and not written to our database  |
+| A feed session identifier | On your first contact with the Service; held in the cookie and also recorded on the activity records tied to your account, so it appears in your data export  |
 
 **Before you have an account.** If you use the picker as a visitor, a provisional account
 and profile record is created for you server-side so your selections can be carried into a
@@ -90,10 +93,10 @@ See §6.3.
 
 ### 3.5 We do not use AI on your data
 
-Job postings in our corpus are indexed using a similarity model that runs **on our own
-infrastructure**, and it processes posting text — shared job listings — not your personal
-data. No external AI or inference provider receives your profile, your activity, or your
-job data.
+Job postings in our corpus have embeddings computed by a similarity model that runs **on
+our own infrastructure**, and it processes posting text — shared job listings — not your
+personal data. No external AI or inference provider receives your profile, your activity,
+or your job data.
 
 
 The short explanatory notes shown beside a posting (why it appeared for you) are
@@ -103,14 +106,20 @@ generated by restating fields already stored on that posting. They involve no mo
 ## 4. Why we process it, and on what legal basis
 
 
-| Purpose | Data | Proposed basis |
+| Purpose | Data | Legal basis |
+
 |---|---|---|
 | Create and maintain your account | Clerk user id, email | Performance of a contract |
-| Build and rank your job feed | Career profile, picker selections | Performance of a contract |
+| Build and filter your job feed, and generate the automated notes shown beside postings | Career profile, picker selections | Performance of a contract  |
 | Remember what you saved, dismissed, or applied to | Saved/dismissed/applied state | Performance of a contract |
 | Keep you signed in and keep the session working | Session cookie contents | Strictly necessary / legitimate interests |
-| Understand how the product is used and improve ranking | Behavioral analytics events | **Consent** — and only consent; nothing is collected without it  |
+| Understand how the product is used and improve it | Behavioral analytics events | **Consent** — and only consent; nothing is collected without it  |
 | Record that you made a consent choice | Consent decision, timestamp, version | Legal obligation (demonstrating consent) |
+
+Providing your Clerk user id and email is required to create and use an account; without
+them, you cannot use the Service. Analytics data is never required, and declining it does
+not affect your use of the Service.
+
 
 ## 5. Analytics and your consent
 
@@ -119,9 +128,8 @@ generated by restating fields already stored on that posting. They involve no mo
 
 If you have **not** granted consent, behavioral events — postings shown to you, postings
 saved, postings dismissed, apply clicks — are **discarded outright**. No record is written
-to our database and no call is made to our analytics provider. This is worth stating
-plainly because many policies say "we collect it but don't share it"; that is not what
-happens here. There is nothing to share, because there is nothing collected.
+to our database and no call is made to our analytics provider. Nothing is shared with
+anyone, because nothing is collected without your consent.
 
 
 Two records are written regardless of your consent choice: the fact that you signed up,
@@ -171,7 +179,10 @@ gets:
   falling back to the real identifier
 
 - the name of the event
-- a small properties bag for that event
+- a small properties bag for that event — for example, an Apply click carries the
+  **hostname** of the site the Apply link leads to (an employer's careers site or
+  applicant-tracking system), never the full address
+
 
 PostHog does **not** receive the posting identifier, your position in the feed, the
 ranking version, your feed session identifier, or experiment assignment — those are stored
@@ -182,12 +193,15 @@ more than a surface label.
 ### 6.3 Render — hosting
 
 The Service and its single database run on Render. Render therefore processes all
-application traffic and holds the database in which everything described in §3 is stored.
+application traffic and holds the database in which the account, profile, and activity
+data described in §3 is stored.
 
 
 Render operates platform-level infrastructure beneath our application. Our application
-code configures no request or access logging and records no IP addresses, but we have not
-independently verified what logging Render's platform applies on its own.
+code configures no request or access logging and records no IP addresses. Render may
+apply platform-level request logging as part of operating its infrastructure; any such
+logging is governed by Render's own privacy policy and data processing agreement, not by
+this policy.
 
 
 ### 6.4 Nobody else
@@ -220,22 +234,28 @@ where it is not.
 | The session cookie | Until you close your browser  |
 
 When your account is deleted, the deletion is a genuine hard delete: your account row is
-removed and every dependent record — profile, saved postings, pipeline status, analytics
-events — is removed with it by database cascade. This is not a soft flag or an archival
-copy.
+removed and every dependent record we hold — profile, saved postings, pipeline status,
+analytics events — is removed with it by database cascade. This is not a soft flag or an
+archival copy. The cascade runs when Clerk, our identity provider, confirms the account
+deletion to us, which normally follows your request shortly.
+
+Copies of analytics events that were already sent to PostHog under your consent are
+**not** separately deleted when your account is deleted. They remain at PostHog under the
+pseudonymous identifier described in §6.2, which cannot be linked back to you without
+our server's secret, and are subject to PostHog's own retention policy.
 
 
 ## 9. Your rights
 
 Depending on where you live, you may have rights to access, correct, delete, port, or
 restrict the processing of your personal data, and to object to it or withdraw consent.
-Here is the actual state of each:
+Here is how each works today:
 
 | Right | How it works today |
 |---|---|
 | **Withdraw or grant analytics consent** | Fully self-service on the consent page, at any time  |
-| **Correct your profile** | Self-service — edit your profile in the Service  |
-| **Delete your account and all associated data** | **Self-service** — a "Delete account" link in the Service's footer takes you to a confirmation page; confirming deletes your account. This triggers deletion through Clerk (our identity provider), and the same cascade removes every dependent record — profile, saved postings, pipeline status, analytics events. You can also delete your account directly through Clerk's own account management at https://accounts.jobcannon.dev/user  |
+| **Correct your profile** | Your profile is set from the picker selections carried in when you sign up; there is currently no in-Service way to edit it afterward. Email hello@jobcannon.dev to correct it and we will action the request within 30 days (see below)  |
+| **Delete your account and all associated data** | **Self-service** — a "Delete account" link in the Service's footer takes you to a confirmation page; confirming tells Clerk (our identity provider) to delete your account, and when Clerk confirms that deletion to us the same cascade removes every dependent record we hold — profile, saved postings, pipeline status, analytics events. Copies of analytics events already sent to PostHog are not separately purged (see §8). You can also delete your account directly through Clerk's own account management at https://accounts.jobcannon.dev/user; either path triggers the same cascade described above  |
 | **Export or download your data** | **Self-service** — the "Export your data" link in the Service's footer downloads a JSON file containing your profile, saved postings, pipeline status, consent decisions, and analytics events  |
 | **See a history of your consent decisions** | Included in the export above — every consent decision you have recorded appears in its events list, and the most recent one is also summarized. There is no separate history page  |
 
@@ -267,8 +287,8 @@ not yet saved to an account; and a flag noting your signup has been processed.
 
 The cookie is **cryptographically signed but not encrypted**. This means we can detect if
 it has been tampered with, but its contents are readable by anyone with access to your
-browser. We mention this because the cookie holds your picker selections before you have
-an account. It never contains a password or a credential.
+browser. This matters because the cookie holds your picker selections before you have an
+account. It never contains a password or a credential.
 
 
 We set no advertising, tracking, or third-party cookies.
@@ -308,4 +328,5 @@ any mandatory data-protection right you have under the law of the country where 
 ## 15. Contact
 
 Senkichi, LLC
+
 hello@jobcannon.dev

@@ -1,7 +1,7 @@
 # Job Cannon — Terms of Service
 
 
-**Effective date:** 2026-08-27
+**Effective date:** 2026-08-26
 
 ## 1. Agreement
 
@@ -17,9 +17,10 @@ Terms by reference. It is available at https://jobcannon.dev/privacy.
 ## 2. What the Service does
 
 The Service maintains a corpus of job postings gathered from employers' career pages and
-applicant-tracking systems, and presents you a ranked feed of those postings based on a
-profile you provide. You can save postings, dismiss them, and record that you have
-applied to them.
+applicant-tracking systems, and presents you a feed of those postings, which you can
+filter by title, company, location, and workplace type. Alongside a posting the Service
+may show short automated notes on how it relates to the profile you provide. You can save
+postings, dismiss them, and record that you have applied to them.
 
 
 **The Service is a search and organization tool. It is not an employer, a recruiter, a
@@ -57,8 +58,9 @@ are charged, and using a paid feature will be your choice.
 
 You keep ownership of the profile information and activity data you put into the Service.
 You grant us a non-exclusive licence to store and process that information solely to
-operate the Service for you — building your feed, ranking postings, and remembering what
-you saved, dismissed, or applied to — as described in the Privacy Policy.
+operate the Service for you — building and filtering your feed, generating the automated
+notes described in §2, and remembering what you saved, dismissed, or applied to — as
+described in the Privacy Policy.
 
 
 You confirm that information you supply is yours to supply and is accurate to the best of
@@ -109,8 +111,12 @@ of *our hosted instance* of it. The two are separate: nothing in these Terms res
 right the AGPL grants you in the code, and nothing in the AGPL entitles you to use our
 hosted Service on terms other than these.
 
-Consistent with AGPL-3.0 §13, the complete corresponding source for the version of the
-Service you interact with is available at https://github.com/Senkichi/jobcannon.
+Consistent with AGPL-3.0 §13, we make the complete corresponding source for the version
+of the Service you interact with available to you: it is at
+https://github.com/Senkichi/jobcannon, where the "Source" link in the Service's footer
+points at the exact revision that is running, and it is also available on request from
+hello@jobcannon.dev.
+
 
 If you run your own copy of the software, you are the operator of that instance. These
 Terms and our Privacy Policy do not apply to it, and we have no responsibility for it.
@@ -127,9 +133,11 @@ backups exist or that lost data can be restored.**
 
 
 We may add, change, suspend, or discontinue any part of the Service at any time. We may
-also change these Terms; if we do, we will post the updated version with a new effective
-date. Because the Service does not operate an email notification system, we will not
-promise to notify you by email — continued use after an update means you accept it.
+also change these Terms; if we do, we will post the updated version and change the
+effective date shown above to the date the new version takes effect — so the effective
+date above always reflects the current version of these Terms. Because the Service does
+not operate an email notification system, we will not promise to notify you by email —
+continued use after an update means you accept it.
 
 
 ## 10. Termination
@@ -137,9 +145,12 @@ promise to notify you by email — continued use after an update means you accep
 You may stop using the Service at any time. To close your account and have your data
 deleted, use the "Delete account" link in the Service's footer, or delete your account
 directly through Clerk's own account management at https://accounts.jobcannon.dev/user.
-Either path triggers deletion through Clerk, our identity provider, and the same cascade
-removes every dependent record — profile, saved postings, pipeline status, analytics
-events.
+Either path tells Clerk, our identity provider, to delete your account; when Clerk
+confirms that deletion to us, the same cascade removes every dependent record we hold in
+our own database — profile, saved postings, pipeline status, analytics events. Copies of
+analytics events already sent to our analytics processor under your consent are not
+separately purged; the Privacy Policy (§8) describes what remains there and under what
+identifier.
 
 
 We may suspend or terminate your access if you breach these Terms, if required by law, or
@@ -205,4 +216,5 @@ may assign them in connection with a merger, acquisition, or sale of assets.
 ## 16. Contact
 
 Senkichi, LLC
+
 hello@jobcannon.dev
