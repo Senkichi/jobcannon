@@ -21,6 +21,25 @@ def test_test_key_decodes_to_fapi_host():
 
 
 @pytest.mark.parametrize(
+    "unpadded_key, host",
+    [
+        ("pk_live_Y2xlcmsuam9iY2Fubm9uLmRldiQ", "clerk.jobcannon.dev"),  # one '=' dropped
+        ("pk_test_Y2xlcmsudGVzdCQ", "clerk.test"),  # one '=' dropped
+        ("pk_live_Y2xlcmsuam9iY2Fubm9uLmRldg", None),  # unpadded AND no '$' sentinel
+    ],
+)
+def test_unpadded_base64_matches_clerk_js_forgiving_atob(unpadded_key, host):
+    # clerk-js parses the key with the browser's forgiving atob(), which
+    # accepts missing '=' padding. The server must not be stricter than the
+    # client (a key clerk-js loads fine must never fail create_app at boot).
+    if host is None:
+        with pytest.raises(ValueError):
+            frontend_api_host(unpadded_key)
+    else:
+        assert frontend_api_host(unpadded_key) == host
+
+
+@pytest.mark.parametrize(
     "bad_key",
     [
         "",

@@ -6,7 +6,9 @@
   <title>{% block title %}Job Cannon{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  {% if clerk_publishable_key %}
+  {# Gate on the derived FAPI host, not the key: a key that decodes to no host
+     must never emit `src="https:///npm/..."`. #}
+  {% if clerk_publishable_key and clerk_frontend_api_host %}
   <script
     async
     crossorigin="anonymous"

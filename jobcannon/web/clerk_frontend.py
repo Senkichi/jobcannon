@@ -41,8 +41,14 @@ def frontend_api_host(publishable_key: str) -> str:
         )
     if not encoded:
         raise ValueError(f"publishable key has no content after its prefix: {publishable_key!r}")
+    # clerk-js decodes the key with the browser's forgiving `atob`, which
+    # tolerates missing `=` padding; re-pad so this check is never stricter
+    # than the client it is paired with (a key clerk-js accepts must not
+    # fail the web service's boot). `validate=True` still rejects any
+    # non-alphabet character.
+    padded = encoded + "=" * (-len(encoded) % 4)
     try:
-        decoded = base64.b64decode(encoded, validate=True).decode("ascii")
+        decoded = base64.b64decode(padded, validate=True).decode("ascii")
     except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
         raise ValueError(f"publishable key is not valid base64: {publishable_key!r}") from exc
     if not decoded.endswith("$"):
