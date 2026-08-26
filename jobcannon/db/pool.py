@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import ipaddress
 import logging
+import math
 import os
 import socket
 import threading
@@ -56,12 +57,19 @@ _WATCHDOG_MIN_RECYCLE_INTERVAL_S = 60.0
 
 
 def _watchdog_interval_s() -> float:
-    """Seconds between watchdog probes. 0 (or negative) disables the watchdog."""
+    """Seconds between watchdog probes. 0 (or negative) disables the watchdog.
+
+    Unparseable or non-finite values fall back to the default rather than
+    disabling: float() accepts "nan"/"inf", neither compares <= 0, and
+    time.sleep() raises on both — which would kill the watchdog thread
+    silently on a config typo.
+    """
     raw = os.environ.get("JC_POOL_WATCHDOG_S", "15")
     try:
-        return float(raw)
+        interval = float(raw)
     except ValueError:
         return 15.0
+    return interval if math.isfinite(interval) else 15.0
 
 
 # Boot-time resolution bounds (see _pin_hostaddr): each attempt gets its own
