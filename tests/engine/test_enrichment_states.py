@@ -189,6 +189,25 @@ def test_all_enrichment_tier_sql_literals_are_enum_members():
     )
 
 
+def test_expired_is_not_yet_written_anywhere():
+    """Adding EXPIRED to the enum widens the grep gate above's allowlist — it no
+    longer flags a write of enrichment_tier = 'expired' as off-vocabulary. This
+    port carries EXPIRED as vocabulary only (module docstring): no writer exists
+    yet (private original's retry/requeue sweep needs a hosted LLM caller, #139).
+    Pin that claim positively so it's enforced, not just asserted in prose.
+
+    DELETE this test the day a hosted writer for 'expired' lands (issue #139) —
+    at that point a real write is expected and this assertion becomes false by
+    design."""
+    literals: set[str] = set()
+    for py in _JOB_FINDER_ROOT.rglob("*.py"):
+        if "__pycache__" in py.parts or "migrations" in py.parts:
+            continue
+        text = py.read_text(encoding="utf-8")
+        literals.update(m.group(1) for m in _TIER_LITERAL_RE.finditer(text))
+    assert "expired" not in literals
+
+
 # ---------------------------------------------------------------------------
 # Consumers agree with the single source of truth
 # ---------------------------------------------------------------------------
