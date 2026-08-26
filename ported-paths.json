@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-26T00:54:21Z",
+  "generated_at": "2026-08-26T22:24:50Z",
   "roots": [
     "engine",
     "db",
@@ -352,7 +352,11 @@
           "text": "`job_finder/db/_classification.py` and was re-exported via `job_finder/db/__init__.py`"
         },
         {
-          "line": 110,
+          "line": 57,
+          "text": "# that can invalidate already-derived verdicts. In the private original,"
+        },
+        {
+          "line": 128,
           "text": "in the private original, the assessment writer"
         }
       ]
@@ -368,6 +372,24 @@
         {
           "line": 44,
           "text": "the cross-copy parity assertions in the private repo's"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/enrichment_states.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 26,
+          "text": "kept separate. ``expired`` belongs in this set deliberately: in the private"
+        },
+        {
+          "line": 27,
+          "text": "original it is reached only after a bounded agentic-exhausted retry budget is"
+        },
+        {
+          "line": 56,
+          "text": "private original: an AGENTIC_EXHAUSTED row that spent its bounded retry budget"
         }
       ]
     },
@@ -526,11 +548,11 @@
       "root": "host",
       "markers": [
         {
-          "line": 32,
+          "line": 46,
           "text": "_JD_STORAGE_MAX_CHARS = 50_000  # parity with the private repo's JD_STORAGE_MAX_CHARS"
         },
         {
-          "line": 34,
+          "line": 48,
           "text": "# Parity with the private deployment's job-level runtime cap for the ATS"
         }
       ]

@@ -52,6 +52,24 @@ _STRONG_AXIS_FLOOR: int = 4
 # vector nor suppress the tell on a genuinely flat one.
 _EXCLUDED_AXIS_MARKER: int = 3
 
+# Classification rule-version stamp. Bumped every time the rule in
+# ``derive_classification`` (or the thresholds that feed it) changes in a way
+# that can invalidate already-derived verdicts. In the private original,
+# ``persist_job_assessment`` stamps this onto a ``jobs.classification_rule_version``
+# column at write time so a rule change makes the affected cohort immediately
+# enumerable via ``WHERE classification_rule_version < CLASSIFICATION_RULE_VERSION``
+# instead of being inferred later from a health signal. That write path (the
+# column, its migration, and the redrive sweep) has no public counterpart yet —
+# this port carries only the version constant itself, so a future hosted
+# persistence layer has a stable value to stamp and this module's own history
+# of its rule is recorded in one place.
+#
+# Version history:
+#   1 — the rule as ported: low_signal branch + positive-evidence "apply" gate
+#       + location-policy effective_location_fit. Bump to 2 (3, ...) on the
+#       NEXT rule change that can invalidate stored verdicts.
+CLASSIFICATION_RULE_VERSION: int = 1
+
 
 def is_non_degenerate_low_signal(
     sub_scores: dict,
@@ -240,9 +258,10 @@ def derive_classification(
             ingestion-time scam/exclusion detection flagged this row.
         enrichment_tier: value of jobs.enrichment_tier ('free' | 'ddg' | 'low'
             | 'serpapi' | 'mid' | 'exhausted' | 'agentic' | 'agentic_exhausted'
-            | None). Only terminal tiers (those in _TERMINAL_ENRICHMENT_TIERS:
-            'exhausted', 'agentic', 'agentic_exhausted') participate in the
-            low_signal rule; other tiers are still re-enrichment candidates.
+            | 'expired' | None). Only terminal tiers (those in
+            _TERMINAL_ENRICHMENT_TIERS: 'exhausted', 'agentic',
+            'agentic_exhausted', 'expired') participate in the low_signal rule;
+            other tiers are still re-enrichment candidates.
         jd_full_length: character length of jobs.jd_full (0 when NULL).
         low_signal_threshold: jd_full_length below this triggers low_signal
             when enrichment is exhausted. Configurable via
