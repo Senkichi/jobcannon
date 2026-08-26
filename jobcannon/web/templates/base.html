@@ -22,6 +22,9 @@
     <a href="/consent" class="hover:text-neutral-300">Analytics preferences</a>
     <a href="/privacy" class="hover:text-neutral-300">Privacy</a>
     <a href="/terms" class="hover:text-neutral-300">Terms</a>
+    {% if g.clerk_user %}
+    <a href="/account/export" class="hover:text-neutral-300">Export your data</a>
+    {% endif %}
     <a href="/account/delete" class="hover:text-neutral-300">Delete account</a>
     <a href="https://github.com/Senkichi/jobcannon" target="_blank" rel="noopener noreferrer" class="hover:text-neutral-300">Source</a>
   </footer>

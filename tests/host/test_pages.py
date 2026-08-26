@@ -203,3 +203,58 @@ def test_demo_page_footer_carries_the_agpl_source_link(app_client_unauthed, monk
     html = app_client_unauthed.get("/demo").get_data(as_text=True)
     assert 'href="https://github.com/Senkichi/jobcannon"' in html
     assert ">Source<" in html
+
+
+# ---------------------------------------------------------------------------
+# Export-your-data footer link (issue #94 follow-up: privacy policy §9
+# promises self-service export; jobcannon/web/export.py's GET /account/export
+# is the real route, this pins the footer link to it and gates the link on
+# g.clerk_user the same way jobcannon/web/__init__.py's before_request hook
+# already sets it — None on every public/unauthed path, the identity object
+# on every authed one).
+# ---------------------------------------------------------------------------
+
+
+def test_footer_export_link_present_when_authenticated(app_client_authed, monkeypatch):
+    from jobcannon.web import pages
+
+    _patch_connection_factory(monkeypatch)
+    monkeypatch.setattr(
+        pages,
+        "corpus_stats",
+        lambda conn: {"postings": 0, "companies": 0, "freshest_last_seen": None},
+    )
+    monkeypatch.setattr(pages, "get_profile", lambda conn, user_id: None)
+
+    html = app_client_authed.get("/").get_data(as_text=True)
+    assert 'href="/account/export"' in html
+    assert "Export your data" in html
+
+
+def test_footer_export_link_absent_on_401_page(app_client_unauthed):
+    """The unauthed 401 page (error_401.html) extends base.html the same as
+    every authed/public page — g.clerk_user is None on this path (set BEFORE
+    the abort(401), jobcannon/web/__init__.py), so the export link must not
+    render even though the same footer markup renders the persistent,
+    unconditional Source link right next to it."""
+    resp = app_client_unauthed.get("/")
+    html = resp.get_data(as_text=True)
+    assert resp.status_code == 401
+    assert 'href="/account/export"' not in html
+    assert "Export your data" not in html
+
+
+def test_footer_export_link_absent_on_public_demo_page(app_client_unauthed, monkeypatch):
+    from jobcannon.web import pages
+
+    _patch_connection_factory(monkeypatch)
+    monkeypatch.setattr(
+        pages,
+        "corpus_stats",
+        lambda conn: {"postings": 0, "companies": 0, "freshest_last_seen": None},
+    )
+    monkeypatch.setattr(pages, "get_profile", lambda conn, user_id: None)
+
+    html = app_client_unauthed.get("/demo").get_data(as_text=True)
+    assert 'href="/account/export"' not in html
+    assert "Export your data" not in html
