@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-26T00:10:13Z",
+  "generated_at": "2026-08-26T00:54:21Z",
   "roots": [
     "engine",
     "db",
@@ -390,7 +390,7 @@
       "root": "engine",
       "markers": [
         {
-          "line": 474,
+          "line": 567,
           "text": "# re-homed from job_finder/db/_jd_full.py (plan Task 1 Step 6 amendment):"
         }
       ]
