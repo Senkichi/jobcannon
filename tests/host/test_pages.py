@@ -258,3 +258,87 @@ def test_footer_export_link_absent_on_public_demo_page(app_client_unauthed, monk
     html = app_client_unauthed.get("/demo").get_data(as_text=True)
     assert 'href="/account/export"' not in html
     assert "Export your data" not in html
+
+
+# ---------------------------------------------------------------------------
+# Footer "Source" link pinned to RENDER_GIT_COMMIT (issue #94 follow-up:
+# Terms of Service §8's AGPL Corresponding Source offer). Both branches of
+# jobcannon.web._source_link_context: unset (local/most test doubles, falls
+# back to the repo root URL — already exercised incidentally by the two
+# existing footer-source-link tests above, pinned explicitly here) and set
+# (a real Render deploy, HOST_CONFIG.render_git_commit populated).
+# ---------------------------------------------------------------------------
+
+
+def test_footer_source_link_falls_back_to_repo_root_when_commit_unset():
+    from jobcannon.web import create_app
+
+    app = create_app(
+        config={
+            "TESTING": True,
+            "VERIFY_REQUEST": lambda req: None,
+            "WEBHOOK_SECRET": "whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3Q=",
+        }
+    )
+    assert app.config["HOST_CONFIG"].render_git_commit == ""
+
+    html = app.test_client().get("/demo").get_data(as_text=True)
+    assert 'href="https://github.com/Senkichi/jobcannon"' in html
+    assert 'href="https://github.com/Senkichi/jobcannon/tree/' not in html
+    assert "commit " not in html
+
+
+def test_footer_source_link_pins_to_render_git_commit_when_set():
+    from jobcannon.host.config import HostConfig
+    from jobcannon.web import create_app
+
+    host_config = HostConfig(
+        database_url="",
+        secret_key="sk_flask_test",
+        clerk_sign_up_url="https://clerk.test/sign-up",
+        signup_wave="0",
+        render_git_commit="0123456789abcdef0123456789abcdef01234567",
+    )
+    app = create_app(
+        config={
+            "TESTING": True,
+            "VERIFY_REQUEST": lambda req: None,
+            "WEBHOOK_SECRET": "whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3Q=",
+            "HOST_CONFIG": host_config,
+        }
+    )
+
+    html = app.test_client().get("/demo").get_data(as_text=True)
+    assert (
+        'href="https://github.com/Senkichi/jobcannon/tree/'
+        '0123456789abcdef0123456789abcdef01234567"' in html
+    )
+    assert 'title="commit 0123456"' in html
+    assert ">Source<" in html
+
+
+def test_footer_source_link_tolerates_a_bare_host_config_double():
+    """Regression guard: the context processor runs on EVERY request,
+    including the 401 path exercised by
+    tests/host/test_empty_states.py's bare
+    `types.SimpleNamespace(clerk_sign_up_url="")` HOST_CONFIG double, which
+    predates the render_git_commit attribute entirely. A bare attribute
+    access (`host_config.render_git_commit`) would raise AttributeError on
+    every such request; getattr with a default must not."""
+    import types
+
+    from jobcannon.web import create_app
+
+    host_config = types.SimpleNamespace(clerk_sign_up_url="")
+    app = create_app(
+        config={
+            "TESTING": True,
+            "VERIFY_REQUEST": lambda req: None,
+            "WEBHOOK_SECRET": "whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3Q=",
+            "HOST_CONFIG": host_config,
+        }
+    )
+
+    resp = app.test_client().get("/")
+    assert resp.status_code == 401
+    assert 'href="https://github.com/Senkichi/jobcannon"' in resp.get_data(as_text=True)

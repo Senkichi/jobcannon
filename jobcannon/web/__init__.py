@@ -13,7 +13,14 @@ verifier and that route's user-delete management call; adds the public
 /privacy and /terms routes (jobcannon.web.legal, issue #94) serving the
 ratified privacy policy and terms of service, rendered once at import
 time from committed markdown under jobcannon/web/legal/ and gated by
-jobcannon.web.legal_guard against leftover drafting matter)."""
+jobcannon.web.legal_guard against leftover drafting matter; adds a
+context processor exposing two derived, non-secret footer values —
+source_url/source_sha_short, pinning the AGPL Corresponding Source link
+to the deployed RENDER_GIT_COMMIT — to every template render, the same
+way Flask itself auto-injects g/request/session, rather than the whole
+HOST_CONFIG object (which also carries Clerk/webhook secrets no template
+should be able to reach) or a per-route kwarg repeated on every one of
+base.html's several consuming routes, issue #94 follow-up)."""
 
 from __future__ import annotations
 
@@ -28,6 +35,30 @@ from jobcannon.web.handoff import run_handoff_if_pending
 logger = logging.getLogger(__name__)
 
 PUBLIC_PATHS = frozenset({"/healthz", "/demo", "/start", "/preview", "/privacy", "/terms"})
+
+# Terms of Service §8's AGPL Corresponding Source offer names this repo.
+_REPO_URL = "https://github.com/Senkichi/jobcannon"
+
+
+def _source_link_context(host_config) -> dict[str, str]:
+    """base.html's footer "Source" link, derived from HOST_CONFIG rather than
+    read ad hoc in the template: `getattr(..., "render_git_commit", "")`
+    (not a bare attribute access) so a HOST_CONFIG test double that predates
+    this field — e.g. tests/host/test_empty_states.py's bare
+    `types.SimpleNamespace(clerk_sign_up_url="")`, which every request
+    renders through this same context processor — degrades to the unset
+    branch instead of raising AttributeError, mirroring the 401 handler's
+    identical tolerance for `clerk_sign_up_url` a few lines up. Unset (local
+    dev, most test doubles): the repo root URL, text-identical to the
+    literal this footer link used to hard-code, so no existing assertion of
+    the plain URL breaks. Set (every real Render deploy): a /tree/<sha> link
+    pinned to the exact commit the running instance was built from, with the
+    7-char short SHA carried in `source_sha_short` for the template to show
+    as a title/tooltip rather than lengthening the visible "Source" text."""
+    sha = getattr(host_config, "render_git_commit", "") or ""
+    if not sha:
+        return {"source_url": _REPO_URL, "source_sha_short": ""}
+    return {"source_url": f"{_REPO_URL}/tree/{sha}", "source_sha_short": sha[:7]}
 
 
 def _resolve_consent(identity) -> bool:
@@ -92,6 +123,15 @@ def create_app(config: dict | None = None) -> Flask:
             signup_wave="0",
         )
     app.config["HOST_CONFIG"] = host_config  # ALWAYS set, both branches
+
+    @app.context_processor
+    def _inject_footer_source_link():
+        # Runs on every template render (Flask's own g/request/session
+        # injection mechanism) — deliberately exposes only the two DERIVED
+        # values _source_link_context computes, never the full HOST_CONFIG
+        # object, which also carries Clerk/webhook secrets no template
+        # should be able to touch.
+        return _source_link_context(app.config["HOST_CONFIG"])
 
     if "WEBHOOK_SECRET" in app.config:
         secret = app.config["WEBHOOK_SECRET"]

@@ -26,7 +26,7 @@
     <a href="/account/export" class="hover:text-neutral-300">Export your data</a>
     {% endif %}
     <a href="/account/delete" class="hover:text-neutral-300">Delete account</a>
-    <a href="https://github.com/Senkichi/jobcannon" target="_blank" rel="noopener noreferrer" class="hover:text-neutral-300">Source</a>
+    <a href="{{ source_url }}" target="_blank" rel="noopener noreferrer" class="hover:text-neutral-300"{% if source_sha_short %} title="commit {{ source_sha_short }}"{% endif %}>Source</a>
   </footer>
 </body>
 </html>
