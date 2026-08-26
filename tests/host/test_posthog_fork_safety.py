@@ -127,18 +127,24 @@ def test_reinit_posthog_after_fork_rebuilds_from_current_config(monkeypatch):
     assert set_calls == ["client-for-key-a", "client-for-key-b"]
 
 
-def test_reinit_posthog_after_fork_installs_none_without_api_key(monkeypatch):
+def test_reinit_posthog_after_fork_installs_none_without_api_key(monkeypatch, caplog):
     """_build_posthog_client(host_config) returns None when no PostHog API
     key is configured — the hook must still install that None (mirroring
-    init_engine_seams' own inert-seam behavior), not skip the call."""
+    init_engine_seams' own inert-seam behavior), not skip the call. The log
+    line must say "absent", not the "rebuilt" line reserved for a real
+    client, so log-signature watchers can't mistake a missing key for a
+    healthy post-fork rebuild."""
     _reset_hook_state(monkeypatch)
     set_calls: list = []
     monkeypatch.setattr(posthog_client, "set_posthog_client", set_calls.append)
     monkeypatch.setattr(wiring, "_current_host_config", HostConfig(database_url="x"))
 
-    wiring._reinit_posthog_after_fork()
+    with caplog.at_level("INFO"):
+        wiring._reinit_posthog_after_fork()
 
     assert set_calls == [None]
+    assert "posthog client absent after fork" in caplog.text
+    assert "posthog client rebuilt after fork" not in caplog.text
 
 
 def test_reinit_posthog_after_fork_noops_without_current_config(monkeypatch):

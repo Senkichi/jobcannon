@@ -95,13 +95,14 @@ def _build_posthog_client(host_config: HostConfig):
 _current_host_config: HostConfig | None = None
 
 # os.register_at_fork registrations are permanent and accumulate for the
-# life of the process; init_engine_seams is called repeatedly (tests, the
-# worker entrypoint's own re-init paths), so registering unconditionally
-# would stack a growing pile of duplicate after_in_child callbacks. This
-# guard makes registration idempotent per process. Unlike pool.py's
-# _install_fork_hook (called once at import time, at module scope), this
-# one is invoked from inside init_engine_seams itself, so it needs its own
-# one-time check rather than relying on Python's single-import semantics.
+# life of the process; init_engine_seams is called repeatedly (the test
+# suite, and multiple create_app() calls within one process), so registering
+# unconditionally would stack a growing pile of duplicate after_in_child
+# callbacks. This guard makes registration idempotent per process. Unlike
+# pool.py's _install_fork_hook (called once at import time, at module
+# scope), this one is invoked from inside init_engine_seams itself, so it
+# needs its own one-time check rather than relying on Python's
+# single-import semantics.
 _POSTHOG_FORK_HOOK_INSTALLED = False
 
 
@@ -131,8 +132,15 @@ def _reinit_posthog_after_fork() -> None:
         # init_engine_seams ran) — nothing to rebuild against.
         return
     try:
-        posthog_client.set_posthog_client(_build_posthog_client(_current_host_config))
-        logger.info("posthog client rebuilt after fork in pid %d", os.getpid())
+        client = _build_posthog_client(_current_host_config)
+        posthog_client.set_posthog_client(client)
+        if client is not None:
+            logger.info("posthog client rebuilt after fork in pid %d", os.getpid())
+        else:
+            logger.info(
+                "posthog client absent after fork in pid %d (no API key configured)",
+                os.getpid(),
+            )
     except Exception:
         logger.exception("post-fork posthog client rebuild failed in pid %d", os.getpid())
 
