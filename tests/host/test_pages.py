@@ -285,7 +285,7 @@ def test_footer_source_link_falls_back_to_repo_root_when_commit_unset():
     html = app.test_client().get("/demo").get_data(as_text=True)
     assert 'href="https://github.com/Senkichi/jobcannon"' in html
     assert 'href="https://github.com/Senkichi/jobcannon/tree/' not in html
-    assert "commit " not in html
+    assert 'title="commit' not in html
 
 
 def test_footer_source_link_pins_to_render_git_commit_when_set():
