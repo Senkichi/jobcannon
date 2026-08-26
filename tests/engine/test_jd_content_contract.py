@@ -262,11 +262,11 @@ def test_empty_jd_is_not_rejected():
 # ---------------------------------------------------------------------------
 
 
-def test_jd_content_version_is_4():
-    # LITERAL pin: the resync lands the private contract's truncation +
-    # json-blob rules, whose watermark is 4. A drift here silently re-arms
-    # (or fails to re-arm) the whole-corpus re-sweep.
-    assert JD_CONTENT_VERSION == 4
+def test_jd_content_version_is_5():
+    # LITERAL pin: the config-shape hardening + json-blob vocabulary widening
+    # (issue #37 re-port from the private source) bumps the watermark to 5.
+    # A drift here silently re-arms (or fails to re-arm) the corpus re-sweep.
+    assert JD_CONTENT_VERSION == 5
 
 
 def test_reason_code_registry_set_equality():
@@ -449,6 +449,124 @@ def test_json_blob_with_real_description_not_rejected():
     assert jd_content_reject(body) is None
 
 
+# ---------------------------------------------------------------------------
+# JSON-blob escape-hatch vocabulary widening (issue #37, re-ported from the
+# private source). The blob detector's description-key escape hatch only recognized
+# snake_case job_description/description; these pin the widened vocabulary
+# (camelCase, a dict-valued description, the generic `content` key, and a
+# bare array wrapping a JSON-LD-style posting object).
+# ---------------------------------------------------------------------------
+
+
+def test_json_blob_with_camelcase_description_not_rejected():
+    """camelCase jobDescription is recognized, not just snake_case."""
+    body = json.dumps({"jobTitle": "Senior Data Scientist", "jobDescription": _REAL_JD})
+    res = classify_jd_content(body, "Senior Data Scientist", "Acme")
+    assert res.verdict is not JdVerdict.REJECT
+
+
+def test_json_blob_with_dict_valued_description_not_rejected():
+    """A description field whose value is itself a nested object (some ATS
+    payloads wrap raw/html variants) is still recognized as real prose."""
+    body = json.dumps(
+        {
+            "job_title": "Senior Data Scientist",
+            "description": {"raw": _REAL_JD, "html": "<p>...</p>"},
+        }
+    )
+    res = classify_jd_content(body, "Senior Data Scientist", "Acme")
+    assert res.verdict is not JdVerdict.REJECT
+
+
+def test_json_blob_with_content_key_not_rejected():
+    """The generic `content` key (some ATS micro-sites use it instead of
+    description/job_description) is recognized too."""
+    body = json.dumps({"job_title": "Senior Data Scientist", "content": _REAL_JD})
+    res = classify_jd_content(body, "Senior Data Scientist", "Acme")
+    assert res.verdict is not JdVerdict.REJECT
+
+
+def test_json_blob_bare_array_with_nested_description_not_rejected():
+    """A leading bare array wrapping a JSON-LD-style posting object, whose
+    element carries real prose under a description key, is not a config
+    blob even though the top-level JSON value is a list."""
+    body = json.dumps(
+        [{"@type": "JobPosting", "title": "Senior Data Scientist", "description": _REAL_JD}]
+    )
+    res = classify_jd_content(body, "Senior Data Scientist", "Acme")
+    assert res.verdict is not JdVerdict.REJECT
+
+
+def test_json_blob_bare_array_without_prose_still_rejected():
+    """Counter-test: a bare array with no nested description/content prose
+    (a genuine config array) stays REJECT -- the widened escape hatch must
+    not swallow real junk."""
+    body = json.dumps([{"id": i, "code": f"locale-{i:03d}"} for i in range(30)])
+    res = classify_jd_content(body, "Senior Data Scientist", "Acme")
+    assert res.verdict is JdVerdict.REJECT
+    assert res.signal == "json_config_blob"
+
+
+def test_json_blob_short_format_tag_under_description_still_rejected():
+    """Counter-test: a description-like key whose value is short filler (a
+    format tag, not prose) must not trip the widened escape hatch. Without a
+    substantiality floor on the matched leaf, this config blob would flip
+    from REJECT to a scorable verdict on the strength of the word "html"."""
+    padding = {"font": "Helvetica", "locale": "en-US", "palette": ["#111", "#222", "#333"] * 60}
+    body = json.dumps(
+        {
+            "theme": padding,
+            "job_title": "Data Scientist 4",
+            "description": {"format": "html", "text": ""},
+        }
+    )
+    res = classify_jd_content(body, "Data Scientist 4", "Netflix")
+    assert res.verdict is JdVerdict.REJECT
+    assert res.signal == "json_config_blob"
+
+
+def test_json_blob_short_content_label_still_rejected():
+    """Counter-test: the generic `content` alias must require substantial
+    text too -- a short section label (`"header": "Careers"`) must not read
+    as real prose just because it sits under the `content` key."""
+    padding = {"font": "Helvetica", "locale": "en-US", "palette": ["#111", "#222", "#333"] * 60}
+    body = json.dumps(
+        {
+            "theme": padding,
+            "job_title": "Data Scientist 4",
+            "content": {"header": "Careers", "footer": "(c) Acme"},
+        }
+    )
+    res = classify_jd_content(body, "Data Scientist 4", "Acme")
+    assert res.verdict is JdVerdict.REJECT
+    assert res.signal == "json_config_blob"
+
+
+def test_json_blob_short_direct_string_description_now_rejected():
+    """Pins the *tightening* half of the substantiality-floor change: before
+    the floor, ANY non-empty string directly under `description` -- even a
+    one-word value like "N/A" -- escaped blob classification entirely
+    (`if isinstance(val, str) and val.strip(): return False`). With the
+    40-char `_PROSE_LEAF_MIN_CHARS` floor, that same short direct-string
+    value (not nested under another key, unlike the format-tag/label
+    counter-tests above) no longer clears the escape hatch, so this body
+    -- long enough to pass the `too_short` gate on padding alone -- flips
+    from a pre-existing fall-through to a deterministic REJECT
+    `json_config_blob` at the write gate."""
+    padding = {"font": "Helvetica", "locale": "en-US", "palette": ["#111", "#222", "#333"] * 20}
+    body = json.dumps(
+        {
+            "theme": padding,
+            "job_title": "Data Scientist 4",
+            "description": "See attached PDF",  # 17 chars: non-empty, under the 40-char floor
+        }
+    )
+    assert len(body) >= 200  # clears the too_short gate independent of the blob check
+    res = classify_jd_content(body, "Data Scientist 4", "Acme")
+    assert res.verdict is JdVerdict.REJECT
+    assert res.signal == "json_config_blob"
+
+
 def test_prose_containing_braces_is_not_a_blob():
     # A real JD that merely CONTAINS an inline JSON/code block must not be
     # mistaken for a serialized config payload.
@@ -580,6 +698,43 @@ def test_malformed_config_degrades_to_defaults():
     assert get_jd_full_thresholds({"enrichment": {"jd_full": "yes"}}) == (200, True)
 
 
+@pytest.mark.parametrize(
+    "cfg",
+    [
+        {"enrichment": "not-a-dict"},
+        {"enrichment": []},
+        "not-a-dict",
+        [],
+    ],
+    ids=[
+        "enrichment_scalar",
+        "enrichment_list",
+        "config_scalar",
+        "config_list",
+    ],
+)
+def test_get_jd_full_thresholds_degrades_on_malformed_top_level_shape(cfg):
+    """Extends test_malformed_config_degrades_to_defaults (issue #37) to the
+    isinstance-guard levels the private source's re-port added on top of
+    the leaf/null-section fix: a *truthy* non-dict `enrichment` value (not
+    just None -- a bare `or {}` only substitutes on falsy values, so a stray
+    scalar would otherwise reach `.get()` on a non-dict and raise
+    AttributeError), a list-valued `enrichment`, and a non-dict `config`
+    itself (scalar or list) all degrade to the documented defaults instead of
+    raising."""
+    assert get_jd_full_thresholds(cfg) == (200, True)
+
+
+@pytest.mark.parametrize("bad_min_chars", [[], {}])
+def test_get_jd_full_thresholds_degrades_on_container_min_chars(bad_min_chars):
+    """A list/dict-valued min_chars leaf (int() raises TypeError on these, the
+    same as the string/None cases test_malformed_config_degrades_to_defaults
+    already pins) also degrades to the default."""
+    cfg = {"enrichment": {"jd_full": {"min_chars": bad_min_chars}}}
+    min_chars, _ = get_jd_full_thresholds(cfg)
+    assert min_chars == 200
+
+
 def test_malformed_config_degrades_at_reject_chokepoint():
     """The same malformed config shapes must not crash jd_content_reject
     itself — the actual per-row gate hit by set_jd_full and
@@ -588,3 +743,13 @@ def test_malformed_config_degrades_at_reject_chokepoint():
     body = "x" * 250  # clears the default 200-char floor; no other reject signal
     assert jd_content_reject(body, None, {"enrichment": None}) is None
     assert jd_content_reject(body, None, {"enrichment": {"jd_full": {"min_chars": "abc"}}}) is None
+
+
+def test_classify_jd_content_survives_null_enrichment_section():
+    """The full 3-way verdict (not just the write-gate reject check) must
+    also survive a null `enrichment` section -- a YAML section whose
+    children are all commented out parses to None, so {"enrichment": None}
+    is a realistic config shape."""
+    cfg = {"enrichment": None}
+    res = classify_jd_content(_REAL_JD, "Senior Data Scientist", "Acme Corp", cfg)
+    assert res.verdict is JdVerdict.CLEAN
