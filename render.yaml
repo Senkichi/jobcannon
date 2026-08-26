@@ -30,7 +30,15 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install uv && uv sync --locked --no-dev
-    startCommand: uv run --no-sync gunicorn --workers 2 --bind 0.0.0.0:$PORT "jobcannon.web:create_app()"
+    # --preload is load-bearing, not an optimization: it pins the process
+    # topology to build-once-in-the-master-then-fork, which is what the
+    # fork-safety hook in jobcannon/db/pool.py is written for (each worker
+    # abandons the inherited pool and rebuilds its own). Production logs
+    # from the 2026-08-26 incident show Render's runtime exhibited pre-fork
+    # load even WITHOUT this flag (pin line stamped before the gunicorn
+    # banner, zero per-worker pool builds) — the flag makes that topology
+    # deterministic instead of environment-dependent.
+    startCommand: uv run --no-sync gunicorn --preload --workers 2 --bind 0.0.0.0:$PORT "jobcannon.web:create_app()"
     healthCheckPath: /healthz
     envVars:
       # Pinned so a new service doesn't silently pick up Render's current
@@ -38,16 +46,16 @@ services:
       # with whatever Python version(s) CI tests as that changes.
       - key: PYTHON_VERSION
         value: "3.13.5"
-      # 2026-08-26 incident: this service's PRIVATE-network path to
-      # jobcannon-db began blackholing connection attempts (hung connects
-      # that never reach the server, across restarts AND fresh deploys),
-      # while the worker, one-off preDeploy containers, and external
-      # clients all connect cleanly. Until Render resolves that, the web
-      # service routes over the DB's EXTERNAL endpoint: sync:false means
-      # the value (the external connection string) is set in the
-      # dashboard/API, never committed here. To restore the internal
-      # route once the platform path is fixed, revert this block to the
-      # worker's fromDatabase form below and delete the dashboard value.
+      # 2026-08-26 incident: originally diagnosed as a platform network
+      # fault on the private DB path, so this was switched to sync:false
+      # with the endpoint managed via the dashboard/API. The real root
+      # cause turned out to be gunicorn pre-fork pool inheritance (fixed
+      # by the fork hook in jobcannon/db/pool.py + --preload above) — the
+      # endpoint was never the fault; both endpoints wedged identically.
+      # Kept sync:false through the fix's first deploy so recovery is
+      # attributable to one variable; restoring the worker's fromDatabase
+      # form below (and deleting the dashboard value) is the follow-up
+      # once the fix is proven live.
       - key: DATABASE_URL
         sync: false
       - key: CLERK_SECRET_KEY
