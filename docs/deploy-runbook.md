@@ -103,6 +103,20 @@ the warm connection. Recycling recovers only what a fresh connect can reach
 — if the network path itself is down, probes keep failing, `/healthz` stays
 503, and platform replacement remains the backstop.
 
+**The pool is fork-safe.** The 2026-08-26 incident's actual root cause: the
+web app is built before gunicorn forks its workers, so each worker inherited
+a pool whose background threads (psycopg_pool's workers, the watchdog) did
+not exist in the child and whose one connection socket was shared across
+processes — the shared connection died within seconds and the child could
+never build another (refill tasks queue to threads that aren't there), with
+zero errors logged. `jobcannon/db/pool.py` now registers an
+`os.register_at_fork` hook: after every fork the child abandons the
+inherited pool (never closes it — that would write into the parent's
+socket) and builds its own, with its own threads and watchdog. Log
+signature to expect on a healthy boot: one `pinned DB hostaddr ... (pid N)`
+line for the pre-fork build, plus one `pool rebuilt after fork in pid M`
+(with its own pin line) per gunicorn worker.
+
 Clerk auth + consent resolution still
 fail closed (no session / no consent) without a live schema, and routes that
 read/write `postings`, `companies`, etc. will error until the worker has
