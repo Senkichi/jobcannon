@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import ipaddress
 import logging
+import math
 import os
 import socket
 import threading
@@ -34,6 +35,42 @@ from jobcannon.db.rows import hybrid_row
 logger = logging.getLogger(__name__)
 
 _pool: ConnectionPool | None = None
+_pool_lock = threading.Lock()
+# Construction args, kept so the watchdog can rebuild an equivalent pool.
+_pool_args: tuple[str, int, int] | None = None
+_watchdog_thread: threading.Thread | None = None
+
+# Pool watchdog tuning. The 2026-08-26 incident's terminal state was a WEDGED
+# pool: the first established connection went app-level dark while its TCP
+# flow stayed ACKed (external-endpoint proxy alive, backhaul dead), the
+# pool's untimed reset/check round-trips on it wedged all three background
+# workers, and a wedged pool never attempts another connect — even though a
+# fresh connect succeeded on every observed instance restart. No layer below
+# this one can bound that mode (connect_timeout covers establishment only;
+# tcp_user_timeout/keepalives never fire when the peer's TCP stack ACKs), so
+# the recovery has to live here: probe the pool on a wall-clock bound, and
+# after enough consecutive failures throw the whole pool away and build a
+# fresh one. Probing doubles as an app-level keepalive — each probe runs a
+# real round-trip, so the warm connection's flow never sits idle.
+_WATCHDOG_FAILURES_TO_RECYCLE = 3
+_WATCHDOG_MIN_RECYCLE_INTERVAL_S = 60.0
+
+
+def _watchdog_interval_s() -> float:
+    """Seconds between watchdog probes. 0 (or negative) disables the watchdog.
+
+    Unparseable or non-finite values fall back to the default rather than
+    disabling: float() accepts "nan"/"inf", neither compares <= 0, and
+    time.sleep() raises on both — which would kill the watchdog thread
+    silently on a config typo.
+    """
+    raw = os.environ.get("JC_POOL_WATCHDOG_S", "15")
+    try:
+        interval = float(raw)
+    except ValueError:
+        return 15.0
+    return interval if math.isfinite(interval) else 15.0
+
 
 # Boot-time resolution bounds (see _pin_hostaddr): each attempt gets its own
 # wall-clock budget because a HUNG resolver (the 2026-08-26 failure mode) never
@@ -197,11 +234,8 @@ def _reset(conn: psycopg.Connection) -> None:
         conn.execute("RESET synchronous_commit")
 
 
-def open_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> None:
-    global _pool
-    if _pool is not None:
-        return
-    _pool = ConnectionPool(
+def _build_pool(dsn: str, *, min_size: int, max_size: int) -> ConnectionPool:
+    pool = ConnectionPool(
         conninfo=_conninfo_with_defaults(dsn),
         min_size=min_size,
         max_size=max_size,
@@ -214,14 +248,144 @@ def open_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> None:
         check=ConnectionPool.check_connection,
         open=False,
     )
-    _pool.open()
+    pool.open()
+    return pool
+
+
+def open_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> None:
+    global _pool, _pool_args
+    with _pool_lock:
+        if _pool is not None:
+            return
+        _pool_args = (dsn, min_size, max_size)
+        _pool = _build_pool(dsn, min_size=min_size, max_size=max_size)
+        # Under the lock: two racing open_pool calls must not each pass the
+        # is_alive check and start duplicate watchdog loops (each loop keeps
+        # its own rate-limit clock, so duplicates could recycle-thrash).
+        _ensure_watchdog()
 
 
 def close_pool() -> None:
     global _pool
-    if _pool is not None:
-        _pool.close()
-        _pool = None
+    with _pool_lock:
+        if _pool is not None:
+            _pool.close()
+            _pool = None
+
+
+def probe_pool(*, acquire_timeout: float = 2.0, wall_timeout: float = 2.5) -> str | None:
+    """Wall-clock-bounded liveness probe of the open pool.
+
+    Returns None when a connection could be acquired and ran SELECT 1, else a
+    one-line failure detail. Shared by /healthz and the watchdog so both judge
+    health identically.
+
+    The acquisition timeout bounds only the WAIT for a pool slot; a connection
+    handed over with a dark socket then hangs in SELECT 1 with no lower-layer
+    bound (the incident mode: peer TCP ACKs, so tcp_user_timeout/keepalives
+    never fire). Hence the daemon-thread wall bound around the whole probe —
+    an abandoned probe thread parks in a network read, holds no locks, and is
+    reaped with its socket at process exit.
+    """
+    result: dict[str, Any] = {}
+
+    def _probe() -> None:
+        try:
+            with get_pool().connection(timeout=acquire_timeout) as conn:
+                conn.execute("SELECT 1")
+            result["ok"] = True
+        except Exception as ex:
+            result["error"] = ex
+
+    probe = threading.Thread(target=_probe, daemon=True, name="pool-probe")
+    probe.start()
+    probe.join(wall_timeout)
+    if result.get("ok"):
+        return None
+    ex = result.get("error")
+    if ex is not None:
+        return f"{type(ex).__name__}: {ex}"
+    return f"probe did not complete within {wall_timeout}s (hung socket or wedged pool)"
+
+
+def _recycle_pool(detail: str) -> None:
+    """Replace a wedged pool with a freshly built one.
+
+    Build-first, swap, then close the old pool outside the lock: a rebuild
+    failure leaves the old pool in place (the watchdog retries after the
+    rate-limit window), and close() on a wedged pool can burn its full worker
+    timeout — proven by the incident's 'couldn't stop thread pool-1-worker-N'
+    teardown warnings — so it must not hold the lock or block the swap.
+    """
+    global _pool
+    with _pool_lock:
+        old = _pool
+        if old is None or _pool_args is None:
+            return
+        try:
+            stats: dict = old.get_stats()
+        except Exception:
+            stats = {}
+        logger.critical(
+            "pool watchdog: recycling pool after %d consecutive probe failures "
+            "(last: %s; stats: %s)",
+            _WATCHDOG_FAILURES_TO_RECYCLE,
+            detail,
+            stats,
+        )
+        dsn, min_size, max_size = _pool_args
+        try:
+            _pool = _build_pool(dsn, min_size=min_size, max_size=max_size)
+        except Exception:
+            logger.exception("pool watchdog: rebuild failed; keeping existing pool")
+            return
+    try:
+        old.close(timeout=5.0)
+    except Exception as ex:
+        logger.warning("pool watchdog: closing old pool raised %s: %s", type(ex).__name__, ex)
+
+
+def _watchdog_loop() -> None:
+    failures = 0
+    last_recycle: float | None = None
+    while True:
+        interval = _watchdog_interval_s()
+        if interval <= 0:
+            return
+        time.sleep(interval)
+        if _pool is None:
+            return
+        try:
+            detail = probe_pool()
+        except Exception as ex:  # the loop must survive anything
+            detail = f"{type(ex).__name__}: {ex}"
+        if detail is None:
+            failures = 0
+            continue
+        failures += 1
+        logger.warning(
+            "pool watchdog: probe failed (%d/%d): %s",
+            failures,
+            _WATCHDOG_FAILURES_TO_RECYCLE,
+            detail,
+        )
+        now = time.monotonic()
+        if failures >= _WATCHDOG_FAILURES_TO_RECYCLE and (
+            last_recycle is None or now - last_recycle >= _WATCHDOG_MIN_RECYCLE_INTERVAL_S
+        ):
+            _recycle_pool(detail)
+            failures = 0
+            last_recycle = now
+
+
+def _ensure_watchdog() -> None:
+    global _watchdog_thread
+    if _watchdog_interval_s() <= 0:
+        return
+    if _watchdog_thread is not None and _watchdog_thread.is_alive():
+        return
+    _watchdog_thread = threading.Thread(target=_watchdog_loop, daemon=True, name="pool-watchdog")
+    _watchdog_thread.start()
 
 
 def is_open() -> bool:
