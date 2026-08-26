@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-26T22:24:50Z",
+  "generated_at": "2026-08-26T23:15:53Z",
   "roots": [
     "engine",
     "db",
@@ -430,19 +430,27 @@
           "text": "job_finder.web.model_provider.call_model in the private repo, which"
         },
         {
-          "line": 43,
+          "line": 44,
           "text": "# Re-homed from the private repo's providers/ollama_provider.py; provider-tuning"
         },
         {
-          "line": 430,
+          "line": 363,
+          "text": "it (private-repo D5, issue #1742). A"
+        },
+        {
+          "line": 440,
+          "text": "# the private repo's batch scoring does) gets self-healing for free: a"
+        },
+        {
+          "line": 489,
           "text": "``job_finder.web.model_provider.call_model`` in the private repo, which"
         },
         {
-          "line": 431,
+          "line": 490,
           "text": "inherited schema retry, cascade fallback, rate limiting, and provider"
         },
         {
-          "line": 457,
+          "line": 516,
           "text": "the private repo's ``model_provider.call_model`` signature"
         }
       ]
@@ -548,11 +556,11 @@
       "root": "host",
       "markers": [
         {
-          "line": 46,
+          "line": 87,
           "text": "_JD_STORAGE_MAX_CHARS = 50_000  # parity with the private repo's JD_STORAGE_MAX_CHARS"
         },
         {
-          "line": 48,
+          "line": 89,
           "text": "# Parity with the private deployment's job-level runtime cap for the ATS"
         }
       ]

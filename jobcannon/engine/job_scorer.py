@@ -35,6 +35,7 @@ from typing import Any, Callable
 from jobcannon.engine.constants import SUB_SCORE_KEYS
 from jobcannon.engine.classification import JobAssessment
 from jobcannon.engine.classification import _TERMINAL_ENRICHMENT_TIERS
+from jobcannon.engine.jd_content_contract import JD_CONTENT_VERSION, JdVerdict
 from jobcannon.engine.scoring_prompts.v3_scoring_prompt import JOB_ASSESSMENT_SCHEMA
 from jobcannon.engine.scoring_types import build_comp_context
 
@@ -118,9 +119,12 @@ class ScoringResult:
       strings reported by the cascade.
     - status="skipped": data is None, provider/model are None, error is None —
       a precondition was not met (SCORER-05). ``reason`` names which gate fired:
-        "awaiting_jd"       — jd_full absent/empty; job needs enrichment.
-        "awaiting_location" — locations_structured + location both empty and the
-                              job is still enrichable (D-7 / P3.2 gate).
+        "awaiting_jd"              — jd_full absent/empty; job needs enrichment.
+        "awaiting_location"        — locations_structured + location both empty
+                                      and the job is still enrichable (D-7 / P3.2
+                                      gate).
+        "awaiting_jd_adjudication" — persisted jd_content_verdict is not CLEAN
+                                      and the row is not adjudicated (D5, #1742).
     - status="error": data is None, provider/model are whatever the dispatcher
       reported if the call reached it, error is a human-readable reason.
     """
@@ -338,16 +342,40 @@ def _coerce_assessment(
 def scoring_precheck(job: dict) -> str | None:
     """Return the pre-call skip reason for *job*, or ``None`` if it is ready to score.
 
-    Pure — no I/O, no model call. The SINGLE source of truth for the two
+    Pure — no I/O, no model call. The SINGLE source of truth for the three
     completeness gates ``score_job`` enforces before spending a model call
     (D-7, "completeness gates, not garbage-in scoring"):
 
-      ``"awaiting_jd"``       — ``jd_full`` absent/empty (SCORER-05).
-      ``"awaiting_location"`` — ``locations_structured`` AND ``location`` both
-                                empty, the job is still enrichable (enrichment
-                                tier is NOT terminal), and the row does not
-                                already carry ``"location_missing"`` in
-                                ``unresolved_reasons`` (P3.2).
+      ``"awaiting_jd"``              — ``jd_full`` absent/empty (SCORER-05).
+      ``"awaiting_location"``        — ``locations_structured`` AND ``location``
+                                        both empty, the job is still enrichable
+                                        (enrichment tier is NOT terminal), and
+                                        the row does not already carry
+                                        ``"location_missing"`` in
+                                        ``unresolved_reasons`` (P3.2).
+      ``"awaiting_jd_adjudication"`` — the row carries a PERSISTED jd-content
+                                        contract verdict (``jd_content_verdict``,
+                                        as stamped by a host's ``set_jd_full``
+                                        at write time via
+                                        ``jd_content_contract.classify_jd_content``
+                                        — see that module) that is not CLEAN,
+                                        and the adjudicator has not vouched for
+                                        it (private-repo D5, issue #1742). A
+                                        REJECT/AMBIGUOUS body is not proven to
+                                        be this job's actual posting, so
+                                        scoring it burns a model call against
+                                        garbage-in / off-topic text.
+
+    Deliberately fails OPEN on a NULL ``jd_content_verdict`` (no gate applied):
+    this function stays pure/no-I/O (no ``classify_jd_content`` call here), so
+    a row no host has stamped yet — which, on THIS engine today, is every row,
+    since the port's public ``jobcannon.db._jd_full.set_jd_full`` does not yet
+    persist the verdict columns (Wave-1 hosted-schema gap; see that module's
+    docstring and the port's WAIVE note) — scores exactly as it did before this
+    gate existed rather than being silently blocked pending a value nothing has
+    ever computed for it. This is "measure first, gate what's proven": the
+    gate only fires for rows a persisted verdict has actually characterized,
+    and is correct-but-inert engine parity code until a host stamps the column.
 
     ``score_job`` is the only in-tree caller. This engine ships no
     candidate-counting predicate of its own to keep in sync — a host that
@@ -399,6 +427,29 @@ def scoring_precheck(job: dict) -> str | None:
         and "location_missing" not in _unresolved_reasons
     ):
         return "awaiting_location"
+
+    # D5 / #1742: jd-content contract gate. Reads the PERSISTED verdict only —
+    # this function stays pure/no-I/O, so there is no per-call
+    # classify_jd_content recompute here (that cost belongs once, at a host's
+    # set_jd_full write chokepoint, not on every scoring-precheck call). A
+    # NULL verdict (no host has stamped this row yet) fails OPEN: no gate,
+    # scores exactly as it did before this gate existed. A row the adjudicator
+    # has already vouched for (jd_adjudicated_version stamped at-or-above the
+    # CURRENT contract version) also passes through — this is the terminal,
+    # resolved state. A host that re-selects unscored rows continuously (as
+    # the private repo's batch scoring does) gets self-healing for free: a
+    # REJECT/AMBIGUOUS row becomes scorable the moment the adjudicator (or a
+    # re-fetch that overwrites jd_full with a clean body, re-stamping the
+    # verdict) resolves it — it cannot orphan.
+    _verdict_raw = job.get("jd_content_verdict")
+    if _verdict_raw is not None:
+        _adjudicated_version = job.get("jd_adjudicated_version")
+        _adjudicated = (
+            isinstance(_adjudicated_version, int) and _adjudicated_version >= JD_CONTENT_VERSION
+        )
+        if _verdict_raw != JdVerdict.CLEAN.value and not _adjudicated:
+            return "awaiting_jd_adjudication"
+
     return None
 
 
@@ -412,7 +463,8 @@ def score_job(
 ) -> ScoringResult:
     """Score a single job with the v3.0 ordinal rubric.
 
-    Two completeness gates (D-7, no garbage-in scoring):
+    Three completeness gates (D-7, no garbage-in scoring), all defined once
+    in ``scoring_precheck``:
 
     SCORER-05 (jd_full gate): empty or missing jd_full returns
     status='skipped' (reason='awaiting_jd') without invoking call_model —
@@ -424,6 +476,13 @@ def score_job(
     status='skipped' (reason='awaiting_location'). Batch scoring re-selects
     classification IS NULL continuously, so the gate self-heals once P2.3
     fills location — it cannot orphan jobs.
+
+    D5 (jd-content contract gate, issue #1742): when the row carries a
+    persisted jd_content_verdict that does not verdict CLEAN and the row is
+    not already adjudicated at-or-above JD_CONTENT_VERSION, returns
+    status='skipped' (reason='awaiting_jd_adjudication'). Self-heals the same
+    way. Fails open (no gate) when no host has stamped a verdict for this row
+    — see ``scoring_precheck``'s docstring.
 
     Routes through the injected ``call_model(tier='score', output_schema=JOB_ASSESSMENT_SCHEMA, ...)``
     callable — the engine has no provider cascade of its own (was
