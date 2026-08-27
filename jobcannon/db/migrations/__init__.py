@@ -58,12 +58,8 @@ for _info in pkgutil.iter_modules(__path__):
         contract_step=_fold_contract_step(
             getattr(_mod, "contract_step", False), _mod.MIGRATION.contract_step
         ),
-        lock_step=_fold_lock_step(
-            getattr(_mod, "lock_step", False), _mod.MIGRATION.lock_step
-        ),
-        autocommit=_fold_autocommit(
-            getattr(_mod, "autocommit", False), _mod.MIGRATION.autocommit
-        ),
+        lock_step=_fold_lock_step(getattr(_mod, "lock_step", False), _mod.MIGRATION.lock_step),
+        autocommit=_fold_autocommit(getattr(_mod, "autocommit", False), _mod.MIGRATION.autocommit),
     )
     MIGRATIONS.append(_mig)
 
