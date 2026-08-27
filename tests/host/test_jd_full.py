@@ -366,29 +366,67 @@ def test_unchanged_content_with_no_verdict_stamps_without_nulling_adjudicated_ve
     assert row["jd_adjudicated_version"] == 8
 
 
-def test_cas_guard_rejects_stamp_when_jd_full_changes_mid_write(db_conn, posting, monkeypatch):
-    """CAS guard (#152): the jd_full UPDATE and the verdict-stamp UPDATE are
-    two separately-committed statements; a concurrent writer's own jd_full
-    UPDATE could land in the window between them. Simulate that by having
-    classify_jd_content -- which runs in exactly that window, see
-    set_jd_full -- mutate jd_full as a side effect. The stamp's
-    `WHERE jd_full = %s` guard must then match 0 rows, leaving
-    jd_content_verdict untouched rather than stamping a verdict describing
-    text that is no longer current."""
+def test_concurrent_delete_between_select_and_update_returns_false(db_conn, posting, monkeypatch):
+    """L1 (refuter-1, PR #214): the SELECT at the top of set_jd_full can be
+    followed by a concurrent DELETE before the UPDATE runs. Without a
+    rowcount check, the UPDATE would affect 0 rows while the function still
+    returned True -- a false "wrote" signal. Uses the same monkeypatch
+    injection point as the interleaved-write test below (classify_jd_content
+    runs after the SELECT and before the UPDATE) to land a same-connection
+    DELETE in that window."""
     from jobcannon.db import _jd_full as jd_full_mod
     from jobcannon.db._jd_full import set_jd_full
 
     real_classify = jd_full_mod.classify_jd_content
-    concurrent_body = "z" * 250
 
-    def _racing_classify(text, title, company, config):
+    def _delete_then_classify(text, title, company, config):
+        db_conn.execute("DELETE FROM postings WHERE dedup_key = %s", (posting,))
+        return real_classify(text, title, company, config)
+
+    monkeypatch.setattr(jd_full_mod, "classify_jd_content", _delete_then_classify)
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is False
+    )
+    row = db_conn.execute("SELECT 1 FROM postings WHERE dedup_key = %s", (posting,)).fetchone()
+    assert row is None
+
+
+def test_interleaved_write_during_classify_still_lands_self_consistent(
+    db_conn, posting, monkeypatch
+):
+    """#184 (was the CAS-guard test for #152's now-removed two-statement
+    design): jd_full and its verdict/adjudicated_version are set together by
+    ONE UPDATE (see the module docstring), so the mismatch the old CAS guard
+    protected against -- a verdict landing next to text it doesn't
+    describe -- is no longer representable, and there is nothing left for a
+    WHERE-clause CAS to guard. This exercises the same interleaving the old
+    test did (classify_jd_content is still called before the write, so a
+    same-connection statement run inside it still lands before our own
+    UPDATE) and asserts the PAIR stays consistent regardless of which write
+    ends up as the row's current state: our own UPDATE runs last on this
+    connection, so it wins outright, and jd_full/jd_content_verdict describe
+    the exact same (our own) text together. The real cross-connection
+    invariant -- what a truly concurrent writer's reader observes -- is
+    proven by test_race_two_connections_never_observe_torn_jd_full_and_verdict
+    below."""
+    from jobcannon.db import _jd_full as jd_full_mod
+    from jobcannon.db._jd_full import set_jd_full
+
+    real_classify = jd_full_mod.classify_jd_content
+    interleaved_body = "z" * 250
+
+    def _interleaving_classify(text, title, company, config):
         db_conn.execute(
             "UPDATE postings SET jd_full = %s WHERE dedup_key = %s",
-            (concurrent_body, posting),
+            (interleaved_body, posting),
         )
         return real_classify(text, title, company, config)
 
-    monkeypatch.setattr(jd_full_mod, "classify_jd_content", _racing_classify)
+    monkeypatch.setattr(jd_full_mod, "classify_jd_content", _interleaving_classify)
 
     assert (
         set_jd_full(
@@ -400,11 +438,150 @@ def test_cas_guard_rejects_stamp_when_jd_full_changes_mid_write(db_conn, posting
         "SELECT jd_full, jd_content_verdict FROM postings WHERE dedup_key = %s",
         (posting,),
     ).fetchone()
-    # The "concurrent writer" landed last and won the jd_full column...
-    assert row["jd_full"] == concurrent_body
-    # ...and the CAS guard correctly refused to stamp CLEAN_JD's verdict
-    # onto a row that no longer holds CLEAN_JD's text.
-    assert row["jd_content_verdict"] is None
+    # Our own UPDATE is the last statement on this connection, so it wins --
+    # and jd_full/jd_content_verdict describe the SAME text together,
+    # structurally, because one statement set both.
+    assert row["jd_full"] == CLEAN_JD
+    assert row["jd_content_verdict"] == "clean"
+
+
+def test_race_two_connections_never_observe_torn_jd_full_and_verdict(postgres_test_dsn):
+    """Two-connection proof for #184: a reader on connection B polling
+    during connection A's write must never observe NEW jd_full paired with
+    a STALE verdict describing the OLD text. Uses a real committed seed row
+    plus two independent (non-rollback) connections -- the rollback-isolated
+    `db_conn` fixture would make this vacuous, since nothing A writes
+    through it is ever visible to another connection.
+
+    classify_jd_content is the injection point: on the pre-fix two-statement
+    code it runs strictly BETWEEN the jd_full UPDATE's commit and the
+    verdict UPDATE, so pausing inside it parks connection A right in the
+    torn window -- B polls a committed (NEW jd_full, OLD verdict) pair the
+    whole time it's paused. On the fixed single-UPDATE code, classify runs
+    BEFORE any write, so pausing there leaves the OLD row (jd_full, verdict)
+    fully intact and committed until A resumes and the ONE UPDATE lands, at
+    which point B's next poll sees the NEW pair whole -- never a mix.
+    """
+    import threading
+    import time
+    import unittest.mock
+
+    import psycopg
+    from psycopg.rows import dict_row
+
+    from jobcannon.db import _jd_full as jd_full_mod
+    from jobcannon.db._jd_full import set_jd_full
+    from jobcannon.db.pool import EngineCompatConnection
+
+    dedup_key = "race-co|staff data engineer"
+    conn_a = psycopg.connect(postgres_test_dsn, row_factory=dict_row)
+    conn_b = psycopg.connect(postgres_test_dsn, row_factory=dict_row, autocommit=True)
+    stop = threading.Event()
+    release = threading.Event()
+    poller: threading.Thread | None = None
+    writer: threading.Thread | None = None
+    try:
+        cid = conn_a.execute(
+            "INSERT INTO companies (name) VALUES ('race-co') RETURNING id"
+        ).fetchone()["id"]
+        conn_a.execute(
+            "INSERT INTO postings (dedup_key, company_id, title, company, jd_full, "
+            "jd_content_verdict, jd_content_signal) VALUES (%s, %s, "
+            "'Staff Data Engineer', 'race-co', %s, 'clean', 'shape+grounded')",
+            (dedup_key, cid, CLEAN_JD),
+        )
+        conn_a.commit()
+
+        real_classify = jd_full_mod.classify_jd_content
+        entered = threading.Event()
+
+        def _paused_classify(text, title, company, config):
+            entered.set()
+            release.wait(timeout=10)
+            return real_classify(text, title, company, config)
+
+        pre = (CLEAN_JD, "clean")
+        post = (GOOD_JD, "ambiguous")
+        samples: list[tuple] = []
+        observed_post = threading.Event()
+
+        def _poll():
+            while not stop.is_set():
+                row = conn_b.execute(
+                    "SELECT jd_full, jd_content_verdict FROM postings WHERE dedup_key = %s",
+                    (dedup_key,),
+                ).fetchone()
+                sample = (row["jd_full"], row["jd_content_verdict"])
+                samples.append(sample)
+                if sample == post:
+                    observed_post.set()
+                time.sleep(0.01)
+
+        poller = threading.Thread(target=_poll, daemon=True)
+        poller.start()
+
+        writer_result: dict = {}
+
+        def _write():
+            writer_result["ok"] = set_jd_full(
+                EngineCompatConnection(conn_a), dedup_key, GOOD_JD, source="test"
+            )
+
+        with unittest.mock.patch.object(jd_full_mod, "classify_jd_content", _paused_classify):
+            writer = threading.Thread(target=_write)
+            writer.start()
+            assert entered.wait(timeout=10), "classify_jd_content was never entered"
+            time.sleep(0.3)  # let the poller sample repeatedly during the pause
+            release.set()
+            writer.join(timeout=10)
+            assert not writer.is_alive(), "writer thread did not finish within timeout"
+
+        # Bounded poll-until instead of a fixed sleep (refuter-2/refuter-3
+        # LOW): wait for the poller thread itself to observe the post-write
+        # committed state, signaled via observed_post, rather than assuming
+        # a fixed sleep duration is enough on any given box. Still bounded
+        # (5s timeout) so a genuinely broken poller/write fails fast instead
+        # of hanging; the positive-control assertion below still catches a
+        # timeout (observed_post never set -> post not in samples).
+        observed_post.wait(timeout=5)
+        stop.set()
+        poller.join(timeout=10)
+        assert not poller.is_alive(), "poller thread did not finish within timeout"
+
+        assert writer_result.get("ok") is True
+
+        bad = [s for s in samples if s not in (pre, post)]
+        assert not bad, f"observed a torn (jd_full, jd_content_verdict) pair: {bad[:5]}"
+        # Positive control: without this, an empty/no-op poll would pass
+        # vacuously against ANY code, fixed or not.
+        assert post in samples, f"poller never observed the post-write state; samples={samples[:5]}"
+    finally:
+        # Release any paused/looping worker threads BEFORE touching conn_a/conn_b
+        # from this thread -- psycopg connections aren't safe for concurrent use,
+        # and a thread still parked in release.wait()/still polling would race
+        # the cleanup below. Only after both threads are confirmed joined do we
+        # touch the connections they were using.
+        release.set()
+        stop.set()
+        if writer is not None:
+            writer.join(timeout=10)
+        if poller is not None:
+            poller.join(timeout=10)
+        # Each cleanup step below is independent of the others (refuter-3
+        # LOW): a raise from conn_a.rollback()/DELETE/commit must not skip
+        # conn_a.close(), and neither of those must skip conn_b.close() --
+        # both connections always get released even if the row cleanup
+        # itself fails partway through.
+        try:
+            try:
+                conn_a.rollback()
+                conn_a.execute("DELETE FROM postings WHERE dedup_key = %s", (dedup_key,))
+                conn_a.execute("DELETE FROM companies WHERE name = 'race-co'")
+                conn_a.commit()
+            finally:
+                conn_a.close()
+        finally:
+            conn_b.close()
 
 
 def test_persisted_reject_verdict_gates_scoring_precheck_until_adjudicated(db_conn, posting):
