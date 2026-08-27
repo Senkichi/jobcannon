@@ -17,7 +17,7 @@ _ALLOWED_KEYS: dict[str, set[str]] = {
     "posting_dismissed": set(),
     "posting_watchlist_added": set(),
     "posting_apply_clicked": {"apply_destination"},
-    "user_signed_up": {"channel", "wave", "signup_method", "referrer_url"},
+    "user_signed_up": {"channel", "wave", "signup_method", "referrer_host"},
     "user_activated": set(),
     "user_exit_surveyed": {"exit_reason"},
     "consent_recorded": {"consent_type", "granted", "consent_version", "consented_at"},
