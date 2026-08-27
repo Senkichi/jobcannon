@@ -1,0 +1,36 @@
+{# The postings-history list fragment (#180): both a programmatic
+   HX-Request caller's response and, via {% include %}, the full-page
+   render's own list slot (postings_history.html) share this exact markup
+   so the two can never drift apart -- a real tab or prev/next click is
+   always a plain full-page GET (no hx-boost on this page) and never
+   reaches the HX-Request branch on its own; see the same relationship
+   _feed_page.html has to _feed_list.html/feed.html. Paginated via `?page=N`
+   (jobcannon/web/postings_history.py's `_paginate_ids`) rather than a "Load
+   more" control -- prev/next below are plain `<a href>` links (no hx-get),
+   matching the tab links' own convention on this page. No `show_actions` in
+   this include's context, so _posting_row.html renders every row read-only
+   (its save/dismiss/apply/undo block is entirely skipped -- see
+   jobcannon/web/postings_history.py's module docstring for why). #}
+{% if entries %}
+  <div class="space-y-4" data-postings-history-list>
+    {% for entry in entries %}
+      {% include "_posting_row.html" %}
+    {% endfor %}
+  </div>
+  <div class="flex items-center justify-between text-sm text-neutral-400 mt-4"
+       data-postings-history-pagination>
+    <span data-postings-history-range>Showing {{ pagination.page_start }}&ndash;{{ pagination.page_end }} of {{ pagination.total }}</span>
+    <span class="flex gap-4">
+      {% if pagination.has_prev %}
+        <a href="{{ url_for('postings_history.index', view=view, page=pagination.prev_page) }}"
+           class="underline text-neutral-300 min-h-11 inline-flex items-center px-1" data-postings-history-prev>Previous</a>
+      {% endif %}
+      {% if pagination.has_next %}
+        <a href="{{ url_for('postings_history.index', view=view, page=pagination.next_page) }}"
+           class="underline text-neutral-300 min-h-11 inline-flex items-center px-1" data-postings-history-next>Next</a>
+      {% endif %}
+    </span>
+  </div>
+{% else %}
+  <p class="text-neutral-400" data-postings-history-empty>{{ empty_copy }}</p>
+{% endif %}

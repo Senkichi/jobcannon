@@ -83,6 +83,14 @@
     <nav class="flex gap-4 text-sm text-neutral-400">
       <a href="/" class="hover:text-neutral-100 min-h-11 inline-flex items-center px-1">Feed</a>
       <a href="/demo" class="hover:text-neutral-100 min-h-11 inline-flex items-center px-1">Demo</a>
+      {% if g.clerk_user %}
+      {# #180: the in-app saved/applied/dismissed review page
+         (jobcannon/web/postings_history.py) -- gated on auth state the same
+         way the footer's export/delete links already are, since the route
+         itself 401s an unauthenticated visitor (not in PUBLIC_PATHS). #}
+      <a href="{{ url_for('postings_history.index') }}" class="hover:text-neutral-100 min-h-11 inline-flex items-center px-1"
+         data-postings-history-nav-link>My postings</a>
+      {% endif %}
     </nav>
     {% if not g.clerk_user %}
     {# Discoverable sign-in/sign-up entry point (issue #145) -- gated on

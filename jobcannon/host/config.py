@@ -35,6 +35,31 @@ class HostConfig:
     posthog_host: str | None = field(
         default=None, metadata={"env": "POSTHOG_HOST", "declare_on": ()}
     )
+    # PostHog admin/private REST API credentials (issue #135's person
+    # purge, jobcannon.host.posthog_admin) — declare_on=() same as
+    # posthog_api_key/posthog_host above: optional, fail-soft-if-unset
+    # (posthog_admin.purge_person logs once and skips rather than raising),
+    # covered by test_render_config.py's own dedicated test rather than the
+    # generic required-var derivation. Declared on the WORKER only in
+    # render.yaml — the purge only ever runs inside
+    # jobcannon.host.tasks.purge_posthog_person, a worker-side procrastinate
+    # task; the web process never calls posthog_admin.purge_person.
+    posthog_personal_api_key: str | None = field(
+        default=None, metadata={"env": "POSTHOG_PERSONAL_API_KEY", "declare_on": ()}
+    )
+    posthog_project_id: str | None = field(
+        default=None, metadata={"env": "POSTHOG_PROJECT_ID", "declare_on": ()}
+    )
+    # A committed literal in render.yaml (like posthog_host), NOT derived
+    # from posthog_host by a string transform: PostHog's private/admin REST
+    # API (`/api/projects/...`) lives on a DIFFERENT host
+    # (`https://eu.posthog.com`) than the ingestion host posthog_host names
+    # (`https://eu.i.posthog.com`) — see jobcannon.host.posthog_admin's
+    # module docstring for why a transform was rejected in favor of an
+    # explicit, independently-verifiable value.
+    posthog_admin_api_host: str | None = field(
+        default=None, metadata={"env": "POSTHOG_ADMIN_API_HOST", "declare_on": ()}
+    )
     # Deterministic-pseudonym HMAC key for the PostHog distinct_id
     # (jobcannon/host/posthog_client.py's pseudonymize()) — declared on BOTH
     # services because the worker builds its own PostHog client through the
@@ -80,10 +105,17 @@ class HostConfig:
     # enforced at those consumption sites, not here, same rationale as
     # secret_key above — an unset var must still produce a valid HostConfig.
     # The worker never verifies a Clerk request or a webhook, so declare_on
-    # is web-only for all four (issue #47 folded these in from a literal
-    # that test_render_config.py used to hand-maintain).
+    # is web-only for THREE of the four (jwt_key, authorized_parties,
+    # webhook_signing_secret — issue #47 folded these in from a literal
+    # that test_render_config.py used to hand-maintain). clerk_secret_key
+    # itself is the exception: issue #136's reconciliation-sweep periodic
+    # (jobcannon.host.tasks.reconcile_deleted_users) runs on the WORKER and
+    # needs its own Clerk Backend API client (it reuses
+    # jobcannon.web.auth.build_clerk_client — the repo's one Clerk SDK
+    # client construction site — rather than a second one), so this one
+    # field is declared on both services.
     clerk_secret_key: str = field(
-        default="", metadata={"env": "CLERK_SECRET_KEY", "declare_on": ("web",)}
+        default="", metadata={"env": "CLERK_SECRET_KEY", "declare_on": ("web", "worker")}
     )
     clerk_jwt_key: str = field(
         default="", metadata={"env": "CLERK_JWT_KEY", "declare_on": ("web",)}
@@ -159,12 +191,18 @@ def load_host_config() -> HostConfig:
             ) from exc
     posthog_api_key = (os.environ.get("POSTHOG_API_KEY") or "").strip() or None
     posthog_host = (os.environ.get("POSTHOG_HOST") or "").strip() or None
+    posthog_personal_api_key = (os.environ.get("POSTHOG_PERSONAL_API_KEY") or "").strip() or None
+    posthog_project_id = (os.environ.get("POSTHOG_PROJECT_ID") or "").strip() or None
+    posthog_admin_api_host = (os.environ.get("POSTHOG_ADMIN_API_HOST") or "").strip() or None
     analytics_pseudonym_salt = (os.environ.get("JC_ANALYTICS_PSEUDONYM_SALT") or "").strip() or None
     return HostConfig(
         database_url=database_url,
         runtime=runtime,
         posthog_api_key=posthog_api_key,
         posthog_host=posthog_host,
+        posthog_personal_api_key=posthog_personal_api_key,
+        posthog_project_id=posthog_project_id,
+        posthog_admin_api_host=posthog_admin_api_host,
         analytics_pseudonym_salt=analytics_pseudonym_salt,
         secret_key=os.environ.get("JC_SECRET_KEY", ""),
         clerk_sign_up_url=os.environ.get("CLERK_SIGN_UP_URL", ""),

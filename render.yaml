@@ -30,6 +30,26 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install uv && uv sync --locked --no-dev
+    # THE ordering guarantee for web/worker's independent deploys (issue
+    # #196, docs/deploy-runbook.md §3): render.com/schema/render.yaml.json's
+    # serverService definition documents preDeployCommand as "Command that
+    # runs after the build command but before the start command. Recommended
+    # for database migrations" and render.com/docs/blueprint-spec confirms
+    # the same ordering ("runs after the service's buildCommand but before
+    # its startCommand"). render.com/docs/deploys states it's supported for
+    # "paid web services, private services, and background workers" (this
+    # plan, `starter`, is paid) and that "If any command fails or times out,
+    # the entire deploy fails" — so a broken migration here blocks the new
+    # web code from ever going live against a schema it doesn't match,
+    # instead of leaving that as a race with worker boot. Runs on a separate,
+    # ephemeral instance with this service's env vars (DATABASE_URL
+    # included) but no filesystem continuity with the deployed instance —
+    # jobcannon/db/migrate.py's `python -m jobcannon.db.migrate` entry point
+    # resolves the DSN the same way the worker does and is itself
+    # lock-serialized (pg_advisory_lock) against the worker's own boot-time
+    # run_migrations() call, so the two can never collide even if they
+    # somehow overlap.
+    preDeployCommand: uv run --no-sync python -m jobcannon.db.migrate
     # --preload is load-bearing, not an optimization: it pins the process
     # topology to build-once-in-the-master-then-fork, which is what the
     # fork-safety hook in jobcannon/db/pool.py is written for (each worker
@@ -194,3 +214,34 @@ services:
       # rather than a committed literal.
       - key: JC_ANALYTICS_PSEUDONYM_SALT
         sync: false
+      # Issue #136: the reconciliation-sweep periodic
+      # (jobcannon.host.tasks.reconcile_deleted_users) needs its own Clerk
+      # Backend API client (jobcannon.web.auth.build_clerk_client) to ask
+      # Clerk directly whether an old local `users` row still exists —
+      # previously this key was declared web-only (HostConfig.
+      # clerk_secret_key's declare_on expanded from ("web",) to
+      # ("web","worker") in the same PR that added this task). Same value
+      # as jobcannon-web's CLERK_SECRET_KEY above.
+      - key: CLERK_SECRET_KEY
+        sync: false
+      # Issue #135: PostHog admin/private REST API credentials for the
+      # person-purge task (jobcannon.host.tasks.purge_posthog_person /
+      # jobcannon.host.posthog_admin). Worker-only — the purge only ever
+      # runs inside this worker-side procrastinate task, never in the web
+      # process. Left unset, purge_person() logs once and skips (fail-soft
+      # by design); the published privacy policy keeps disclosing
+      # surviving PostHog copies until the owner sets these (see the #135
+      # PR body — a follow-up legal-text update is required once they are).
+      - key: POSTHOG_PERSONAL_API_KEY
+        sync: false
+      - key: POSTHOG_PROJECT_ID
+        sync: false
+      # Committed literal, NOT sync:false: a routing choice like
+      # POSTHOG_HOST above, not a secret. Deliberately a SEPARATE var from
+      # POSTHOG_HOST rather than derived from it by a string transform —
+      # PostHog's private/admin REST API (`/api/projects/...`, used here)
+      # lives on a DIFFERENT host than the EU ingestion endpoint POSTHOG_HOST
+      # names; see jobcannon/host/posthog_admin.py's module docstring for
+      # why an explicit value was chosen over a transform.
+      - key: POSTHOG_ADMIN_API_HOST
+        value: https://eu.posthog.com

@@ -17,9 +17,12 @@ and no seeded row: CSRFProtect's `before_request` hook runs before the view
 function (and therefore before any DB read/write) even for a syntactically
 valid `<int:posting_id>` path segment, so a nonexistent id is fine there.
 The "with token" cases that DO reach a real write (`/start`, `/consent`,
-`/postings/<id>/save`) open a throwaway database, the same shape
-tests/host/test_onboarding.py / tests/host/test_consent_route.py /
-tests/host/test_feed_events.py already use.
+`/postings/<id>/save`, `/account/delete`) open a throwaway database, the
+same shape tests/host/test_onboarding.py / tests/host/test_consent_route.py
+/ tests/host/test_feed_events.py already use. `/account/delete`'s "without
+token" case still needs none (issue #146 predates CSRFProtect running
+before the view, so a rejected request never reaches the tombstone write
+either way), and stays on `_stateless_app()`.
 
 /healthz carries no test here: it is `@app.get`-only, and
 `WTF_CSRF_METHODS` never checks GET, so there is no negative case to prove
@@ -96,7 +99,7 @@ def test_post_consent_without_token_is_400():
     assert resp.status_code == 400
 
 
-@pytest.mark.parametrize("action", ["save", "dismiss", "apply"])
+@pytest.mark.parametrize("action", ["save", "dismiss", "apply", "undo-apply"])
 def test_post_posting_action_without_token_is_400(action):
     client = _stateless_app().test_client()
     resp = client.post(f"/postings/1/{action}")
@@ -202,7 +205,8 @@ def test_post_start_with_token_mints_anon_user(db_app):
 @requires_postgres
 def test_post_consent_with_token_records_grant(db_app):
     """Prior behavior pinned by tests/host/test_consent_route.py: a grant
-    redirects and sets analytics_consent."""
+    Post/Redirect/Gets back to GET /consent (303 -- issue #182's inline-ack
+    fix replaced the old 302-to-feed redirect) and sets analytics_consent."""
     dsn = db_app.config["_TEST_DSN"]
     with psycopg.connect(dsn) as conn:
         conn.execute("INSERT INTO users (id) VALUES (%s)", (USER_ID,))
@@ -215,7 +219,7 @@ def test_post_consent_with_token_records_grant(db_app):
     token = _token_from(get_resp.data)
 
     resp = client.post("/consent", data={"choice": "grant", "csrf_token": token})
-    assert resp.status_code == 302
+    assert resp.status_code == 303
 
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
         user = conn.execute(
@@ -309,14 +313,16 @@ def test_wtf_csrf_enabled_defaults_true_outside_testing(monkeypatch):
     assert b"Request could not be verified" in resp.data
 
 
-def test_post_account_delete_with_token_calls_clerk():
-    """No throwaway DB needed (account.py never touches Postgres itself —
-    same rationale as tests/host/test_account_route.py's module docstring,
-    which carries no requires_postgres marker either). Prior behavior pinned
-    by tests/host/test_account_route.py: a confirmed deletion calls Clerk's
-    delete exactly once and returns 200."""
-    from jobcannon.web import create_app
-
+@requires_postgres
+def test_post_account_delete_with_token_calls_clerk(db_app):
+    """Needs the throwaway DB now (issue #159, landed after this test was
+    first written against a DB-free account.py): post_delete writes a
+    revoked_subjects tombstone via a real pooled connection BEFORE calling
+    Clerk, so a `db_app` without an open pool 502s here instead of ever
+    reaching Clerk — same reasoning as tests/host/test_account_route.py's
+    module docstring, which now carries the same DB-backed `app` fixture
+    for this exact code path. Prior behavior otherwise unchanged: a
+    confirmed deletion calls Clerk's delete exactly once and returns 200."""
     calls: list[str] = []
 
     class _FakeUsers:
@@ -327,16 +333,10 @@ def test_post_account_delete_with_token_calls_clerk():
         def __init__(self):
             self.users = _FakeUsers()
 
-    app = create_app(
-        config={
-            "TESTING": True,
-            "WTF_CSRF_ENABLED": True,
-            "VERIFY_REQUEST": lambda req: ClerkIdentity(user_id=USER_ID, claims={"sub": USER_ID}),
-            "WEBHOOK_SECRET": WEBHOOK_SECRET,
-            "CLERK_CLIENT": _FakeClerkClient(),
-        }
-    )
-    client = app.test_client()
+    db_app.config["CLERK_CLIENT"] = _FakeClerkClient()
+    client = db_app.test_client()
+    with client.session_transaction() as sess:
+        sess[_HANDOFF_DONE_KEY] = True
     get_resp = client.get("/account/delete")
     token = _token_from(get_resp.data)
 

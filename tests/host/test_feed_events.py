@@ -322,6 +322,31 @@ def test_posting_with_no_usable_url_renders_degraded_apply_control(app):
     assert _events(dsn, "posting_apply_clicked") == []
 
 
+def test_authed_feed_never_shows_the_anonymous_signup_cta(app):
+    """Negative control for issue #174's anonymous per-row CTA
+    (_posting_row.html, gated on `signup_cta_url`): jobcannon.web's
+    _inject_auth_links context processor derives signup_cta_url as None
+    for any authed visitor (jobcannon.web._visitor_is_anonymous, via the
+    g.clerk_user this route's before_request already populated), and this
+    module's `app` fixture never overrides HOST_CONFIG, so TESTING's
+    default configures BOTH clerk_sign_up_url and clerk_sign_in_url
+    (jobcannon/web/__init__.py) -- if the gate keyed on the URLs alone
+    instead of real identity, this CTA would leak onto every signed-in
+    visitor's real feed. The row still renders (positive control) so the
+    CTA's absence isn't just an empty/error page."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "No Anon CTA Co")
+    _seed_posting(dsn, "no-anon-cta-1", company_id, title="No Anon CTA Row")
+
+    html = client.get("/").get_data(as_text=True)
+
+    assert "No Anon CTA Row" in html
+    assert "data-action-signup" not in html
+    assert "Sign up to apply" not in html
+    assert "data-posting-signup" not in html
+
+
 def test_apply_control_renders_the_seeded_outbound_link(app):
     dsn = app.config["_TEST_DSN"]
     client = _feed_client(app, consent=True)
@@ -346,6 +371,163 @@ def test_apply_control_renders_the_seeded_outbound_link(app):
     apply_path = f"/postings/{posting_id}/apply"
     assert f'hx-post="{apply_path}"' not in html
     assert f"fetch('{apply_path}'" in html
+
+
+def test_apply_control_handler_guards_double_click_and_stale_swap(app):
+    """LOW findings from review-1 (F4) and Devin (F3/F4): a rapid double
+    click on Apply must not fire the mutation twice, and a response the
+    handler can't turn into a usable row must never silently no-op. Both
+    fixes live entirely in the inline hx-on:click string _posting_row.html
+    renders (JS execution itself is out of reach for a server-side test —
+    see that template's own comment for why), so this pins the markers on
+    the ACTUAL rendered handler rather than a hand-copied JS literal."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Double Click Co")
+    _seed_posting(
+        dsn,
+        "double-click-1",
+        company_id,
+        title="Double Click Row",
+        source_urls=["https://boards.greenhouse.io/acme/jobs/1"],
+    )
+
+    html = client.get("/").get_data(as_text=True)
+
+    assert "data-action-apply" in html
+    assert "row.dataset.applyPending" in html  # pending guard
+    assert "row.parentNode === parent" in html  # stale-swap guard
+    assert "Apply recorded, but the row did not update" in html  # F4: no silent no-op
+
+
+# --- #177: applied state + undo -------------------------------------------
+
+
+def test_apply_response_fragment_renders_applied_state_immediately(app):
+    """The apply route's OWN response fragment (not a second GET /) must
+    already reflect entry.applied=True: _fetch_entry re-reads the row AFTER
+    mark_applied commits, so the same request that records the apply also
+    returns the post-mutation row. This is the gap #177 closes -- previously
+    this fragment was rendered but never applied to the DOM at all."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Applied Fragment Co")
+    posting_id = _seed_posting(
+        dsn,
+        "applied-fragment-1",
+        company_id,
+        title="Applied Fragment Row",
+        source_urls=["https://boards.greenhouse.io/acme/jobs/1"],
+    )
+
+    resp = client.post(f"/postings/{posting_id}/apply")
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "data-apply-applied" in html
+    assert ">Applied<" in html
+    undo_path = f"/postings/{posting_id}/undo-apply"
+    assert f'hx-post="{undo_path}"' in html
+    assert "data-action-apply>" not in html  # the outbound Apply link is gone
+
+
+def test_undo_apply_reverts_the_row_to_its_normal_apply_control(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Undo Apply Co")
+    posting_id = _seed_posting(
+        dsn,
+        "undo-apply-1",
+        company_id,
+        title="Undo Apply Row",
+        source_urls=["https://boards.greenhouse.io/acme/jobs/2"],
+    )
+    assert client.post(f"/postings/{posting_id}/apply").status_code == 200
+
+    resp = client.post(f"/postings/{posting_id}/undo-apply")
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "data-apply-applied" not in html
+    apply_path = f"/postings/{posting_id}/apply"
+    assert f"fetch('{apply_path}'" in html  # back to the normal Apply anchor
+
+    with psycopg.connect(dsn, row_factory=psycopg.rows.dict_row) as conn:
+        row = conn.execute(
+            "SELECT status FROM pipeline_status WHERE user_id = %s AND posting_id = %s",
+            (CLERK_ID, posting_id),
+        ).fetchone()
+    assert row is None  # the row is deleted entirely, not set to a third status
+
+
+def test_undo_apply_emits_posting_apply_undone_event(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Undo Event Co")
+    posting_id = _seed_posting(dsn, "undo-event-1", company_id, title="Undo Event Row")
+    assert client.post(f"/postings/{posting_id}/apply").status_code == 200
+
+    assert client.post(f"/postings/{posting_id}/undo-apply").status_code == 200
+
+    undone = _events(dsn, "posting_apply_undone")
+    assert len(undone) == 1
+    assert undone[0]["posting_id"] == posting_id
+    assert undone[0]["payload"] is None
+
+
+def test_undo_apply_on_a_never_applied_posting_is_a_no_op(app):
+    """Idempotent under a double-submit or a stray click, matching
+    unsave_posting's contract: no ForeignKeyViolation, no crash, and the
+    (still-nonexistent) pipeline_status row stays absent."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Never Applied Co")
+    posting_id = _seed_posting(dsn, "never-applied-1", company_id, title="Never Applied Row")
+
+    resp = client.post(f"/postings/{posting_id}/undo-apply")
+    assert resp.status_code == 200
+
+    with psycopg.connect(dsn, row_factory=psycopg.rows.dict_row) as conn:
+        row = conn.execute(
+            "SELECT status FROM pipeline_status WHERE user_id = %s AND posting_id = %s",
+            (CLERK_ID, posting_id),
+        ).fetchone()
+    assert row is None
+
+
+def test_undo_apply_on_a_posting_that_does_not_exist_is_a_404(app):
+    """Unlike save/dismiss/apply's INSERT/UPDATE (whose ForeignKeyViolation
+    IS the 404 mechanism, actions.py's module docstring), undo-apply's bare
+    DELETE never raises one -- unmark_applied's own return value drives the
+    404 here instead, matching the shared contract without a pre-check on
+    the common (posting exists) path (Devin F1, verified)."""
+    client = _feed_client(app, consent=True)
+
+    resp = client.post("/postings/999999999/undo-apply")
+
+    assert resp.status_code == 404
+
+
+def test_undo_apply_does_not_touch_a_dismissed_posting(app):
+    """Scoped delete (status = 'applied' in the WHERE clause): undo-apply
+    against a posting this user separately dismissed must never clear that
+    dismissal -- proves the DELETE can't be broadened to "this user's
+    pipeline_status row for this posting" by accident."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Dismissed Untouched Co")
+    posting_id = _seed_posting(dsn, "dismissed-untouched-1", company_id, title="Dismissed Row")
+    assert client.post(f"/postings/{posting_id}/dismiss").status_code == 200
+
+    resp = client.post(f"/postings/{posting_id}/undo-apply")
+    assert resp.status_code == 200
+
+    with psycopg.connect(dsn, row_factory=psycopg.rows.dict_row) as conn:
+        row = conn.execute(
+            "SELECT status FROM pipeline_status WHERE user_id = %s AND posting_id = %s",
+            (CLERK_ID, posting_id),
+        ).fetchone()
+    assert row["status"] == "dismissed"
 
 
 def test_save_dismiss_apply_each_emit_their_allowlisted_event(app):
@@ -448,7 +630,19 @@ def test_the_overlap_chip_survives_a_save_mutation_swap(app):
     one built with no profile. Skills must actually overlap the seeded
     title's tokens (default fixture skills=["python"] never overlaps a
     default "Engineer" title, which would make the divergence invisible on
-    both the page render AND the swap)."""
+    both the page render AND the swap).
+
+    Also the coverage gap review-1.md flagged (LOW 2): actions.py:92's
+    `_row_response` is the single `_posting_row.html` re-render shared by
+    Save/Dismiss/Apply (and feed-states' undo_apply via the same
+    `_fetch_entry` helper), and it already passes show_actions=True, but
+    had no negative test guarding that the anonymous CTA (issue #174)
+    never leaks onto it -- unlike the authed full page/fragment, which
+    test_authed_feed_never_shows_the_anonymous_signup_cta above already
+    covers. A future show_actions omission here would now leak
+    signup_cta_url's CTA onto an authenticated row, since #174's gate is
+    identity-derived, not show_actions-derived -- this locks in that the
+    save-mutation fragment stays clean."""
     dsn = app.config["_TEST_DSN"]
     client = _feed_client(app, consent=True, skills=("engineer",))
     company_id = _seed_company(dsn, "Overlap Chip Co")
@@ -463,6 +657,9 @@ def test_the_overlap_chip_survives_a_save_mutation_swap(app):
     assert "Engineer" in fragment_html
     assert "Saved" in fragment_html
     assert "title matches your selections: engineer" in fragment_html
+    assert "data-action-signup" not in fragment_html
+    assert "data-posting-signup" not in fragment_html
+    assert "Sign up to apply" not in fragment_html
 
 
 def test_apply_on_nonexistent_posting_is_404_not_500(app):
