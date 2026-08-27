@@ -217,7 +217,7 @@ def run_handoff_if_pending() -> Any:
                     "channel": attribution.get("channel", "direct"),
                     "wave": attribution.get("wave", "0"),
                     "signup_method": "clerk",
-                    "referrer_url": attribution.get("referrer_host", "unknown"),
+                    "referrer_host": attribution.get("referrer_host", "unknown"),
                 },
             )
         except Exception:
