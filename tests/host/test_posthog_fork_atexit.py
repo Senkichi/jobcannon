@@ -95,6 +95,13 @@ _JC_FORK_TESTS_UNAVAILABLE_ENV = "JC_FORK_TESTS_UNAVAILABLE"
 def _require_fork_or_fail_loud() -> None:
     """Gate for the two real os.fork() tests below (POSIX-only). Local
     Windows dev quietly skips -- same as any other platform-gated test.
+    Caveat: detection below treats ANY non-empty `CI` env var as on-CI, so
+    a dev box with a stray `CI` value set by unrelated tooling (some
+    npm/yarn/cargo wrappers use it too) and no opt-out would `pytest.fail`
+    here instead of skipping -- not narrowed to `GITHUB_ACTIONS` alone
+    since this repo's CI is exclusively self-hosted GitHub Actions and
+    erring toward on_ci=True is the fail-loud-safe direction this gate
+    wants anyway.
 
     CI is different (jobcannon#162): after #160 moved this repo's CI to
     self-hosted Windows runners, os.fork() stopped existing there too, and
