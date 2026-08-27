@@ -12,13 +12,13 @@
 </p>
 <form method="post" action="/account/delete">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <label class="flex items-start gap-2 text-sm text-neutral-300 mb-6">
+  <label class="flex items-center gap-2 min-h-11 px-1 text-sm text-neutral-300 mb-6">
     <input type="checkbox" name="confirm" value="delete-my-account" required
-           class="mt-1 rounded border-neutral-700 bg-neutral-900">
+           class="rounded border-neutral-700 bg-neutral-900 h-11 w-11 shrink-0">
     I understand this permanently deletes my account and cannot be undone.
   </label>
   <button type="submit"
-          class="bg-red-600 text-neutral-100 px-4 py-2 rounded font-medium">
+          class="bg-red-600 text-neutral-100 px-4 py-2 rounded font-medium min-h-11 inline-flex items-center">
     Delete my account
   </button>
 </form>

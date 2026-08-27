@@ -4,13 +4,13 @@
 <h1 class="text-2xl font-semibold mb-3">Sign-in required</h1>
 <p class="text-neutral-400 mb-4">
   This page needs a signed-in account.
-  <a href="/start" class="underline">Start with the picker</a> if you're new here.
+  <a href="/start" class="underline min-h-11 inline-flex items-center px-1">Start with the picker</a> if you're new here.
 </p>
 {% if clerk_sign_in_url or clerk_sign_up_url %}
   <p class="text-neutral-400">
-    {% if clerk_sign_in_url %}<a href="{{ clerk_sign_in_url }}" class="underline text-neutral-100">Sign in</a>{% endif %}
+    {% if clerk_sign_in_url %}<a href="{{ clerk_sign_in_url }}" class="underline text-neutral-100 min-h-11 inline-flex items-center px-1">Sign in</a>{% endif %}
     {% if clerk_sign_in_url and clerk_sign_up_url %}or{% endif %}
-    {% if clerk_sign_up_url %}<a href="{{ clerk_sign_up_url }}" class="underline text-neutral-100">sign up</a>{% endif %}
+    {% if clerk_sign_up_url %}<a href="{{ clerk_sign_up_url }}" class="underline text-neutral-100 min-h-11 inline-flex items-center px-1">sign up</a>{% endif %}
   </p>
 {% endif %}
 {% endblock %}
