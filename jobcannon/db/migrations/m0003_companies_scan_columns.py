@@ -7,11 +7,30 @@ bookkeeping, board cache) and constrained ats_probe_status to
 transient scan failure. This migration closes both gaps. name_raw is added
 nullable here; a later PR makes upsert_company populate it (single-writer).
 consecutive_empty_scans and last_scanned_at already shipped in m0001.
+
+Contract justification: the DROP CONSTRAINT + ADD CONSTRAINT pair widens
+ats_probe_status's allowed set from ('pending','hit','miss') to that set
+plus 'error' — it only ever adds an allowed value, never removes one. Every
+row and every write the previous (outgoing) release can produce during
+Render's zero-downtime deploy overlap window already satisfies the new,
+wider CHECK (a CHECK constraint only rejects INSERT/UPDATE, never SELECT,
+so the previous release's reads are unaffected either way). This is
+contract-shaped by DDL SHAPE (DROP CONSTRAINT + ADD CONSTRAINT, both
+touching a column m0001 created) but not by BEHAVIOR:
+tests/test_migration_deploy_safety.py parses this with a real SQL grammar
+(pglast) but deliberately doesn't attempt to parse CHECK boolean-expression
+semantics to tell a widen from a narrow, so it conservatively flags any
+DROP CONSTRAINT / ADD CONSTRAINT on a pre-existing column and relies on
+this declaration + justification instead.
 """
 
 from __future__ import annotations
 
 from jobcannon.db.migrations.types import Migration
+
+# See "Contract justification:" above -- required alongside this flag by
+# tests/test_migration_deploy_safety.py (issue #199).
+contract_step = True
 
 MIGRATION = Migration(
     version=3,

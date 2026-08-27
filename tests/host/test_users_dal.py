@@ -56,7 +56,7 @@ def test_upsert_profile_succeeds_immediately_after_mint_anon_user(db_conn):
     from jobcannon.db._users import mint_anon_user
 
     user_id = mint_anon_user(db_conn)
-    upsert_profile(db_conn, user_id, skills=["sql"])
+    upsert_profile(db_conn, user_id, skills=["sql"], workplace_type=None)
 
     row = get_profile(db_conn, user_id)
     assert row is not None

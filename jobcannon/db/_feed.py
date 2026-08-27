@@ -228,6 +228,7 @@ def _build_filters(
     workplace_type: str | None,
     location_contains: str | None,
     company: str | None,
+    companies: list[str] | None = None,
     posting_id: int | None = None,
 ) -> tuple[list[str], list[Any]]:
     """Parameterized WHERE fragments + bound params for `list_feed_postings`,
@@ -244,6 +245,22 @@ def _build_filters(
     serves the authed feed's free-text title box (jobcannon/web/pages.py),
     where a user is typing a fragment. Both may be passed at once without
     conflict — they AND together like every other filter here.
+
+    `companies` (exact-match list, `= ANY(%s)`) is `titles`'s twin for the
+    picker's multi-select company field (#169) — same corpus-derived-string,
+    exact-match rationale. `company` (singular, exact-match on ONE string) is
+    a pre-existing, unrelated caller: the authed feed's free-text company box
+    (jobcannon/web/pages.py's `_feed_query_kwargs`), which submits one typed
+    value, not a pick from a fixed set. Despite both being exact-match (not
+    substring, unlike the titles/title_contains split), they stay two
+    separate parameters rather than one that accepts either a str or a list:
+    `companies` MUST support zero-or-more selections (an empty picker
+    selection means "no filter", not "match nothing"), a shape `company`'s
+    single-string-or-None contract cannot express without the caller
+    special-casing an empty list into None itself — pushing that
+    normalization into `selection_filter_kwargs` (below) instead of in two
+    places. Both may be passed at once — they AND together like every other
+    filter here.
 
     `posting_id` narrows to exactly one posting. It exists so
     `jobcannon/web/actions.py` can re-fetch the single row it just mutated
@@ -266,6 +283,9 @@ def _build_filters(
     if company is not None:
         clauses.append("p.company = %s")
         params.append(company)
+    if companies:
+        clauses.append("p.company = ANY(%s)")
+        params.append(list(companies))
     if location_contains is not None:
         clauses.append("p.location LIKE %s ESCAPE '\\'")
         params.append(f"%{_escape_like(location_contains)}%")
@@ -273,6 +293,45 @@ def _build_filters(
         clauses.append("p.id = %s")
         params.append(posting_id)
     return clauses, params
+
+
+def _select(mapping: Any, *keys: str) -> Any:
+    """Bracket-access lookup trying each key in order, returning the first
+    present-and-truthy value, or None if every key is absent/empty — the
+    same STRING-KEY-only discipline this module's docstring requires (a
+    pooled `HybridRow` has no `.get()`). Mirrors
+    `jobcannon/web/why.py`'s `_selection_tokens` dual-key-reading idiom for
+    exactly the same reason: `selection_filter_kwargs` below reads either a
+    session-held `pending_picker` dict or a `profiles` row."""
+    for key in keys:
+        try:
+            value = mapping[key]
+        except (KeyError, IndexError):
+            continue
+        if value:
+            return value
+    return None
+
+
+def selection_filter_kwargs(selections_or_profile: Any) -> dict[str, Any]:
+    """The ONE selections -> `list_feed_postings` filter-kwargs derivation
+    (#169/#170), shared by `jobcannon/web/onboarding.py`'s pre-signup
+    /preview (a session-held `pending_picker` dict, keys `titles`/
+    `companies`/`workplace_type`) and `jobcannon/web/pages.py`'s authed feed
+    (a `profiles` row, keys `target_titles`/`target_companies`/
+    `workplace_type`) — a single point of enforcement so the two surfaces
+    can never diverge on what "your selections" means. Accepts either shape
+    via `_select`'s dual-key reads; `workplace_type` uses the same key on
+    both shapes (already an uppercase DB token or None for "any" —
+    `jobcannon/web/onboarding.py`'s `_WORKPLACE_FILTERS` — so it is passed
+    through unchanged, never re-mapped here). `None`/`{}` input (no pending
+    picker, no profile row) returns every key as None, i.e. no filter."""
+    m = selections_or_profile or {}
+    return {
+        "titles": _select(m, "titles", "target_titles"),
+        "companies": _select(m, "companies", "target_companies"),
+        "workplace_type": _select(m, "workplace_type"),
+    }
 
 
 def list_feed_postings(
@@ -284,6 +343,7 @@ def list_feed_postings(
     workplace_type: str | None = None,
     location_contains: str | None = None,
     company: str | None = None,
+    companies: list[str] | None = None,
     posting_id: int | None = None,
     sort: str = "default",
     limit: int = FEED_PAGE_MAX,
@@ -329,6 +389,7 @@ def list_feed_postings(
         workplace_type=workplace_type,
         location_contains=location_contains,
         company=company,
+        companies=companies,
         posting_id=posting_id,
     )
 

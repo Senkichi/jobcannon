@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-27T10:30:59Z",
+  "generated_at": "2026-08-27T10:46:00Z",
   "roots": [
     "engine",
     "db",
@@ -44,35 +44,39 @@
           "text": "Divergence from the private original, deliberate and Wave-1-scoped: no"
         },
         {
-          "line": 20,
-          "text": "body — the single point where that cost is paid, mirroring the private"
-        },
-        {
           "line": 21,
-          "text": "original's ``set_jd_full`` (see ``job_finder/db/_jd_full.py``, read-only"
+          "text": "the private original's ``set_jd_full`` (see ``job_finder/db/_jd_full.py``,"
         },
         {
-          "line": 30,
-          "text": "``WHERE dedup_key = %s AND jd_full = %s`` (mirroring the private original)"
+          "line": 27,
+          "text": "pre-fix hosted code and the private original): ``jd_full``,"
         },
         {
-          "line": 37,
+          "line": 86,
           "text": "Watermark invalidation (design decision, #152): the private original's"
         },
         {
-          "line": 61,
+          "line": 111,
           "text": "A second Wave-1 divergence, same shape: the private original also resets a"
         },
         {
-          "line": 131,
+          "line": 181,
           "text": "Content-contract side effects (parity with the private original's I-18"
         },
         {
-          "line": 138,
-          "text": "``enrichment_tier`` reset the private original also performs, which has"
+          "line": 194,
+          "text": "kind to the private original, not introduced by #184; tracked as #217."
         },
         {
-          "line": 223,
+          "line": 195,
+          "text": "See this module's docstring for the ``enrichment_tier`` reset the private"
+        },
+        {
+          "line": 196,
+          "text": "original also performs, which has no column to act on in the Wave-1"
+        },
+        {
+          "line": 301,
           "text": "Mirrors the private original's ``_record_jd_content_reject``, minus the"
         }
       ]
