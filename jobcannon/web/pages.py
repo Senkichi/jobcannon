@@ -1,4 +1,5 @@
-"""GET / (authed feed) and GET /demo (public guest demo).
+"""GET / (authed feed), POST /feed/clear-selection, and GET /demo (public
+guest demo).
 
 GET / now renders the authed user's profile plus a real, server-filtered
 posting list: a free-text title/company/location box and a sort token,
@@ -10,7 +11,13 @@ filters (#170), the signed-in user's saved picker selections
 jobcannon/web/onboarding.py's POST /start) ALSO filter this feed, through
 the exact same jobcannon.db._feed.selection_filter_kwargs predicate builder
 onboarding.py's pre-signup /preview calls (#169) — see `_read_feed_postings`
-below for the one collision (workplace_type) and how it resolves. Each row carries its own
+below for the one collision (workplace_type) and how it resolves. A saved
+titles/companies selection ANDs (never ORs) with the free-text title/company
+boxes, by deliberate product decision (#206) — an exact-match saved pick can
+zero out an otherwise-matching search with no visible signal why, so
+`_saved_selection_indicator`/`_feed_empty_reason` surface that a selection is
+filtering the feed and `clear_selection` (this module's other route) gives a
+one-click way out, rather than changing the AND itself. Each row carries its own
 literal "why" chips (jobcannon.web.feed_entries.build_entry, which wraps
 jobcannon.web.why.why_chips); a row whose `structural_axes` is still NULL
 (the axes batch caps at 500 rows per scan tick, so a large pre-seed leaves
@@ -57,11 +64,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from flask import Blueprint, g, render_template, request, url_for
+from flask import Blueprint, g, redirect, render_template, request, url_for
 
 from jobcannon.db import _feed
 from jobcannon.db._feed import list_feed_postings
-from jobcannon.db._profiles import GUEST_USER_ID, get_profile
+from jobcannon.db._profiles import GUEST_USER_ID, get_profile, upsert_profile
 from jobcannon.db._stats import corpus_stats
 from jobcannon.db.pool import connection_factory
 from jobcannon.host.events import log_event
@@ -174,7 +181,7 @@ def _read_feed_postings(
     *,
     user_id: str,
     filters: dict[str, Any],
-    profile: Any,
+    selection_kwargs: dict[str, Any],
     after: tuple[float | None, Any, int] | None = None,
 ) -> list[Any]:
     """Fail-closed feed read, the same discipline as `_read_page_data` /
@@ -188,17 +195,26 @@ def _read_feed_postings(
     keyset cursor for "Load more" — see jobcannon/db/_feed.py's
     list_feed_postings/_cursor_predicate.
 
-    #170: `profile` (the caller's already-read `profiles` row) flows through
-    `jobcannon.db._feed.selection_filter_kwargs` — the SAME predicate
-    builder `jobcannon/web/onboarding.py`'s pre-signup /preview calls against
-    a session-held `pending_picker` dict (#169) — so titles/companies/
-    workplace_type filter identically on both surfaces by construction, not
-    by two independently-written call sites staying in sync by discipline.
+    #170: `selection_kwargs` is `jobcannon.db._feed.selection_filter_kwargs`'s
+    output — the SAME predicate builder `jobcannon/web/onboarding.py`'s
+    pre-signup /preview calls against a session-held `pending_picker` dict
+    (#169) — so titles/companies/workplace_type filter identically on both
+    surfaces by construction, not by two independently-written call sites
+    staying in sync by discipline. Taken pre-built (#206) rather than a raw
+    `profile` row so `_feed_content_context` (this route's caller) can derive
+    it exactly ONCE per request and reuse the same dict for the saved-
+    selection indicator/empty-state-reason logic — a `profile` param here
+    would let a future edit derive `selection_filter_kwargs(profile)` a
+    second time nearby and risk the two calls drifting if one call site ever
+    got a stale/different `profile` value.
+
     `titles`/`companies` have no query-string equivalent on this route (the
     feed's own title/company boxes are free-text `title_contains`/`company`,
     a different filter — see `_feed_query_kwargs`), so they compose
-    additively with no collision. `workplace_type` is the one key both
-    sources can supply: an explicit `?workplace_type=` query-string value
+    additively with no collision — see `_feed_empty_reason` for how the
+    resulting AND (#206) is surfaced to the visitor rather than silently
+    zeroing results. `workplace_type` is the one key both sources can
+    supply: an explicit `?workplace_type=` query-string value
     (`_parse_feed_filters` already validated it against the same allowlist)
     always wins, since it reflects what THIS request is asking for right
     now; the profile's saved preference applies only as a fallback when the
@@ -216,7 +232,6 @@ def _read_feed_postings(
     try:
         with connection_factory() as conn:
             query_kwargs = _feed_query_kwargs(filters)
-            selection_kwargs = _feed.selection_filter_kwargs(profile)
             if query_kwargs["workplace_type"] is None and not filters.get(
                 "workplace_type_explicit"
             ):
@@ -241,6 +256,45 @@ def _read_feed_postings(
         return []
 
 
+def _saved_selection_indicator(selection_kwargs: dict[str, Any]) -> dict[str, int] | None:
+    """#206: the feed indicator's ONLY source of "does a saved selection
+    apply right now, and how big is it" — reads the same `selection_kwargs`
+    dict `_read_feed_postings` filters with, never a second, independent walk
+    of `profile["target_titles"]`/`["target_companies"]` that could disagree
+    with `_select`'s own present-and-truthy rule (`jobcannon/db/_feed.py`:
+    an empty list is already folded to None there). Returns None — not a
+    zeroed dict — when neither field is set, so the template's `{% if
+    saved_selection %}` gate (Undefined-tolerant the same way `show_actions`/
+    `load_more_url` already are elsewhere in this route) renders nothing for
+    a fresh profile or one that has just been Cleared."""
+    titles = selection_kwargs["titles"] or []
+    companies = selection_kwargs["companies"] or []
+    if not titles and not companies:
+        return None
+    return {"title_count": len(titles), "company_count": len(companies)}
+
+
+def _feed_empty_reason(selection_kwargs: dict[str, Any], filters: dict[str, Any]) -> str:
+    """#206: which empty-state copy `_feed_list.html` should render, computed
+    from the same two already-derived sources as everything else this route
+    does — `selection_kwargs` (never re-walking the profile row by hand) and
+    `filters` (never re-reading `request.args` here). "collision" is the
+    specific, previously-silent failure #206 reports: an exact-match saved
+    title/company selection ANDed with a free-text search this route's own
+    `title`/`company` boxes submit, zeroing a result set that would
+    otherwise be non-empty for the search alone. `location` is deliberately
+    excluded — it has no saved-selection counterpart (`selection_filter_kwargs`
+    carries no location field), so a location-only miss is never a
+    collision, it's just genuinely zero matching postings. Every OTHER empty
+    cause (an actually-thin corpus, a saved-selection-only zero match with
+    no search typed, or `_read_feed_postings`'s own fail-closed empty list on
+    a DB error) falls through to "empty", preserving the pre-#206 flat copy
+    for every case this fix does not change."""
+    has_selection = bool(selection_kwargs["titles"] or selection_kwargs["companies"])
+    has_search = bool(filters["title"] or filters["company"])
+    return "collision" if has_selection and has_search else "empty"
+
+
 # Every `_parse_feed_filters` key's own "no filter applied" value — omitted
 # from a "Load more" URL's query string rather than round-tripped literally,
 # so the next-page link stays as clean as a fresh, unfiltered GET / would be
@@ -255,6 +309,34 @@ _FILTER_DEFAULTS = {
 }
 
 
+def _carry_forward_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    """Every `_parse_feed_filters` key whose value differs from its "no
+    filter applied" default (`_FILTER_DEFAULTS`), PLUS any key whose matching
+    `<key>_explicit` flag is set even when its value equals the default — the
+    only one today is `workplace_type_explicit` (F1 fix): an explicit
+    `?workplace_type=any` and an absent param render identically ("any" ==
+    `_FILTER_DEFAULTS["workplace_type"]`), so without this the override would
+    silently vanish from the URL this builds and `_read_feed_postings` would
+    revert to the profile's saved filter there. `<key>_explicit` keys
+    themselves are excluded from the returned dict — they steer this
+    function, they are never a real `pages.feed` query param.
+
+    Extracted from `_feed_load_more_url` (#206) so the Clear control's own
+    form action/redirect target (`clear_selection`) carries forward the SAME
+    title/company/location/workplace_type/sort values a "Load more" click on
+    that same page would — in particular so an explicit `?workplace_type=`
+    override survives a Clear round-trip exactly like it survives
+    pagination, rather than a second, hand-written carry-forward rule
+    risking a divergent (and, per F1's own history, previously-buggy)
+    treatment of the explicit-vs-absent distinction."""
+    return {
+        k: v
+        for k, v in filters.items()
+        if not k.endswith("_explicit")
+        and (v != _FILTER_DEFAULTS.get(k, "") or filters.get(f"{k}_explicit"))
+    }
+
+
 def _feed_load_more_url(filters: dict[str, Any], rows: list[Any]) -> str | None:
     """Next-page URL for the authed feed's "Load more" control, or None when
     this page came back short of FEED_PAGE_MAX — a keyset page shorter than
@@ -262,16 +344,9 @@ def _feed_load_more_url(filters: dict[str, Any], rows: list[Any]) -> str | None:
     requirement: this is a seek, never an OFFSET, so there is no drift
     between the row a click was expecting and the row it gets even if the
     corpus changes between clicks). Carries forward every non-default filter
-    value already on this page (`_FILTER_DEFAULTS`), PLUS any filter whose
-    matching `<key>_explicit` flag is set even when its value equals the
-    default — the only one today is `workplace_type_explicit` (F1 fix): an
-    explicit `?workplace_type=any` and an absent param render identically
-    ("any" == `_FILTER_DEFAULTS["workplace_type"]`), so without this the
-    override would silently vanish from page 2 and `_read_feed_postings`
-    would revert to the profile's saved filter there. `<key>_explicit` keys
-    themselves are excluded from the query string — they steer this
-    function, they are never a real `pages.feed` query param — plus the
-    cursor derived from the LAST row actually rendered (`cursor_from_row`).
+    value already on this page plus any explicit override (`_carry_forward_filters`),
+    plus the cursor derived from the LAST row actually rendered
+    (`cursor_from_row`).
 
     Known limitation, not fixed here: the titles/companies filters embedded
     via the profile are re-derived fresh from the DB on every request, not
@@ -286,13 +361,9 @@ def _feed_load_more_url(filters: dict[str, Any], rows: list[Any]) -> str | None:
     here."""
     if len(rows) < _feed.FEED_PAGE_MAX:
         return None
-    query = {
-        k: v
-        for k, v in filters.items()
-        if not k.endswith("_explicit")
-        and (v != _FILTER_DEFAULTS.get(k, "") or filters.get(f"{k}_explicit"))
-    }
-    return url_for("pages.feed", **query, **_feed.cursor_from_row(rows[-1]))
+    return url_for(
+        "pages.feed", **_carry_forward_filters(filters), **_feed.cursor_from_row(rows[-1])
+    )
 
 
 def _read_demo_feed_postings(profile: Any) -> list[Any]:
@@ -349,6 +420,53 @@ def _log_impressions(user_id: str, rows: list[Any]) -> None:
         )
 
 
+def _feed_content_context(
+    user_id: str,
+    profile: Any,
+    filters: dict[str, Any],
+    after: tuple[float | None, Any, int] | None = None,
+) -> dict[str, Any]:
+    """#206: everything `_feed_content.html` (indicator/Clear control, filter
+    form, entries, "Load more", empty-state copy) needs for one render,
+    derived from exactly one `selection_filter_kwargs(profile)` call —
+    shared by `feed()`'s full-page GET and `clear_selection()`'s own
+    HX-Request fragment response so both agree on "what does this feed look
+    like right now" by construction, mirroring `jobcannon/web/onboarding.py`'s
+    `preview()` computing its own `selection_kwargs` once and reusing it for
+    both the read and `has_selections` (#169). Returns the SAME defaults
+    `feed()` used inline before this helper existed (empty entries,
+    unranked ordering, no "Load more", no indicator, "empty" reason) when
+    `profile is None` — the no-profile branch never reaches this function in
+    practice (both callers already guard on it), but a defensive default
+    here costs nothing and avoids a `NoneType` selection_filter_kwargs call
+    if that guard is ever loosened."""
+    if profile is None:
+        return {
+            "entries": [],
+            "ordering": {"personalized": False, "ranker_version": UNRANKED_VERSION},
+            "load_more_url": None,
+            "saved_selection": None,
+            "empty_reason": "empty",
+        }
+    selection_kwargs = _feed.selection_filter_kwargs(profile)
+    saved_selection = _saved_selection_indicator(selection_kwargs)
+    rows = _read_feed_postings(
+        user_id=user_id, filters=filters, selection_kwargs=selection_kwargs, after=after
+    )
+    entries = [build_entry(row, profile) for row in rows]
+    ordering = _ordering_label(rows)
+    _log_impressions(user_id, rows)
+    load_more_url = _feed_load_more_url(filters, rows)
+    empty_reason = "empty" if entries else _feed_empty_reason(selection_kwargs, filters)
+    return {
+        "entries": entries,
+        "ordering": ordering,
+        "load_more_url": load_more_url,
+        "saved_selection": saved_selection,
+        "empty_reason": empty_reason,
+    }
+
+
 @pages_bp.get("/", strict_slashes=False)
 def feed():
     """#156: paginates via a keyset cursor read from `cursor_id`/
@@ -375,19 +493,22 @@ def feed():
     filters = _parse_feed_filters(request.args)
     after = _feed.parse_cursor(request.args)
 
-    entries: list[dict[str, Any]] = []
-    ordering = {"personalized": False, "ranker_version": UNRANKED_VERSION}
-    load_more_url = None
+    content = {
+        "entries": [],
+        "ordering": {"personalized": False, "ranker_version": UNRANKED_VERSION},
+        "load_more_url": None,
+        "saved_selection": None,
+        "empty_reason": "empty",
+    }
     if profile is not None and stats.get("postings", 0) > 0:
-        rows = _read_feed_postings(user_id=user_id, filters=filters, profile=profile, after=after)
-        entries = [build_entry(row, profile) for row in rows]
-        ordering = _ordering_label(rows)
-        _log_impressions(user_id, rows)
-        load_more_url = _feed_load_more_url(filters, rows)
+        content = _feed_content_context(user_id, profile, filters, after)
 
     if request.headers.get("HX-Request") == "true":
         return render_template(
-            "_feed_page.html", entries=entries, load_more_url=load_more_url, show_actions=True
+            "_feed_page.html",
+            entries=content["entries"],
+            load_more_url=content["load_more_url"],
+            show_actions=True,
         )
 
     return render_template(
@@ -395,14 +516,92 @@ def feed():
         stats=stats,
         profile=profile,
         has_selections=has_selections,
-        entries=entries,
         filters=filters,
-        ordering=ordering,
         sort_tokens=sorted(_feed._SORTS),
         workplace_types=_WORKPLACE_TYPES,
         show_actions=True,
-        load_more_url=load_more_url,
+        clear_selection_url=url_for("pages.clear_selection", **_carry_forward_filters(filters)),
+        **content,
     )
+
+
+@pages_bp.post("/feed/clear-selection", strict_slashes=False)
+def clear_selection():
+    """#206: the recoverability half of the saved-selection AND-collision
+    fix (`_feed_empty_reason`/`_saved_selection_indicator` above are the
+    discoverability half). PRODUCT DECISION: this clears the saved
+    titles/companies selection, it does NOT change the AND relationship
+    between a saved selection and a free-text search — that stays additive
+    filtering, unchanged, for every profile that has not clicked Clear.
+
+    Not in `PUBLIC_PATHS` (`jobcannon/web/__init__.py`), so `clerk_auth`'s
+    `before_request` gate already 401s an anonymous POST here before this
+    function body ever runs — the same guard `jobcannon/web/actions.py`'s
+    save/dismiss/apply/undo-apply routes rely on, no separate check needed
+    (`tests/host/test_routing_errors.py::test_gate_covers_every_registered_route_for_every_declared_method`
+    proves this holds for every route the app registers, including this
+    one, with no per-route addition required there). CSRF-protected the
+    same way every other state-changing route in this app is: Flask-WTF's
+    `CSRFProtect(app)` is global (`jobcannon/web/__init__.py`) and this
+    blueprint is not `csrf.exempt`-ed, so a request carrying neither the
+    hidden `csrf_token` form field nor the `X-CSRFToken` header 400s before
+    reaching here too.
+
+    `upsert_profile(..., target_titles=[], target_companies=[])` — literal
+    empty lists, never `None` — is what actually clears the stored
+    selection: `jobcannon/db/_profiles.py`'s COALESCE-preserve columns treat
+    an omitted/None argument as "leave the old value," so passing `None`
+    here would silently no-op instead of clearing (the same distinction
+    `jobcannon/web/onboarding.py`'s picker resubmission already relies on,
+    #169). `workplace_type` is passed through as the profile's CURRENT
+    value, not touched by this route at all — m0012 made it a required,
+    non-COALESCE kwarg on `upsert_profile` (a caller must always state it
+    explicitly), so omitting it here would NULL out a saved workplace
+    preference this control has no business clearing.
+
+    HX-aware like every other mutation route in this codebase
+    (`jobcannon/web/actions.py`, `jobcannon/web/onboarding.py`'s
+    `start_submit`): an HX-Request (the Clear button's own `hx-post`) gets
+    `_feed_content.html` re-rendered at 200 — the SAME wrapper `feed.html`
+    itself includes, so the swap lands on a live `#feed-content` anchor and
+    the response carries a fresh copy of that same anchor for any later
+    swap (see `_feed_content.html`'s own docstring, mirroring
+    `_feed_page.html`'s self-perpetuating "Load more" pattern). A plain
+    form POST (no JS) gets a 303 redirect back to the feed, carrying
+    forward whatever title/company/location/workplace_type/sort values were
+    on the request that rendered the Clear control (`_carry_forward_filters`,
+    baked into the form's own `action`/`hx-post` URL by `feed()` /
+    `_feed_content_context`'s callers) — so the free-text search that
+    triggered the "collision" empty-state in the first place survives the
+    round trip instead of being dropped along with the saved selection."""
+    user_id = g.clerk_user.user_id
+    with connection_factory() as conn:
+        profile = get_profile(conn, user_id)
+        current_workplace_type = profile["workplace_type"] if profile is not None else None
+        upsert_profile(
+            conn,
+            user_id,
+            target_titles=[],
+            target_companies=[],
+            workplace_type=current_workplace_type,
+        )
+        profile = get_profile(conn, user_id)
+
+    filters = _parse_feed_filters(request.args)
+
+    if request.headers.get("HX-Request") == "true":
+        content = _feed_content_context(user_id, profile, filters)
+        return render_template(
+            "_feed_content.html",
+            filters=filters,
+            sort_tokens=sorted(_feed._SORTS),
+            workplace_types=_WORKPLACE_TYPES,
+            show_actions=True,
+            clear_selection_url=url_for("pages.clear_selection", **_carry_forward_filters(filters)),
+            **content,
+        ), 200
+
+    return redirect(url_for("pages.feed", **_carry_forward_filters(filters)), code=303)
 
 
 @pages_bp.get("/demo", strict_slashes=False)
