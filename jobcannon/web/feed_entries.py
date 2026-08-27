@@ -1,4 +1,4 @@
-"""build_entry — composes one `list_feed_postings` / `get_posting_row` row
+"""build_entry — composes one `list_feed_postings` / `list_postings_by_ids` row
 into the dict shape `_posting_row.html` renders: `row` (the raw DB row),
 `chips` (jobcannon.web.why.why_chips(...), possibly empty — the pending
 marker in `_posting_row.html` is keyed on `structural_axes` being NULL, not

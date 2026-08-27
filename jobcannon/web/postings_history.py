@@ -42,10 +42,17 @@ a follow-up (adding controls back once `_fetch_entry` can distinguish
 "dismissed, but the caller wants to see it anyway" from "not this user's
 row").
 
-Same HX-Request split every other route in this codebase uses: an
-HX-Request gets just the list fragment (`_postings_history_list.html`,
-consumed by a tab link's own full-page GET too via `{% include %}`), a
-direct browser hit gets the full page with the tab nav.
+Same HX-Request split every other route in this codebase uses, but note
+what actually reaches each branch: the tab links (`postings_history.html`)
+and the pagination prev/next links (`_postings_history_list.html`) are all
+plain `<a href>` with no hx-boost on this page, so a real tab click or
+page-N click is always a full-page GET that never carries `HX-Request` —
+that traffic always lands on the `else` branch below, which renders
+`postings_history.html` (the full page with the tab nav), and that template
+itself `{% include %}`s the SAME `_postings_history_list.html` fragment for
+its list slot. The `if request.headers.get("HX-Request") == "true":` branch
+is reachable only by a caller that sets that header itself (a future JS
+fetch, or a test) — never by anything the shipped UI does today.
 """
 
 from __future__ import annotations
