@@ -163,7 +163,9 @@ def test_public_page_shows_authed_nav_for_a_signed_in_visitor(path):
     _current_identity(), the same re-check /preview's own redirect uses)."""
     app = _app(
         _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL),
-        verify=lambda req: ClerkIdentity(user_id="user_authed_legal", claims={"sub": "user_authed_legal"}),
+        verify=lambda req: ClerkIdentity(
+            user_id="user_authed_legal", claims={"sub": "user_authed_legal"}
+        ),
     )
     html = app.test_client().get(path).get_data(as_text=True)
 
