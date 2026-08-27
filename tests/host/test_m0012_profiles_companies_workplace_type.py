@@ -1,4 +1,4 @@
-"""jobcannon/db/migrations/m0011_profiles_companies_workplace_type.py — the
+"""jobcannon/db/migrations/m0012_profiles_companies_workplace_type.py — the
 two columns #169/#170 needed a durable home for: `target_companies` (the
 picker's company selection) and `workplace_type` (remote/hybrid/onsite
 preference). Before this migration only `target_titles` (m0001) survived
@@ -50,25 +50,25 @@ def test_workplace_type_column_exists_and_is_nullable_text(db_conn):
 
 
 def test_target_companies_and_workplace_type_default_null(db_conn):
-    _seed_user(db_conn, "m0011_default_user")
-    db_conn.execute("INSERT INTO profiles (user_id) VALUES ('m0011_default_user')")
+    _seed_user(db_conn, "m0012_default_user")
+    db_conn.execute("INSERT INTO profiles (user_id) VALUES ('m0012_default_user')")
 
     row = db_conn.execute(
-        "SELECT target_companies, workplace_type FROM profiles WHERE user_id = 'm0011_default_user'"
+        "SELECT target_companies, workplace_type FROM profiles WHERE user_id = 'm0012_default_user'"
     ).fetchone()
     assert row["target_companies"] is None
     assert row["workplace_type"] is None
 
 
 def test_target_companies_accepts_a_jsonb_array_and_workplace_type_accepts_text(db_conn):
-    _seed_user(db_conn, "m0011_populated_user")
+    _seed_user(db_conn, "m0012_populated_user")
     db_conn.execute(
         "INSERT INTO profiles (user_id, target_companies, workplace_type) VALUES (%s, %s, %s)",
-        ("m0011_populated_user", Jsonb(["Acme Corp", "Globex"]), "REMOTE"),
+        ("m0012_populated_user", Jsonb(["Acme Corp", "Globex"]), "REMOTE"),
     )
 
     row = db_conn.execute(
-        "SELECT target_companies, workplace_type FROM profiles WHERE user_id = 'm0011_populated_user'"
+        "SELECT target_companies, workplace_type FROM profiles WHERE user_id = 'm0012_populated_user'"
     ).fetchone()
     assert row["target_companies"] == ["Acme Corp", "Globex"]
     assert row["workplace_type"] == "REMOTE"
@@ -81,21 +81,21 @@ def test_target_companies_accepts_an_empty_jsonb_array(db_conn):
     literally to CLEAR a prior selection rather than accidentally reviving
     it via COALESCE. Assert the column itself round-trips `[]` faithfully,
     independent of the DAL logic that depends on it."""
-    _seed_user(db_conn, "m0011_empty_array_user")
+    _seed_user(db_conn, "m0012_empty_array_user")
     db_conn.execute(
         "INSERT INTO profiles (user_id, target_companies) VALUES (%s, %s)",
-        ("m0011_empty_array_user", Jsonb([])),
+        ("m0012_empty_array_user", Jsonb([])),
     )
 
     row = db_conn.execute(
-        "SELECT target_companies FROM profiles WHERE user_id = 'm0011_empty_array_user'"
+        "SELECT target_companies FROM profiles WHERE user_id = 'm0012_empty_array_user'"
     ).fetchone()
     assert row["target_companies"] == []
     assert row["target_companies"] is not None
 
 
 def test_migration_applies_to_a_profiles_table_with_pre_existing_rows(monkeypatch):
-    """m0011 must succeed as two ALTER TABLE ADD COLUMN statements against a
+    """m0012 must succeed as two ALTER TABLE ADD COLUMN statements against a
     `profiles` table that already has rows, not only a brand-new empty
     database. A pre-existing row predates both columns entirely, so they
     must land NULL — there is no CHECK constraint to interact with, unlike
@@ -104,16 +104,16 @@ def test_migration_applies_to_a_profiles_table_with_pre_existing_rows(monkeypatc
     import jobcannon.db.migrate as migrate_mod
     from jobcannon.db.migrations import MIGRATIONS
 
-    dsn, db_name = create_throwaway_db("jobcannon_mig_m0011_populated")
+    dsn, db_name = create_throwaway_db("jobcannon_mig_m0012_populated")
     try:
-        pre_m0011 = [m for m in MIGRATIONS if m.version < 11]
-        monkeypatch.setattr(migrate_mod, "MIGRATIONS", pre_m0011)
+        pre_m0012 = [m for m in MIGRATIONS if m.version < 12]
+        monkeypatch.setattr(migrate_mod, "MIGRATIONS", pre_m0012)
         migrate_mod.run_migrations(dsn)
 
         with psycopg.connect(dsn) as conn:
-            conn.execute("INSERT INTO users (id, plan_tier) VALUES ('pre_m0011_user', 'free')")
+            conn.execute("INSERT INTO users (id, plan_tier) VALUES ('pre_m0012_user', 'free')")
             conn.execute(
-                "INSERT INTO profiles (user_id, seniority_level) VALUES ('pre_m0011_user', 'senior')"
+                "INSERT INTO profiles (user_id, seniority_level) VALUES ('pre_m0012_user', 'senior')"
             )
             conn.commit()
 
@@ -123,7 +123,7 @@ def test_migration_applies_to_a_profiles_table_with_pre_existing_rows(monkeypatc
         with psycopg.connect(dsn, row_factory=dict_row) as conn:
             row = conn.execute(
                 "SELECT seniority_level, target_companies, workplace_type "
-                "FROM profiles WHERE user_id = 'pre_m0011_user'"
+                "FROM profiles WHERE user_id = 'pre_m0012_user'"
             ).fetchone()
         assert row["seniority_level"] == "senior"
         assert row["target_companies"] is None

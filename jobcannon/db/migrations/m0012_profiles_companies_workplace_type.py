@@ -1,4 +1,4 @@
-"""Migration 11 — profiles.target_companies + profiles.workplace_type
+"""Migration 12 — profiles.target_companies + profiles.workplace_type
 (#169/#170: the picker's company selection and workplace-type preference
 have no durable home for a signed-up user).
 
@@ -36,7 +36,7 @@ from __future__ import annotations
 from jobcannon.db.migrations.types import Migration
 
 MIGRATION = Migration(
-    version=11,
+    version=12,
     description="profiles.target_companies (jsonb) + profiles.workplace_type (text), both nullable",
     sql=[
         "ALTER TABLE profiles ADD COLUMN target_companies jsonb",

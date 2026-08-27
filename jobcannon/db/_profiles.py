@@ -24,7 +24,7 @@ jsonb write in this codebase (_companies.py / _jobs.py / _jd_full.py /
 _events.py / health_recorder.py) rather than pre-serialized with
 json.dumps().
 
-`target_companies` (m0011, #169/#170) follows `target_titles`'s exact
+`target_companies` (m0012, #169/#170) follows `target_titles`'s exact
 COALESCE-preserve-when-omitted shape, with one caller-side difference that
 matters: `jobcannon/web/onboarding.py`'s `start_submit` passes the picker's
 selection list LITERALLY (`selections["titles"]`/`selections["companies"]`),
@@ -38,7 +38,7 @@ one shape of "omitted field" this table's COALESCE design was never meant
 to represent, since the picker always submits a complete snapshot of every
 field, never a partial patch.
 
-`workplace_type` (m0011) is the one exception to the COALESCE-preserve
+`workplace_type` (m0012) is the one exception to the COALESCE-preserve
 pattern: it is a single nullable `text` column whose only valid "no
 preference" value (NULL, mapped from the picker's "any" option — see
 `onboarding.py`'s `_WORKPLACE_FILTERS`) is indistinguishable from "omitted"

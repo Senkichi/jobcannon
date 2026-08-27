@@ -39,7 +39,7 @@ column, so there is no corpus source for skill-token *options* the way
 there is for titles/companies), seniority level, years of experience, and a
 workplace-type preference. No free text, name, email, or resume is
 collected. profiles.experience_summary and profiles.target_locations stay
-NULL. target_companies/workplace_type (m0011, #169/#170) DO reach the
+NULL. target_companies/workplace_type (m0012, #169/#170) DO reach the
 durable `profiles` row through upsert_profile, same as target_titles —
 workplace_type is written as a plain overwrite rather than
 target_titles/target_companies's COALESCE-preserve-when-omitted shape (see
@@ -156,7 +156,7 @@ MAX_TITLES_PER_SELECTION = 20
 # would break the session-cookie round trip anyway.
 MAX_TITLE_LENGTH = 140
 
-# `companies` selections now reach durable storage too (m0011's
+# `companies` selections now reach durable storage too (m0012's
 # target_companies column — see _parse_companies's docstring below), but
 # this cap exists independently of that: they share the exact same
 # signed-cookie round trip titles take via set_pending_picker, so an
@@ -406,7 +406,7 @@ def _parse_companies(form: Any) -> tuple[list[str] | None, str | None]:
     enforces (issue #80, extended by #169). Before #169, companies never
     reached durable storage, so the control-character check titles carries
     for issue #54 was deliberately omitted here; now that target_companies
-    is a real column (m0011), the same embedding hazard applies equally, so
+    is a real column (m0012), the same embedding hazard applies equally, so
     the check does too."""
     raw_companies = [c for c in form.getlist("companies") if c]
     message = _too_many_selected_message(
@@ -486,7 +486,7 @@ def _parse_submission(form: Any) -> tuple[dict[str, Any] | None, str | None]:
 
     selections = {
         "titles": titles,
-        # `target_companies` (m0011, #169) is now a real durable column —
+        # `target_companies` (m0012, #169) is now a real durable column —
         # shape-validated the same way titles is (count + length + control-
         # character cap, see _parse_companies) because it reaches BOTH the
         # session cookie (set_pending_picker, for /preview's read-side
