@@ -56,3 +56,4 @@ authoritative signal, not yet an enforced one.
 - One logical change per PR. Conventional commit style (`feat:`, `fix:`,
   `test:`, `chore:`) for commit messages.
 - CI (lint + tests) must pass before merge.
+
