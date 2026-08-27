@@ -7,12 +7,17 @@ user.created/user.updated is an UPSERT on the Clerk user id. The primary
 email is data.email_addresses[] matched by data.primary_email_address_id —
 there is no flat data.email. user.deleted carries only data.id.
 
-user.deleted -> hard DELETE cascades to profiles/feed_state/watchlists/
-pipeline_status/byo_key_credentials AND events (m0001 FKs, all ON DELETE
-CASCADE) — spec consequence C-1 ("deletion must erase per-user raw events")
-is implemented STRUCTURALLY at the FK layer rather than by a future runbook;
-anonymous (user_id IS NULL) events are unaffected. Do not weaken the events
-FK to SET NULL — that would re-open C-1.
+user.deleted -> jobcannon.host.user_deletion.cascade_delete_user, the ONE
+deletion path (also called by issue #136's reconciliation-sweep periodic —
+never a second copy). Hard DELETE cascades to profiles/feed_state/
+watchlists/pipeline_status/byo_key_credentials AND events (m0001 FKs, all
+ON DELETE CASCADE) — spec consequence C-1 ("deletion must erase per-user
+raw events") is implemented STRUCTURALLY at the FK layer rather than by a
+future runbook; anonymous (user_id IS NULL) events are unaffected. Do not
+weaken the events FK to SET NULL — that would re-open C-1. The cascade also
+enqueues issue #135's PostHog person purge (async, worker-side, pseudonym
+only) when analytics pseudonymization is configured — see
+jobcannon.host.user_deletion's module docstring.
 """
 
 from __future__ import annotations
@@ -68,7 +73,9 @@ def clerk_webhook():
         with connection_factory() as conn:
             _users.ensure_user(conn, user_id, email=_primary_email(data))
     elif event_type == "user.deleted":
+        from jobcannon.host.user_deletion import cascade_delete_user
+
         with connection_factory() as conn:
-            _users.delete_user(conn, user_id)
+            cascade_delete_user(conn, user_id)
     # Unknown event types: acknowledged 200 so Clerk doesn't retry forever.
     return ("", 200)

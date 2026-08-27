@@ -133,8 +133,10 @@ def test_every_required_env_var_is_declared_on_both_services():
     for svc in bp["services"]:
         declared = {e["key"] for e in svc.get("envVars", [])}
         # Worker never verifies a Clerk request or a webhook — that's
-        # expressed once, as declare_on=("web",) on the four Clerk fields
-        # in HostConfig, not as a second exemption list here.
+        # expressed once, as declare_on=("web",) on three of the four Clerk
+        # fields in HostConfig (clerk_secret_key is the exception — issue
+        # #136's reconciliation sweep runs on the worker and needs its own
+        # Clerk Backend API client), not as a second exemption list here.
         required = {env for env, svcs in derived.items() if svc["type"] in svcs}
         missing = required - declared
         assert not missing, f"{svc['name']} missing env declarations: {missing}"
@@ -157,6 +159,33 @@ def test_posthog_env_declared_identically_on_both_services():
         assert host_entry.get("value") == "https://eu.i.posthog.com", svc["name"]
         hosts[svc["name"]] = host_entry["value"]
     assert hosts["jobcannon-web"] == hosts["jobcannon-worker"]
+
+
+def test_posthog_admin_env_declared_on_worker_only():
+    """Issue #135's PostHog admin/private-API credentials
+    (POSTHOG_PERSONAL_API_KEY, POSTHOG_PROJECT_ID, POSTHOG_ADMIN_API_HOST)
+    are declare_on=() in HostConfig (optional/fail-soft, like
+    POSTHOG_API_KEY/POSTHOG_HOST) so the generic derivation test above
+    doesn't cover them — this is their dedicated coverage. Unlike
+    POSTHOG_API_KEY/POSTHOG_HOST (declared identically on both services),
+    these are WORKER-ONLY: the purge only ever runs inside
+    jobcannon.host.tasks.purge_posthog_person, a worker-side procrastinate
+    task; jobcannon-web never calls posthog_admin.purge_person, so
+    declaring these on web would be dead config with no consumer."""
+    bp = _blueprint()
+    web = next(s for s in bp["services"] if s["type"] == "web")
+    worker = next(s for s in bp["services"] if s["type"] == "worker")
+    admin_keys = {"POSTHOG_PERSONAL_API_KEY", "POSTHOG_PROJECT_ID", "POSTHOG_ADMIN_API_HOST"}
+
+    worker_declared = {e["key"] for e in worker["envVars"]}
+    web_declared = {e["key"] for e in web["envVars"]}
+    assert admin_keys <= worker_declared
+    assert not (admin_keys & web_declared)
+
+    host_entry = next(e for e in worker["envVars"] if e["key"] == "POSTHOG_ADMIN_API_HOST")
+    # Distinct from POSTHOG_HOST's ingestion value (eu.i.posthog.com) —
+    # PostHog's private/admin REST API lives on a different host.
+    assert host_entry.get("value") == "https://eu.posthog.com"
 
 
 def test_web_graceful_timeout_covers_posthog_atexit_bound():

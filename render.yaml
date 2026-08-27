@@ -194,3 +194,34 @@ services:
       # rather than a committed literal.
       - key: JC_ANALYTICS_PSEUDONYM_SALT
         sync: false
+      # Issue #136: the reconciliation-sweep periodic
+      # (jobcannon.host.tasks.reconcile_deleted_users) needs its own Clerk
+      # Backend API client (jobcannon.web.auth.build_clerk_client) to ask
+      # Clerk directly whether an old local `users` row still exists —
+      # previously this key was declared web-only (HostConfig.
+      # clerk_secret_key's declare_on expanded from ("web",) to
+      # ("web","worker") in the same PR that added this task). Same value
+      # as jobcannon-web's CLERK_SECRET_KEY above.
+      - key: CLERK_SECRET_KEY
+        sync: false
+      # Issue #135: PostHog admin/private REST API credentials for the
+      # person-purge task (jobcannon.host.tasks.purge_posthog_person /
+      # jobcannon.host.posthog_admin). Worker-only — the purge only ever
+      # runs inside this worker-side procrastinate task, never in the web
+      # process. Left unset, purge_person() logs once and skips (fail-soft
+      # by design); the published privacy policy keeps disclosing
+      # surviving PostHog copies until the owner sets these (see the #135
+      # PR body — a follow-up legal-text update is required once they are).
+      - key: POSTHOG_PERSONAL_API_KEY
+        sync: false
+      - key: POSTHOG_PROJECT_ID
+        sync: false
+      # Committed literal, NOT sync:false: a routing choice like
+      # POSTHOG_HOST above, not a secret. Deliberately a SEPARATE var from
+      # POSTHOG_HOST rather than derived from it by a string transform —
+      # PostHog's private/admin REST API (`/api/projects/...`, used here)
+      # lives on a DIFFERENT host than the EU ingestion endpoint POSTHOG_HOST
+      # names; see jobcannon/host/posthog_admin.py's module docstring for
+      # why an explicit value was chosen over a transform.
+      - key: POSTHOG_ADMIN_API_HOST
+        value: https://eu.posthog.com

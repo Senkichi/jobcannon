@@ -8,7 +8,9 @@
    step: the pseudonymization salt gates whether that fan-out ever reaches
    PostHog with an identifier at all (posthog_client.pseudonymize's
    fail-closed contract) — it is not a fifth seam, just the other half of
-   seam 4's configuration.
+   seam 4's configuration. posthog_admin.configure(...) (issue #135's
+   PostHog person-purge admin credentials) rides along here too, for the
+   same reason.
 ScanServices.prober_extensions stays None (spec §3.6 ruling: fail-closed;
 multi-tenant identity is a Phase 2 design item, consequence C-2).
 
@@ -85,7 +87,7 @@ import os
 from jobcannon.db import _companies, _jd_full, _jobs
 from jobcannon.db import pool as pool_mod
 from jobcannon.engine import extraction_health, runtime_config, services
-from jobcannon.host import posthog_client
+from jobcannon.host import posthog_admin, posthog_client
 from jobcannon.host.config import HostConfig
 from jobcannon.host.health_recorder import record_scan_health
 
@@ -324,6 +326,21 @@ def init_engine_seams(host_config: HostConfig) -> None:
     extraction_health.set_recorder(record_scan_health)
     posthog_client.set_posthog_client(_build_posthog_client(host_config))
     posthog_client.set_analytics_salt(host_config.analytics_pseudonym_salt)
+    # Issue #135's PostHog person-purge admin credentials ride along in
+    # seam 4 too, same rationale as the analytics salt above: not a fifth
+    # seam, just more of seam 4's configuration. Threaded unconditionally
+    # (both web and worker call init_engine_seams) even though the purge
+    # itself only ever runs worker-side (jobcannon.host.tasks.
+    # purge_posthog_person) -- HostConfig's three new fields are simply
+    # None wherever POSTHOG_PERSONAL_API_KEY/POSTHOG_PROJECT_ID/
+    # POSTHOG_ADMIN_API_HOST aren't set (e.g. the web service, which
+    # render.yaml never declares them on), so this is a harmless no-op
+    # there rather than something that needs process-type branching.
+    posthog_admin.configure(
+        personal_api_key=host_config.posthog_personal_api_key,
+        project_id=host_config.posthog_project_id,
+        host=host_config.posthog_admin_api_host,
+    )
     _install_posthog_fork_hook()
 
 
@@ -337,6 +354,7 @@ def teardown_engine_seams() -> None:
     # would make the next init_engine_seams() call register a second
     # after_in_child hook alongside the still-installed first one.
     _current_host_config = None
+    posthog_admin.configure(personal_api_key=None, project_id=None, host=None)
     posthog_client.set_analytics_salt(None)
     posthog_client.set_posthog_client(None)
     extraction_health.set_recorder(None)
