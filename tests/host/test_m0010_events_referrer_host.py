@@ -117,10 +117,16 @@ def test_migration_rewrites_referrer_url_to_referrer_host(monkeypatch):
         drop_throwaway_db(db_name)
 
 
-def test_migration_is_idempotent_against_already_rewritten_rows():
-    """A second run (test_migrate.py's idempotency contract for every
-    migration) must not error and must not double-wrap the value — the
-    WHERE clause excludes rows that no longer have `referrer_url`."""
+def test_migration_driver_is_idempotent_via_ledger_skip():
+    """A second `run_migrations` call must not error and must not re-ledger
+    m0010 — the driver's ledger (set membership in schema_migrations) skips
+    a version it has already applied before the UPDATE statement itself ever
+    re-executes. This proves driver/ledger idempotency for m0010 specifically
+    (test_migrate.py's `test_run_migrations_is_idempotent_and_ledgered` only
+    checks version 1's ledger row, not m0010's). It does NOT exercise the
+    migration's own WHERE-clause guard against already-rewritten data — that
+    is `test_migration_sql_where_guard_is_idempotent_against_rewritten_rows`
+    below, which re-executes the raw SQL directly, bypassing the ledger."""
     from jobcannon.db.migrate import run_migrations
 
     dsn, db_name = create_throwaway_db("jobcannon_mig_m0010_idem")
@@ -131,5 +137,73 @@ def test_migration_is_idempotent_against_already_rewritten_rows():
         with psycopg.connect(dsn) as conn:
             count = conn.execute("SELECT count(*) FROM schema_migrations WHERE version = 10")
             assert count.fetchone()[0] == 1
+    finally:
+        drop_throwaway_db(db_name)
+
+
+def test_migration_sql_where_guard_is_idempotent_against_rewritten_rows(monkeypatch):
+    """Re-executes m0010's raw UPDATE statement a second time, bypassing
+    `run_migrations`' ledger short-circuit entirely, directly against a row
+    the FIRST execution already rewrote. Proves the `payload ? 'referrer_url'`
+    WHERE guard itself — not just the ledger — is safe to re-run: without it,
+    `payload -> 'referrer_url'` on an already-rewritten row evaluates to SQL
+    NULL, `jsonb_build_object` would wrap that as `referrer_host: null`, and
+    `||` would clobber the good value with that null. The ledger alone can
+    never exercise this path, since it prevents the SQL from running a second
+    time at all — that gap is what the renamed test above documents."""
+    import jobcannon.db.migrate as migrate_mod
+    from jobcannon.db.migrations import MIGRATIONS
+    from jobcannon.db.migrations.m0010_events_referrer_host import MIGRATION
+
+    dsn, db_name = create_throwaway_db("jobcannon_mig_m0010_sql_idem")
+    try:
+        pre_m0010 = [m for m in MIGRATIONS if m.version < 10]
+        monkeypatch.setattr(migrate_mod, "MIGRATIONS", pre_m0010)
+        migrate_mod.run_migrations(dsn)
+
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "INSERT INTO users (id) VALUES ('m0010_sql_idem_user') ON CONFLICT (id) DO NOTHING"
+            )
+            conn.execute(
+                "INSERT INTO events (user_id, event_type, payload) "
+                "VALUES (%s, 'user_signed_up', %s)",
+                (
+                    "m0010_sql_idem_user",
+                    json.dumps(
+                        {
+                            "channel": "direct",
+                            "wave": "0",
+                            "signup_method": "clerk",
+                            "referrer_url": "example.com",
+                        }
+                    ),
+                ),
+            )
+            conn.commit()
+
+        monkeypatch.setattr(migrate_mod, "MIGRATIONS", MIGRATIONS)
+        migrate_mod.run_migrations(dsn)  # first run: the real rewrite happens here
+
+        # Re-execute the migration's raw SQL a SECOND time, directly, bypassing
+        # run_migrations()'s ledger entirely.
+        with psycopg.connect(dsn) as conn:
+            with conn.transaction():
+                for statement in MIGRATION.sql:
+                    conn.execute(statement)
+
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            row = conn.execute(
+                "SELECT payload FROM events WHERE user_id = 'm0010_sql_idem_user'"
+            ).fetchone()
+
+        assert row["payload"]["referrer_host"] == "example.com"
+        assert "referrer_url" not in row["payload"]
+        # Siblings still intact — a re-run that clobbered via a null overwrite
+        # would still leave these alone, but assert them anyway for parity
+        # with the first test's coverage.
+        assert row["payload"]["channel"] == "direct"
+        assert row["payload"]["wave"] == "0"
+        assert row["payload"]["signup_method"] == "clerk"
     finally:
         drop_throwaway_db(db_name)

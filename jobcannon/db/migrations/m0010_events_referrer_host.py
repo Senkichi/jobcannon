@@ -28,6 +28,18 @@ over byte-for-byte.
 Privacy Policy §3.3 already describes this field as "the hostname of the
 site that referred you" — the legal text was correct before this migration
 and needs no change; only the internal payload key name was misleading.
+
+Deploy order: run this migration AFTER jobcannon-web has finished rolling
+out the renamed writer (jobcannon/web/handoff.py), not before or
+concurrently. The web and worker services (render.yaml) deploy
+independently with no ordering guarantee; the ledger blocks this migration
+from ever running twice, so any `user_signed_up` row written by an
+old (pre-rename) web worker after this migration has already committed
+keeps the old `referrer_url` key permanently. Impact of getting the order
+wrong is benign either way — the value is hostname-only either key name,
+`has_signed_up_event` dedups on event_type not the payload key, and any
+straggler rows are a cosmetic naming leftover, not a data-integrity or
+privacy defect — but deploy-code-first avoids creating stragglers at all.
 """
 
 from __future__ import annotations
