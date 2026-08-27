@@ -380,8 +380,18 @@ def _parse_titles(form: Any) -> tuple[list[str] | None, str | None]:
     upsert_profile's target_titles column: count cap, per-item length cap,
     type check, and a control-character rejection (issue #54's proposal).
     Deliberately NOT a membership check against the rendered option window
-    — see MAX_TITLES_PER_SELECTION's module-level rationale comment."""
-    raw_titles = [t for t in form.getlist("titles") if t]
+    — see MAX_TITLES_PER_SELECTION's module-level rationale comment.
+    Filtered on the STRIPPED form (so a whitespace-only value like " "
+    can't survive as a garbage exact-match filter, #175/whitespace-bypass)
+    but the RAW value is kept — picker options are corpus-derived from
+    postings.title verbatim, and stripping the stored value would make a
+    checkbox for a title with incidental leading/trailing whitespace no
+    longer match the very posting it came from. The strip-emptiness check
+    is skipped for a non-str item (`not isinstance(t, str) or t.strip()`)
+    so a wrong-typed value can't crash here — it survives this pre-filter
+    and reaches the type check below instead, where it gets the correct
+    "must be text values" error rather than an AttributeError."""
+    raw_titles = [t for t in form.getlist("titles") if not isinstance(t, str) or t.strip()]
     message = _too_many_selected_message("titles", len(raw_titles), MAX_TITLES_PER_SELECTION)
     if message is not None:
         return None, message
@@ -407,8 +417,12 @@ def _parse_companies(form: Any) -> tuple[list[str] | None, str | None]:
     reached durable storage, so the control-character check titles carries
     for issue #54 was deliberately omitted here; now that target_companies
     is a real column (m0012), the same embedding hazard applies equally, so
-    the check does too."""
-    raw_companies = [c for c in form.getlist("companies") if c]
+    the check does too. Filtered on the STRIPPED form, RAW value kept — see
+    _parse_titles's docstring for why (same #175/whitespace-bypass fix,
+    same corpus-verbatim-match reason not to alter the stored value, and
+    the same non-str passthrough so a wrong-typed item reaches the type
+    check below instead of crashing on .strip())."""
+    raw_companies = [c for c in form.getlist("companies") if not isinstance(c, str) or c.strip()]
     message = _too_many_selected_message(
         "companies", len(raw_companies), MAX_COMPANIES_PER_SELECTION
     )
@@ -762,11 +776,33 @@ def preview():
     location_contains = (request.args.get("location") or "").strip() or None
     after = parse_cursor(request.args)
 
-    # Computed once and reused below for `has_selections` — #169's shared
-    # predicate is a pure function of `selections`, so deriving it twice
-    # per request (once for the read, once for the banner) would just be
-    # duplicate work on the same in-memory dict.
+    # Computed once and reused below for both the read and `has_selections`
+    # — #169's shared predicate is a pure function of `selections`, so
+    # deriving it twice per request would just be duplicate work on the
+    # same in-memory dict.
     selection_kwargs = selection_filter_kwargs(selections)
+
+    # #175: NOT `bool(selections)` — `selections` always carries `anon_id`
+    # once /start has been submitted even once, so that check is truthy
+    # even for a hollow selection. It also stayed truthy for a session
+    # cookie minted by the pre-#175 build, which let a fully-blank
+    # submission through and stored it verbatim; that cookie is still live
+    # in production today. Derive it from the same "at least one title or
+    # company" predicate _parse_submission now enforces on write, so a
+    # pre-existing hollow cookie shows the same honest banner a fresh
+    # blank submission is rejected before ever producing.
+    #
+    # Computed BEFORE the read (F4, refuter-1 LOW): a legacy pre-#175
+    # cookie can carry a workplace-only selection (no titles, no
+    # companies) — has_selections=False, "you haven't completed the
+    # picker" banner — while the corpus read below still applied that
+    # workplace_type filter, so the preview silently narrowed under a
+    # banner claiming nothing had been selected. When there is no real
+    # selection, drop workplace_type from the read too, so the banner and
+    # the results agree: neither field is applied.
+    has_selections = bool(selection_kwargs["titles"] or selection_kwargs["companies"])
+    if not has_selections:
+        selection_kwargs = {**selection_kwargs, "workplace_type": None}
 
     rows = _read_preview_postings(
         selection_kwargs=selection_kwargs,
@@ -778,17 +814,6 @@ def preview():
 
     if request.headers.get("HX-Request") == "true":
         return render_template("_feed_page.html", entries=entries, load_more_url=load_more_url)
-
-    # #175: NOT `bool(selections)` — `selections` always carries `anon_id`
-    # once /start has been submitted even once, so that check is truthy
-    # even for a hollow selection. It also stayed truthy for a session
-    # cookie minted by the pre-#175 build, which let a fully-blank
-    # submission through and stored it verbatim; that cookie is still live
-    # in production today. Derive it from the same "at least one title or
-    # company" predicate _parse_submission now enforces on write, so a
-    # pre-existing hollow cookie shows the same honest banner a fresh
-    # blank submission is rejected before ever producing.
-    has_selections = bool(selection_kwargs["titles"] or selection_kwargs["companies"])
 
     return render_template(
         "preview.html",
