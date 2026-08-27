@@ -4,7 +4,7 @@ import time
 import psycopg
 import pytest
 
-from tests.host.conftest import create_throwaway_db, drop_throwaway_db, requires_postgres
+from tests.host.conftest import ADMIN_DSN, create_throwaway_db, drop_throwaway_db, requires_postgres
 
 pytestmark = requires_postgres
 
@@ -323,4 +323,62 @@ def test_run_migrations_serializes_concurrent_callers_via_advisory_lock(monkeypa
             ).fetchall()
         assert len(rows) == 1
     finally:
+        drop_throwaway_db(db_name)
+
+
+def test_advisory_lock_key_matches_documented_derivation():
+    """Guards the hardcoded `_ADVISORY_LOCK_KEY` comment against a silent
+    transcription typo (cross-family review LEAD 4): re-derives the constant
+    from the exact string the module comment claims it comes from, against
+    live Postgres, rather than trusting the hardcoded value on faith. Any
+    connection works here -- hashtextextended is a pure function of its
+    arguments, not tied to a particular database -- so this uses the admin
+    DSN directly instead of a throwaway db."""
+    import jobcannon.db.migrate as migrate_mod
+
+    with psycopg.connect(ADMIN_DSN) as conn:
+        row = conn.execute(
+            "SELECT hashtextextended(%s, 0)",
+            ("jobcannon.db.migrate: schema_migrations advisory lock",),
+        ).fetchone()
+    assert row[0] == migrate_mod._ADVISORY_LOCK_KEY
+
+
+def test_unlock_failure_in_finally_does_not_mask_migration_exception(monkeypatch):
+    """Regression for the finally-block masking hazard (review-1 L-a /
+    review-3 finding 2 / cross-family review LEAD 1, corroborated 3x): if a
+    migration fails AND the connection is then dead, the finally block's own
+    `pg_advisory_unlock` statement also raising must NOT replace the
+    ORIGINAL migration exception -- that would put an unrelated "connection
+    already closed" traceback in main()'s logger.exception output instead of
+    the real failure an operator needs to see. Simulates a dead-connection
+    unlock failure directly (raising whenever the unlock statement text is
+    executed) while a real migration hook fails first, and asserts the
+    migration's own exception is what propagates."""
+    import jobcannon.db.migrate as migrate_mod
+    from jobcannon.db.migrations.types import Migration, MigrationContext
+
+    def _boom(ctx: MigrationContext) -> None:
+        raise RuntimeError("boom from the migration itself")
+
+    fake_migrations = [
+        Migration(version=900301, description="fails", py=_boom, name="m900301_fails"),
+    ]
+    monkeypatch.setattr(migrate_mod, "MIGRATIONS", fake_migrations)
+
+    original_execute = psycopg.Connection.execute
+
+    def _flaky_execute(self, query, *args, **kwargs):
+        if isinstance(query, str) and "pg_advisory_unlock" in query:
+            raise RuntimeError("simulated: connection already closed")
+        return original_execute(self, query, *args, **kwargs)
+
+    monkeypatch.setattr(psycopg.Connection, "execute", _flaky_execute)
+
+    dsn, db_name = create_throwaway_db("jobcannon_mig_unlock_fail")
+    try:
+        with pytest.raises(RuntimeError, match="boom from the migration itself"):
+            migrate_mod.run_migrations(dsn)
+    finally:
+        monkeypatch.undo()  # restore real execute() before drop_throwaway_db needs it
         drop_throwaway_db(db_name)

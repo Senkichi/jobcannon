@@ -157,9 +157,23 @@ def run_migrations(dsn: str, *, allow_newer_db: bool = False) -> None:
             # session-end (connection close already releases every
             # session-level advisory lock the backend holds, but an explicit
             # unlock frees it immediately instead of only when this
-            # connection object is torn down).
-            with conn.transaction():
-                conn.execute("SELECT pg_advisory_unlock(%s)", (_ADVISORY_LOCK_KEY,))
+            # connection object is torn down). Swallow any failure HERE:
+            # if a migration just failed because the connection died, this
+            # statement fails too, and letting it raise would replace the
+            # real migration exception in main()'s logger.exception output
+            # with an unrelated "connection already closed" traceback — the
+            # thing an operator actually needs to see is the migration
+            # failure, not this best-effort cleanup's own error. The
+            # connection-close backstop above still releases the lock
+            # either way.
+            try:
+                with conn.transaction():
+                    conn.execute("SELECT pg_advisory_unlock(%s)", (_ADVISORY_LOCK_KEY,))
+            except Exception:
+                logger.warning(
+                    "advisory unlock failed; the lock is released when the connection closes",
+                    exc_info=True,
+                )
 
 
 def main() -> int:
