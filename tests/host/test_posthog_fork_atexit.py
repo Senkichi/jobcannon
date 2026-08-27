@@ -175,6 +175,40 @@ def test_require_fork_or_fail_loud_noop_when_fork_exists(monkeypatch):
     _require_fork_or_fail_loud()  # must not raise
 
 
+def test_require_fork_or_fail_loud_noop_when_fork_exists_and_optout_set(monkeypatch):
+    """Case 5 (PR #213 refuter-1 MED): fork present + CI set + the opt-out
+    ALSO set -> still returns normally, never skip/fail. Pins the exact
+    ordering the gate depends on -- `hasattr(os, "fork")` must be checked
+    BEFORE JC_FORK_TESTS_UNAVAILABLE. Cases 1-3 all monkeypatch os.fork
+    away, so none of them can distinguish "gate checks fork first" from
+    "gate checks the opt-out first"; only a fork-present + opt-out-set
+    case can. That reordering would silently re-skip these tests on a real
+    future fork-capable CI leg that still carries today's opt-out, which
+    is the precise #162 failure mode this gate exists to make impossible.
+
+    Deliberately does NOT call `_require_fork_or_fail_loud()` bare: a
+    hoisted opt-out check makes it raise `pytest.skip.Exception`, and an
+    *uncaught* skip would report this test as SKIPPED, not FAILED --
+    which would NOT break CI's `tests-passed` gate (skips are not
+    failures), silently defeating the point of this case. Catching both
+    outcome exceptions and converting them to an explicit `pytest.fail()`
+    is what makes the regression an actual red build.
+    """
+    monkeypatch.setattr(os, "fork", lambda: 0, raising=False)
+    monkeypatch.setenv("CI", "1")
+    monkeypatch.setenv(_JC_FORK_TESTS_UNAVAILABLE_ENV, "1")
+    try:
+        _require_fork_or_fail_loud()  # must return normally -- fork wins over opt-out
+    except (pytest.skip.Exception, pytest.fail.Exception) as exc:
+        pytest.fail(
+            "_require_fork_or_fail_loud() must return normally when "
+            "os.fork() is present, even with the opt-out set -- got "
+            f"{type(exc).__name__}: {exc}. This means the opt-out check "
+            "ran before the fork check, reintroducing jobcannon#162's "
+            "silent-skip failure mode on a future fork-capable CI leg."
+        )
+
+
 # TEST-NET-1 (RFC 5737): syntactically valid, guaranteed non-routable. Never
 # actually dialed -- this test bypasses init_engine_seams's pool_mod.open_pool
 # call entirely, so database_url is present only because HostConfig requires
