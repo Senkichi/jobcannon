@@ -23,12 +23,12 @@
            class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 min-h-11">
     <input type="text" name="location" value="{{ filters.location }}" placeholder="Location contains"
            class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 min-h-11">
-    <select name="workplace_type" class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100">
+    <select name="workplace_type" class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 min-h-11">
       {% for wt in workplace_types %}
         <option value="{{ wt }}" {% if wt == filters.workplace_type %}selected{% endif %}>{{ wt }}</option>
       {% endfor %}
     </select>
-    <select name="sort" class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100">
+    <select name="sort" class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 min-h-11">
       {% for token in sort_tokens %}
         <option value="{{ token }}" {% if token == filters.sort %}selected{% endif %}>{{ token }}</option>
       {% endfor %}

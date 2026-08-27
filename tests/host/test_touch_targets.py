@@ -11,9 +11,10 @@ scratchpad/eng/fleet/mobile-targets/ covers the reachable branches
 empirically; this test is what covers the rest and is what keeps them
 covered as templates change.
 
-No hardcoded element list: every <a>, <button>, non-hidden <input>, and
-<label> opening tag in every jobcannon/web/templates/*.html file must
-carry the shared marker class in its `class` attribute:
+No hardcoded element list: every <a>, <button>, non-hidden <input>,
+<label>, <select>, and <textarea> opening tag in every
+jobcannon/web/templates/*.html file must carry the shared marker class in
+its `class` attribute:
 
   - `min-h-11` for everything except checkbox/radio inputs. Tailwind's
     `min-h-*` scale gives a floor without clipping wrapped text (verified
@@ -57,7 +58,7 @@ _TEMPLATES_DIR = pathlib.Path("jobcannon/web/templates")
 
 _JINJA_COMMENT_RE = re.compile(r"\{#.*?#\}", re.DOTALL)
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
-_TAG_RE = re.compile(r"<(a|button|input|label)\b([^>]*)>", re.IGNORECASE)
+_TAG_RE = re.compile(r"<(a|button|input|label|select|textarea)\b([^>]*)>", re.IGNORECASE)
 _CLASS_RE = re.compile(r'class\s*=\s*"([^"]*)"', re.IGNORECASE)
 _TYPE_RE = re.compile(r'type\s*=\s*"([^"]*)"', re.IGNORECASE)
 

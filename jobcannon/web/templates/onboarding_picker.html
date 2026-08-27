@@ -65,7 +65,7 @@
     </fieldset>
     <label class="block min-h-11">
       <span class="font-medium">Seniority level</span>
-      <select name="seniority_level" class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1">
+      <select name="seniority_level" class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 min-h-11">
         <option value="">Prefer not to say</option>
         {% for level in seniority_levels %}
           <option value="{{ level }}">{{ level }}</option>
@@ -84,7 +84,7 @@
     </label>
     <label class="block min-h-11">
       <span class="font-medium">Workplace type</span>
-      <select name="workplace_type" class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1">
+      <select name="workplace_type" class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 min-h-11">
         {% for wt in workplace_types %}
           <option value="{{ wt }}">{{ wt }}</option>
         {% endfor %}
