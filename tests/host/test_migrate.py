@@ -382,3 +382,31 @@ def test_unlock_failure_in_finally_does_not_mask_migration_exception(monkeypatch
     finally:
         monkeypatch.undo()  # restore real execute() before drop_throwaway_db needs it
         drop_throwaway_db(db_name)
+
+
+def test_main_import_time_failure_still_logs_the_failure_line(monkeypatch, caplog):
+    """Regression for cross-family review LEAD 3: main()'s
+    `from jobcannon.host.config import load_host_config` now sits INSIDE the
+    try block (not before it), so a failure resolving load_host_config --
+    an import-time error in that leaf module, or the config loader itself
+    raising, as simulated here -- still produces the
+    "pre-deploy migration run failed" log line docs/deploy-runbook.md points
+    operators toward, and main() still returns 1, instead of an uncaught
+    traceback with no diagnostic line. Patches
+    jobcannon.host.config.load_host_config itself (the leaf module main()
+    imports from) rather than mocking main()'s whole body, so this exercises
+    the real import + call path, not a stand-in for it."""
+    import logging
+
+    import jobcannon.db.migrate as migrate_mod
+    import jobcannon.host.config as host_config_mod
+
+    def _boom():
+        raise ImportError("simulated: config resolution failed")
+
+    monkeypatch.setattr(host_config_mod, "load_host_config", _boom)
+
+    with caplog.at_level(logging.ERROR, logger="jobcannon.db.migrate"):
+        assert migrate_mod.main() == 1
+
+    assert "pre-deploy migration run failed" in caplog.text

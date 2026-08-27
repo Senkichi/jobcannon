@@ -184,12 +184,17 @@ def main() -> int:
     so a failed pre-deploy aborts the Render release instead of promoting
     web code to a schema it doesn't match."""
     logging.basicConfig(level=os.environ.get("JC_LOG_LEVEL", "INFO"))
-    # Deferred import: jobcannon.host pulls in the full engine-seam wiring
-    # stack, which run_migrations() itself has no need of — keep that
-    # dependency scoped to the CLI entry point, not the importable driver.
-    from jobcannon.host import load_host_config
-
     try:
+        # Deferred + leaf import: jobcannon.host.config only, not the
+        # jobcannon.host package (which also pulls in the full engine-seam
+        # wiring stack — build_scan_services/init_engine_seams — that this
+        # pre-deploy step has no need of). Deliberately INSIDE the try: an
+        # import-time failure anywhere in that graph must still produce the
+        # same "pre-deploy migration run failed" log line as any other
+        # pre-deploy failure (docs/deploy-runbook.md points operators at
+        # that line), not an uncaught traceback with no diagnostic line.
+        from jobcannon.host.config import load_host_config
+
         host_config = load_host_config()
         run_migrations(host_config.database_url, allow_newer_db=allow_newer_db_from_env())
     except Exception:
