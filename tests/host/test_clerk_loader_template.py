@@ -153,7 +153,10 @@ def test_is_public_request_path_matches_every_public_path():
     rather than only the two DB-free routes above, so /demo, /start, and
     /preview (which need Postgres to render end-to-end, per
     tests/host/test_demo_feed.py and tests/host/test_preview.py) are still
-    covered for the gating decision itself."""
+    covered for the gating decision itself. /preview additionally has a
+    real end-to-end assertion —
+    tests/host/test_preview.py::test_preview_omits_clerk_js_even_when_publishable_key_configured
+    — proving the actual route (not just this helper) honors the gate."""
     from jobcannon.web import PUBLIC_PATHS, _is_public_request_path
 
     app = _app(_host_config(), verify=lambda req: None)
