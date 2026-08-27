@@ -1,0 +1,50 @@
+{# The picker's Titles/Companies fieldsets (#148). Shared by GET /start's
+   full-page render (jobcannon/web/onboarding.py's `start` view, inside the
+   main POST form) and that SAME route's own HX-Request fragment response —
+   the search input's hx-get targets this exact fragment (hx-target
+   #picker-options, hx-swap outerHTML), so the two render paths can never
+   drift apart. `checked_titles` / `checked_companies` are the visitor's
+   already-selected values, carried forward via the search input's
+   hx-include (or a validation-error re-render's own submitted form) and
+   already merged into `titles` / `companies` by
+   jobcannon.web.onboarding._picker_context / _merge_checked — this template
+   only needs them to know which box to render `checked`. `notice` (GET
+   /start's carry-forward-overage message, PR #192 review finding L5) is
+   rendered here — not in onboarding_picker.html's own top-level `error`
+   block — so it shows up in both the HX fragment and, via that template's
+   {% include %} of this one, the full page, without duplicating: POST's
+   `error` re-render never sets `notice`, and this block never sets
+   `error`. #}
+<div id="picker-options">
+  {% if notice %}
+    <p class="text-red-400 mb-4">{{ notice }}</p>
+  {% endif %}
+  <fieldset>
+    <legend class="font-medium mb-2">Titles</legend>
+    {% if titles %}
+      {% for title in titles %}
+        <label class="block text-sm text-neutral-300">
+          <input type="checkbox" name="titles" value="{{ title }}" {% if title in checked_titles %}checked{% endif %}> {{ title }}
+        </label>
+      {% endfor %}
+    {% elif q %}
+      <p class="text-sm text-neutral-500">No titles match &ldquo;{{ q }}&rdquo;.</p>
+    {% else %}
+      <p class="text-sm text-neutral-500">No titles in the corpus yet.</p>
+    {% endif %}
+  </fieldset>
+  <fieldset>
+    <legend class="font-medium mb-2">Companies</legend>
+    {% if companies %}
+      {% for company in companies %}
+        <label class="block text-sm text-neutral-300">
+          <input type="checkbox" name="companies" value="{{ company }}" {% if company in checked_companies %}checked{% endif %}> {{ company }}
+        </label>
+      {% endfor %}
+    {% elif q %}
+      <p class="text-sm text-neutral-500">No companies match &ldquo;{{ q }}&rdquo;.</p>
+    {% else %}
+      <p class="text-sm text-neutral-500">No companies in the corpus yet.</p>
+    {% endif %}
+  </fieldset>
+</div>

@@ -10,13 +10,16 @@ other tests/host/ module uses).
 from __future__ import annotations
 
 import ast
+import html as html_lib
 import pathlib
+import re
 from urllib.parse import urlsplit
 
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
+from jobcannon.db._feed import FEED_PAGE_MAX
 from tests.host.conftest import create_throwaway_db, drop_throwaway_db, requires_postgres
 
 pytestmark = requires_postgres
@@ -136,6 +139,187 @@ def test_preview_is_driven_only_by_picker_selections(app):
     html_beta = client.get("/preview").get_data(as_text=True)
     assert "Distinctive Title Beta" in html_beta
     assert "Distinctive Title Alpha" not in html_beta
+
+
+# --- #156: keyset "Load more" pagination -----------------------------------
+
+_LOAD_MORE_RE = re.compile(
+    r'hx-get="([^"]+)"[^>]*data-load-more|data-load-more[^>]*hx-get="([^"]+)"'
+)
+
+
+def _extract_load_more_url(html: str) -> str | None:
+    """Un-escapes the Jinja-autoescaped `&amp;` between query params back to
+    a literal `&` — the same decode step a real browser performs on a DOM
+    attribute before htmx ever issues the request. Skipping it splits the
+    query string on the stray `&` inside `&amp;` and silently drops
+    cursor_id/cursor_last_seen (see tests/host/test_feed_pagination.py's
+    identical helper, where this was caught as a real test-harness bug)."""
+    match = _LOAD_MORE_RE.search(html)
+    if match is None:
+        return None
+    raw = match.group(1) or match.group(2)
+    return html_lib.unescape(raw)
+
+
+def _row_count(html: str) -> int:
+    return len(re.findall(r"<article[^>]*data-posting-row[^>]*>", html))
+
+
+def _seed_preview_pages_worth(dsn, company_id, count, *, title_prefix="Preview Page Row"):
+    for i in range(count):
+        _seed_posting(
+            dsn, f"preview-page-{title_prefix}-{i}", company_id, title=f"{title_prefix} {i:03d}"
+        )
+
+
+def test_preview_load_more_button_appears_when_first_page_is_full(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview Full Page Co")
+    _seed_preview_pages_worth(dsn, company_id, FEED_PAGE_MAX + 5)
+
+    html = app.test_client().get("/preview").get_data(as_text=True)
+
+    assert "data-load-more" in html
+    assert _row_count(html) == FEED_PAGE_MAX
+
+
+def test_preview_load_more_button_absent_when_fewer_than_a_full_page(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview Short Page Co")
+    _seed_preview_pages_worth(dsn, company_id, 3)
+
+    html = app.test_client().get("/preview").get_data(as_text=True)
+
+    assert "data-load-more" not in html
+    assert _row_count(html) == 3
+
+
+def test_preview_load_more_hx_request_returns_only_the_next_batch(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview HX Fragment Co")
+    _seed_preview_pages_worth(dsn, company_id, FEED_PAGE_MAX + 10)
+
+    client = app.test_client()
+    first_page_html = client.get("/preview").get_data(as_text=True)
+    load_more_url = _extract_load_more_url(first_page_html)
+    assert load_more_url is not None
+
+    resp = client.get(load_more_url, headers={"HX-Request": "true"})
+    fragment_html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert _row_count(fragment_html) == 10
+    assert "Your preview feed" not in fragment_html
+    assert "<nav" not in fragment_html
+    first_titles = set(re.findall(r"<h2[^>]*>([^<]+)</h2>", first_page_html))
+    second_titles = set(re.findall(r"<h2[^>]*>([^<]+)</h2>", fragment_html))
+    assert first_titles & second_titles == set()
+    assert len(first_titles) == FEED_PAGE_MAX
+    assert len(second_titles) == 10
+    assert "data-load-more" not in fragment_html
+
+
+def test_preview_load_more_without_hx_request_returns_the_full_page(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview No HX Header Co")
+    _seed_preview_pages_worth(dsn, company_id, FEED_PAGE_MAX + 5)
+
+    client = app.test_client()
+    first_page_html = client.get("/preview").get_data(as_text=True)
+    load_more_url = _extract_load_more_url(first_page_html)
+    assert load_more_url is not None
+
+    resp = client.get(load_more_url)
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Your preview feed" in html
+    assert _row_count(html) == 5
+
+
+def test_preview_load_more_removes_itself_when_exhausted(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview Exhausted Co")
+    _seed_preview_pages_worth(dsn, company_id, FEED_PAGE_MAX)
+
+    client = app.test_client()
+    first_page_html = client.get("/preview").get_data(as_text=True)
+    load_more_url = _extract_load_more_url(first_page_html)
+    assert load_more_url is not None
+
+    resp = client.get(load_more_url, headers={"HX-Request": "true"})
+    fragment_html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert _row_count(fragment_html) == 0
+    assert "data-load-more" not in fragment_html
+
+
+def test_preview_load_more_preserves_the_current_location_filter(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview Filter Preserve Co")
+    for i in range(FEED_PAGE_MAX + 3):
+        _seed_posting(
+            dsn,
+            f"preview-loc-match-{i}",
+            company_id,
+            title=f"Matching Remote Row {i:03d}",
+            location="Remote-Matching",
+        )
+    for i in range(5):
+        _seed_posting(
+            dsn,
+            f"preview-loc-other-{i}",
+            company_id,
+            title=f"Other Onsite Row {i:03d}",
+            location="Onsite-Other",
+        )
+
+    client = app.test_client()
+    first_page = client.get("/preview", query_string={"location": "Remote-Matching"}).get_data(
+        as_text=True
+    )
+    load_more_url = _extract_load_more_url(first_page)
+    assert load_more_url is not None
+    assert "location=Remote-Matching" in load_more_url
+
+    resp = client.get(load_more_url, headers={"HX-Request": "true"})
+    fragment_html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert _row_count(fragment_html) == 3
+    assert "Other Onsite Row" not in fragment_html
+
+
+def test_preview_malformed_cursor_degrades_to_first_page_not_500(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview Malformed Cursor Co")
+    _seed_preview_pages_worth(dsn, company_id, 3)
+
+    resp = app.test_client().get("/preview", query_string={"cursor_id": "not-a-number"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert _row_count(html) == 3
+
+
+def test_preview_malformed_cursor_last_seen_degrades_to_first_page_not_500(app):
+    """Mirrors test_malformed_cursor_last_seen_degrades_to_first_page_not_500
+    in test_feed_pagination.py for the anonymous /preview route: a valid
+    cursor_id with a non-ISO cursor_last_seen exercises the branch the
+    id-only malformed test above never reaches."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview Malformed Timestamp Co")
+    _seed_preview_pages_worth(dsn, company_id, 3)
+
+    resp = app.test_client().get(
+        "/preview", query_string={"cursor_id": "1", "cursor_last_seen": "not-a-timestamp"}
+    )
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert _row_count(html) == 3
 
 
 def test_preview_shows_honest_ordering_label_when_all_rows_unranked(app):
@@ -328,3 +512,96 @@ def test_preview_shows_a_real_salary_currency_label(app):
     assert "Real Currency Posting" in html
     assert "GBP" in html
     assert "95000" in html
+
+
+# ---------------------------------------------------------------------------
+# Sign-up CTA (issue #145): /preview is the pre-signup feed a visitor
+# reaches after the picker, with no path onward to an account before this
+# fix. Tolerant-default gating, same shape as the header nav
+# (tests/host/test_auth_nav.py) — mutating app.config["HOST_CONFIG"] after
+# the fixture creates the app works here because
+# jobcannon.web._inject_auth_links reads app.config["HOST_CONFIG"] fresh on
+# every render rather than closing over a value captured at create_app time.
+# ---------------------------------------------------------------------------
+
+
+def test_preview_shows_signup_cta_when_sign_up_url_configured(app):
+    """The `app` fixture never overrides HOST_CONFIG, so TESTING's default
+    (clerk_sign_up_url="https://clerk.test/sign-up",
+    jobcannon/web/__init__.py) applies -- this is the positive control."""
+    html = app.test_client().get("/preview").get_data(as_text=True)
+
+    assert "data-signup-cta" in html
+    assert "Sign up to keep this feed" in html
+    assert 'href="https://clerk.test/sign-up"' in html
+
+
+def test_preview_omits_signup_cta_when_sign_up_url_unset(app):
+    from jobcannon.host.config import HostConfig
+
+    app.config["HOST_CONFIG"] = HostConfig(database_url="", secret_key="testing-secret-key")
+
+    html = app.test_client().get("/preview").get_data(as_text=True)
+
+    assert "data-signup-cta" not in html
+    assert "Sign up to keep this feed" not in html
+
+
+@pytest.fixture()
+def app_with_clerk_key():
+    """Same throwaway-DB shape as `app` above, but HOST_CONFIG carries a
+    real-shaped Clerk publishable key at create_app() call time. Issue
+    #158's gate (jobcannon/web/__init__.py's inject_clerk_frontend) derives
+    clerk_publishable_key/clerk_frontend_api_host ONCE at app-factory time
+    from the HOST_CONFIG closure, not per-request -- unlike
+    _auth_link_context (used by the CTA test above), which re-reads
+    app.config["HOST_CONFIG"] on every render. A test proving the #158 gate
+    holds on /preview therefore must configure the key here, not by
+    mutating app.config["HOST_CONFIG"] after create_app() returns."""
+    from jobcannon.db import pool as pool_mod
+    from jobcannon.db.migrate import run_migrations
+    from jobcannon.host.config import HostConfig
+    from jobcannon.web import create_app
+
+    dsn, db_name = create_throwaway_db("jobcannon_preview_clerk")
+    try:
+        run_migrations(dsn)
+        pool_mod.open_pool(dsn)
+        flask_app = create_app(
+            config={
+                "TESTING": True,
+                "HOST_CONFIG": HostConfig(
+                    database_url="",
+                    secret_key="testing-secret-key",
+                    clerk_publishable_key="pk_test_ZXhhbXBsZS5jb20k",
+                    clerk_sign_up_url="https://clerk.test/sign-up",
+                ),
+                "VERIFY_REQUEST": lambda r: None,
+                "WEBHOOK_SECRET": "whsec_dGVzdA==",
+            }
+        )
+        flask_app.config["_TEST_DSN"] = dsn
+        yield flask_app
+    finally:
+        pool_mod.close_pool()
+        drop_throwaway_db(db_name)
+
+
+def test_preview_omits_clerk_js_even_when_publishable_key_configured(app_with_clerk_key):
+    """Closes the end-to-end gap flagged in test_clerk_loader_template.py's
+    test_is_public_request_path_matches_every_public_path docstring:
+    /preview needs Postgres to render end-to-end, so the #158 regression
+    test there only proves _is_public_request_path() is True for it, not
+    that the real /preview route (jobcannon/web/onboarding.py) actually
+    omits the loader. This fixture supplies the DB /privacy and /terms
+    (both DB-free) don't need, closing the inference gap end-to-end."""
+    html = app_with_clerk_key.test_client().get("/preview").get_data(as_text=True)
+
+    assert "clerk-publishable-key" not in html
+    assert "clerk.browser.js" not in html
+    assert "Clerk.load" not in html
+    # Positive control within the same response: the CTA (gated on
+    # clerk_sign_up_url alone via _auth_link_context, unaffected by #158's
+    # gate) IS present -- proves this is a real 200 render of the route,
+    # not an empty/error page that would vacuously lack clerk-js too.
+    assert "data-signup-cta" in html

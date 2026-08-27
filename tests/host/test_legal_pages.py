@@ -19,6 +19,12 @@ Things this module pins:
   (g) jobcannon.web.legal._render() calls the guard and raises at boot time
       (issue #94 guard-hardening review), against a sabotaged temp file —
       never against jobcannon/web/legal/ itself
+  (h) /privacy and /terms send Cache-Control: private, max-age=300 on both
+      GET and HEAD (issue #182 item 4) — private because ensure_session_ids()
+      mints a per-visitor session cookie on first contact, NOT because these
+      routes' body varies by auth state (it doesn't: both are PUBLIC_PATHS,
+      so g.clerk_user is unconditionally None here — see
+      jobcannon/web/legal.py's Cache-Control comment for the full reasoning)
 """
 
 from __future__ import annotations
@@ -213,6 +219,52 @@ def test_legal_page_head_request_200(path):
 
 
 # ---------------------------------------------------------------------------
+# (h) Cache-Control (issue #182 item 4). `private`, not `public`: every
+# request here — including this public-path branch — mints a per-visitor
+# session cookie via ensure_session_ids() on first contact (see
+# jobcannon/web/legal.py's Cache-Control comment for the full reasoning, and
+# jobcannon/web/anon_session.py for the cookie itself). A `public` directive
+# would let a shared cache (CDN, corporate proxy) replay one visitor's
+# Set-Cookie response onto a different first-time visitor. This is NOT
+# because the auth nav varies per visitor on these two routes — it doesn't:
+# /privacy and /terms are both in PUBLIC_PATHS, so g.clerk_user is
+# unconditionally None here regardless of the requester's real session.
+# Parametrized over GET and HEAD (issue #182 item 2 was HEAD-specific) and
+# asserts the raw header string, not just the parsed cache_control
+# attributes, so a stray extra directive would also be caught.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("method", ["get", "head"])
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_legal_page_sets_private_cache_control_with_max_age(path, method):
+    app = _app(verify=lambda req: None)
+    client = app.test_client()
+
+    resp = getattr(client, method)(path)
+
+    assert resp.headers["Cache-Control"] == "private, max-age=300"
+
+
+@pytest.mark.parametrize("method", ["get", "head"])
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_legal_page_cache_control_same_when_authed(path, method):
+    """The directive is a property of the route, not of the requester's auth
+    state — an authed VERIFY_REQUEST stub must not change it. (It also never
+    actually runs here: /privacy and /terms are PUBLIC_PATHS, so clerk_auth
+    short-circuits before VERIFY_REQUEST is called — this test still pins
+    that the header doesn't accidentally depend on it.)"""
+    from jobcannon.web.auth import ClerkIdentity
+
+    app = _app(verify=lambda req: ClerkIdentity(user_id="user_1", claims={"sub": "user_1"}))
+    client = app.test_client()
+
+    resp = getattr(client, method)(path)
+
+    assert resp.headers["Cache-Control"] == "private, max-age=300"
+
+
+# ---------------------------------------------------------------------------
 # (d) /terms is public (mirrors the existing /privacy pin)
 # ---------------------------------------------------------------------------
 
@@ -236,9 +288,19 @@ def test_footer_links_to_privacy_and_terms():
 
 
 def test_consent_copy_links_to_privacy_and_no_longer_says_pending():
-    src = pathlib.Path("jobcannon/web/templates/consent.html").read_text(encoding="utf-8")
-    assert 'href="/privacy"' in src
-    assert "pending" not in src.lower()
+    """consent.html no longer carries this copy directly (issue #182 split
+    it into _consent_panel.html, shared with the post-grant/decline
+    fragment response) -- assert BOTH that consent.html still pulls the
+    panel in, and that the panel itself (the actual owner of this copy
+    now) still links /privacy and says nothing about "pending"."""
+    consent_src = pathlib.Path("jobcannon/web/templates/consent.html").read_text(encoding="utf-8")
+    assert 'include "_consent_panel.html"' in consent_src
+
+    panel_src = pathlib.Path("jobcannon/web/templates/_consent_panel.html").read_text(
+        encoding="utf-8"
+    )
+    assert 'href="/privacy"' in panel_src
+    assert "pending" not in panel_src.lower()
 
 
 # ---------------------------------------------------------------------------

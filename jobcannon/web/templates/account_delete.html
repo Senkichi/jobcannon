@@ -11,6 +11,7 @@
   cannot be undone.
 </p>
 <form method="post" action="/account/delete">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <label class="flex items-start gap-2 text-sm text-neutral-300 mb-6">
     <input type="checkbox" name="confirm" value="delete-my-account" required
            class="mt-1 rounded border-neutral-700 bg-neutral-900">

@@ -1,7 +1,7 @@
-"""Feed read DAL: list_feed_postings / count_feed_postings / distinct_titles
-/ distinct_companies (jobcannon/db/_feed.py). The first postings-list query
-and the first feed_state read in this repo's history — feed_state has no
-writer anywhere, so every seed in this file writes it directly."""
+"""Feed read DAL: list_feed_postings / distinct_titles / distinct_companies
+(jobcannon/db/_feed.py). The first postings-list query and the first
+feed_state read in this repo's history — feed_state has no writer anywhere,
+so every seed in this file writes it directly."""
 
 from __future__ import annotations
 
@@ -58,6 +58,14 @@ def _seed_feed_state(conn, user_id, posting_id, rank_score, ranker_version="test
         "VALUES (%s, %s, %s, %s, now())",
         (user_id, posting_id, rank_score, ranker_version),
     )
+
+
+def _after_from_row(row):
+    """The (rank_score, last_seen, id) `after` tuple `list_feed_postings`
+    expects, taken directly from a row — bypasses the query-string round
+    trip so pagination tests below are about `_cursor_predicate` itself, not
+    about `parse_cursor`'s string parsing (covered separately)."""
+    return (row["rank_score"], row["last_seen"], row["id"])
 
 
 def test_returns_rows_ordered_newest_first_when_all_unranked(db_conn):
@@ -209,3 +217,292 @@ def test_distinct_titles_and_companies_are_corpus_derived_and_bounded(db_conn):
     assert companies == sorted(companies)
     assert set(titles) <= {f"Title {i:03d}" for i in range(60)}
     assert set(companies) <= {f"Company {i:03d}" for i in range(60)}
+
+
+# --- #148: distinct_titles/distinct_companies `q` search ------------------
+
+
+def test_distinct_titles_q_finds_a_title_outside_the_alphabetical_window(db_conn):
+    """The exact bug #148 reports: with 60 alphabetically-early titles ahead
+    of it, "Software Engineer" would never appear in an unfiltered
+    limit=50 window — q="Software" must still surface it."""
+    from jobcannon.db._feed import distinct_titles
+
+    company_id = _seed_company(db_conn, "Acme")
+    for i in range(60):
+        _seed_posting(
+            db_conn,
+            f"p-alpha-{i}",
+            company_id,
+            title=f"Aardvark Role {i:03d}",
+            last_seen=_BASE_TIME,
+        )
+    _seed_posting(db_conn, "p-target", company_id, title="Software Engineer", last_seen=_BASE_TIME)
+
+    unfiltered = distinct_titles(db_conn, limit=50)
+    assert "Software Engineer" not in unfiltered  # sanity: reproduces the bug first
+
+    matches = distinct_titles(db_conn, q="Software", limit=50)
+    assert matches == ["Software Engineer"]
+
+
+def test_distinct_titles_q_orders_prefix_matches_before_substring_matches(db_conn):
+    from jobcannon.db._feed import distinct_titles
+
+    company_id = _seed_company(db_conn, "Acme")
+    _seed_posting(
+        db_conn, "p-substr", company_id, title="Senior Product Manager", last_seen=_BASE_TIME
+    )
+    _seed_posting(db_conn, "p-prefix", company_id, title="Product Manager", last_seen=_BASE_TIME)
+
+    matches = distinct_titles(db_conn, q="Product", limit=50)
+
+    assert matches == ["Product Manager", "Senior Product Manager"]
+
+
+def test_distinct_titles_q_is_case_insensitive(db_conn):
+    from jobcannon.db._feed import distinct_titles
+
+    company_id = _seed_company(db_conn, "Acme")
+    _seed_posting(db_conn, "p-case", company_id, title="Data Engineer", last_seen=_BASE_TIME)
+
+    assert distinct_titles(db_conn, q="data engineer", limit=50) == ["Data Engineer"]
+    assert distinct_titles(db_conn, q="DATA", limit=50) == ["Data Engineer"]
+
+
+def test_distinct_titles_q_escapes_percent_and_underscore(db_conn):
+    """Same LIKE-metacharacter hazard `_build_filters` already guards against
+    for title_contains/location_contains (test_like_metacharacters_in_filter_are_escaped
+    above) — q="%" or q="_" must match only a title literally containing
+    that character, not every row."""
+    from jobcannon.db._feed import distinct_titles
+
+    company_id = _seed_company(db_conn, "Acme")
+    percent_title = "50% Remote Engineer"
+    underscore_title = "Back_End Developer"
+    _seed_posting(db_conn, "p-pct", company_id, title=percent_title, last_seen=_BASE_TIME)
+    _seed_posting(db_conn, "p-under", company_id, title=underscore_title, last_seen=_BASE_TIME)
+    _seed_posting(
+        db_conn, "p-plain", company_id, title="Plain Title With No Metachars", last_seen=_BASE_TIME
+    )
+
+    percent_matches = distinct_titles(db_conn, q="%", limit=50)
+    assert percent_matches == [percent_title]
+
+    underscore_matches = distinct_titles(db_conn, q="_", limit=50)
+    assert underscore_matches == [underscore_title]
+
+
+def test_distinct_titles_q_no_match_returns_empty_list(db_conn):
+    from jobcannon.db._feed import distinct_titles
+
+    company_id = _seed_company(db_conn, "Acme")
+    _seed_posting(db_conn, "p-nomatch", company_id, title="Product Manager", last_seen=_BASE_TIME)
+
+    assert distinct_titles(db_conn, q="Zzzznonexistent", limit=50) == []
+
+
+def test_distinct_companies_q_finds_and_ranks_prefix_first(db_conn):
+    """distinct_companies reads postings.company (like distinct_titles reads
+    postings.title) — not the companies table, which only companies with an
+    actual posting need seeding here."""
+    from jobcannon.db._feed import distinct_companies
+
+    company_id = _seed_company(db_conn, "Acme")
+    _seed_posting(
+        db_conn, "p-co-prefix", company_id, company="Zeta Acquisitions", last_seen=_BASE_TIME
+    )
+    _seed_posting(
+        db_conn, "p-co-substr", company_id, company="Beta Zeta Holdings", last_seen=_BASE_TIME
+    )
+
+    matches = distinct_companies(db_conn, q="Zeta", limit=50)
+
+    assert matches == ["Zeta Acquisitions", "Beta Zeta Holdings"]
+
+
+# --- #156: keyset cursor pagination ----------------------------------------
+
+
+def test_cursor_pagination_across_three_pages_no_duplicates_no_skips(db_conn):
+    """26 unranked postings at 1-second last_seen increments, paged at
+    limit=10: three pages (10, 10, 6) must union back to exactly the
+    original 26 ids with no duplicate and no gap, in the same order a
+    single unpaged limit=26 read would return them."""
+    from jobcannon.db._feed import cursor_from_row, list_feed_postings
+
+    company_id = _seed_company(db_conn, "Acme")
+    ids = [
+        _seed_posting(
+            db_conn, f"p-cur-{i}", company_id, last_seen=_BASE_TIME + timedelta(seconds=i)
+        )
+        for i in range(26)
+    ]
+    expected_order = list(reversed(ids))  # newest last_seen first
+
+    page1 = list_feed_postings(db_conn, limit=10)
+    assert [r["id"] for r in page1] == expected_order[0:10]
+
+    page2 = list_feed_postings(db_conn, limit=10, after=_after_from_row(page1[-1]))
+    assert [r["id"] for r in page2] == expected_order[10:20]
+
+    page3 = list_feed_postings(db_conn, limit=10, after=_after_from_row(page2[-1]))
+    assert [r["id"] for r in page3] == expected_order[20:26]
+
+    all_seen = [r["id"] for r in page1] + [r["id"] for r in page2] + [r["id"] for r in page3]
+    assert all_seen == expected_order  # no duplicates, no skips, order preserved
+    assert len(set(all_seen)) == 26
+
+    # cursor_from_row's own output round-trips through parse_cursor the same
+    # way a real HTTP request would (exercised separately below); this just
+    # confirms it produces the shape list_feed_postings actually consumes.
+    assert set(cursor_from_row(page1[-1])) == {"cursor_rank_score", "cursor_last_seen", "cursor_id"}
+
+
+def test_cursor_pagination_is_deterministic_with_last_seen_ties(db_conn):
+    """Multiple postings sharing the exact same last_seen (a real corpus
+    scenario — a scan tick can insert many rows in the same instant) must
+    still page deterministically: the `id` tiebreaker in `_SORTS["default"]`
+    means paging by (last_seen, id) never duplicates or skips a tied row
+    across a page boundary."""
+    from jobcannon.db._feed import list_feed_postings
+
+    company_id = _seed_company(db_conn, "Acme")
+    tied_time = _BASE_TIME + timedelta(hours=1)
+    ids = sorted(
+        _seed_posting(db_conn, f"p-tie-{i}", company_id, last_seen=tied_time) for i in range(6)
+    )
+    expected_order = list(reversed(ids))  # tied last_seen -> id DESC
+
+    page1 = list_feed_postings(db_conn, limit=3)
+    assert [r["id"] for r in page1] == expected_order[0:3]
+
+    page2 = list_feed_postings(db_conn, limit=3, after=_after_from_row(page1[-1]))
+    assert [r["id"] for r in page2] == expected_order[3:6]
+
+    assert set(r["id"] for r in page1) & set(r["id"] for r in page2) == set()
+
+
+def test_cursor_pagination_orders_ranked_ahead_of_unranked_across_pages(db_conn):
+    """Cursor pagination must respect the SAME ordering
+    (rank_score DESC NULLS LAST, last_seen DESC, id DESC) an unpaged read
+    does — a ranked-but-stale row must still page ahead of a fresh unranked
+    one, exactly as test_rank_score_orders_ahead_of_recency_when_present
+    proves for a single unpaged read."""
+    from jobcannon.db._feed import list_feed_postings
+
+    _seed_user(db_conn, "u-cursor-rank")
+    company_id = _seed_company(db_conn, "Acme")
+    ranked = _seed_posting(db_conn, "p-cur-ranked", company_id, last_seen=_BASE_TIME)
+    fresh_unranked = _seed_posting(
+        db_conn, "p-cur-fresh", company_id, last_seen=_BASE_TIME + timedelta(hours=5)
+    )
+    _seed_feed_state(db_conn, "u-cursor-rank", ranked, 0.9)
+
+    page1 = list_feed_postings(db_conn, user_id="u-cursor-rank", limit=1)
+    assert [r["id"] for r in page1] == [ranked]
+
+    page2 = list_feed_postings(
+        db_conn, user_id="u-cursor-rank", limit=1, after=_after_from_row(page1[-1])
+    )
+    assert [r["id"] for r in page2] == [fresh_unranked]
+
+
+def test_cursor_with_unknown_sort_token_raises(db_conn):
+    """An unknown sort token raises before the cursor is even considered
+    (the `sort not in _SORTS` guard fires first) — this is the same code
+    path `test_unknown_sort_token_raises` below exercises without a
+    cursor; kept here too as a guard against that ordering ever flipping,
+    not as coverage of the after+non-default-sort guard itself (see
+    `test_cursor_with_valid_non_default_sort_raises` for that)."""
+    from jobcannon.db._feed import list_feed_postings
+
+    with pytest.raises(ValueError):
+        list_feed_postings(db_conn, sort="bogus-token", after=(None, _BASE_TIME, 1))
+
+
+def test_cursor_with_valid_non_default_sort_raises(db_conn, monkeypatch):
+    """The `after is not None and sort != "default"` guard is unreachable
+    with today's real `_SORTS` (it has exactly one token, so any non-
+    "default" value is also unknown and trips the earlier guard first).
+    Monkeypatch a second, valid sort token in so this test actually drives
+    execution past the first guard and into the second one."""
+    import jobcannon.db._feed as feed_module
+
+    monkeypatch.setitem(feed_module._SORTS, "recent", "p.last_seen DESC, p.id DESC")
+
+    with pytest.raises(ValueError, match="cursor pagination is only defined for sort='default'"):
+        feed_module.list_feed_postings(db_conn, sort="recent", after=(None, _BASE_TIME, 1))
+
+
+def test_cursor_with_nonzero_offset_raises(db_conn):
+    """`after` and a nonzero `offset` are mutually exclusive (#156 review
+    finding): combining them would silently skip rows past the seek point,
+    the exact drift keyset pagination exists to avoid. No route passes
+    both today, but the DAL enforces it at the boundary rather than
+    relying on every future caller to remember not to."""
+    from jobcannon.db._feed import list_feed_postings
+
+    with pytest.raises(ValueError, match="offset"):
+        list_feed_postings(db_conn, after=(None, _BASE_TIME, 1), offset=5)
+
+
+def test_parse_cursor_round_trips_cursor_from_row(db_conn):
+    """cursor_from_row's dict, serialized to strings the way a query string
+    would carry them, must parse back to the exact `after` tuple that same
+    row would produce for `_cursor_predicate` — including the None
+    rank_score case, which is every real page today (feed_state has no
+    writer anywhere in this codebase)."""
+    from jobcannon.db._feed import cursor_from_row, list_feed_postings, parse_cursor
+
+    company_id = _seed_company(db_conn, "Acme")
+    _seed_posting(db_conn, "p-roundtrip", company_id, last_seen=_BASE_TIME)
+    row = list_feed_postings(db_conn, limit=1)[0]
+
+    cursor_dict = cursor_from_row(row)
+    after = parse_cursor(cursor_dict)
+
+    assert after == (None, row["last_seen"], row["id"])
+
+
+def test_parse_cursor_round_trips_a_real_rank_score(db_conn):
+    from jobcannon.db._feed import cursor_from_row, list_feed_postings, parse_cursor
+
+    _seed_user(db_conn, "u-roundtrip-rank")
+    company_id = _seed_company(db_conn, "Acme")
+    posting_id = _seed_posting(db_conn, "p-roundtrip-rank", company_id, last_seen=_BASE_TIME)
+    _seed_feed_state(db_conn, "u-roundtrip-rank", posting_id, 0.42)
+    row = list_feed_postings(db_conn, user_id="u-roundtrip-rank", limit=1)[0]
+
+    after = parse_cursor(cursor_from_row(row))
+
+    assert after == (pytest.approx(0.42), row["last_seen"], row["id"])
+
+
+def test_parse_cursor_missing_id_returns_none():
+    from jobcannon.db._feed import parse_cursor
+
+    assert parse_cursor({}) is None
+    assert parse_cursor({"cursor_id": ""}) is None
+
+
+def test_parse_cursor_malformed_values_degrade_to_none_not_raise():
+    """A tampered/malformed cursor must never 500 the route consuming it —
+    parse_cursor degrades to None (render a first page) instead."""
+    from jobcannon.db._feed import parse_cursor
+
+    assert (
+        parse_cursor({"cursor_id": "not-a-number", "cursor_last_seen": "2026-01-01T00:00:00+00:00"})
+        is None
+    )
+    assert parse_cursor({"cursor_id": "1", "cursor_last_seen": "not-a-timestamp"}) is None
+    assert (
+        parse_cursor(
+            {
+                "cursor_id": "1",
+                "cursor_last_seen": "2026-01-01T00:00:00+00:00",
+                "cursor_rank_score": "nan-ish",
+            }
+        )
+        is None
+    )

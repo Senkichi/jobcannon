@@ -1,10 +1,13 @@
-{# Shared posting-list partial: iterates `entries` (a list of
-   {"row": <postings row>, "chips": <why_chips(...) list[str]>}) and includes
-   _posting_row.html once per entry. Consumed by /preview, /, and /demo (all
-   three server-render a real feed here). No hx-* attributes here — the
-   save/dismiss controls that use them live inside _posting_row.html itself,
-   rendered only when the caller passes show_actions; this list partial is a
-   plain server-rendered include.
+{# Shared posting-list partial: renders the first batch of `entries` (a
+   list of {"row": <postings row>, "chips": <why_chips(...) list[str]>}) via
+   _feed_page.html, which itself includes _posting_row.html once per entry
+   and, when `load_more_url` is set, a "Load more" control (#156). Consumed
+   by /preview, /, and /demo (all three server-render a real feed here); the
+   context that includes this template propagates through to _feed_page.html
+   / _posting_row.html unchanged (Jinja `{% include %}` shares context by
+   default) — no hx-* attributes live directly in THIS template, only in
+   _feed_page.html (the Load more button) and _posting_row.html (save/
+   dismiss/apply, gated on show_actions).
 
    Optional `filters` context (a dict of display-safe strings — see
    jobcannon/web/pages.py's `_parse_feed_filters` — plus the `sort_tokens` /
@@ -34,11 +37,7 @@
   </form>
 {% endif %}
 {% if entries %}
-  <div class="space-y-4" data-feed-list>
-    {% for entry in entries %}
-      {% include "_posting_row.html" %}
-    {% endfor %}
-  </div>
+  {% include "_feed_page.html" %}
 {% else %}
   <p class="text-neutral-400" data-feed-empty>No postings match your selections yet.</p>
 {% endif %}

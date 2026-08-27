@@ -38,7 +38,15 @@ services:
     # load even WITHOUT this flag (pin line stamped before the gunicorn
     # banner, zero per-worker pool builds) — the flag makes that topology
     # deterministic instead of environment-dependent.
-    startCommand: uv run --no-sync gunicorn --preload --workers 2 --bind 0.0.0.0:$PORT "jobcannon.web:create_app()"
+    # --graceful-timeout pinned explicitly (jobcannon#137) rather than left
+    # to gunicorn's implicit default (which also happens to be 30): worker
+    # shutdown now has a documented, code-cross-checked budget instead of
+    # an unstated assumption. jobcannon/host/wiring.py's
+    # _POSTHOG_ATEXIT_JOIN_TIMEOUT_S (10s) bounds the slowest thing a
+    # worker's atexit does today (flushing PostHog against a down
+    # endpoint), so this value must stay >= that bound with real headroom —
+    # tests/host/test_render_config.py cross-checks the two.
+    startCommand: uv run --no-sync gunicorn --preload --workers 2 --graceful-timeout 30 --bind 0.0.0.0:$PORT "jobcannon.web:create_app()"
     healthCheckPath: /healthz
     envVars:
       # Pinned so a new service doesn't silently pick up Render's current
@@ -80,6 +88,11 @@ services:
       - key: JC_SECRET_KEY
         sync: false
       - key: CLERK_SIGN_UP_URL
+        sync: false
+      # Sign-in counterpart (issue #145) -- already set live to
+      # https://accounts.jobcannon.dev/sign-in alongside CLERK_SIGN_UP_URL
+      # above; both were unlinked from any page until this change.
+      - key: CLERK_SIGN_IN_URL
         sync: false
       # First cohort's signup wave label; captured into every session's
       # attribution at first contact (jobcannon.web.anon_session) so a later
