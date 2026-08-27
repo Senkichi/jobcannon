@@ -88,33 +88,50 @@ def _cursor_predicate(
     expression here.
 
     `last_seen` is `timestamptz NOT NULL` (m0001), so only `rank_score`
-    needs NULLS-LAST handling: COALESCE to '-infinity' emulates "NULLS
-    LAST" in a DESC ordering by substituting a real, storable
-    double-precision sentinel that sorts behind every other *finite*
-    value, which a plain `<` seek predicate cannot express on a nullable
-    column by itself. This is NOT exactly equivalent to NULLS LAST if a
-    row ever stores a real `rank_score = -Infinity` (a valid double
-    precision value): it would then collide with the NULL sentinel and
-    could be skipped on a page boundary. `feed_state` has no writer
-    anywhere in this codebase yet (guarded by test_feed_state_not_written.py),
-    so this can't occur today — tracked as a follow-up for whenever a
-    ranker writer lands (would need a separate `IS NULL` flag in the row
-    constructor rather than a shared sentinel). Both sides of the row
-    comparison are COALESCEd, not just the column: `after`'s rank_score is
-    NULL on every real page today, and a PostgreSQL row-constructor
-    comparison treats ANY NULL element pair as unknown and drops the row,
-    so COALESCEing only the column side would silently return zero rows
-    on every "load more" click. The explicit `::double precision` cast on
-    the parameter is required: an untyped NULL inside COALESCE raises
-    "could not determine data type"."""
+    needs NULLS-LAST handling. The row constructor leads with an explicit
+    `{rank_expr} IS NOT NULL` boolean instead of folding NULL into the
+    same '-infinity' sentinel used for COALESCE: a plain COALESCE-only
+    sentinel would make a genuine `rank_score = -Infinity` row (a valid
+    double precision value) indistinguishable from a `rank_score IS NULL`
+    row, which could skip the NULL row on a page boundary once `after`'s
+    leading element ties. Leading with `IS NOT NULL` (TRUE=1 for a real
+    value, FALSE=0 for NULL) makes every NULL row sort into a distinct,
+    later group than every finite row (including -Infinity) before the
+    value is ever compared -- and it has to be the "is not null" polarity,
+    not "is null": every element of this row constructor is compared with
+    a single, uniform `<`, which only produces the correct "next page"
+    predicate for a column already sorted DESC (a plain `<` seek on a DESC
+    column is the standard keyset trick every column here already uses).
+    `(x IS NOT NULL) DESC` -- real values (1) sort ahead of NULLs (0) --
+    is what's DESC-compatible with that trick; `(x IS NULL) ASC` produces
+    the identical row ordering but needs `>`, not `<`, so using the IS
+    NULL polarity here would silently invert the comparison instead of
+    just being a no-op relabeling. `(x IS NOT NULL) DESC, x DESC` is
+    exactly what `_SORTS["default"]`'s `rank_score DESC NULLS LAST`
+    already produces natively, so this predicate's ordering agrees with
+    that ORDER BY without needing to change its text. The COALESCE after
+    the flag is still required even though the flag disambiguates NULL: a
+    PostgreSQL row-constructor comparison treats ANY NULL element as
+    unknown for that whole tuple pair and drops the row, so a NULL second
+    element would still silently return zero rows within the NULL group
+    (ties there fall through to last_seen/id) -- COALESCE keeps that
+    element non-NULL while the leading flag carries the actual NULL-vs-
+    value distinction. Both sides of the row comparison get both the flag
+    and the COALESCE, not just the column side: `after`'s rank_score is
+    NULL on every real page today, and COALESCEing only the column side
+    would hit the same "NULL element drops the row" problem on every
+    "load more" click. The explicit `::double precision` cast on the value
+    parameter is required: an untyped NULL inside COALESCE raises "could
+    not determine data type"."""
     if after is None:
         return "", []
     after_rank_score, after_last_seen, after_id = after
     clause = (
-        f"(COALESCE({rank_expr}, '-infinity'::double precision), p.last_seen, p.id) "
-        "< (COALESCE(%s::double precision, '-infinity'::double precision), %s, %s)"
+        f"({rank_expr} IS NOT NULL, COALESCE({rank_expr}, '-infinity'::double precision), "
+        "p.last_seen, p.id) "
+        "< (%s, COALESCE(%s::double precision, '-infinity'::double precision), %s, %s)"
     )
-    return clause, [after_rank_score, after_last_seen, after_id]
+    return clause, [after_rank_score is not None, after_rank_score, after_last_seen, after_id]
 
 
 def cursor_from_row(row: Any) -> dict[str, str]:
