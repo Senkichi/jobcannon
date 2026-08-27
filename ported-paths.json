@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-27T01:46:26Z",
+  "generated_at": "2026-08-27T07:15:03Z",
   "roots": [
     "engine",
     "db",
@@ -576,11 +576,11 @@
       "root": "host",
       "markers": [
         {
-          "line": 94,
+          "line": 102,
           "text": "_JD_STORAGE_MAX_CHARS = 50_000  # parity with the private repo's JD_STORAGE_MAX_CHARS"
         },
         {
-          "line": 96,
+          "line": 104,
           "text": "# Parity with the private deployment's job-level runtime cap for the ATS"
         }
       ]
