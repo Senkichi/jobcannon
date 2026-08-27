@@ -426,6 +426,251 @@ def test_contract_step_migration_logs_a_loud_notice_when_applied(monkeypatch, ca
         drop_throwaway_db(db_name)
 
 
+def test_autocommit_migration_applies_and_ledgers_after_success(monkeypatch):
+    """Issue #219: an autocommit=True migration's CONCURRENTLY statement
+    must actually build a valid index outside the ledger transaction, and
+    the ledger row must land only AFTER it succeeds."""
+    import jobcannon.db.migrate as migrate_mod
+    from jobcannon.db.migrations.types import Migration
+
+    fake_migrations = [
+        Migration(
+            version=900501,
+            description="table for the index",
+            sql=["CREATE TABLE t_ac_ok (id bigserial PRIMARY KEY, val int)"],
+            name="m900501_ac_table",
+        ),
+        Migration(
+            version=900502,
+            description="concurrent index build",
+            sql=["CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_t_ac_ok_val ON t_ac_ok(val)"],
+            name="m900502_ac_index",
+            autocommit=True,
+        ),
+    ]
+    monkeypatch.setattr(migrate_mod, "MIGRATIONS", fake_migrations)
+
+    dsn, db_name = create_throwaway_db("jobcannon_mig_autocommit_ok")
+    try:
+        migrate_mod.run_migrations(dsn)
+
+        with psycopg.connect(dsn) as conn:
+            versions = {
+                r[0] for r in conn.execute("SELECT version FROM schema_migrations").fetchall()
+            }
+            assert {900501, 900502} <= versions
+
+            valid = conn.execute(
+                "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                "WHERE c.relname = 'idx_t_ac_ok_val'"
+            ).fetchone()
+            assert valid is not None, "the CONCURRENTLY index was never built"
+            assert valid[0] is True, "the index built but was left INVALID"
+    finally:
+        drop_throwaway_db(db_name)
+
+
+def test_autocommit_migration_failure_leaves_no_ledger_row_and_retries_cleanly(monkeypatch):
+    """Issue #219's retry hazard: a CREATE UNIQUE INDEX CONCURRENTLY build
+    that fails partway (here: real duplicate data tripping the uniqueness
+    check, the actual failure mode Postgres produces) leaves an INVALID
+    catalog entry behind instead of rolling back. Proves the full recovery
+    story: (1) the failed run raises, no ledger row for that version, and
+    the index exists but indisvalid=false; (2) after the underlying data
+    problem is fixed, a retry's _drop_invalid_indexes sweep drops that
+    leftover BEFORE re-running the statement, so the retry succeeds cleanly
+    and the ledger row lands with indisvalid=true."""
+    import jobcannon.db.migrate as migrate_mod
+    from jobcannon.db.migrations.types import Migration
+
+    fake_migrations = [
+        Migration(
+            version=900511,
+            description="table with a duplicate value",
+            sql=[
+                "CREATE TABLE t_ac_retry (id bigserial PRIMARY KEY, val int)",
+                "INSERT INTO t_ac_retry (val) VALUES (1), (1)",
+            ],
+            name="m900511_ac_dup_table",
+        ),
+        Migration(
+            version=900512,
+            description="unique concurrent index build over duplicate data",
+            sql=[
+                "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_t_ac_retry_val "
+                "ON t_ac_retry(val)"
+            ],
+            name="m900512_ac_unique_index",
+            autocommit=True,
+        ),
+    ]
+    monkeypatch.setattr(migrate_mod, "MIGRATIONS", fake_migrations)
+
+    dsn, db_name = create_throwaway_db("jobcannon_mig_autocommit_retry")
+    try:
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            migrate_mod.run_migrations(dsn)
+
+        with psycopg.connect(dsn) as conn:
+            versions = {
+                r[0] for r in conn.execute("SELECT version FROM schema_migrations").fetchall()
+            }
+            assert 900511 in versions
+            assert 900512 not in versions, (
+                "the failed autocommit migration was ledgered anyway -- it must not be"
+            )
+
+            valid = conn.execute(
+                "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                "WHERE c.relname = 'idx_t_ac_retry_val'"
+            ).fetchone()
+            assert valid is not None, "the failed CONCURRENTLY build left no catalog entry at all"
+            assert valid[0] is False, "the leftover index should be INVALID after the failure"
+
+        # Fix the underlying data problem, then retry.
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute(
+                "DELETE FROM t_ac_retry WHERE ctid = (SELECT ctid FROM t_ac_retry LIMIT 1)"
+            )
+
+        migrate_mod.run_migrations(dsn)  # must not raise this time
+
+        with psycopg.connect(dsn) as conn:
+            versions = {
+                r[0] for r in conn.execute("SELECT version FROM schema_migrations").fetchall()
+            }
+            assert 900512 in versions, "retry did not ledger the migration after recovering"
+
+            valid = conn.execute(
+                "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                "WHERE c.relname = 'idx_t_ac_retry_val'"
+            ).fetchone()
+            assert valid is not None
+            assert valid[0] is True, "the rebuilt index should be valid after the retry"
+    finally:
+        drop_throwaway_db(db_name)
+
+
+def test_autocommit_migration_reuses_the_same_locked_connection(monkeypatch):
+    """The advisory lock run_migrations() holds is session-scoped
+    (pg_advisory_lock) -- it only covers an autocommit migration's
+    statements if they run on the SAME connection/session the lock was
+    acquired on, not a second one. Proves _apply_autocommit_migration never
+    opens a second connection: patches psycopg.connect to record every call
+    made against this test's own throwaway DSN and asserts there's exactly
+    one, across a migrations list that mixes an ordinary and an autocommit
+    migration."""
+    import jobcannon.db.migrate as migrate_mod
+    from jobcannon.db.migrations.types import Migration
+
+    fake_migrations = [
+        Migration(
+            version=900521,
+            description="ordinary",
+            sql=["CREATE TABLE t_ac_conn (id int)"],
+            name="m900521_plain",
+        ),
+        Migration(
+            version=900522,
+            description="autocommit",
+            sql=["CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_t_ac_conn_id ON t_ac_conn(id)"],
+            name="m900522_autocommit",
+            autocommit=True,
+        ),
+    ]
+    monkeypatch.setattr(migrate_mod, "MIGRATIONS", fake_migrations)
+
+    dsn, db_name = create_throwaway_db("jobcannon_mig_autocommit_conn")
+    try:
+        connect_calls = []
+        original_connect = psycopg.connect
+
+        def _counting_connect(conninfo, *args, **kwargs):
+            if conninfo == dsn:
+                connect_calls.append(conninfo)
+            return original_connect(conninfo, *args, **kwargs)
+
+        monkeypatch.setattr(psycopg, "connect", _counting_connect)
+
+        migrate_mod.run_migrations(dsn)
+
+        assert len(connect_calls) == 1, (
+            f"run_migrations opened {len(connect_calls)} connection(s) against the "
+            f"target DB -- an autocommit migration must run on the SAME session the "
+            f"advisory lock is held on, not a second connection"
+        )
+
+        monkeypatch.undo()  # restore real psycopg.connect before the finally's cleanup call
+        with psycopg.connect(dsn) as conn:
+            versions = {
+                r[0] for r in conn.execute("SELECT version FROM schema_migrations").fetchall()
+            }
+        assert {900521, 900522} <= versions
+    finally:
+        drop_throwaway_db(db_name)
+
+
+def test_lock_step_migration_logs_a_loud_notice_when_applied(monkeypatch, caplog):
+    """Issue #219 counterpart to
+    test_contract_step_migration_logs_a_loud_notice_when_applied above: a
+    lock_step=True migration must log a loud (WARNING) one-line notice
+    naming its version + name when it actually applies. A non-lock-step
+    migration must NOT log it."""
+    import logging
+
+    import jobcannon.db.migrate as migrate_mod
+    from jobcannon.db.migrations.types import Migration
+
+    fake_migrations = [
+        Migration(
+            version=900531,
+            description="plain",
+            sql=["CREATE TABLE t_lock_plain (id int)"],
+            name="m900531_plain",
+        ),
+        Migration(
+            version=900532,
+            description="lock step",
+            sql=["CREATE TABLE t_lock_step (id int)", "CREATE INDEX ON t_lock_step(id)"],
+            name="m900532_lock_step",
+            lock_step=True,
+        ),
+    ]
+    monkeypatch.setattr(migrate_mod, "MIGRATIONS", fake_migrations)
+
+    dsn, db_name = create_throwaway_db("jobcannon_mig_lock_step")
+    try:
+        with caplog.at_level(logging.WARNING, logger="jobcannon.db.migrate"):
+            migrate_mod.run_migrations(dsn)
+
+        assert "LOCK-STEP migration 900532" in caplog.text
+        assert "m900532_lock_step" in caplog.text
+        assert "LOCK-STEP migration 900531" not in caplog.text
+    finally:
+        drop_throwaway_db(db_name)
+
+
+def test_autocommit_migration_with_py_hook_raises_before_touching_the_connection():
+    """Defense-in-depth beyond the static scanner (Rule 4): if autocommit=True
+    and py are both set (the scanner should have already rejected this at CI
+    time, but _apply_autocommit_migration must never silently skip the hook
+    if that guard is ever bypassed), it must fail loudly rather than quietly
+    never calling the hook."""
+    from jobcannon.db.migrate import _apply_autocommit_migration
+    from jobcannon.db.migrations.types import Migration
+
+    migration = Migration(
+        version=900541,
+        description="autocommit with a stray py hook",
+        sql=["CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_x ON t(x)"],
+        py=lambda ctx: None,
+        name="m900541_autocommit_py",
+        autocommit=True,
+    )
+    with pytest.raises(ValueError, match="py hook"):
+        _apply_autocommit_migration(conn=None, migration=migration)
+
+
 def test_main_import_time_failure_still_logs_the_failure_line(monkeypatch, caplog):
     """Regression for cross-family review LEAD 3: main()'s
     `from jobcannon.host.config import load_host_config` now sits INSIDE the
