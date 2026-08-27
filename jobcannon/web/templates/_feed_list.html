@@ -34,28 +34,28 @@
           data-saved-selection-indicator>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <span>Filtering to your saved picks ({{ saved_selection.title_label }} &middot; {{ saved_selection.company_label }})</span>
-      <button type="submit" class="underline text-neutral-300 min-h-11 inline-flex items-center px-1"
+      <button type="submit" class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"
               data-clear-selection>Clear</button>
     </form>
   {% endif %}
   <form method="get" class="mb-6 grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm" data-feed-filters>
     <input type="text" name="title" value="{{ filters.title }}" placeholder="Title contains"
-           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 min-h-11">
+           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 {{ touch_target() }}">
     <input type="text" name="company" value="{{ filters.company }}" placeholder="Company"
-           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 min-h-11">
+           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 {{ touch_target() }}">
     <input type="text" name="location" value="{{ filters.location }}" placeholder="Location contains"
-           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 min-h-11">
-    <select name="workplace_type" class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 min-h-11">
+           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 {{ touch_target() }}">
+    <select name="workplace_type" class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 {{ touch_target() }}">
       {% for wt in workplace_types %}
         <option value="{{ wt }}" {% if wt == filters.workplace_type %}selected{% endif %}>{{ wt }}</option>
       {% endfor %}
     </select>
-    <select name="sort" class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 min-h-11">
+    <select name="sort" class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 {{ touch_target() }}">
       {% for token in sort_tokens %}
         <option value="{{ token }}" {% if token == filters.sort %}selected{% endif %}>{{ token }}</option>
       {% endfor %}
     </select>
-    <button type="submit" class="text-sm underline text-neutral-300 min-h-11 inline-flex items-center px-2">Apply filters</button>
+    <button type="submit" class="text-sm underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-2">Apply filters</button>
   </form>
 {% endif %}
 {% if entries %}

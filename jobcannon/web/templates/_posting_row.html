@@ -66,7 +66,7 @@
               hx-post="{{ url_for('actions.save', posting_id=entry.row.id) }}"
               hx-target="closest [data-posting-row]"
               hx-swap="outerHTML"
-              class="underline text-neutral-300 min-h-11 inline-flex items-center px-1"
+              class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"
               data-action-save>
         {{ "Saved" if entry.saved else "Save" }}
       </button>
@@ -74,7 +74,7 @@
               hx-post="{{ url_for('actions.dismiss', posting_id=entry.row.id) }}"
               hx-target="closest [data-posting-row]"
               hx-swap="outerHTML"
-              class="underline text-neutral-300 min-h-11 inline-flex items-center px-1"
+              class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"
               data-action-dismiss>
         Dismiss
       </button>
@@ -92,7 +92,7 @@
                 hx-post="{{ url_for('actions.undo_apply', posting_id=entry.row.id) }}"
                 hx-target="closest [data-posting-row]"
                 hx-swap="outerHTML"
-                class="underline text-neutral-300 min-h-11 inline-flex items-center px-1"
+                class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"
                 data-action-undo-apply>
           Undo
         </button>
@@ -157,7 +157,7 @@
            target="_blank"
            rel="noopener noreferrer"
            hx-on:click="var row = this.closest('[data-posting-row]'); if (row.dataset.applyPending === '1') { return; } row.dataset.applyPending = '1'; var parent = row.parentNode; fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true, headers: {'X-CSRFToken': document.querySelector('meta[name=csrf-token]').content}}).then(function(resp){ if (!resp.ok) { if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — refresh the page and try again.'); } return; } return resp.text().then(function(html){ var tmpl = document.createElement('template'); tmpl.innerHTML = html.trim(); var newRow = tmpl.content.firstElementChild; if (newRow && parent && row.parentNode === parent) { parent.replaceChild(newRow, row); if (window.htmx) { window.htmx.process(newRow); } } else if (window.jcSurfaceError) { window.jcSurfaceError('Apply recorded, but the row did not update — refresh'); } }); }).catch(function(){ if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — check your connection and try again.'); } }).finally(function(){ row.dataset.applyPending = ''; })"
-           class="underline text-neutral-300 min-h-11 inline-flex items-center px-1"
+           class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"
            data-action-apply>
           Apply
         </a>
@@ -184,7 +184,7 @@
        fallback. #}
     <div class="flex gap-3 text-xs pt-1" data-posting-signup>
       <a href="{{ signup_cta_url }}"
-         class="underline text-neutral-300 min-h-11 inline-flex items-center px-1"
+         class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"
          data-action-signup>
         Sign up to apply
       </a>

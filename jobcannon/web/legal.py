@@ -127,15 +127,31 @@ def _render(filename: str) -> tuple[str, str]:
     return title, html
 
 
-_PRIVACY_TITLE, _PRIVACY_HTML = _render("privacy.md")
-_TERMS_TITLE, _TERMS_HTML = _render("terms.md")
+# Route path -> committed markdown filename. The single source both the
+# routes below AND tests/host/test_touch_targets.py's #222 coverage tests
+# derive from (devin review finding 1): a file listed here is checked
+# against disk for an orphan (no route) and, via the routes' own
+# render+response pipeline below, against its real HTTP response for the
+# `.legal-prose` container -- not hand-copied as a second file-name list in
+# the test module. A file only present on disk but missing from this dict is
+# an orphan the test catches; a file added here is automatically served and
+# automatically covered by that test the moment it's added.
+_LEGAL_PAGES: dict[str, str] = {
+    "/privacy": "privacy.md",
+    "/terms": "terms.md",
+}
+_RENDERED: dict[str, tuple[str, str]] = {
+    path: _render(filename) for path, filename in _LEGAL_PAGES.items()
+}
 
 
 @legal_bp.get("/privacy", strict_slashes=False)
 def privacy():
-    return _legal_response(_PRIVACY_TITLE, _PRIVACY_HTML)
+    title, html = _RENDERED["/privacy"]
+    return _legal_response(title, html)
 
 
 @legal_bp.get("/terms", strict_slashes=False)
 def terms():
-    return _legal_response(_TERMS_TITLE, _TERMS_HTML)
+    title, html = _RENDERED["/terms"]
+    return _legal_response(title, html)
