@@ -56,9 +56,79 @@ _TRAILING_RULE_OR_BLANK = re.compile(r"^(-{3,})?\s*$")
 # write, so this fills every case variant of the same placeholder.
 _EFFECTIVE_DATE_PLACEHOLDER = re.compile(r"\[effective date\]", re.IGNORECASE)
 
+# issue #178: a Markdown table delimiter row is only ever valid immediately
+# after its header row, so a blank line sitting between the two always
+# indicates upstream corruption (here: an HTML comment that occupied that
+# line and left an empty line behind once _strip_html_comments removed its
+# text), never deliberate spacing.
+#
+# The fix is scoped to exactly this table-boundary shape rather than made
+# "a comment-only line never leaves a blank line" in general: the draft
+# carries an audit-citation comment after nearly every paragraph and list
+# item, each currently leaving one blank line that (combined with the
+# paragraph's own separator) produces the double-blank-line spacing already
+# baked into the committed .md files. A general fix was tried and measured
+# against both committed files — it also collapsed list items from "loose"
+# to "tight" Markdown (blank line between `- ` items removed), which changes
+# the rendered HTML (loose-list items are wrapped in `<p>`, tight-list items
+# are not), not just cosmetic .md whitespace. That is exactly the kind of
+# unreviewed drift the regeneration diff check below exists to catch, so the
+# fix stays narrow: only the shape that actually breaks something is
+# corrected, everywhere else in the document is untouched byte-for-byte.
+_TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+_TABLE_DELIMITER_ROW = re.compile(r"^\s*\|(\s*:?-+:?\s*\|)+\s*$")
+
+# issue #182 item 6: the first plain-text mention of the OTHER published
+# legal document's name becomes a link to it. Keyed by --target because each
+# document only cross-links to the other one.
+_CROSS_LINK_TARGETS: dict[str, tuple[str, str]] = {
+    "terms": ("Privacy Policy", "/privacy"),
+    "privacy": ("Terms of Service", "/terms"),
+}
+
 
 def _strip_html_comments(text: str) -> str:
     return _HTML_COMMENT.sub("", text)
+
+
+def _collapse_blank_before_table_delimiter(text: str) -> str:
+    """Drop a blank line sitting directly between a table header row and its
+    delimiter row (see _TABLE_ROW / _TABLE_DELIMITER_ROW above)."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i, n = 0, len(lines)
+    while i < n:
+        if (
+            i + 2 < n
+            and _TABLE_ROW.match(lines[i])
+            and lines[i + 1].strip() == ""
+            and _TABLE_DELIMITER_ROW.match(lines[i + 2])
+        ):
+            out.append(lines[i])
+            out.append(lines[i + 2])
+            i += 3
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
+def _link_first_cross_reference(text: str, target: str) -> str:
+    """Turn the first plain-text mention of the other legal document's name
+    into a Markdown link to it (issue #182 item 6) — e.g. terms.md's first
+    "Privacy Policy" becomes `[Privacy Policy](/privacy)`. First mention
+    only: repeating the link on every occurrence is noise, not navigation.
+    Idempotent: the lookbehind/lookahead skip a mention already wrapped as
+    `[Privacy Policy](...)`, so re-running this against already-linked text
+    is a no-op rather than double-wrapping it. A target with no configured
+    cross-link (or a draft that never mentions the other document) passes
+    text through unchanged."""
+    target_info = _CROSS_LINK_TARGETS.get(target)
+    if target_info is None:
+        return text
+    phrase, href = target_info
+    pattern = re.compile(r"(?<!\[)" + re.escape(phrase) + r"(?!\]\()")
+    return pattern.sub(f"[{phrase}]({href})", text, count=1)
 
 
 def _strip_draft_banner(text: str) -> str:
@@ -142,6 +212,8 @@ def build_published_text(raw: str, target: str, effective_date: str) -> str:
     text = _strip_trailing_rule_and_blank_lines(text)
     text = _EFFECTIVE_DATE_PLACEHOLDER.sub(effective_date, text)
     text = _collapse_blank_lines(text)
+    text = _collapse_blank_before_table_delimiter(text)
+    text = _link_first_cross_reference(text, target)
     text = "\n".join(line.rstrip() for line in text.split("\n"))
     return text.strip("\n") + "\n"
 
