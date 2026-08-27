@@ -243,6 +243,16 @@ def test_provenance_regex_rejects_dotted_attribute_named_private():
     assert dpp.PROVENANCE_RE.search("reconciler.py private variant"), (
         "backward direction with a real word-gap must still match"
     )
+    # Forward-dot positive control: only the BACKWARD direction's tight gap
+    # (_TIGHT_GAP_NO_DOT) excludes a bare ".". The forward direction still
+    # uses the plain _TIGHT_GAP, so "private" immediately followed by a
+    # dot-glued filename must still match — pinned so a future change that
+    # also excluded "." from the forward direction (collapsing this
+    # deliberate asymmetry) would fail a test instead of silently
+    # regressing.
+    assert dpp.PROVENANCE_RE.search("private.reconciler.py"), (
+        "forward direction with a bare-dot tight gap must still match"
+    )
 
 
 def test_checker_accepts_complete_manifest(tmp_path):

@@ -131,7 +131,7 @@ _TIGHT_GAP = r"\W+"
 # Same tight-adjacency idea, but for the mirrored "signal, then private"
 # direction, the gap additionally excludes a bare "." — a dotted attribute
 # chain like `response.cache_control.private` (Werkzeug's Cache-Control API;
-# jobcannon/web/legal.py, issue #191) is a SINGLE Python identifier whose
+# jobcannon/web/legal.py, issue #182 item 4) is a SINGLE Python identifier whose
 # final segment happens to be the word "private", not a code-artifact
 # signal followed by a separately-written, descriptive "private". _MODULE_PATH
 # backtracks to match "response.cache_control" and would otherwise treat the
