@@ -118,6 +118,17 @@ def test_post_posting_action_without_token_and_hx_request_renders_small_fragment
     assert b"data-csrf-error" in resp.data
 
 
+def test_post_clear_selection_without_token_is_400():
+    """#206's `POST /feed/clear-selection` (jobcannon/web/pages.py) is not
+    `csrf.exempt`-ed, so it 400s the same way every other state-changing
+    route above does — before the view body runs, so no throwaway DB or
+    seeded profile is needed here either."""
+    client = _stateless_app().test_client()
+    resp = client.post("/feed/clear-selection")
+    assert resp.status_code == 400
+    assert b"Request could not be verified" in resp.data
+
+
 # ---------------------------------------------------------------------------
 # Webhook route: exempt regardless of CSRF token presence.
 # ---------------------------------------------------------------------------
