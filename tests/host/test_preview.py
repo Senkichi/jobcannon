@@ -304,6 +304,24 @@ def test_preview_malformed_cursor_degrades_to_first_page_not_500(app):
     assert _row_count(html) == 3
 
 
+def test_preview_malformed_cursor_last_seen_degrades_to_first_page_not_500(app):
+    """Mirrors test_malformed_cursor_last_seen_degrades_to_first_page_not_500
+    in test_feed_pagination.py for the anonymous /preview route: a valid
+    cursor_id with a non-ISO cursor_last_seen exercises the branch the
+    id-only malformed test above never reaches."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview Malformed Timestamp Co")
+    _seed_preview_pages_worth(dsn, company_id, 3)
+
+    resp = app.test_client().get(
+        "/preview", query_string={"cursor_id": "1", "cursor_last_seen": "not-a-timestamp"}
+    )
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert _row_count(html) == 3
+
+
 def test_preview_shows_honest_ordering_label_when_all_rows_unranked(app):
     dsn = app.config["_TEST_DSN"]
     company_id = _seed_company(dsn, "Honest Label Co")

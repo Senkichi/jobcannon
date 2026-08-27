@@ -301,3 +301,20 @@ def test_malformed_cursor_degrades_to_first_page_not_500(app):
 
     assert resp.status_code == 200
     assert _row_count(html) == 3
+
+
+def test_malformed_cursor_last_seen_degrades_to_first_page_not_500(app):
+    """Same fail-open guarantee, but through the request.args -> parse_cursor
+    round trip with a *valid* cursor_id and a non-ISO cursor_last_seen —
+    the id-only case above doesn't exercise this branch of parse_cursor at
+    all (it returns None before ever reading cursor_last_seen)."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app)
+    company_id = _seed_company(dsn, "Malformed Timestamp Co")
+    _seed_pages_worth(dsn, company_id, 3)
+
+    resp = client.get("/", query_string={"cursor_id": "1", "cursor_last_seen": "not-a-timestamp"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert _row_count(html) == 3

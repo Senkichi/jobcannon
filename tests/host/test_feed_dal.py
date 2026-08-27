@@ -408,11 +408,43 @@ def test_cursor_pagination_orders_ranked_ahead_of_unranked_across_pages(db_conn)
     assert [r["id"] for r in page2] == [fresh_unranked]
 
 
-def test_cursor_with_non_default_sort_raises(db_conn):
+def test_cursor_with_unknown_sort_token_raises(db_conn):
+    """An unknown sort token raises before the cursor is even considered
+    (the `sort not in _SORTS` guard fires first) — this is the same code
+    path `test_unknown_sort_token_raises` below exercises without a
+    cursor; kept here too as a guard against that ordering ever flipping,
+    not as coverage of the after+non-default-sort guard itself (see
+    `test_cursor_with_valid_non_default_sort_raises` for that)."""
     from jobcannon.db._feed import list_feed_postings
 
     with pytest.raises(ValueError):
         list_feed_postings(db_conn, sort="bogus-token", after=(None, _BASE_TIME, 1))
+
+
+def test_cursor_with_valid_non_default_sort_raises(db_conn, monkeypatch):
+    """The `after is not None and sort != "default"` guard is unreachable
+    with today's real `_SORTS` (it has exactly one token, so any non-
+    "default" value is also unknown and trips the earlier guard first).
+    Monkeypatch a second, valid sort token in so this test actually drives
+    execution past the first guard and into the second one."""
+    import jobcannon.db._feed as feed_module
+
+    monkeypatch.setitem(feed_module._SORTS, "recent", "p.last_seen DESC, p.id DESC")
+
+    with pytest.raises(ValueError, match="cursor pagination is only defined for sort='default'"):
+        feed_module.list_feed_postings(db_conn, sort="recent", after=(None, _BASE_TIME, 1))
+
+
+def test_cursor_with_nonzero_offset_raises(db_conn):
+    """`after` and a nonzero `offset` are mutually exclusive (#156 review
+    finding): combining them would silently skip rows past the seek point,
+    the exact drift keyset pagination exists to avoid. No route passes
+    both today, but the DAL enforces it at the boundary rather than
+    relying on every future caller to remember not to."""
+    from jobcannon.db._feed import list_feed_postings
+
+    with pytest.raises(ValueError, match="offset"):
+        list_feed_postings(db_conn, after=(None, _BASE_TIME, 1), offset=5)
 
 
 def test_parse_cursor_round_trips_cursor_from_row(db_conn):

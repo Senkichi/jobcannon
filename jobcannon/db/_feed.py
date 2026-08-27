@@ -88,14 +88,20 @@ def _cursor_predicate(
     expression here.
 
     `last_seen` is `timestamptz NOT NULL` (m0001), so only `rank_score`
-    needs NULLS-LAST handling: COALESCE to '-infinity' is exactly
-    equivalent to "NULLS LAST" in a DESC ordering (a real, storable
-    double-precision value that sorts behind every other value), which a
-    plain `<` seek predicate cannot express on a nullable column by
-    itself. Both sides of the row comparison are COALESCEd, not just the
-    column: `feed_state` has no writer anywhere in this codebase yet
-    (guarded by test_feed_state_not_written.py), so `after`'s rank_score
-    is NULL on every real page today -- a PostgreSQL row-constructor
+    needs NULLS-LAST handling: COALESCE to '-infinity' emulates "NULLS
+    LAST" in a DESC ordering by substituting a real, storable
+    double-precision sentinel that sorts behind every other *finite*
+    value, which a plain `<` seek predicate cannot express on a nullable
+    column by itself. This is NOT exactly equivalent to NULLS LAST if a
+    row ever stores a real `rank_score = -Infinity` (a valid double
+    precision value): it would then collide with the NULL sentinel and
+    could be skipped on a page boundary. `feed_state` has no writer
+    anywhere in this codebase yet (guarded by test_feed_state_not_written.py),
+    so this can't occur today — tracked as a follow-up for whenever a
+    ranker writer lands (would need a separate `IS NULL` flag in the row
+    constructor rather than a shared sentinel). Both sides of the row
+    comparison are COALESCEd, not just the column: `after`'s rank_score is
+    NULL on every real page today, and a PostgreSQL row-constructor
     comparison treats ANY NULL element pair as unknown and drops the row,
     so COALESCEing only the column side would silently return zero rows
     on every "load more" click. The explicit `::double precision` cast on
@@ -133,10 +139,18 @@ def cursor_from_row(row: Any) -> dict[str, str]:
 def parse_cursor(args: Any) -> tuple[float | None, datetime, int] | None:
     """Query params (a Flask `request.args`-shaped mapping) -> the `after`
     tuple `list_feed_postings` accepts, or None for "no cursor" (render a
-    first page). A malformed or tampered cursor (non-numeric id, non-ISO
-    timestamp) degrades to None rather than raising -- the caller gets a
-    fresh first page instead of a 500, the same fail-open discipline
-    jobcannon/web/pages.py's other query-param parsing already uses."""
+    first page). A cursor value that fails to *parse* (non-numeric id,
+    non-ISO timestamp, non-float rank score) degrades to None rather than
+    raising -- the caller gets a fresh first page instead of a 500, the
+    same fail-open discipline jobcannon/web/pages.py's other query-param
+    parsing already uses. This function only guards parseability, not SQL
+    validity: a value that parses but is out of range for the DB column
+    (e.g. an id wider than bigint) or is a float special value `float()`
+    accepts but SQL rejects (`nan`, `inf`) passes this function and is
+    instead caught by the caller's broad `except Exception` around the DB
+    call, which degrades to an *empty* batch rather than a fresh first
+    page -- still fail-closed (no 500, no data leak), just a different
+    empty state than "no cursor" produces."""
     raw_id = (args.get("cursor_id") or "").strip()
     if not raw_id:
         return None
@@ -250,11 +264,18 @@ def list_feed_postings(
     own ordering (see `_cursor_predicate`'s docstring), so passing a cursor
     against any other sort token raises rather than silently seeking through
     rows in an order the cursor was never computed against — today `_SORTS`
-    has exactly one token, so this only guards a future second one."""
+    has exactly one token, so this only guards a future second one. `after`
+    and a nonzero `offset` are mutually exclusive: `OFFSET` is kept only so
+    non-cursor callers (existing callers of this function, pre-#156) are
+    unaffected, but combining it with `after` would silently skip rows past
+    the seek point — the exact drift keyset pagination exists to avoid — so
+    that combination raises rather than being allowed to compose."""
     if sort not in _SORTS:
         raise ValueError(f"unknown sort token: {sort!r}")
     if after is not None and sort != "default":
         raise ValueError(f"cursor pagination is only defined for sort='default', got {sort!r}")
+    if after is not None and offset != 0:
+        raise ValueError("cursor pagination (after=...) cannot be combined with offset != 0")
     order_by = _SORTS[sort]
     limit = max(0, min(limit, FEED_PAGE_MAX))
 
