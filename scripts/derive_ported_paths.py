@@ -128,13 +128,28 @@ _FILE_LIKE_SIGNAL = rf"(?:{_PY_FILENAME}|{_MODULE_PATH}|{_MIGRATION_ID})"
 #     directly glued to "private" (e.g. "the private data_enricher.py").
 _NOUN_GAP = r"(?:\W+\w+){0,3}\W+"
 _TIGHT_GAP = r"\W+"
+# Same tight-adjacency idea, but for the mirrored "signal, then private"
+# direction, the gap additionally excludes a bare "." — a dotted attribute
+# chain like `response.cache_control.private` (Werkzeug's Cache-Control API;
+# jobcannon/web/legal.py, issue #191) is a SINGLE Python identifier whose
+# final segment happens to be the word "private", not a code-artifact
+# signal followed by a separately-written, descriptive "private". _MODULE_PATH
+# backtracks to match "response.cache_control" and would otherwise treat the
+# following ".private" as the tight gap plus the word — indistinguishable,
+# with a plain \W+ gap, from real prose like "the private helper is
+# reconciler.py.private" (which does not occur; a "." here is always a
+# same-token attribute-access continuation, never a sentence separator).
+# Whitespace/comma-separated prose ("reconciler.py private", "reconciler.py,
+# private") still matches. See
+# test_provenance_regex_rejects_dotted_attribute_named_private.
+_TIGHT_GAP_NO_DOT = r"[^\w.]+"
 
 PROVENANCE_RE = re.compile(
     rf"\bjob_finder\b"
     rf"|\bprivate\b{_NOUN_GAP}\b(?:{_ARTIFACT_NOUNS})\b"
     rf"|\b(?:{_ARTIFACT_NOUNS})\b{_NOUN_GAP}\bprivate\b"
     rf"|\bprivate\b{_TIGHT_GAP}{_FILE_LIKE_SIGNAL}"
-    rf"|{_FILE_LIKE_SIGNAL}{_TIGHT_GAP}\bprivate\b",
+    rf"|{_FILE_LIKE_SIGNAL}{_TIGHT_GAP_NO_DOT}\bprivate\b",
     re.IGNORECASE,
 )
 

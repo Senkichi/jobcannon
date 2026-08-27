@@ -217,6 +217,34 @@ def test_provenance_regex_rejects_local_underscore_privacy_near_filename():
     assert not dpp.PROVENANCE_RE.search(block), block
 
 
+def test_provenance_regex_rejects_dotted_attribute_named_private():
+    """Regression for a real false positive found while fixing issue #178/
+    #182 (issue #191): jobcannon/web/legal.py's Werkzeug Cache-Control usage
+    `response.cache_control.private = True` is ordinary Python attribute
+    access whose last segment happens to be spelled "private" — it is ONE
+    identifier chain, not a code-artifact filename/module-path followed by a
+    separately-written, descriptive "private". The mirrored
+    signal-then-private alternative used to match this via a bare "."
+    tight-gap, which is indistinguishable from continuing the same dotted
+    chain. Prose with an actual word-level separator (space, comma) between
+    a filename and "private" must still match — only the bare-dot,
+    same-token case is excluded."""
+    assert not dpp.PROVENANCE_RE.search("response.cache_control.private = True"), (
+        "dotted attribute access ending in .private must not be treated as provenance"
+    )
+    assert not dpp.PROVENANCE_RE.search("self.some_module.private"), (
+        "same shape with a different attribute name must also be excluded"
+    )
+    # Positive control: prose still matches when a real word-gap separates
+    # the filename from "private" (the shape _TIGHT_GAP was written for).
+    assert dpp.PROVENANCE_RE.search("the private data_enricher.py"), (
+        "forward direction (private, then filename) must be unaffected"
+    )
+    assert dpp.PROVENANCE_RE.search("reconciler.py private variant"), (
+        "backward direction with a real word-gap must still match"
+    )
+
+
 def test_checker_accepts_complete_manifest(tmp_path):
     """Companion positive case: a manifest built by build_manifest() for a
     synthetic tree must itself pass check() against that same tree — proves
