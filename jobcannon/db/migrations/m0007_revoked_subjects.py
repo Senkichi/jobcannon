@@ -19,23 +19,22 @@ constant close to the security invariant it protects rather than a schema
 default. The index supports both the auth gate's per-request "is this
 still live" lookup and the periodic prune's "which rows are stale" sweep.
 
-Deploy order: run this migration AFTER (or at latest concurrently with)
-jobcannon-web rolling out `jobcannon/web/account.py`'s
-`_write_revocation_tombstone` and `jobcannon/web/webhooks.py`'s
-`user.deleted` handler, both of which call `revoke_subject` against this
-table. The web and worker services (render.yaml) deploy independently with
-no ordering guarantee. Unlike m0010's benign-either-way case, getting this
-one backwards is NOT benign: `revoke_subject` raises on the missing table,
-so `webhooks.py`'s `user.deleted` branch calls neither `revoke_subject` nor
-`delete_user` (webhooks.py:90 puts the revoke first) until the migration
-lands, and `account.py::post_delete` returns 502 without ever calling
-Clerk. Both self-heal without data loss — Svix retries a failed webhook
-delivery for hours, and a 502 in `post_delete` never proceeds to Clerk — so
-the actual failure mode is "account deletion is unavailable for a few
-minutes," not silent data loss. `jobcannon/worker/__main__.py` is the
-single migration authority (docs/deploy-runbook.md §3) and normally
-applies pending migrations before the web service's rollout completes
-health checks, so this ordering holds in practice without any manual step.
+Deploy order: as of #197 (issue #196), the former "worker deploys first"
+caveat here is OBSOLETE. `jobcannon-web`'s Render `preDeployCommand` now
+runs `python -m jobcannon.db.migrate` before the new web code ever starts
+serving, so this migration is guaranteed to be applied before
+`jobcannon/web/account.py`'s `_write_revocation_tombstone` and
+`jobcannon/web/webhooks.py`'s `user.deleted` handler — both of which call
+`revoke_subject` against this table — can run against the code that calls
+them. The worker's boot-time `run_migrations()` call remains as an
+idempotent, lock-serialized belt-and-braces (see docs/deploy-runbook.md
+§3), covering only the first-deploy-of-a-brand-new-environment case where
+nothing has applied any migration yet. Still true regardless of ordering:
+this migration is purely additive (new table + index, no change to any
+existing table/column), so it stays expand-compatible with every prior
+code version, and `revoke_subject`/`webhooks.py`'s `user.deleted` branch
+still self-heal (Svix retries; `post_delete` 502s without ever calling
+Clerk) in the narrow window before that first migration run completes.
 """
 
 from __future__ import annotations

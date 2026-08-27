@@ -130,16 +130,14 @@ applied both schemas; that window is normally seconds on a fresh deploy and
 is otherwise closed once the worker service reports healthy in the Render
 dashboard.
 
-**Migration 7 (`revoked_subjects`) has a real, not-benign deploy-order
-dependency**, unlike the general case above: `jobcannon/web/account.py`'s
-account-deletion route and `jobcannon/web/webhooks.py`'s `user.deleted`
-handler both call `jobcannon.db._revoked_subjects.revoke_subject`, which
-raises on the missing table. Both callers already self-heal (Svix retries a
-failed webhook delivery for hours; `post_delete` returns 502 without ever
-calling Clerk), so the failure mode if web rolls out ahead of the worker
-applying m0007 is "account deletion is briefly unavailable," not data
-loss — but it is real, unlike the general window described above. See
-`m0007_revoked_subjects.py`'s docstring for the full analysis.
+**Migration 7 (`revoked_subjects`)** previously had a real, not-benign
+deploy-order dependency on this section's general worker-first case (a
+missing table would raise inside `jobcannon.db._revoked_subjects.
+revoke_subject`, called from `jobcannon/web/account.py`'s account-deletion
+route and `jobcannon/web/webhooks.py`'s `user.deleted` handler). That
+dependency is resolved by issue #196's web pre-deploy migration step
+(#197) — see `m0007_revoked_subjects.py`'s docstring for the current
+guarantee and the narrow self-healing window that remains.
 
 ## 4. Webhook endpoint registration
 
