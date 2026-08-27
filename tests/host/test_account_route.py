@@ -25,6 +25,8 @@ never reach that code and stay on the original DB-free `_app()` helper.
 
 from __future__ import annotations
 
+import time
+
 import psycopg
 import pytest
 
@@ -241,6 +243,44 @@ def test_post_delete_failure_does_not_clear_session_or_pass_confirmation_twice(a
     assert resp.status_code == 502
     with client.session_transaction() as sess:
         assert sess["anon_session_id"] == "anon_kept_on_failure"
+
+
+@requires_postgres
+def test_post_delete_failure_then_fresh_relogin_recovers_the_account(app):
+    """Issue #159 follow-up (refuter-1 L1 / refuter-3 MED, corroborated):
+    the previous test proves a Clerk-delete-call failure leaves the
+    tombstone committed even though the account was never actually
+    deleted. Before the iat comparison, that left the account hard-locked
+    out of the ENTIRE authed surface -- including this very route -- for
+    the full TTL, with no un-revoke path at all: a naive relogin mints a
+    JWT for the same `sub`, which the tombstone still matched
+    unconditionally. Proves the actual fix: the STALE identity (no iat,
+    same as the token in use at failure time) stays denied, while a FRESH
+    relogin (new JWT, iat minted after the tombstone's revoked_at) reaches
+    GET /account/delete again."""
+    client_double = _ExplodingClerkClient()
+    _authed(app, client_double)
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess[_HANDOFF_DONE_KEY] = True
+
+    resp = client.post("/account/delete", data={"confirm": "delete-my-account"})
+    assert resp.status_code == 502  # tombstone now committed, account NOT deleted
+
+    stale_resp = client.get("/account/delete")
+    assert stale_resp.status_code == 401
+
+    fresh_iat = int(time.time()) + 300
+    app.config["VERIFY_REQUEST"] = lambda req: ClerkIdentity(
+        user_id=USER_ID, claims={"sub": USER_ID, "iat": fresh_iat}
+    )
+    fresh_client = app.test_client()
+    with fresh_client.session_transaction() as sess:
+        sess[_HANDOFF_DONE_KEY] = True
+
+    fresh_resp = fresh_client.get("/account/delete")
+
+    assert fresh_resp.status_code == 200
 
 
 @requires_postgres

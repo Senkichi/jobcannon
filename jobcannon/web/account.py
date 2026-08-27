@@ -102,10 +102,24 @@ def post_delete():
         # Fail-closed, matching jobcannon/web/consent.py's and
         # jobcannon/web/handoff.py's stance on an external call failing
         # mid-request: log with the traceback, never destroy local session
-        # state for a deletion that didn't actually happen. The tombstone
-        # written above stays in place regardless (harmless: it only ever
-        # denies further requests from a JWT belonging to a user who just
-        # asked to be deleted, and it expires on its own).
+        # state for a deletion that didn't actually happen.
+        #
+        # The tombstone written above stays in place regardless -- do NOT
+        # "fix" this by rolling it back here. On a timeout (one of the
+        # failures this branch catches) this handler cannot tell "the
+        # delete failed" from "the delete succeeded and only the response
+        # was lost" -- in the lost-response case the account IS gone, and
+        # rolling back the tombstone would leave this session's still-valid
+        # JWT usable until its own exp with no revocation in place at all,
+        # reopening the exact window issue #159 exists to close, until
+        # Clerk's async user.deleted webhook eventually arrives. Keeping
+        # the tombstone is correct either way; the cost is that a still-
+        # existing, never-actually-deleted account is locked out of the
+        # authed surface until the tombstone expires. The only safe
+        # recovery is the iat comparison in jobcannon/db/_revoked_subjects.
+        # py's is_subject_revoked: a fresh relogin mints a JWT with an iat
+        # after this tombstone's revoked_at, which passes the gate even
+        # while the row is still within its TTL.
         logger.exception("Clerk account-delete call failed for user %s", user_id)
         return (
             render_template(

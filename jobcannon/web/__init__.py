@@ -183,13 +183,23 @@ def _is_subject_revoked(identity) -> bool:
     failed") so this failure mode -- e.g. an instance rolling before the
     worker applies migration m0007 -- is greppable in deploy logs instead
     of silently leaving the feature inert.
+
+    Passes the verified JWT's `iat` claim through to `is_subject_revoked`
+    (issue #159 follow-up): without it, a Clerk-delete-call failure in
+    account.py::post_delete -- which deliberately leaves the tombstone
+    committed even though the account was never actually deleted -- had NO
+    recovery path, since a fresh relogin still mints a JWT for the same
+    `sub`. See jobcannon/db/_revoked_subjects.py's module docstring for the
+    full rationale.
     """
     from jobcannon.db import _revoked_subjects
     from jobcannon.db.pool import connection_factory
 
     try:
         with connection_factory() as conn:
-            return _revoked_subjects.is_subject_revoked(conn, identity.user_id)
+            return _revoked_subjects.is_subject_revoked(
+                conn, identity.user_id, identity.claims.get("iat")
+            )
     except Exception:
         logger.warning(
             "revocation lookup failed for user %s (defaulting to not-revoked)",

@@ -101,6 +101,95 @@ def test_revoke_subject_called_twice_extends_the_window_rather_than_erroring(db_
     assert count == 1
 
 
+def test_is_subject_revoked_denies_a_pre_revocation_iat(db_conn):
+    """Issue #159 follow-up: a token minted before the tombstone's own
+    revoked_at must stay denied even once fresh tokens would pass."""
+    import time
+
+    from jobcannon.db._revoked_subjects import is_subject_revoked, revoke_subject
+
+    revoke_subject(db_conn, "user_dal_iat_stale")
+    stale_iat = int(time.time()) - 300
+
+    assert is_subject_revoked(db_conn, "user_dal_iat_stale", stale_iat) is True
+
+
+def test_is_subject_revoked_allows_a_fresh_post_revocation_iat(db_conn):
+    """A token minted well after revoked_at -- e.g. from a fresh relogin --
+    must pass, even while the row is still within its TTL. This is the
+    only recovery path when account.py's Clerk-delete call fails after the
+    tombstone already committed (see account.py::post_delete)."""
+    import time
+
+    from jobcannon.db._revoked_subjects import is_subject_revoked, revoke_subject
+
+    revoke_subject(db_conn, "user_dal_iat_fresh")
+    fresh_iat = int(time.time()) + 300
+
+    assert is_subject_revoked(db_conn, "user_dal_iat_fresh", fresh_iat) is False
+
+
+def test_is_subject_revoked_denies_when_issued_at_is_omitted(db_conn):
+    """No iat means no freshness signal to check -- deny, matching every
+    call site that predates the #159 follow-up (both DAL call sites above
+    use only 2 positional args) and any production JWT payload that
+    somehow lacks the standard `iat` claim."""
+    from jobcannon.db._revoked_subjects import is_subject_revoked, revoke_subject
+
+    revoke_subject(db_conn, "user_dal_iat_missing")
+
+    assert is_subject_revoked(db_conn, "user_dal_iat_missing") is True
+
+
+def test_is_subject_revoked_denies_on_an_unparseable_issued_at(db_conn):
+    """A malformed iat must fail toward denial, not toward silently
+    disabling the iat-comparison branch via an uncaught exception that
+    would otherwise propagate into the gate's fail-OPEN handler -- an
+    unparseable claim on the security-critical revocation path must never
+    itself become a bypass."""
+    from jobcannon.db._revoked_subjects import is_subject_revoked, revoke_subject
+
+    revoke_subject(db_conn, "user_dal_iat_bad")
+
+    assert is_subject_revoked(db_conn, "user_dal_iat_bad", "not-a-timestamp") is True
+
+
+def test_is_subject_revoked_within_clock_skew_tolerance_still_denies(db_conn):
+    """An iat only a few seconds after revoked_at -- well inside plausible
+    Clerk-vs-Postgres clock skew -- must still deny: the tolerance widens
+    the DENY band, not the allow band, so clock drift alone can't let a
+    genuinely pre-delete token through."""
+    import time
+
+    from jobcannon.db._revoked_subjects import (
+        CLOCK_SKEW_TOLERANCE_SECONDS,
+        is_subject_revoked,
+        revoke_subject,
+    )
+
+    revoke_subject(db_conn, "user_dal_iat_skew")
+    near_iat = int(time.time()) + max(1, CLOCK_SKEW_TOLERANCE_SECONDS - 1)
+
+    assert is_subject_revoked(db_conn, "user_dal_iat_skew", near_iat) is True
+
+
+def test_is_subject_revoked_beyond_clock_skew_tolerance_allows(db_conn):
+    """The other side of the boundary: an iat safely past revoked_at plus
+    the tolerance must pass."""
+    import time
+
+    from jobcannon.db._revoked_subjects import (
+        CLOCK_SKEW_TOLERANCE_SECONDS,
+        is_subject_revoked,
+        revoke_subject,
+    )
+
+    revoke_subject(db_conn, "user_dal_iat_beyond_skew")
+    far_iat = int(time.time()) + CLOCK_SKEW_TOLERANCE_SECONDS + 60
+
+    assert is_subject_revoked(db_conn, "user_dal_iat_beyond_skew", far_iat) is False
+
+
 def test_prune_expired_revocations_removes_only_expired_rows(db_conn):
     from jobcannon.db._revoked_subjects import prune_expired_revocations, revoke_subject
 
@@ -174,7 +263,19 @@ def test_reap_revoked_subjects_task_reports_zero_when_nothing_reaped(monkeypatch
 def test_reap_revoked_subjects_is_registered_as_a_periodic_task():
     """Confirms the task is a peer on the SAME procrastinate App as
     reap_anon_users/reap_old_events, not a second scheduling mechanism --
-    app.tasks is keyed by fully-qualified dotted name (module docstring)."""
+    app.tasks is keyed by fully-qualified dotted name (module docstring).
+
+    Also asserts the `@app.periodic` registration itself (refuter-3 LOW,
+    review-3.md): app.tasks only proves `@app.task` fired. Dropping
+    `@app.periodic` while keeping `@app.task` would leave the old
+    assertion green while the reaper silently never fired on a schedule
+    again -- unbounded `revoked_subjects` growth with no test catching it.
+    `periodic_registry.periodic_tasks` is keyed by
+    (fully_qualified_task_name, periodic_id)."""
     from jobcannon.host import tasks
 
     assert "jobcannon.host.tasks.reap_revoked_subjects" in tasks.app.tasks
+    assert (
+        "jobcannon.host.tasks.reap_revoked_subjects",
+        "reap_revoked_subjects",
+    ) in tasks.app.periodic_registry.periodic_tasks

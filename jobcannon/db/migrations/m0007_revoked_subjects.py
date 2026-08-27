@@ -18,6 +18,24 @@ lifetime), not derived here, so the retention window is a code-level
 constant close to the security invariant it protects rather than a schema
 default. The index supports both the auth gate's per-request "is this
 still live" lookup and the periodic prune's "which rows are stale" sweep.
+
+Deploy order: run this migration AFTER (or at latest concurrently with)
+jobcannon-web rolling out `jobcannon/web/account.py`'s
+`_write_revocation_tombstone` and `jobcannon/web/webhooks.py`'s
+`user.deleted` handler, both of which call `revoke_subject` against this
+table. The web and worker services (render.yaml) deploy independently with
+no ordering guarantee. Unlike m0010's benign-either-way case, getting this
+one backwards is NOT benign: `revoke_subject` raises on the missing table,
+so `webhooks.py`'s `user.deleted` branch calls neither `revoke_subject` nor
+`delete_user` (webhooks.py:90 puts the revoke first) until the migration
+lands, and `account.py::post_delete` returns 502 without ever calling
+Clerk. Both self-heal without data loss — Svix retries a failed webhook
+delivery for hours, and a 502 in `post_delete` never proceeds to Clerk — so
+the actual failure mode is "account deletion is unavailable for a few
+minutes," not silent data loss. `jobcannon/worker/__main__.py` is the
+single migration authority (docs/deploy-runbook.md §3) and normally
+applies pending migrations before the web service's rollout completes
+health checks, so this ordering holds in practice without any manual step.
 """
 
 from __future__ import annotations

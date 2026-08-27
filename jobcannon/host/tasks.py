@@ -266,7 +266,7 @@ def reap_old_events(timestamp: int) -> dict:
 
 
 @app.periodic(
-    cron=os.environ.get("JC_REVOKED_REAP_CRON", "59 6 * * *"),
+    cron=os.environ.get("JC_REVOKED_REAP_CRON", "*/15 * * * *"),
     periodic_id="reap_revoked_subjects",
 )
 @app.task(queue="maintenance", queueing_lock="reap_revoked_subjects")
@@ -278,14 +278,23 @@ def reap_revoked_subjects(timestamp: int) -> dict:
     a code-level security constant sized against Clerk's own ~60s JWT
     lifetime, not a privacy-policy-driven retention period, so it is not a
     render.yaml-declared value the way JC_EVENTS_RETENTION_DAYS/
-    JC_ANON_RETENTION_DAYS are. An unpruned expired row is harmless on its
-    own (`is_subject_revoked`'s `expires_at > now()` predicate already
-    excludes it from denying access) — this tick just keeps the table from
-    growing unbounded. Cron minute (59, past the 6am UTC cluster at
-    :17/:43/:51) is deliberately offset from the other four so ticks don't
-    stack in the same minute. Returns a count, not the reaped ids —
-    procrastinate persists task results into the same database being
-    reaped, and a Clerk user id is PII-adjacent."""
+    JC_ANON_RETENTION_DAYS are.
+
+    Cadence (issue #159 follow-up, privacy-disclosure gap): a Clerk user id
+    is a GDPR online identifier, and privacy.md §8 promises deletion is a
+    genuine hard delete, not a soft flag or archival copy. The row itself
+    (not just the 15-minute blocking window) must therefore track that
+    promise. This runs every 15 minutes (same cadence as the existing
+    `reclaim_orphaned_jobs` sibling in the scheduler, see
+    docs/deploy-runbook.md §8) so worst-case total retention of one id is
+    the 15-minute TTL plus up to one more tick before the next sweep finds
+    it — ~30 minutes, not 15. State that real bound, not the TTL alone, in
+    any disclosure text. An unpruned-but-not-yet-reaped expired row is
+    harmless to the auth check itself (`is_subject_revoked`'s
+    `expires_at > now()` predicate already excludes it from denying
+    access) — this tick's job is retention, not correctness. Returns a
+    count, not the reaped ids — procrastinate persists task results into
+    the same database being reaped, and a Clerk user id is PII-adjacent."""
     from jobcannon.db import connection_factory
 
     with connection_factory() as conn:

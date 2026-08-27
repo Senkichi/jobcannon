@@ -19,6 +19,8 @@ that sequence.
 
 from __future__ import annotations
 
+import time
+
 import psycopg
 import pytest
 
@@ -56,12 +58,13 @@ def app():
         drop_throwaway_db(db_name)
 
 
-def _authed(app, user_id):
+def _authed(app, user_id, *, iat=None):
     from jobcannon.web.auth import ClerkIdentity
 
-    app.config["VERIFY_REQUEST"] = lambda req: ClerkIdentity(
-        user_id=user_id, claims={"sub": user_id}
-    )
+    claims = {"sub": user_id}
+    if iat is not None:
+        claims["iat"] = iat
+    app.config["VERIFY_REQUEST"] = lambda req: ClerkIdentity(user_id=user_id, claims=claims)
 
 
 def _seed_user(dsn, user_id):
@@ -74,14 +77,14 @@ def _seed_profile(dsn, user_id):
         upsert_profile(conn, user_id)
 
 
-def _feed_client(app, user_id):
+def _feed_client(app, user_id, *, iat=None):
     """An authed test client past the handoff, with a real `users` row and a
     `profiles` row already committed -- mirrors tests/host/test_empty_states.
     py's identical helper, needed here because the pass-through assertions
     hit `/`, which (unlike /account/export) does not degrade gracefully
     without a seeded profile row."""
     dsn = app.config["_TEST_DSN"]
-    _authed(app, user_id)
+    _authed(app, user_id, iat=iat)
     _seed_user(dsn, user_id)
     _seed_profile(dsn, user_id)
     client = app.test_client()
@@ -188,7 +191,7 @@ def test_revocation_lookup_failure_fails_open(app, monkeypatch, caplog):
 
     client = _feed_client(app, LIVE_USER)
 
-    def _boom(conn, user_id):
+    def _boom(conn, user_id, issued_at=None):
         raise RuntimeError("revoked_subjects query failed (simulated)")
 
     monkeypatch.setattr(_revoked_subjects, "is_subject_revoked", _boom)
@@ -198,3 +201,37 @@ def test_revocation_lookup_failure_fails_open(app, monkeypatch, caplog):
 
     assert resp.status_code == 200
     assert any("revocation" in rec.message.lower() for rec in caplog.records)
+
+
+def test_revoked_subject_with_a_pre_revocation_iat_still_401s(app):
+    """Issue #159 follow-up (refuter-1 L1 / refuter-3 MED, corroborated):
+    the iat comparison must keep denying the SAME token that could have
+    existed before the revocation -- an iat minted well before revoked_at
+    must never slip through, or the tombstone stops meaning anything."""
+    dsn = app.config["_TEST_DSN"]
+    _revoke(dsn, REVOKED_USER)
+    stale_iat = int(time.time()) - 300  # minted 5 minutes before revocation
+    _authed(app, REVOKED_USER, iat=stale_iat)
+    client = app.test_client()
+
+    resp = client.get("/account/export")
+
+    assert resp.status_code == 401
+
+
+def test_revoked_subject_with_a_fresh_post_revocation_iat_is_allowed_through(app):
+    """Issue #159 follow-up: this is the recovery path account.py::post_
+    delete's docstring now cites by name. When the Clerk-delete call fails
+    after the tombstone already committed, the account is NOT deleted and
+    the tombstone is deliberately left in place -- the ONLY way back in is
+    a fresh relogin minting a JWT whose iat postdates revoked_at. Proves
+    the gate honors that JWT even while the row is still within its TTL."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, LIVE_USER)
+    _revoke(dsn, LIVE_USER)
+    fresh_iat = int(time.time()) + 300  # minted 5 minutes after revocation
+    _authed(app, LIVE_USER, iat=fresh_iat)
+
+    resp = client.get("/")
+
+    assert resp.status_code == 200
