@@ -169,3 +169,32 @@ def test_revocation_of_a_different_subject_does_not_block_this_one(app):
     resp = client.get("/")
 
     assert resp.status_code == 200
+
+
+def test_revocation_lookup_failure_fails_open(app, monkeypatch, caplog):
+    """A DB error surfaced from the revocation lookup itself (not a
+    pool-wide outage) must not block a live request -- fail-open here
+    creates no NEW "revoked user reaches data" path, since every authed
+    route already depends on the same pool for its own reads; see
+    _is_subject_revoked's docstring in jobcannon/web/__init__.py for the
+    full rationale. Patches the DAL call itself, not connection_factory,
+    so this isolates the revocation check's own error handling from
+    consent resolution and the route handler's own DB reads -- both share
+    the same pool and would otherwise also break, muddying what actually
+    failed open."""
+    import logging
+
+    from jobcannon.db import _revoked_subjects
+
+    client = _feed_client(app, LIVE_USER)
+
+    def _boom(conn, user_id):
+        raise RuntimeError("revoked_subjects query failed (simulated)")
+
+    monkeypatch.setattr(_revoked_subjects, "is_subject_revoked", _boom)
+
+    with caplog.at_level(logging.WARNING):
+        resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert any("revocation" in rec.message.lower() for rec in caplog.records)
