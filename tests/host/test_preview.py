@@ -536,6 +536,24 @@ def test_preview_shows_signup_cta_when_sign_up_url_configured(app):
     assert 'href="https://clerk.test/sign-up"' in html
 
 
+def test_preview_shows_header_signup_nav_and_hides_authed_nav_for_anonymous_visitor(app):
+    """Issue #205 negative control on /preview -- the fourth PUBLIC_PATHS
+    route named in the issue. Only the anonymous case is directly testable
+    at the response level here: test_preview_redirects_signed_in_visitor_
+    to_the_real_feed (below) already proves an authed visitor never sees
+    this page's body at all (onboarding.preview() redirects to / first,
+    via the same _current_identity() check visitor_is_authed's PUBLIC_PATHS
+    fallback reuses), so there is no authed /preview render to assert nav
+    content against."""
+    html = app.test_client().get("/preview").get_data(as_text=True)
+
+    assert "data-auth-nav" in html
+    assert "data-postings-history-nav-link" not in html
+    assert ">My postings<" not in html
+    assert ">Export your data<" not in html
+    assert ">Delete account<" not in html
+
+
 def test_preview_omits_signup_cta_when_both_urls_unset(app):
     """Both clerk_sign_up_url and clerk_sign_in_url unset (the bare
     HostConfig default) -- issue #174 added a sign-in fallback to this CTA,
