@@ -236,6 +236,26 @@ def test_clear_selection_hx_request_returns_feed_content_fragment(app):
     assert "Filtering to your saved picks" not in body
 
 
+def test_clear_selection_hx_fragment_preserves_search_term_in_filter_form(app):
+    """Companion to test_clear_selection_redirect_preserves_current_search_query_string
+    for the OTHER response shape: the HX-Request branch re-renders
+    _feed_content.html server-side (not a client-side redirect), so the
+    search term's survival has to be proven in the re-rendered filter
+    form's `value=` attribute, not a Location header — a regression in
+    `clear_selection`'s own `filters=filters` pass-through (as opposed to
+    `_carry_forward_filters`, which only the redirect/URL path uses) would
+    not be caught by the redirect test above."""
+    client = _feed_client(app, target_titles=["Engineer"])
+
+    resp = client.post(
+        "/feed/clear-selection", query_string={"title": "Manager"}, headers={"HX-Request": "true"}
+    )
+    body = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert 'name="title" value="Manager"' in body
+
+
 def test_clear_selection_non_hx_redirects_to_feed(app):
     client = _feed_client(app, target_titles=["Engineer"])
 
