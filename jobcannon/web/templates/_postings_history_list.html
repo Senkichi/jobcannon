@@ -1,0 +1,18 @@
+{# The postings-history list fragment (#180): both the HX-Request response
+   for a tab click and, via {% include %}, the initial full-page render's
+   own list slot (postings_history.html) share this exact markup so the two
+   can never drift apart -- the same relationship _feed_page.html has to
+   _feed_list.html/feed.html. No load_more control here (list_postings_by_ids
+   is capped, unpaged) and no `show_actions` in this include's context, so
+   _posting_row.html renders every row read-only (its save/dismiss/apply/undo
+   block is entirely skipped -- see jobcannon/web/postings_history.py's
+   module docstring for why). #}
+{% if entries %}
+  <div class="space-y-4" data-postings-history-list>
+    {% for entry in entries %}
+      {% include "_posting_row.html" %}
+    {% endfor %}
+  </div>
+{% else %}
+  <p class="text-neutral-400" data-postings-history-empty>{{ empty_copy }}</p>
+{% endif %}

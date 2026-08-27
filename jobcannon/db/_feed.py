@@ -383,3 +383,47 @@ def distinct_companies(conn: Any, *, q: str | None = None, limit: int = 50) -> l
     """Same contract as `distinct_titles`, for the company field (#148)."""
     raw = conn.raw if hasattr(conn, "raw") else conn
     return _distinct_matching(raw, "company", q, limit)
+
+
+def list_postings_by_ids(conn: Any, posting_ids: list[int], *, user_id: str) -> list[Any]:
+    """#180: the "My postings" review page's read helper -- given a caller-
+    supplied id list (already filtered to a status/watchlist cohort by
+    `jobcannon/db/_user_actions.py`'s `list_watchlist_entries` /
+    `list_pipeline_status_entries`, the SAME read helpers
+    `jobcannon/web/export.py` uses, never a second query over those tables),
+    returns the matching `postings` rows in `_SELECT_COLUMNS` + `saved` /
+    `applied` shape so `jobcannon/web/feed_entries.py::build_entry` and
+    `_posting_row.html` render them identically to a feed row.
+
+    Deliberately NOT `list_feed_postings` with a `posting_id = ANY(...)`
+    filter: that function's authed branch unconditionally excludes
+    `status = 'dismissed'` rows (the exact exclusion a "My dismissed
+    postings" view must NOT apply), and it has no multi-id filter at all
+    today. A second, narrower query here keeps that exclusion out of this
+    read path rather than adding a bypass flag to `list_feed_postings` for
+    one caller.
+
+    Results preserve the CALLER'S id order (typically newest-first, from
+    `status_changed_at`/`created_at`) via a Python sort keyed on each id's
+    position in `posting_ids` -- not a SQL `array_position` ORDER BY, which
+    would raise a type-mismatch error against a `bigint` `postings.id`
+    compared to a same-width but not identical `int[]` cast. Capped at
+    `FEED_PAGE_MAX`, the same bound every other list path in this module
+    enforces (no pagination for this view yet -- a known limitation, not
+    silently unbounded)."""
+    if not posting_ids:
+        return []
+    capped_ids = posting_ids[:FEED_PAGE_MAX]
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    sql = (
+        f"SELECT {_SELECT_COLUMNS}, "
+        "NULL::double precision AS rank_score, NULL::text AS ranker_version, "
+        "(w.id IS NOT NULL) AS saved, COALESCE(ps.status = 'applied', false) AS applied "
+        "FROM postings p "
+        "LEFT JOIN pipeline_status ps ON ps.user_id = %s AND ps.posting_id = p.id "
+        "LEFT JOIN watchlists w ON w.user_id = %s AND w.posting_id = p.id "
+        "WHERE p.id = ANY(%s)"
+    )
+    rows = raw.execute(sql, [user_id, user_id, capped_ids]).fetchall()
+    order = {posting_id: index for index, posting_id in enumerate(capped_ids)}
+    return sorted(rows, key=lambda row: order[row["id"]])

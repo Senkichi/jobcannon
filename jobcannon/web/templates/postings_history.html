@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}My postings — Job Cannon{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-3">My postings</h1>
+<nav class="flex gap-4 text-sm mb-6" data-postings-history-tabs>
+  {% for token in views %}
+    <a href="{{ url_for('postings_history.index', view=token) }}"
+       class="{{ 'text-neutral-100 underline' if token == view else 'text-neutral-400 hover:text-neutral-100' }}"
+       {% if token == view %}aria-current="page"{% endif %}
+       data-postings-history-tab="{{ token }}">
+      {{ token | capitalize }}
+    </a>
+  {% endfor %}
+</nav>
+{% include "_postings_history_list.html" %}
+{% endblock %}
