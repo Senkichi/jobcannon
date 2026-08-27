@@ -408,6 +408,62 @@ def test_cursor_pagination_orders_ranked_ahead_of_unranked_across_pages(db_conn)
     assert [r["id"] for r in page2] == [fresh_unranked]
 
 
+def test_cursor_pagination_visits_every_row_across_the_neg_inf_null_boundary(db_conn):
+    """#194: `_cursor_predicate` used to COALESCE both a genuine
+    `rank_score = -Infinity` row and a `rank_score IS NULL` row to the same
+    '-infinity' sentinel. At a page boundary landing exactly on the
+    -Infinity row, the seek predicate's leading tuple element tied
+    (-inf == -inf) and fell through to comparing `last_seen`, silently
+    skipping a NULL row whose last_seen was newer than the -Infinity row's
+    -- the exact scenario the issue describes. This walks a 5-row corpus
+    (two ranked, one real -Infinity, two NULL) one row per page and
+    asserts every row is visited exactly once, in sort order, with the
+    cursor landing exactly on the -Infinity row before crossing into the
+    NULL group."""
+    from jobcannon.db._feed import list_feed_postings
+
+    _seed_user(db_conn, "u-neg-inf")
+    company_id = _seed_company(db_conn, "Acme")
+    ranked_high = _seed_posting(db_conn, "p-ni-high", company_id, last_seen=_BASE_TIME)
+    ranked_mid = _seed_posting(
+        db_conn, "p-ni-mid", company_id, last_seen=_BASE_TIME + timedelta(hours=1)
+    )
+    # Row B from #194: a genuine -Infinity rank_score, OLDER last_seen.
+    neg_inf_row = _seed_posting(
+        db_conn, "p-ni-neginf", company_id, last_seen=_BASE_TIME - timedelta(hours=10)
+    )
+    # Row A from #194: NULL rank_score, NEWER last_seen than Row B -- the
+    # exact row the pre-fix COALESCE sentinel collision skipped.
+    null_newer = _seed_posting(
+        db_conn, "p-ni-null-new", company_id, last_seen=_BASE_TIME + timedelta(hours=5)
+    )
+    null_older = _seed_posting(
+        db_conn, "p-ni-null-old", company_id, last_seen=_BASE_TIME + timedelta(hours=4)
+    )
+    _seed_feed_state(db_conn, "u-neg-inf", ranked_high, 8.0)
+    _seed_feed_state(db_conn, "u-neg-inf", ranked_mid, 3.0)
+    _seed_feed_state(db_conn, "u-neg-inf", neg_inf_row, float("-inf"))
+    # null_newer / null_older get no feed_state row -> rank_score NULL.
+
+    expected_order = [ranked_high, ranked_mid, neg_inf_row, null_newer, null_older]
+
+    visited = []
+    after = None
+    for _ in range(len(expected_order) + 1):  # one extra call must come back empty
+        page = list_feed_postings(db_conn, user_id="u-neg-inf", limit=1, after=after)
+        if not page:
+            break
+        visited.append(page[0]["id"])
+        after = _after_from_row(page[0])
+
+    assert visited == expected_order
+    # The exact #194 boundary: the page landing right after the -Infinity
+    # row's own cursor must be the NULL row with the newer last_seen, not
+    # an empty page (the pre-fix collision returned zero rows here).
+    boundary_index = expected_order.index(neg_inf_row)
+    assert visited[boundary_index + 1] == null_newer
+
+
 def test_cursor_with_unknown_sort_token_raises(db_conn):
     """An unknown sort token raises before the cursor is even considered
     (the `sort not in _SORTS` guard fires first) — this is the same code
