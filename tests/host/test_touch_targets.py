@@ -83,18 +83,30 @@ plain substring search over the raw, unrendered attribute text, so
 neither Jinja expression needs to be evaluated or even be the only one
 present).
 
-Issue #222 adds two more tests below (not part of the tag/attribute scan
-above): /terms's inline `[Privacy Policy](/privacy)` markdown link is
+Issue #222 adds several more tests below (not part of the tag/attribute
+scan above): /terms's inline `[Privacy Policy](/privacy)` markdown link is
 invisible to the source-scan approach entirely -- it's not written as an
 HTML `<a>` tag in any *.html template, it's markdown body text rendered
-by jobcannon/web/legal.py at import time. Those two tests close that
-blind spot structurally instead: any `<a>` a committed
-jobcannon/web/legal/*.md file's markdown renders into must land inside
-`.legal-prose`, whose CSS (jobcannon/web/templates/legal_page.html) gives
-every such link vertical padding that clears the 44px floor. See those
-tests' own docstrings for why vertical (not horizontal) padding on an
-inline (not inline-block) element is the right layer for this specific
-case.
+by jobcannon/web/legal.py at import time. Those tests close that blind
+spot structurally instead: any `<a>` a committed jobcannon/web/legal/*.md
+file's markdown renders into must land inside `.legal-prose`, whose CSS
+(jobcannon/web/templates/legal_page.html) gives every such link vertical
+padding that clears the 44px floor. See those tests' own docstrings for
+why vertical (not horizontal) padding on an inline (not inline-block)
+element is the right layer for this specific case.
+
+What is (and isn't) enforced by the file-coverage tests specifically:
+every markdown file `jobcannon.web.legal._LEGAL_PAGES` claims to serve is
+checked against disk for an orphan, against its REAL route's HTTP response
+for the `.legal-prose` container (not just `_render()`'s return value in
+isolation), and against a pinned per-file link count. A file dropped into
+jobcannon/web/legal/ without being added to `_LEGAL_PAGES` is an orphan
+these tests name explicitly; a file added to `_LEGAL_PAGES` but served
+through a route that doesn't share `_legal_response()`'s `legal_page.html`
+render would fail the route-response check. This is deliberately narrower
+than "any future legal file is automatically covered by construction" --
+coverage still requires adding the file to `_LEGAL_PAGES`, the one place
+both the routes and these tests read from.
 """
 
 from __future__ import annotations
@@ -425,7 +437,7 @@ def test_sabotage_a_real_template_site_and_confirm_the_guard_fails():
 # invisible to the source scan above -- it's not an HTML <a> tag in any
 # *.html template at all, it's markdown body text rendered by
 # jobcannon/web/legal.py at import time into `body_html`, which
-# legal_page.html then drops in via `{{ body_html|safe }}`. These two tests
+# legal_page.html then drops in via `{{ body_html|safe }}`. These tests
 # close that blind spot structurally instead of by special-casing terms.md:
 # every `<a>` any committed jobcannon/web/legal/*.md file renders into is
 # proven to land inside `.legal-prose`, and `.legal-prose a`'s own CSS is
@@ -483,13 +495,13 @@ def test_legal_prose_link_padding_clears_the_touch_target_floor():
 
 
 def test_legal_page_wraps_body_html_in_the_padded_prose_container():
-    """#222 structural check (1 of 2): legal_page.html's `{{ body_html|safe
+    """#222 structural check (1 of 4): legal_page.html's `{{ body_html|safe
     }}` -- the only place ANY legal .md file's rendered markdown reaches
     the page -- must be nested inside the SAME container the
     `.legal-prose a` CSS rule targets. Guards against the container div
     and the CSS class drifting apart (a rename of one without the other),
-    which neither the CSS-declaration test above nor the render-coverage
-    test below would catch on their own -- each only checks its own half."""
+    which neither the CSS-declaration test above nor the coverage tests
+    below would catch on their own -- each only checks its own half."""
     html = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
     container_re = re.compile(
         r'<div\s+class="legal-prose">\s*\{\{\s*body_html\s*\|\s*safe\s*\}\}',
@@ -502,42 +514,89 @@ def test_legal_page_wraps_body_html_in_the_padded_prose_container():
     )
 
 
-def test_every_legal_markdown_file_renders_links_covered_by_the_prose_container():
-    """#222 structural check (2 of 2): renders every committed
-    jobcannon/web/legal/*.md file through the SAME `legal._render()`
-    function jobcannon/web/legal.py's routes call at import time (already
-    used directly as a test seam by tests/host/test_legal_pages.py -- pure,
-    no DB/Flask-app-context needed, matching this module's own
-    zero-dependency philosophy), and asserts every `<a` the rendered HTML
-    contains is a real markdown link (an `<a href=` tag, not a false
-    positive from stray text). Combined with the two tests above -- the
-    container test proving legal_page.html always wraps `body_html` in
-    `.legal-prose`, and the CSS test proving that class's `a` rule clears
-    the floor -- this means ANY future legal .md file that adds a link is
-    covered by construction: nothing here hardcodes "terms.md" or
-    "privacy.md" by name, so a third legal document added later is
-    automatically in scope the moment it's glob-discovered.
+def test_every_committed_legal_markdown_file_is_served_by_a_route():
+    """#222 structural check (2 of 4): no orphan .md. Devin MED (finding 1)
+    was that the old aggregate-only check gave coverage confidence it
+    didn't structurally back -- a file on disk but never wired to a route
+    was indistinguishable from one that was. `legal._LEGAL_PAGES` is the
+    routes' OWN route-path -> filename mapping (not a second, hand-copied
+    list here): every file glob-discovered on disk must appear as one of
+    its values, or it's an orphan this test names."""
+    disk_files = {path.name for path in _LEGAL_MD_DIR.glob("*.md")}
+    assert disk_files, "no jobcannon/web/legal/*.md files found -- scan itself is broken"
+    served_files = set(legal._LEGAL_PAGES.values())
+    assert disk_files <= served_files, (
+        "orphan legal markdown file(s) on disk with no serving route in "
+        f"jobcannon.web.legal._LEGAL_PAGES: {sorted(disk_files - served_files)}"
+    )
 
-    Also serves as the positive control for this whole #222 guard: if this
-    found zero links, the two structural tests above would be proving
-    something true about a container that never actually receives a real
-    `<a>` tag from any legal document -- an empty result here would tell
-    you nothing (verification-ladder rule). terms.md's
-    `[Privacy Policy](/privacy)` line is expected to keep this non-empty;
-    if a future edit removes it, this test failing is the signal to
-    replace it with a different real link in a legal doc rather than
-    silently letting the guard go vacuous."""
-    md_files = sorted(_LEGAL_MD_DIR.glob("*.md"))
-    assert md_files, "no jobcannon/web/legal/*.md files found -- scan itself is broken"
+
+def test_every_served_legal_route_renders_inside_the_legal_prose_container():
+    """#222 structural check (3 of 4): checked against the REAL route's
+    HTTP response, not just `_render()`'s return value in isolation --
+    Devin's finding 1 concrete counter-example was a hypothetical third
+    file served through a DIFFERENT template with no `.legal-prose`
+    container, which the old `_render()`-only check could not have caught
+    (it never touches routing or `legal_page.html` at all). Iterates
+    `legal._LEGAL_PAGES`'s own route paths -- no hardcoded "/privacy"/
+    "/terms" list -- so a route added there is automatically exercised
+    here too. No DB access: mirrors tests/host/test_legal_pages.py's `_app`
+    helper (TESTING config, anonymous VERIFY_REQUEST stub)."""
+    from jobcannon.web import create_app
+
+    app = create_app(
+        config={
+            "TESTING": True,
+            "VERIFY_REQUEST": lambda req: None,
+            "WEBHOOK_SECRET": "whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3Q=",
+        }
+    )
+    client = app.test_client()
+    assert legal._LEGAL_PAGES, "legal._LEGAL_PAGES is empty -- nothing to cover"
+    for path in legal._LEGAL_PAGES:
+        resp = client.get(path)
+        assert resp.status_code == 200, path
+        body = resp.data.decode("utf-8")
+        assert '<div class="legal-prose">' in body, (
+            path,
+            "route response is not wrapped in the .legal-prose container",
+        )
+
+
+_EXPECTED_LEGAL_MARKDOWN_LINK_COUNTS = {
+    "privacy.md": 0,
+    "terms.md": 1,
+}
+
+
+def test_each_served_legal_markdown_files_link_count_is_pinned():
+    """#222 structural check (4 of 4): per-file, literal expected link
+    counts -- not just an aggregate floor -- so a link silently added to or
+    removed from ONE file (privacy.md gaining a link, terms.md losing its
+    Privacy Policy link) is named by file, not absorbed into a total that
+    happens to still clear a threshold. Every filename `_LEGAL_PAGES`
+    serves must have an entry in `_EXPECTED_LEGAL_MARKDOWN_LINK_COUNTS`
+    (a KeyError on a newly-served file with no pinned count is a
+    deliberate fail-closed prompt to add one, not a silent skip).
+
+    The aggregate floor from the pre-#222-hardening version of this test is
+    kept as a positive control alongside the per-file pins: if every
+    individual count coincidentally matched but the sum were 0, something
+    upstream of the per-file comparisons (the regex itself) would be
+    broken in a way no single literal-vs-literal comparison could catch."""
+    served_files = sorted(set(legal._LEGAL_PAGES.values()))
+    assert served_files, "legal._LEGAL_PAGES is empty -- nothing to cover"
 
     total_links = 0
-    for path in md_files:
-        _title, html = legal._render(path.name)
+    for filename in served_files:
+        _title, html = legal._render(filename)
         links = re.findall(r"<a\s+href=", html, re.IGNORECASE)
+        expected = _EXPECTED_LEGAL_MARKDOWN_LINK_COUNTS[filename]
+        assert len(links) == expected, (filename, len(links), expected)
         total_links += len(links)
 
     assert total_links >= 1, (
-        "expected at least one real <a href=...> link across all committed "
+        "expected at least one real <a href=...> link across all served "
         "legal markdown files (terms.md's Privacy Policy link) -- if this "
         "is genuinely 0, the structural guard above has nothing to cover "
         "and #222's regression is no longer reachable, but that needs "
