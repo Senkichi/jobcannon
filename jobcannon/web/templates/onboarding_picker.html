@@ -59,7 +59,7 @@
       <legend class="font-medium mb-2">Skills</legend>
       {% for skill in skills %}
         <label class="flex items-center gap-2 min-h-11 px-1 text-sm text-neutral-300">
-          <input type="checkbox" name="skills" value="{{ skill }}" class="h-11 w-11 shrink-0 accent-neutral-100" {% if skill in checked_skills %}checked{% endif %}> {{ skill }}
+          <input type="checkbox" name="skills" value="{{ skill }}" {% if skill in checked_skills %}checked{% endif %} class="h-11 w-11 shrink-0 accent-neutral-100"> {{ skill }}
         </label>
       {% endfor %}
     </fieldset>
