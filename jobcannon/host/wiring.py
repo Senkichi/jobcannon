@@ -190,9 +190,16 @@ def _install_bounded_atexit_flush(client) -> None:
     `atexit.unregister` compares callables by equality, and a bound
     method's equality is defined by (instance, underlying function), so
     this correctly removes the specific registration `Client.__init__` just
-    made for THIS client — verified empirically, not just from the
-    equality-semantics reasoning, in
-    tests/host/test_posthog_fork_atexit.py::test_bounded_atexit_flush_replaces_sdk_default.
+    made for THIS client —
+    tests/host/test_posthog_fork_atexit.py::test_bounded_atexit_flush_replaces_sdk_default
+    spies on the real `atexit.register`/`unregister` and confirms
+    `unregister` is called with that exact bound method (the SDK's
+    init-time registration) and that a *different* callable is registered
+    in its place; it does not itself inspect CPython's atexit registry
+    state, so it proves the call was made correctly, not that the
+    interpreter's bookkeeping dropped the entry (those are the same thing
+    under documented `atexit.unregister` equality semantics, but the test
+    verifies the call, not the registry).
 
     A join that times out leaves the daemon consumer thread running in the
     background — harmless: daemon threads never block interpreter exit on
@@ -211,7 +218,17 @@ def _install_bounded_atexit_flush(client) -> None:
     def _bounded_join() -> None:
         for consumer in client.consumers or ():
             consumer.pause()
-            consumer.join(timeout=_POSTHOG_ATEXIT_JOIN_TIMEOUT_S)
+            try:
+                consumer.join(timeout=_POSTHOG_ATEXIT_JOIN_TIMEOUT_S)
+            except RuntimeError:
+                # Consumer thread was never started (mirrors the SDK's own
+                # Client.join(), client.py:791-795) — currently unreachable
+                # in this app (_build_posthog_client always constructs with
+                # the SDK's default send=True, so every consumer's .start()
+                # runs), kept for the same reason the SDK keeps it: a future
+                # send=False/thread=0 wiring change shouldn't turn a no-op
+                # into an atexit-time traceback.
+                continue
             if consumer.is_alive():
                 logger.warning(
                     "posthog consumer still flushing after %.0fs at exit; "

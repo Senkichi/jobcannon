@@ -318,6 +318,76 @@ def test_build_posthog_client_bounds_worst_case_flush_under_graceful_timeout():
         client.join()  # cleanup: no queued items, returns promptly
 
 
+def _captured_bounded_join_closure(monkeypatch, host_config):
+    """Shared helper: build a real client via _build_posthog_client while
+    spying on atexit.register, and return the exact `_bounded_join` closure
+    it installs plus the client itself. Lets a test invoke the closure
+    directly without waiting for process exit.
+
+    Takes the LAST register call, not a fixed index/count: `_build_posthog_client`
+    does `import posthog` internally, and on this process's FIRST-EVER import
+    of posthog/requests/certifi, certifi's own `exit_cacert_ctx` atexit
+    registration fires too (module-level, so only once per process — whether
+    it happens here depends on test execution order, not on anything this
+    function does). Regardless of that, `_install_bounded_atexit_flush`
+    always runs last inside `_build_posthog_client` (client.py:316's own
+    atexit(self.join) registers when Posthog(**kwargs) is constructed, then
+    _install_bounded_atexit_flush unregisters it and registers the bounded
+    replacement — see the ["register", "unregister", "register"] tail
+    test_bounded_atexit_flush_replaces_sdk_default asserts), so the bounded
+    closure is always the last register call, whether it's call 2 or 3."""
+    calls: list[tuple[str, object]] = []
+    orig_register = atexit.register
+
+    def spy_register(func):
+        calls.append(("register", func))
+        return orig_register(func)
+
+    monkeypatch.setattr(atexit, "register", spy_register)
+    client = wiring._build_posthog_client(host_config)
+    assert client is not None
+    assert len(calls) >= 2, (
+        "expected at least the SDK's init-time register plus the bounded replacement"
+    )
+    bounded_join = calls[-1][1]
+    assert bounded_join != client.join, (
+        "last register must be the bounded replacement, not the SDK's join"
+    )
+    return bounded_join, client
+
+
+def test_bounded_join_swallows_runtimeerror_from_unstarted_consumer(monkeypatch):
+    """Mirrors the SDK's own Client.join() (client.py:791-795): a consumer
+    whose thread never started raises RuntimeError from Thread.join(), and
+    the SDK swallows it with a bare `except RuntimeError: pass`. Corroborated
+    finding (refuter-1 LOW #1 / devin LEAD 4): _bounded_join must not let
+    that divergence surface an unhandled exception inside an atexit handler.
+
+    Currently unreachable in production (this app always builds with the
+    SDK's default send=True, so every consumer's .start() runs) — this test
+    exercises the guard directly via a fake consumer rather than trying to
+    construct a real never-started one.
+    """
+    host_config = _host_config()
+    bounded_join, client = _captured_bounded_join_closure(monkeypatch, host_config)
+    try:
+
+        class _NeverStartedConsumer:
+            def pause(self):
+                pass
+
+            def join(self, timeout=None):
+                raise RuntimeError("threads can only be started once")
+
+            def is_alive(self):
+                pytest.fail("is_alive() must not be reached after a RuntimeError")
+
+        monkeypatch.setattr(client, "consumers", [_NeverStartedConsumer()])
+        bounded_join()  # must not raise
+    finally:
+        client.join()
+
+
 def test_bounded_atexit_flush_replaces_sdk_default(monkeypatch):
     """L3-wired check for _install_bounded_atexit_flush (jobcannon#137):
     confirms _build_posthog_client actually swaps the SDK's own
