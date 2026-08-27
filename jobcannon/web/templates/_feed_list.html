@@ -16,6 +16,28 @@
    does; jobcannon/web/onboarding.py's /preview does not yet, so it keeps
    its own single location field unchanged and this block is skipped there. #}
 {% if filters is defined %}
+  {% if saved_selection %}
+    {# #206: discoverability half of the AND-collision fix -- rendered ONLY
+       when the profile has a non-empty saved titles/companies selection
+       (jobcannon/web/pages.py's `_saved_selection_indicator`, the single
+       source both this line's counts and the query itself read from). The
+       Clear button is a real <form method=post> (not hx-include on a CSS
+       selector, per this codebase's own convention) whose action/hx-post
+       URL already carries this render's title/company/location/
+       workplace_type/sort values (`_carry_forward_filters`, baked in by the
+       calling route) -- no hidden filter inputs needed here, only the CSRF
+       token every other mutating form in this app carries the same way
+       (_consent_panel.html / account_delete.html / onboarding_picker.html). #}
+    <form method="post" action="{{ clear_selection_url }}"
+          hx-post="{{ clear_selection_url }}" hx-target="#feed-content" hx-swap="outerHTML"
+          class="mb-3 flex items-center gap-2 flex-wrap text-sm text-neutral-400"
+          data-saved-selection-indicator>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <span>Filtering to your saved picks ({{ saved_selection.title_label }} &middot; {{ saved_selection.company_label }})</span>
+      <button type="submit" class="underline text-neutral-300 min-h-11 inline-flex items-center px-1"
+              data-clear-selection>Clear</button>
+    </form>
+  {% endif %}
   <form method="get" class="mb-6 grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm" data-feed-filters>
     <input type="text" name="title" value="{{ filters.title }}" placeholder="Title contains"
            class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 {{ touch_target() }}">
@@ -38,6 +60,19 @@
 {% endif %}
 {% if entries %}
   {% include "_feed_page.html" %}
+{% elif filters is defined and empty_reason == "collision" %}
+  {# #206's other empty-state branch: only reachable when `filters is
+     defined` (so undefined `empty_reason`/`saved_selection` on /preview and
+     /demo are never even compared, short-circuited by Jinja's `and`) and
+     only when pages.py's `_feed_empty_reason` determined THIS zero-result
+     render is the saved-selection/free-text AND collision, not a genuinely
+     thin corpus. `saved_selection` is guaranteed set here (a collision
+     requires a non-empty saved selection by definition), so the indicator
+     form above is always on screen too -- this text points at it rather
+     than duplicating a second Clear control. #}
+  <p class="text-neutral-400" data-feed-empty data-feed-empty-collision>
+    Your search didn&#39;t match anything within your saved picks ({{ saved_selection.title_label }} &middot; {{ saved_selection.company_label }}). Clear your saved selection above to search your whole feed.
+  </p>
 {% else %}
   <p class="text-neutral-400" data-feed-empty>No postings match your selections yet.</p>
 {% endif %}
