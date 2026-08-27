@@ -46,6 +46,26 @@ services:
     # worker's atexit does today (flushing PostHog against a down
     # endpoint), so this value must stay >= that bound with real headroom —
     # tests/host/test_render_config.py cross-checks the two.
+    # THE ordering guarantee for web/worker's independent deploys (issue
+    # #196, docs/deploy-runbook.md §3): render.com/schema/render.yaml.json's
+    # serverService definition documents preDeployCommand as "Command that
+    # runs after the build command but before the start command. Recommended
+    # for database migrations" and render.com/docs/blueprint-spec confirms
+    # the same ordering ("runs after the service's buildCommand but before
+    # its startCommand"). render.com/docs/deploys states it's supported for
+    # "paid web services, private services, and background workers" (this
+    # plan, `starter`, is paid) and that "If any command fails or times out,
+    # the entire deploy fails" — so a broken migration here blocks the new
+    # web code from ever going live against a schema it doesn't match,
+    # instead of leaving that as a race with worker boot. Runs on a separate,
+    # ephemeral instance with this service's env vars (DATABASE_URL
+    # included) but no filesystem continuity with the deployed instance —
+    # jobcannon/db/migrate.py's `python -m jobcannon.db.migrate` entry point
+    # resolves the DSN the same way the worker does and is itself
+    # lock-serialized (pg_advisory_lock) against the worker's own boot-time
+    # run_migrations() call, so the two can never collide even if they
+    # somehow overlap.
+    preDeployCommand: uv run --no-sync python -m jobcannon.db.migrate
     startCommand: uv run --no-sync gunicorn --preload --workers 2 --graceful-timeout 30 --bind 0.0.0.0:$PORT "jobcannon.web:create_app()"
     healthCheckPath: /healthz
     envVars:
