@@ -76,7 +76,16 @@ branch below, which deliberately resets `g.clerk_user` to None for a
 cryptographically-valid-but-tombstoned JWT, would have had this new nav
 gate silently re-authenticate that same JWT via the naive fallback and
 show the account-mutation links on the page telling that visitor they're
-signed out."""
+signed out; adds an after_request hook, `_vary_and_cache_public_paths`,
+that guarantees `Vary: Cookie` (Flask's own `save_session` already adds
+this whenever `session.accessed` -- true on every request here because
+`ensure_session_ids()` reads the session unconditionally -- but the hook
+makes that explicit and no longer incidental) and sets `Cache-Control:
+private` (only when a route hasn't already set one; this half has no
+Flask equivalent and is the hook's real behavioral change) on every
+PUBLIC_PATHS response — the #205 nav variance above means those
+responses can no longer be treated as identity-independent for
+shared-cache purposes, even though each route's own body still is."""
 
 from __future__ import annotations
 
@@ -947,6 +956,52 @@ def create_app(config: dict | None = None) -> Flask:
     from jobcannon.web.legal import legal_bp
 
     app.register_blueprint(legal_bp)
+
+    @app.after_request
+    def _vary_and_cache_public_paths(response):
+        """Issue #205 fallout: every PUBLIC_PATHS response's nav/footer now
+        varies by real visitor identity (`visitor_is_authed`, via
+        `_visitor_is_anonymous()`'s PUBLIC_PATHS fallback actually calling
+        VERIFY_REQUEST), even though `g.clerk_user` and each route's own
+        body stay force-None/identity-independent. A shared cache (a CDN,
+        a corporate proxy) that stored and replayed one visitor's response
+        would leak that visitor's authed nav to another. Reuses the SAME
+        `_is_public_request_path()` normalization clerk_auth's before_request
+        gate and the clerk-js loader gate already share (issue #158) — never
+        re-derive the path set here.
+
+        Two independent defenses, both applied uniformly to all of
+        PUBLIC_PATHS (including /healthz and /start, which carry no
+        identity-dependent content today but would silently lose this
+        protection later if excluded now):
+        - `Vary: Cookie`, appended (never overwriting an existing Vary), so
+          any cache that respects Vary treats different-cookie requests as
+          different cache entries. NOTE: on every request in this app,
+          Flask's own `SecureCookieSessionInterface.save_session()` already
+          adds this header whenever `session.accessed` is true, and
+          `ensure_session_ids()` (jobcannon/web/anon_session.py, called
+          unconditionally from before_request) reads the session on every
+          request, so this line is usually redundant in practice. It stays
+          because that guarantee is otherwise incidental to unrelated
+          session-carrier code — anything that made `ensure_session_ids()`
+          lazy or skip PUBLIC_PATHS would silently drop `Vary: Cookie` with
+          nothing here to catch it. This line converts that accident into a
+          declared invariant.
+        - `Cache-Control: private`, set ONLY when the response carries no
+          Cache-Control yet — /demo, /start, and /preview currently set
+          none, so they gain a bare `private`; /privacy and /terms already
+          set `private, max-age=300` in jobcannon/web/legal.py's
+          `_legal_response`, which is left completely untouched here. This
+          half has no Flask-provided equivalent — it is the hook's actual
+          behavioral effect.
+        `private` is the header that actually forbids shared-cache storage;
+        `Vary: Cookie` is defense-in-depth for a cache that ignores it."""
+        if not _is_public_request_path():
+            return response
+        response.vary.add("Cookie")
+        if "Cache-Control" not in response.headers:
+            response.cache_control.private = True
+        return response
 
     # Registered last, once every blueprint above is mounted and
     # CLERK_FRONTEND_API_HOST/HOST_CONFIG are both final — issue #147.
