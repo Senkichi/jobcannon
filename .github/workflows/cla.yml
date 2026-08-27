@@ -31,10 +31,18 @@ jobs:
     # though this job runs on our self-hosted `jcpub` runner, the only code
     # that ever executes there is this action's own pinned-by-commit-SHA
     # source — never anything from a contributor's branch.
+    # Gated at job level (not just the step) so a non-matching issue_comment
+    # never occupies a jcpub runner slot at all — CI here is queue-bound
+    # (prior audits), and a step-level-only gate would schedule the job for
+    # every comment repo-wide before skipping the step. The
+    # `github.event.issue.pull_request` check additionally keeps this off
+    # plain-issue comments (the action's own README example omits it, which
+    # would otherwise error on a bare `recheck`/sign-phrase comment left on
+    # a non-PR issue).
+    if: (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA')) || github.event_name == 'pull_request_target'
     runs-on: [self-hosted, Windows, X64, jcpub]
     steps:
       - name: CLA Assistant Lite
-        if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
         uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -47,6 +55,14 @@ jobs:
           # before this workflow's first run.
           branch: "cla-signatures"
           allowlist: Senkichi,dependabot[bot]
+          # Default is "true", and the action's own source (main.ts, pinned
+          # SHA) locks the PR conversation on ANY `closed` event with no
+          # check for whether the PR was actually merged — the "aftermerge"
+          # name is misleading. Left at default, the very next PR closed
+          # anywhere in the repo (merged or abandoned) gets its comment
+          # thread locked. Disabled until/unless freezing every closed PR
+          # thread is genuinely wanted.
+          lock-pullrequest-aftermerge: "false"
           custom-notsigned-prcomment: |
             Thank you for the pull request! Before it can be reviewed, please
             read the [Contributor License Agreement](https://github.com/Senkichi/jobcannon/blob/main/CLA.md)
