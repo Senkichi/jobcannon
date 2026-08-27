@@ -253,6 +253,25 @@ def test_consent_get_renders_signed_out_variant_instead_of_401(app):
     assert 'href="https://clerk.test/sign-up"' in html
 
 
+def test_consent_options_is_exempted_same_as_get_when_signed_out(app):
+    """`_is_auth_optional_for_method` covers OPTIONS alongside GET/HEAD, not
+    just "GET only" -- Flask's automatic OPTIONS responder answers this
+    itself in dispatch_request without ever calling get_consent(), so if
+    the gate aborted 401 first, a signed-out `OPTIONS /consent` would 401
+    on a route that serves GET as 200: the same routing-vs-auth-layer
+    confusion issue #173 exists to fix, one layer down. Pins the decision
+    (not merely absence-of-401) by also checking the Allow header Flask's
+    default responder fills in."""
+    app.config["VERIFY_REQUEST"] = lambda req: None
+    client = app.test_client()
+
+    resp = client.options("/consent")
+
+    assert resp.status_code == 200
+    assert "GET" in resp.headers["Allow"]
+    assert "POST" in resp.headers["Allow"]
+
+
 def test_no_python_wallclock_in_the_consent_route():
     """consented_at must come from the database's own clock (db_now_iso),
     never a process wall-clock call. Covers both modules this PR adds that

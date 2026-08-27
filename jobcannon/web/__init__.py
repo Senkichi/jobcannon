@@ -100,12 +100,23 @@ def _is_auth_optional_for_method(view_func, method: str) -> bool:
     """The single predicate `clerk_auth` consults for `public_get`'s
     marker, so a test (or any future consumer) checks the SAME rule the
     gate itself uses rather than re-deriving it against the private
-    attribute name. HEAD is included alongside GET deliberately, not a
+    attribute name. Covers every safe, non-mutating method Flask will
+    route to the marked view without ever calling it: GET, HEAD (not a
     literal reading of "GET only" from issue #171 -- HEAD requests to a
-    GET-registered view must mirror that GET's status code (that's HEAD's
-    whole contract), so a marked view that opened up for GET but not HEAD
-    would be self-contradictory."""
-    return bool(getattr(view_func, "_auth_optional_get", False)) and method in ("GET", "HEAD")
+    GET-registered view must mirror that GET's status code, that's HEAD's
+    whole contract), and OPTIONS (Flask's automatic OPTIONS responder
+    answers this itself in dispatch_request -- if the gate aborted 401
+    first, a signed-out CORS preflight or an `OPTIONS /consent` probe
+    would see 401 on a route that serves GET as 200, the same
+    routing-vs-auth-layer confusion issue #173 exists to fix, just one
+    layer down). POST is deliberately excluded: it is the one method this
+    marker must never open, since POST /consent is the account mutation
+    issue #171 keeps fully gated."""
+    return bool(getattr(view_func, "_auth_optional_get", False)) and method in (
+        "GET",
+        "HEAD",
+        "OPTIONS",
+    )
 
 
 def _source_link_context(host_config) -> dict[str, str]:
