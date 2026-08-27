@@ -366,6 +366,35 @@ def test_unchanged_content_with_no_verdict_stamps_without_nulling_adjudicated_ve
     assert row["jd_adjudicated_version"] == 8
 
 
+def test_concurrent_delete_between_select_and_update_returns_false(db_conn, posting, monkeypatch):
+    """L1 (refuter-1, PR #214): the SELECT at the top of set_jd_full can be
+    followed by a concurrent DELETE before the UPDATE runs. Without a
+    rowcount check, the UPDATE would affect 0 rows while the function still
+    returned True -- a false "wrote" signal. Uses the same monkeypatch
+    injection point as the interleaved-write test below (classify_jd_content
+    runs after the SELECT and before the UPDATE) to land a same-connection
+    DELETE in that window."""
+    from jobcannon.db import _jd_full as jd_full_mod
+    from jobcannon.db._jd_full import set_jd_full
+
+    real_classify = jd_full_mod.classify_jd_content
+
+    def _delete_then_classify(text, title, company, config):
+        db_conn.execute("DELETE FROM postings WHERE dedup_key = %s", (posting,))
+        return real_classify(text, title, company, config)
+
+    monkeypatch.setattr(jd_full_mod, "classify_jd_content", _delete_then_classify)
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is False
+    )
+    row = db_conn.execute("SELECT 1 FROM postings WHERE dedup_key = %s", (posting,)).fetchone()
+    assert row is None
+
+
 def test_interleaved_write_during_classify_still_lands_self_consistent(
     db_conn, posting, monkeypatch
 ):
@@ -471,7 +500,10 @@ def test_race_two_connections_never_observe_torn_jd_full_and_verdict(postgres_te
             release.wait(timeout=10)
             return real_classify(text, title, company, config)
 
+        pre = (CLEAN_JD, "clean")
+        post = (GOOD_JD, "ambiguous")
         samples: list[tuple] = []
+        observed_post = threading.Event()
 
         def _poll():
             while not stop.is_set():
@@ -479,7 +511,10 @@ def test_race_two_connections_never_observe_torn_jd_full_and_verdict(postgres_te
                     "SELECT jd_full, jd_content_verdict FROM postings WHERE dedup_key = %s",
                     (dedup_key,),
                 ).fetchone()
-                samples.append((row["jd_full"], row["jd_content_verdict"]))
+                sample = (row["jd_full"], row["jd_content_verdict"])
+                samples.append(sample)
+                if sample == post:
+                    observed_post.set()
                 time.sleep(0.01)
 
         poller = threading.Thread(target=_poll, daemon=True)
@@ -501,15 +536,20 @@ def test_race_two_connections_never_observe_torn_jd_full_and_verdict(postgres_te
             writer.join(timeout=10)
             assert not writer.is_alive(), "writer thread did not finish within timeout"
 
-        time.sleep(0.3)  # let the poller catch the post-write committed state
+        # Bounded poll-until instead of a fixed sleep (refuter-2/refuter-3
+        # LOW): wait for the poller thread itself to observe the post-write
+        # committed state, signaled via observed_post, rather than assuming
+        # a fixed sleep duration is enough on any given box. Still bounded
+        # (5s timeout) so a genuinely broken poller/write fails fast instead
+        # of hanging; the positive-control assertion below still catches a
+        # timeout (observed_post never set -> post not in samples).
+        observed_post.wait(timeout=5)
         stop.set()
         poller.join(timeout=10)
         assert not poller.is_alive(), "poller thread did not finish within timeout"
 
         assert writer_result.get("ok") is True
 
-        pre = (CLEAN_JD, "clean")
-        post = (GOOD_JD, "ambiguous")
         bad = [s for s in samples if s not in (pre, post)]
         assert not bad, f"observed a torn (jd_full, jd_content_verdict) pair: {bad[:5]}"
         # Positive control: without this, an empty/no-op poll would pass
@@ -527,12 +567,21 @@ def test_race_two_connections_never_observe_torn_jd_full_and_verdict(postgres_te
             writer.join(timeout=10)
         if poller is not None:
             poller.join(timeout=10)
-        conn_a.rollback()
-        conn_a.execute("DELETE FROM postings WHERE dedup_key = %s", (dedup_key,))
-        conn_a.execute("DELETE FROM companies WHERE name = 'race-co'")
-        conn_a.commit()
-        conn_a.close()
-        conn_b.close()
+        # Each cleanup step below is independent of the others (refuter-3
+        # LOW): a raise from conn_a.rollback()/DELETE/commit must not skip
+        # conn_a.close(), and neither of those must skip conn_b.close() --
+        # both connections always get released even if the row cleanup
+        # itself fails partway through.
+        try:
+            try:
+                conn_a.rollback()
+                conn_a.execute("DELETE FROM postings WHERE dedup_key = %s", (dedup_key,))
+                conn_a.execute("DELETE FROM companies WHERE name = 'race-co'")
+                conn_a.commit()
+            finally:
+                conn_a.close()
+        finally:
+            conn_b.close()
 
 
 def test_persisted_reject_verdict_gates_scoring_precheck_until_adjudicated(db_conn, posting):
