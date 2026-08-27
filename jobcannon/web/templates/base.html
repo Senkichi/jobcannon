@@ -3,6 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  {# Flask-WTF's own global (jobcannon/web/__init__.py registers
+     CSRFProtect) — the one place _posting_row.html's plain fetch() (its
+     Apply control; NOT an htmx-triggered request, so the hx-headers
+     attribute on <body> below never reaches it) reads a token from. #}
+  {{ csrf_meta_tag() }}
   <title>{% block title %}Job Cannon{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
@@ -31,7 +36,48 @@
   </script>
   {% endif %}
 </head>
-<body class="bg-neutral-950 text-neutral-100 min-h-screen antialiased">
+{# hx-headers puts the token on every htmx-issued request app-wide (its
+   JSON value is merged into each htmx request's headers) — covers
+   _posting_row.html's save/dismiss hx-post controls. It does NOT cover a
+   plain fetch()/XMLHttpRequest call (htmx never sees those); Apply's own
+   fetch() call reads the <meta> tag above instead. #}
+<body class="bg-neutral-950 text-neutral-100 min-h-screen antialiased"
+      hx-headers='{"X-CSRFToken": "{{ csrf_token() }}"}'>
+  {# Persistent error-surfacing target — issue #146 follow-up (MED-1). htmx
+     2.0.4's default `responseHandling` maps every 4xx to
+     `{swap: false, error: true}`: a CSRF-rejected save/dismiss's 400
+     fragment (_csrf_error_fragment.html) is therefore NEVER swapped into
+     the DOM by htmx's normal swap path (`shouldSwap` is false), only
+     `htmx:responseError` fires. This div is a plain DOM target the listener
+     below writes into directly with vanilla JS — no OOB swap, no
+     shouldSwap/HX-Reswap interaction, so it can never collide with
+     save/dismiss's own `hx-target="closest [data-posting-row]"` swap.
+     `window.jcSurfaceError` is also used by _posting_row.html's Apply
+     control, whose plain fetch() is invisible to htmx entirely. #}
+  <div id="jc-error-toast" role="alert" hidden
+       class="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-md rounded-lg border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-200 shadow-lg"></div>
+  <script>
+    (function () {
+      var toast = document.getElementById('jc-error-toast');
+      var hideTimer = null;
+      window.jcSurfaceError = function (message) {
+        toast.textContent = message;
+        toast.hidden = false;
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(function () { toast.hidden = true; }, 6000);
+      };
+      // Scoped to ONLY the CSRF-400 shape via the HX-CSRF-Error response
+      // header jobcannon/web/__init__.py's csrf_error handler sets on both
+      // the full-page and HX-Request branches — any OTHER 4xx htmx observes
+      // (a real 404, say) is left untouched by this listener.
+      document.addEventListener('htmx:responseError', function (evt) {
+        var xhr = evt.detail && evt.detail.xhr;
+        if (xhr && xhr.getResponseHeader && xhr.getResponseHeader('HX-CSRF-Error')) {
+          window.jcSurfaceError('That action could not be verified — refresh the page and try again.');
+        }
+      });
+    })();
+  </script>
   <header class="border-b border-neutral-800 px-6 py-4 flex items-center gap-6">
     <span class="font-semibold text-lg tracking-tight">Job Cannon</span>
     <nav class="flex gap-4 text-sm text-neutral-400">
