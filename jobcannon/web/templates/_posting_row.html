@@ -120,4 +120,24 @@
       {% endif %}
     </div>
   {% endif %}
+  {% if not show_actions and (clerk_sign_up_url or clerk_sign_in_url) %}
+    {# Anonymous per-row CTA (issue #174): /preview and /demo never pass
+       show_actions, so the save/dismiss/apply block above is skipped
+       entirely and an anonymous visitor previously had zero path from a
+       row to an account. This is a pure ADDITION after the show_actions
+       block (not an elif on it) so it never touches the lines the
+       feed-states workstream is editing inside that block. `not
+       show_actions` also covers the Undefined case (Undefined is falsy),
+       matching the same tolerance _feed_page.html already uses. Reuses
+       the #165 auth-link context-processor globals (clerk_sign_up_url /
+       clerk_sign_in_url) with the same sign-up-preferred fallback
+       preview.html's own CTA uses -- never a hardcoded Clerk URL. #}
+    <div class="flex gap-3 text-xs pt-1" data-posting-signup>
+      <a href="{{ clerk_sign_up_url or clerk_sign_in_url }}"
+         class="underline text-neutral-300"
+         data-action-signup>
+        Sign up to apply
+      </a>
+    </div>
+  {% endif %}
 </article>
