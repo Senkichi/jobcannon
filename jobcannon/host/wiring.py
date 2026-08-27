@@ -64,14 +64,21 @@ shutdown()/flush()/join()ed manually — leaving its already-harmless
 atexit(join) in place costs nothing, while calling shutdown()/flush() on it
 would risk a stray POST attempt from a dead consumer thread for no benefit.
 See jobcannon#137 for a separate, real finding this verdict does NOT cover:
-the *rebuilt live* client's own atexit(join) can block up to ~67s flushing
+the *rebuilt live* client's own atexit(join) could block up to ~67s flushing
 against a down PostHog endpoint, which DOES exceed gunicorn's default
-graceful_timeout (30s) — that risk lives in the live client B, not this
-husk, so it needs its own fix.
+graceful_timeout (30s) — that risk lived in the live client B, not this
+husk, so it got its own fix: _build_posthog_client below bounds the
+client's retry math (timeout/max_retries) and _install_bounded_atexit_flush
+replaces the SDK's own unbounded atexit(join) with a time-boxed equivalent,
+so a worst-case flush now completes in ~9s with a 10s hard backstop rather
+than ~67s. tests/host/test_posthog_fork_atexit.py's newer tests cover this
+end-to-end, including a real subprocess against a host that accepts a
+connection but never answers.
 """
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 
@@ -94,6 +101,29 @@ _SCAN_DEADLINE_S = (
     # operator decision; numeric parity is what the port preserves.
     12_600.0
 )
+
+# jobcannon#137: bound the worst-case atexit(join) flush duration for the
+# PostHog client this module constructs, so a worker exit during a PostHog
+# outage completes comfortably inside gunicorn's graceful_timeout (render.yaml
+# pins --graceful-timeout 30; tests/host/test_render_config.py cross-checks
+# it against _POSTHOG_ATEXIT_JOIN_TIMEOUT_S below).
+#
+# posthog.Client's own defaults (timeout=15, max_retries=3 -> backoff's
+# max_tries=retries+1=4) retry a batch stuck against a down endpoint for
+# ~4*15 + (1+2+4) = 67s of wall-clock time inside the atexit handler — past
+# gunicorn's default 30s graceful_timeout, so the platform SIGKILLs the
+# worker mid-flush on every deploy during an outage (this is the real
+# finding; distinct from #132's already-harmless inherited husk, see the
+# module docstring above).
+#
+# timeout=4, max_retries=1 -> max_tries=2: worst case per consumer is
+# 2*4 + 1 (one backoff.expo sleep, factor=1 * base(2)**0) =~ 9s.
+# _POSTHOG_ATEXIT_JOIN_TIMEOUT_S is a HARD backstop on top of that bound
+# (not just an inference from today's retry math) — see
+# _install_bounded_atexit_flush below.
+_POSTHOG_TIMEOUT_S = 4
+_POSTHOG_MAX_RETRIES = 1
+_POSTHOG_ATEXIT_JOIN_TIMEOUT_S = 10.0
 
 
 def build_scan_services(host_config: HostConfig) -> services.ScanServices:
@@ -118,15 +148,97 @@ def build_scan_services(host_config: HostConfig) -> services.ScanServices:
 def _build_posthog_client(host_config: HostConfig):
     """Construct a PostHog client when an API key is configured, else None
     (inert no-op fan-out in dev/CI). Constructing the client does not open a
-    network connection — events batch on a background consumer thread."""
+    network connection — events batch on a background consumer thread.
+
+    Passes the bounded timeout/max_retries (jobcannon#137, see the
+    _POSTHOG_* constants above) instead of the SDK's own defaults, and
+    replaces the SDK's unbounded atexit(join) with a time-boxed equivalent
+    via _install_bounded_atexit_flush — every caller (initial wiring AND
+    the post-fork rebuild below) gets the bound, from one place."""
     if not host_config.posthog_api_key:
         return None
     import posthog
 
-    kwargs = {"project_api_key": host_config.posthog_api_key}
+    kwargs = {
+        "project_api_key": host_config.posthog_api_key,
+        "timeout": _POSTHOG_TIMEOUT_S,
+        "max_retries": _POSTHOG_MAX_RETRIES,
+    }
     if host_config.posthog_host:
         kwargs["host"] = host_config.posthog_host
-    return posthog.Posthog(**kwargs)
+    client = posthog.Posthog(**kwargs)
+    _install_bounded_atexit_flush(client)
+    return client
+
+
+def _install_bounded_atexit_flush(client) -> None:
+    """Replace the SDK's own unbounded atexit(client.join) with a
+    time-boxed equivalent (jobcannon#137).
+
+    posthog.Client.__init__ (posthog 3.25.0, client.py:316) unconditionally
+    registers `atexit.register(self.join)` when constructed with the
+    library's default `send=True` (this app never overrides it). `Client.
+    join()` calls `consumer.pause()` then `Thread.join()` with NO timeout —
+    unbounded from atexit's point of view even after the
+    _POSTHOG_TIMEOUT_S/_POSTHOG_MAX_RETRIES bound above, since that bound
+    is "usually ~9s today", not a hard guarantee (a future posthog release
+    could change the retry internals without changing these two kwargs'
+    meaning). Unregistering the SDK's callback and registering our own
+    bounded one makes worker-exit latency a hard invariant instead of an
+    inference from current retry math.
+
+    `atexit.unregister` compares callables by equality, and a bound
+    method's equality is defined by (instance, underlying function), so
+    this correctly removes the specific registration `Client.__init__` just
+    made for THIS client —
+    tests/host/test_posthog_fork_atexit.py::test_bounded_atexit_flush_replaces_sdk_default
+    spies on the real `atexit.register`/`unregister` and confirms
+    `unregister` is called with that exact bound method (the SDK's
+    init-time registration) and that a *different* callable is registered
+    in its place; it does not itself inspect CPython's atexit registry
+    state, so it proves the call was made correctly, not that the
+    interpreter's bookkeeping dropped the entry (those are the same thing
+    under documented `atexit.unregister` equality semantics, but the test
+    verifies the call, not the registry).
+
+    A join that times out leaves the daemon consumer thread running in the
+    background — harmless: daemon threads never block interpreter exit on
+    their own (only an explicit, unbounded Thread.join() does, which is
+    exactly what this replaces), and the process is exiting either way.
+
+    client.poller is always None in this app today (nothing here ever
+    calls Client.load_feature_flags(), the only thing that sets it) — the
+    `if client.poller` branch below mirrors Client.join()'s own shape for
+    fidelity, but note it is NOT itself bounded (Poller.stop() calls a
+    plain, timeout-less Thread.join()); if a future change wires up feature
+    flag polling, this function needs a bounded poller stop too.
+    """
+    atexit.unregister(client.join)
+
+    def _bounded_join() -> None:
+        for consumer in client.consumers or ():
+            consumer.pause()
+            try:
+                consumer.join(timeout=_POSTHOG_ATEXIT_JOIN_TIMEOUT_S)
+            except RuntimeError:
+                # Consumer thread was never started (mirrors the SDK's own
+                # Client.join(), client.py:791-795) — currently unreachable
+                # in this app (_build_posthog_client always constructs with
+                # the SDK's default send=True, so every consumer's .start()
+                # runs), kept for the same reason the SDK keeps it: a future
+                # send=False/thread=0 wiring change shouldn't turn a no-op
+                # into an atexit-time traceback.
+                continue
+            if consumer.is_alive():
+                logger.warning(
+                    "posthog consumer still flushing after %.0fs at exit; "
+                    "abandoning it so worker shutdown is not blocked",
+                    _POSTHOG_ATEXIT_JOIN_TIMEOUT_S,
+                )
+        if client.poller:
+            client.poller.stop()
+
+    atexit.register(_bounded_join)
 
 
 # Module-level stash of the most recently wired HostConfig, read by
