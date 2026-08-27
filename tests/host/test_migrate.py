@@ -1,3 +1,6 @@
+import threading
+import time
+
 import psycopg
 import pytest
 
@@ -84,5 +87,93 @@ def test_migration_failure_does_not_roll_back_earlier_committed_migrations(monke
                 "SELECT 1 FROM information_schema.tables WHERE table_name = 't_ok'"
             ).fetchone()
             assert exists is not None
+    finally:
+        drop_throwaway_db(db_name)
+
+
+def test_run_migrations_serializes_concurrent_callers_via_advisory_lock(monkeypatch):
+    """Regression for the missing concurrency guard: two migrators racing the
+    same database (e.g. jobcannon-web's preDeployCommand and
+    jobcannon-worker's boot-time call, or two overlapping deploys) must never
+    interleave the ledger DDL/read/insert. Without the advisory lock this is
+    a real, reproducible race: both threads can read applied_versions() as
+    empty while the slow migration is still mid-flight, both attempt
+    _apply_migration(), and the loser's INSERT INTO schema_migrations hits
+    the version PRIMARY KEY and raises -- run_migrations() propagates that,
+    so the test below (no exception from either thread) would fail without
+    the lock.
+
+    Patches MIGRATIONS with one migration whose py hook sleeps ~1s, fires
+    two real threads with independent connections at run_migrations() via a
+    Barrier so they genuinely race rather than merely starting close
+    together, then proves both the race-safety (no exception, exactly one
+    ledger row, hook ran exactly once) and true serialization rather than
+    lucky scheduling: the LOSER cannot return from run_migrations() until
+    AFTER the winner's slow hook finishes, because it is blocked on
+    pg_advisory_lock for that whole window.
+    """
+    import jobcannon.db.migrate as migrate_mod
+    from jobcannon.db.migrations.types import Migration, MigrationContext
+
+    hook_calls: list[tuple[float, float]] = []
+
+    def _slow(ctx: MigrationContext) -> None:
+        start = time.monotonic()
+        time.sleep(1.0)
+        hook_calls.append((start, time.monotonic()))
+
+    fake_migrations = [
+        Migration(version=900101, description="slow", py=_slow, name="m900101_slow"),
+    ]
+    monkeypatch.setattr(migrate_mod, "MIGRATIONS", fake_migrations)
+
+    dsn, db_name = create_throwaway_db("jobcannon_mig_concurrent")
+    barrier = threading.Barrier(2)
+    finish_times: dict[str, float] = {}
+    errors: dict[str, BaseException] = {}
+
+    def _worker(name: str) -> None:
+        barrier.wait()
+        try:
+            migrate_mod.run_migrations(dsn)
+        except BaseException as exc:  # noqa: BLE001 - captured for the assertion below
+            errors[name] = exc
+        finish_times[name] = time.monotonic()
+
+    try:
+        threads = [threading.Thread(target=_worker, args=(name,)) for name in ("a", "b")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=15)
+        assert not any(t.is_alive() for t in threads), (
+            "a thread never returned from run_migrations() -- likely a lock "
+            "never released (missing pg_advisory_unlock)"
+        )
+
+        assert not errors, f"run_migrations raised under concurrency: {errors}"
+        assert len(finish_times) == 2
+
+        assert len(hook_calls) == 1, (
+            f"migration py hook ran {len(hook_calls)} times under concurrency, expected "
+            "exactly 1 -- the ledger read/apply is not serialized"
+        )
+        _, hook_end = hook_calls[0]
+
+        # Both threads -- winner and loser alike -- can only have returned
+        # AFTER the lock holder released, which happens after the hook
+        # finished. If either finished before hook_end, it proceeded past
+        # the ledger check while the migration was still mid-flight.
+        assert min(finish_times.values()) >= hook_end, (
+            f"a thread returned from run_migrations() before the slow "
+            f"migration finished (finish_times={finish_times}, hook_end={hook_end}) "
+            "-- the advisory lock did not serialize the two callers"
+        )
+
+        with psycopg.connect(dsn) as conn:
+            rows = conn.execute(
+                "SELECT version FROM schema_migrations WHERE version = %s", (900101,)
+            ).fetchall()
+        assert len(rows) == 1
     finally:
         drop_throwaway_db(db_name)
