@@ -1,4 +1,4 @@
-"""The durable Procrastinate worker: this repo's single migration authority.
+"""The durable Procrastinate worker.
 
 Startup owns BOTH schema authorities (Global Constraints: Two-Schema-
 Authorities ruling): our applied-set ledger via run_migrations (idempotent by
@@ -7,6 +7,16 @@ schema guarded by a to_regclass existence probe (apply_schema is plain
 CREATEs — NOT idempotent; procrastinate's own `procrastinate migrate` owns
 its upgrades, a runbook step when the pin moves). Then run_worker — which
 opens the async connector itself (do NOT wrap it in app.open()).
+
+run_migrations() here is no longer the sole entry point into our applied-set
+ledger (issue #196): render.yaml's jobcannon-web `preDeployCommand` runs
+`python -m jobcannon.db.migrate` before every web release, closing the
+window where web could serve against a schema its own migration hasn't
+applied yet. This boot-time call stays as an idempotent, lock-serialized
+(pg_advisory_lock, jobcannon/db/migrate.py) belt-and-braces — it still runs
+every boot in case a worker ever comes up before web's pre-deploy has, and
+it is still the sole authority for procrastinate's own queue schema below,
+which the web service never touches. See docs/deploy-runbook.md §3.
 
 Signal handling: run_worker's default install_signal_handlers=True turns
 SIGTERM (Render redeploy) into a graceful stop — a job already running when
@@ -42,7 +52,7 @@ if sys.platform == "win32":
 
 import psycopg
 
-from jobcannon.db.migrate import run_migrations
+from jobcannon.db.migrate import allow_newer_db_from_env, run_migrations
 from jobcannon.host import init_engine_seams, load_host_config
 from jobcannon.host import tasks
 
@@ -63,7 +73,7 @@ def _ensure_procrastinate_schema() -> None:
 def main() -> None:
     logging.basicConfig(level=os.environ.get("JC_LOG_LEVEL", "INFO"))
     host_config = load_host_config()
-    run_migrations(host_config.database_url)
+    run_migrations(host_config.database_url, allow_newer_db=allow_newer_db_from_env())
     init_engine_seams(host_config)
     _ensure_procrastinate_schema()
     tasks.app.run_worker(
