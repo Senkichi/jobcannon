@@ -60,7 +60,32 @@ unmatched path or an unauthenticated request still 404s/401s the same
 way it did before this check existed; adds an HX-Request-aware branch to
 the 401 errorhandler (issue #155) so a stale-session htmx fragment
 request gets an HX-Redirect instead of a full HTML document swapped into
-a fragment target."""
+a fragment target; adds `visitor_is_authed` to the `_inject_auth_links`
+context processor (issue #205), derived from the SAME `_visitor_is_anonymous()`
+call `signup_cta_url` already used -- base.html's header sign-in/up nav,
+My-postings link, and footer Export/Delete links now gate on this instead
+of `g.clerk_user` directly, so a signed-in visitor on a PUBLIC_PATHS page
+(/demo, /privacy, /terms; /preview redirects an authed visitor away
+before rendering) sees the authed nav instead of being misread as
+anonymous -- `g.clerk_user` itself is unchanged and still force-None
+there, keeping those pages' BODIES identity-independent for issue #193's
+Cache-Control reasoning; also tightens `_visitor_is_anonymous()` itself to
+fail CLOSED (anonymous) rather than re-verifying whenever `g.clerk_user`
+is None off of a PUBLIC_PATHS render -- otherwise the revoked-subject 401
+branch below, which deliberately resets `g.clerk_user` to None for a
+cryptographically-valid-but-tombstoned JWT, would have had this new nav
+gate silently re-authenticate that same JWT via the naive fallback and
+show the account-mutation links on the page telling that visitor they're
+signed out; adds an after_request hook, `_vary_and_cache_public_paths`,
+that guarantees `Vary: Cookie` (Flask's own `save_session` already adds
+this whenever `session.accessed` -- true on every request here because
+`ensure_session_ids()` reads the session unconditionally -- but the hook
+makes that explicit and no longer incidental) and sets `Cache-Control:
+private` (only when a route hasn't already set one; this half has no
+Flask equivalent and is the hook's real behavioral change) on every
+PUBLIC_PATHS response — the #205 nav variance above means those
+responses can no longer be treated as identity-independent for
+shared-cache purposes, even though each route's own body still is."""
 
 from __future__ import annotations
 
@@ -199,25 +224,54 @@ def _signup_cta_url(host_config, *, is_anonymous: bool) -> str | None:
 
 
 def _visitor_is_anonymous() -> bool:
-    """Whether the current request's visitor is anonymous, for
-    _signup_cta_url. Reuses the SAME identity resolution the auth gate
-    itself uses rather than re-implementing it:
+    """Whether the current request's visitor is anonymous -- the single
+    identity predicate every anonymous-only-vs-authed-only surface gates
+    on: _signup_cta_url (issue #174) and, via `_inject_auth_links`'s
+    `visitor_is_authed` key below, base.html's header sign-in/up nav,
+    My-postings link, and footer Export/Delete links (issue #205). Reuses
+    the SAME identity resolution the auth gate itself uses rather than
+    re-implementing it:
 
-    - On a non-public path, before_request's clerk_auth() has already run
-      VERIFY_REQUEST and set g.clerk_user (aborting 401 if it were None),
-      so g.clerk_user is non-None on every render that reaches here --
-      trust that cached result instead of re-verifying.
-    - On a PUBLIC_PATHS render (/preview, /demo, /privacy, /terms, the
-      401 page), clerk_auth() unconditionally sets g.clerk_user = None
-      without ever checking real identity, so g.clerk_user tells us
-      nothing there; fall back to onboarding._current_identity(), the
-      same re-check preview() already calls at onboarding.py to decide
-      whether to redirect an authed visitor away from /preview. It fails
-      open to anonymous on any verifier error -- the safe direction for
-      an accessor that only ever gates whether a CTA is offered, never
-      access to a page."""
+    - g.clerk_user set (non-None) means before_request's clerk_auth()
+      already ran VERIFY_REQUEST and confirmed a real identity for THIS
+      request -- trust that cached result instead of re-verifying.
+    - g.clerk_user is None AND the path is a PUBLIC_PATHS render
+      (/preview, /demo, /privacy, /terms), where clerk_auth()
+      unconditionally sets g.clerk_user = None without ever checking real
+      identity: fall back to onboarding._current_identity(), the same
+      re-check preview() already calls at onboarding.py to decide whether
+      to redirect an authed visitor away from /preview. It fails open to
+      anonymous on any verifier error, and it never consults
+      revoked_subjects (only clerk_auth's non-public-path branch does) --
+      accepted trade-offs when the only things gating on it were a CTA
+      offer and a redirect, and NOW also slightly widened by issue #205:
+      a tombstoned-but-cryptographically-valid JWT on a PUBLIC_PATHS page
+      will re-verify non-None here and show visitor_is_authed = True, so
+      My-postings / Export / Delete render on that public page for a
+      revoked visitor. Not a security hole -- every one of those links
+      targets a non-public route, where clerk_auth's revocation check
+      runs for real and 401s on click (test_revoked_subject_401s_on_*) --
+      just a narrow, cosmetic UX wart for an edge-case visitor, traded
+      for not adding a DB read to every public-page render (issue #193's
+      cacheability goal).
+    - g.clerk_user is None on any OTHER path -- the 404/405 pre-route-match
+      branch (deliberately never resolved, see the routing_exception
+      comment above) and, more importantly, the revoked-subject 401 branch
+      below (a cryptographically VALID JWT whose subject is tombstoned):
+      that branch explicitly resets g.clerk_user to None specifically so
+      this visitor renders as signed-out (see its own comment). Falling
+      back to _current_identity() here would re-verify the same raw JWT
+      -- which the revocation check never touches -- and come back
+      non-None, silently re-authing the "My postings" / "Export your
+      data" / "Delete account" links on the very page that just told this
+      visitor they're signed out. Fail CLOSED (anonymous) instead: unlike
+      the PUBLIC_PATHS branch above, this g.clerk_user=None was a
+      deliberate, checked decision, not "never resolved," so there is
+      nothing safe to re-derive."""
     if getattr(g, "clerk_user", None) is not None:
         return False
+    if not _is_public_request_path():
+        return True
 
     from jobcannon.web.onboarding import _current_identity
 
@@ -372,18 +426,26 @@ def create_app(config: dict | None = None) -> Flask:
     @app.context_processor
     def _inject_auth_links():
         # Runs on every template render, same as the footer source link
-        # above -- base.html's header nav is gated in the template on
-        # `not g.clerk_user` (public pages and the 401 page render it,
-        # authed pages don't), not on request.path, so this needs no
-        # PUBLIC_PATHS-based logic of its own. Also derives signup_cta_url
-        # (issue #174) -- the single value every anonymous-visitor CTA
-        # gates on, computed here so no template re-derives its own
-        # anonymous fallback or forgets to check identity.
+        # above. Also derives signup_cta_url (issue #174) -- the single
+        # value every anonymous-visitor CTA gates on -- and visitor_is_authed
+        # (issue #205) -- the single value base.html's header sign-in/up
+        # nav, My-postings link, and footer Export/Delete links all gate
+        # on, replacing the template's own `g.clerk_user` reads. Both are
+        # computed here, from the SAME _visitor_is_anonymous() call, so no
+        # template re-derives its own identity fallback or forgets to
+        # check it: g.clerk_user alone is force-None on every PUBLIC_PATHS
+        # render regardless of real identity (by design, so those page
+        # BODIES stay identity-independent -- issue #193's Cache-Control
+        # reasoning), which is exactly the gap issue #205 closed --
+        # visitor_is_authed resolves real identity there via
+        # _visitor_is_anonymous()'s PUBLIC_PATHS fallback, while g.clerk_user
+        # itself is left untouched for every other consumer (route guards,
+        # the 401/404 error pages' own deliberately-unresolved nav).
         host_config = app.config["HOST_CONFIG"]
         context = _auth_link_context(host_config)
-        context["signup_cta_url"] = _signup_cta_url(
-            host_config, is_anonymous=_visitor_is_anonymous()
-        )
+        is_anonymous = _visitor_is_anonymous()
+        context["signup_cta_url"] = _signup_cta_url(host_config, is_anonymous=is_anonymous)
+        context["visitor_is_authed"] = not is_anonymous
         return context
 
     if "WEBHOOK_SECRET" in app.config:
@@ -829,9 +891,13 @@ def create_app(config: dict | None = None) -> Flask:
             # Clerk's Account Portal) already happened for this account,
             # and this token was simply minted/refreshed before that. Undo
             # the g.clerk_user set two lines up before aborting: base.html
-            # gates the header sign-in/up nav AND the authed footer links on
-            # `g.clerk_user`, and error_401.html extends base.html, so a
-            # left-set g.clerk_user would render "Export your data /
+            # gates the header sign-in/up nav, My-postings, and the authed
+            # footer links on `visitor_is_authed` (issue #205), which is
+            # fail-closed to anonymous whenever g.clerk_user is None off of
+            # a PUBLIC_PATHS render (see _visitor_is_anonymous's docstring)
+            # -- this g.clerk_user reset is what that fail-closed branch
+            # keys off of. error_401.html extends base.html, so a left-set
+            # g.clerk_user would otherwise render "Export your data /
             # Delete account" links on the very page telling this visitor
             # they're signed out. session.clear() also runs here, not only
             # in account.py's post_delete -- this is the ONLY gate on the
@@ -890,6 +956,52 @@ def create_app(config: dict | None = None) -> Flask:
     from jobcannon.web.legal import legal_bp
 
     app.register_blueprint(legal_bp)
+
+    @app.after_request
+    def _vary_and_cache_public_paths(response):
+        """Issue #205 fallout: every PUBLIC_PATHS response's nav/footer now
+        varies by real visitor identity (`visitor_is_authed`, via
+        `_visitor_is_anonymous()`'s PUBLIC_PATHS fallback actually calling
+        VERIFY_REQUEST), even though `g.clerk_user` and each route's own
+        body stay force-None/identity-independent. A shared cache (a CDN,
+        a corporate proxy) that stored and replayed one visitor's response
+        would leak that visitor's authed nav to another. Reuses the SAME
+        `_is_public_request_path()` normalization clerk_auth's before_request
+        gate and the clerk-js loader gate already share (issue #158) — never
+        re-derive the path set here.
+
+        Two independent defenses, both applied uniformly to all of
+        PUBLIC_PATHS (including /healthz and /start, which carry no
+        identity-dependent content today but would silently lose this
+        protection later if excluded now):
+        - `Vary: Cookie`, appended (never overwriting an existing Vary), so
+          any cache that respects Vary treats different-cookie requests as
+          different cache entries. NOTE: on every request in this app,
+          Flask's own `SecureCookieSessionInterface.save_session()` already
+          adds this header whenever `session.accessed` is true, and
+          `ensure_session_ids()` (jobcannon/web/anon_session.py, called
+          unconditionally from before_request) reads the session on every
+          request, so this line is usually redundant in practice. It stays
+          because that guarantee is otherwise incidental to unrelated
+          session-carrier code — anything that made `ensure_session_ids()`
+          lazy or skip PUBLIC_PATHS would silently drop `Vary: Cookie` with
+          nothing here to catch it. This line converts that accident into a
+          declared invariant.
+        - `Cache-Control: private`, set ONLY when the response carries no
+          Cache-Control yet — /demo, /start, and /preview currently set
+          none, so they gain a bare `private`; /privacy and /terms already
+          set `private, max-age=300` in jobcannon/web/legal.py's
+          `_legal_response`, which is left completely untouched here. This
+          half has no Flask-provided equivalent — it is the hook's actual
+          behavioral effect.
+        `private` is the header that actually forbids shared-cache storage;
+        `Vary: Cookie` is defense-in-depth for a cache that ignores it."""
+        if not _is_public_request_path():
+            return response
+        response.vary.add("Cookie")
+        if "Cache-Control" not in response.headers:
+            response.cache_control.private = True
+        return response
 
     # Registered last, once every blueprint above is mounted and
     # CLERK_FRONTEND_API_HOST/HOST_CONFIG are both final — issue #147.
