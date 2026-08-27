@@ -1,11 +1,16 @@
 """Procrastinate task-shape declarations for the hosted job taxonomy, plus the
 periodic enqueue tick, storage-check tick, orphaned-job reclaim tick,
-anon-user reap tick, and events-retention reap tick that fire on a schedule.
+anon-user reap tick, events-retention reap tick, deletion-reconciliation
+sweep tick, and revoked-subjects reap tick that fire on a schedule.
 
-Task shapes (`scan`, `expiry_check`, `stale_detect`) and the five periodics
+Task shapes (`scan`, `expiry_check`, `stale_detect`) and the seven periodics
 (`enqueue_due_scans`, `db_storage_check`, `reclaim_orphaned_jobs`,
-`reap_anon_users`, `reap_old_events`, each declared with `@app.periodic` +
-`@app.task` below) all live here. 'enrich' is intentionally not defined: no enrich hook exists
+`reap_anon_users`, `reap_old_events`, `reconcile_deleted_users`,
+`reap_revoked_subjects`, each declared with `@app.periodic` + `@app.task`
+below) all live here — this ONE
+`procrastinate.App` instance (constructed below) is the sole periodic-task
+scheduling mechanism in this codebase; a new periodic task is another peer
+registered on it, never a second scheduler. 'enrich' is intentionally not defined: no enrich hook exists
 to run. Defining a periodic task's SHAPE is not the same as RUNNING it: this
 module still never runs a worker or applies procrastinate's schema at import
 time — `jobcannon.worker.__main__` owns both (it applies procrastinate's
@@ -54,6 +59,7 @@ from procrastinate import exceptions as procrastinate_exceptions
 from procrastinate import manager as procrastinate_manager
 
 from jobcannon.db._events import delete_expired_events
+from jobcannon.db._revoked_subjects import prune_expired_revocations
 from jobcannon.db._users import reap_unconverted_anon_users
 from jobcannon.host import scan_tasks as _scan_tasks
 from jobcannon.host.scan_tasks import (
@@ -364,3 +370,40 @@ def purge_posthog_person(distinct_id: str) -> dict:
     from jobcannon.host import posthog_admin
 
     return posthog_admin.purge_person(distinct_id)
+
+
+@app.periodic(
+    cron=os.environ.get("JC_REVOKED_REAP_CRON", "*/15 * * * *"),
+    periodic_id="reap_revoked_subjects",
+)
+@app.task(queue="maintenance", queueing_lock="reap_revoked_subjects")
+def reap_revoked_subjects(timestamp: int) -> dict:
+    """Periodic reaper (issue #159): hard-deletes `revoked_subjects` rows
+    past their own `expires_at`. Unlike `reap_anon_users`/`reap_old_events`
+    above, there is no retention-window env var here — the window
+    (`jobcannon.db._revoked_subjects.REVOCATION_TTL_MINUTES`, 15 minutes) is
+    a code-level security constant sized against Clerk's own ~60s JWT
+    lifetime, not a privacy-policy-driven retention period, so it is not a
+    render.yaml-declared value the way JC_EVENTS_RETENTION_DAYS/
+    JC_ANON_RETENTION_DAYS are.
+
+    Cadence (issue #159 follow-up, privacy-disclosure gap): a Clerk user id
+    is a GDPR online identifier, and privacy.md §8 promises deletion is a
+    genuine hard delete, not a soft flag or archival copy. The row itself
+    (not just the 15-minute blocking window) must therefore track that
+    promise. This runs every 15 minutes (same cadence as the existing
+    `reclaim_orphaned_jobs` sibling in the scheduler, see
+    docs/deploy-runbook.md §8) so worst-case total retention of one id is
+    the 15-minute TTL plus up to one more tick before the next sweep finds
+    it — ~30 minutes, not 15. State that real bound, not the TTL alone, in
+    any disclosure text. An unpruned-but-not-yet-reaped expired row is
+    harmless to the auth check itself (`is_subject_revoked`'s
+    `expires_at > now()` predicate already excludes it from denying
+    access) — this tick's job is retention, not correctness. Returns a
+    count, not the reaped ids — procrastinate persists task results into
+    the same database being reaped, and a Clerk user id is PII-adjacent."""
+    from jobcannon.db import connection_factory
+
+    with connection_factory() as conn:
+        reaped_ids = prune_expired_revocations(conn)
+    return {"reaped": len(reaped_ids)}

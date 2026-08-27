@@ -101,9 +101,11 @@ one `applied migration V (name)` line per migration
 against the live database. After merging any render.yaml change, also
 confirm the Blueprint actually picked it up — a `render.yaml` edit only
 takes effect on the next Blueprint sync, so the person landing the change
-must confirm `serviceDetails.preDeployCommand` is non-null for
-`jobcannon-web` via the Render API (it was observed `null` before this
-change went in).
+must confirm `serviceDetails.envSpecificDetails.preDeployCommand` (NOT the
+top-level `serviceDetails.preDeployCommand`, which stays `null` even after
+a successful sync — a red herring observed during #188's landing) is
+non-null for `jobcannon-web` via the Render API (it was observed `null`
+before this change went in).
 
 **Rollback caveat.** A rollback of `jobcannon-web` (or `jobcannon-worker`)
 to a commit that predates a migration already recorded in the
@@ -230,6 +232,15 @@ read/write `postings`, `companies`, etc. will error until the worker has
 applied both schemas; that window is normally seconds on a fresh deploy and
 is otherwise closed once the worker service reports healthy in the Render
 dashboard.
+
+**Migration 7 (`revoked_subjects`)** previously had a real, not-benign
+deploy-order dependency on this section's general worker-first case (a
+missing table would raise inside `jobcannon.db._revoked_subjects.
+revoke_subject`, called from `jobcannon/web/account.py`'s account-deletion
+route and `jobcannon/web/webhooks.py`'s `user.deleted` handler). That
+dependency is resolved by issue #196's web pre-deploy migration step
+(#197) — see `m0007_revoked_subjects.py`'s docstring for the current
+guarantee and the narrow self-healing window that remains.
 
 ## 4. Webhook endpoint registration
 

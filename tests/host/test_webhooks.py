@@ -314,6 +314,41 @@ def test_user_deleted_skips_posthog_purge_when_salt_unset(app):
     assert n == 0
 
 
+def test_user_deleted_writes_a_revocation_tombstone(app):
+    """Issue #159: this is the second of the two revocation writers -- it
+    covers a deletion started from Clerk's own Account Portal, which never
+    touches jobcannon/web/account.py::post_delete at all. The row must be
+    unexpired at the moment the webhook returns (a future expires_at),
+    proving the gate would actually reject this subject's next request --
+    not merely that SOME row landed in the table."""
+    user_id = "user_webhook_revoke"
+    created = json.dumps(_user_created(user_id=user_id)).encode()
+    client = app.test_client()
+    assert client.post("/webhooks/clerk", data=created, headers=_sign(created)).status_code == 200
+
+    deleted = json.dumps(_user_deleted(user_id)).encode()
+    resp = client.post(
+        "/webhooks/clerk", data=deleted, headers=_sign(deleted, msg_id="msg_webhook_revoke")
+    )
+    assert resp.status_code == 200
+
+    with psycopg.connect(app.config["_TEST_DSN"]) as conn:
+        user_row = conn.execute("SELECT 1 FROM users WHERE id = %s", (user_id,)).fetchone()
+        tombstone = conn.execute(
+            "SELECT expires_at > now() AS still_live "
+            "FROM revoked_subjects WHERE clerk_user_id = %s",
+            (user_id,),
+        ).fetchone()
+    # The users row is gone (cascade already covered by
+    # test_user_deleted_removes_row) -- the tombstone must survive that
+    # deletion regardless, since revoked_subjects deliberately carries no FK
+    # to users (module docstring): the whole point is to keep denying a
+    # still-valid JWT for a subject that no longer has a users row at all.
+    assert user_row is None
+    assert tombstone is not None
+    assert tombstone[0] is True  # still_live: unexpired at the moment we checked
+
+
 def test_stale_timestamp_replay_rejected_400(app):
     """A correctly-signed payload over a timestamp outside Svix's ~5-minute
     tolerance window must still be rejected — freshness, not just signature
