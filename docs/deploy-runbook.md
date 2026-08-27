@@ -97,15 +97,30 @@ must confirm `serviceDetails.preDeployCommand` is non-null for
 `jobcannon-web` via the Render API (it was observed `null` before this
 change went in).
 
-**Rollback caveat.** A rolled-back web release still runs pre-deploy, which
-re-applies nothing (the ledger already has everything the newer code
-shipped) but does mean a rolled-back web serves against whatever schema
-version is newest in the ledger, not necessarily the schema its own code
-was written against. Keep migrations additive/backward-compatible for this
-reason (§10 already documents this for the general rollback case) — that
-practice no longer needs to cover "web deploys before worker" ordering (the
-pre-deploy command now guarantees that), but it still covers "a rollback
-can't un-apply a migration."
+**Rollback caveat.** A rollback of `jobcannon-web` (or `jobcannon-worker`)
+to a commit that predates a migration already recorded in the
+`schema_migrations` ledger **FAILS**, not serves benignly: pre-deploy
+re-runs `python -m jobcannon.db.migrate` on the rolled-back code, which
+doesn't know that ledger row, so the orphan guard (`orphans = applied -
+known` in `jobcannon/db/migrate.py`) raises `DatabaseNewerThanCodeError`
+and aborts the deploy. A rolled-back worker fails at boot for the exact
+same reason — that guard predates this PR; issue #196 only added the web
+pre-deploy path that now also hits it.
+
+The escape hatch is the `JOBCANNON_MIGRATE_ALLOW_NEWER_DB` config setting
+(truthy values: `1` or `true`): set it on the rolling-back service's
+environment — Render dashboard → Environment, or the Render API — *before*
+triggering the rollback, and the orphan check logs a WARNING naming the
+unknown version(s) instead of raising, then continues normally. **Remove
+the var again once the rollback is resolved** — it's a per-incident
+override, not a standing config value. This is safe ONLY because every
+migration in this repo is expand-only (additive, backward-compatible with
+the previous release — the same discipline §10 documents for the general
+rollback case): the rolled-back code simply never reads the newer
+column/table it doesn't know about. A rollback across a genuinely
+contract-shaped migration (a hypothetical future `DROP COLUMN` / type
+narrowing / constraint tightening) is **not** safe to override this way —
+that needs a database restore, never `JOBCANNON_MIGRATE_ALLOW_NEWER_DB`.
 
 **Migration/writer ordering also inverted, not just eliminated.** Pre-deploy
 runs migrations *before* the new web code goes live, which flips the
@@ -122,12 +137,17 @@ A future migration that rewrites rows a not-yet-deployed writer will
 produce must either be order-independent (safe against running before its
 own writer exists) or ship with an explicit follow-up sweep; it can no
 longer rely on "the worker will boot after the writer's release lands."
+`m0010_events_referrer_host.py` itself is already applied on every existing
+deploy and is **not** affected by this — it's cited above only to
+illustrate the migration *shape* that needs the caution going forward.
 
 Expect these log lines on a fresh database's first worker boot (the ledger
 `name` column — and therefore the second `%s` migrate.py logs — is the
 migration file's stem, not its description):
 
 ```
+waiting for schema_migrations advisory lock
+schema_migrations: 0 applied, 5 pending (m0001_initial_schema, m0002_scan_health_log, m0003_companies_scan_columns, m0004_users_consent, m0005_postings_embedding)
 applied migration 1 (m0001_initial_schema)
 applied migration 2 (m0002_scan_health_log)
 applied migration 3 (m0003_companies_scan_columns)
@@ -136,9 +156,15 @@ applied migration 5 (m0005_postings_embedding)
 applying procrastinate schema (first boot)
 ```
 
-On every subsequent boot, `run_migrations` logs nothing new (already-applied
-migrations are skipped) and the procrastinate probe finds
-`procrastinate_jobs` already present, so neither schema step re-runs.
+`waiting for schema_migrations advisory lock` and
+`schema_migrations: N applied, M pending` are logged on **every** call to
+`run_migrations` — including every subsequent boot, not just the first —
+because the advisory-lock acquire and the ledger read always run; only the
+`applied migration V (name)` lines are conditional on there being pending
+work. So on every subsequent boot, expect those same two lines again with
+`M` at `0` and no `applied migration ...` lines (already-applied migrations
+are skipped), and the procrastinate probe finds `procrastinate_jobs`
+already present, so neither schema step re-runs its DDL.
 
 **The web service needs the database, but not the schema, to report
 healthy.** `/healthz` runs a bounded (2.5 s) pooled `SELECT 1` — schema-free

@@ -48,6 +48,27 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 # and hardcoded here; never recompute this at runtime.
 _ADVISORY_LOCK_KEY = 5255127982483983144
 
+# Escape hatch for a rollback across a migration boundary (issue #196 H1):
+# the orphan guard below is fail-CLOSED by default on BOTH the pre-deploy
+# CLI path (main()) and the worker boot path (jobcannon/worker/__main__.py)
+# — a rolled-back release whose code doesn't know a ledger row it finds
+# raises DatabaseNewerThanCodeError and aborts, same as today. Setting this
+# var is the one sanctioned way to override that on a specific deploy (see
+# docs/deploy-runbook.md's Rollback caveat for when this is actually safe:
+# only across expand-only migrations, never a contract-shaped one). Parsed
+# in exactly ONE place (allow_newer_db_from_env below) so the CLI and the
+# worker can never diverge on what counts as "truthy".
+_ALLOW_NEWER_DB_ENV = "JOBCANNON_MIGRATE_ALLOW_NEWER_DB"
+
+
+def allow_newer_db_from_env() -> bool:
+    """Single source of truth for parsing JOBCANNON_MIGRATE_ALLOW_NEWER_DB.
+    Both jobcannon.db.migrate.main() (pre-deploy) and
+    jobcannon.worker.__main__.main() (worker boot) call this — never read
+    the env var directly — so the two paths can't drift on what "truthy"
+    means."""
+    return os.environ.get(_ALLOW_NEWER_DB_ENV, "").strip().lower() in ("1", "true")
+
 
 class DatabaseNewerThanCodeError(RuntimeError):
     pass
@@ -71,7 +92,7 @@ def _apply_migration(conn: psycopg.Connection, dsn: str, migration: Migration) -
     logger.info("applied migration %s (%s)", migration.version, migration.name)
 
 
-def run_migrations(dsn: str) -> None:
+def run_migrations(dsn: str, *, allow_newer_db: bool = False) -> None:
     with psycopg.connect(dsn) as conn:
         # Acquire the session-level advisory lock in its OWN transaction, same
         # reasoning as the ledger DDL/read below: a bare execute() would leave
@@ -109,11 +130,17 @@ def run_migrations(dsn: str) -> None:
             known = {m.version for m in MIGRATIONS}
             orphans = applied - known
             if orphans:
-                raise DatabaseNewerThanCodeError(
-                    f"This database has applied migration(s) this code does not know "
-                    f"(lowest unknown: {min(orphans)}). It was migrated by a newer "
-                    f"version. Upgrade the code or restore a backup. "
-                    f"The database has NOT been modified."
+                if not allow_newer_db:
+                    raise DatabaseNewerThanCodeError(
+                        f"This database has applied migration(s) this code does not know "
+                        f"(lowest unknown: {min(orphans)}). It was migrated by a newer "
+                        f"version. Upgrade the code or restore a backup. "
+                        f"The database has NOT been modified."
+                    )
+                logger.warning(
+                    "database is newer than this code: versions %s; %s set, continuing",
+                    sorted(orphans),
+                    _ALLOW_NEWER_DB_ENV,
                 )
 
             pending = [m for m in MIGRATIONS if m.version not in applied]
@@ -150,7 +177,7 @@ def main() -> int:
 
     try:
         host_config = load_host_config()
-        run_migrations(host_config.database_url)
+        run_migrations(host_config.database_url, allow_newer_db=allow_newer_db_from_env())
     except Exception:
         logger.exception("pre-deploy migration run failed")
         return 1

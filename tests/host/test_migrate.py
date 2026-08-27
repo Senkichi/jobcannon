@@ -44,6 +44,148 @@ def test_unknown_applied_version_raises_newer_than_code():
         drop_throwaway_db(db_name)
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("1", True),
+        ("true", True),
+        ("True", True),
+        ("TRUE", True),
+        ("0", False),
+        ("false", False),
+        ("no", False),
+        ("", False),
+        ("  1  ", True),
+    ],
+)
+def test_allow_newer_db_from_env_parses_truthy_values(monkeypatch, value, expected):
+    """Single-parse-site guard for the JOBCANNON_MIGRATE_ALLOW_NEWER_DB escape
+    hatch (issue #196 H1) -- both the pre-deploy CLI and the worker boot path
+    call this same helper, so its parsing rules are exactly what both paths
+    honor."""
+    from jobcannon.db.migrate import allow_newer_db_from_env
+
+    monkeypatch.setenv("JOBCANNON_MIGRATE_ALLOW_NEWER_DB", value)
+    assert allow_newer_db_from_env() is expected
+
+
+def test_allow_newer_db_from_env_defaults_false_when_unset(monkeypatch):
+    from jobcannon.db.migrate import allow_newer_db_from_env
+
+    monkeypatch.delenv("JOBCANNON_MIGRATE_ALLOW_NEWER_DB", raising=False)
+    assert allow_newer_db_from_env() is False
+
+
+def test_run_migrations_with_allow_newer_db_continues_past_orphan(caplog):
+    """In-process counterpart to the subprocess override test below: proves
+    run_migrations(..., allow_newer_db=True) does not raise on an orphan
+    ledger version, logs it at WARNING instead, and still completes (default
+    behavior stays fail-closed -- test_unknown_applied_version_raises_newer_than_code
+    above covers that)."""
+    import logging
+
+    from jobcannon.db.migrate import run_migrations
+
+    dsn, db_name = create_throwaway_db("jobcannon_mig_orphan_allow")
+    try:
+        run_migrations(dsn)
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "INSERT INTO schema_migrations (version, name, applied_at) "
+                "VALUES (999999999, 'm999999999_from_the_future', now())"
+            )
+            conn.commit()
+
+        with caplog.at_level(logging.WARNING, logger="jobcannon.db.migrate"):
+            run_migrations(dsn, allow_newer_db=True)  # must not raise
+
+        assert "database is newer than this code" in caplog.text
+        assert "999999999" in caplog.text
+    finally:
+        drop_throwaway_db(db_name)
+
+
+def test_migrate_subprocess_exits_nonzero_on_orphan_without_override():
+    """CLI-subprocess coverage for the orphan guard (review-1 LOW L-b): an
+    unknown ledger version must fail the actual `python -m jobcannon.db.migrate`
+    subprocess Render invokes, not just the in-process run_migrations() call
+    covered by test_unknown_applied_version_raises_newer_than_code above."""
+    import os
+    import pathlib
+    import subprocess
+    import sys
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    dsn, db_name = create_throwaway_db("jobcannon_mig_orphan_subproc")
+    try:
+        from jobcannon.db.migrate import run_migrations
+
+        run_migrations(dsn)
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "INSERT INTO schema_migrations (version, name, applied_at) "
+                "VALUES (999999999, 'm999999999_from_the_future', now())"
+            )
+            conn.commit()
+
+        env = dict(os.environ)
+        env["DATABASE_URL"] = dsn
+        env.pop("JOBCANNON_MIGRATE_ALLOW_NEWER_DB", None)
+
+        result = subprocess.run(
+            [sys.executable, "-m", "jobcannon.db.migrate"],
+            cwd=str(root),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode != 0
+        assert "DatabaseNewerThanCodeError" in result.stderr, result.stderr
+    finally:
+        drop_throwaway_db(db_name)
+
+
+def test_migrate_subprocess_orphan_with_override_exits_zero_and_warns():
+    """The escape hatch, exercised the way Render would actually set it: a
+    subprocess env var, not an in-process monkeypatch of allow_newer_db."""
+    import os
+    import pathlib
+    import subprocess
+    import sys
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    dsn, db_name = create_throwaway_db("jobcannon_mig_orphan_override")
+    try:
+        from jobcannon.db.migrate import run_migrations
+
+        run_migrations(dsn)
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "INSERT INTO schema_migrations (version, name, applied_at) "
+                "VALUES (999999999, 'm999999999_from_the_future', now())"
+            )
+            conn.commit()
+
+        env = dict(os.environ)
+        env["DATABASE_URL"] = dsn
+        env["JOBCANNON_MIGRATE_ALLOW_NEWER_DB"] = "1"
+
+        result = subprocess.run(
+            [sys.executable, "-m", "jobcannon.db.migrate"],
+            cwd=str(root),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "database is newer than this code" in result.stderr, result.stderr
+        assert "999999999" in result.stderr, result.stderr
+    finally:
+        drop_throwaway_db(db_name)
+
+
 def test_migration_failure_does_not_roll_back_earlier_committed_migrations(monkeypatch):
     """Regression for the bare-SELECT transaction-status bug (F2): reading
     applied_versions() via a bare execute() left the connection mid-transaction

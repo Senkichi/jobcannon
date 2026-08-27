@@ -52,7 +52,7 @@ if sys.platform == "win32":
 
 import psycopg
 
-from jobcannon.db.migrate import run_migrations
+from jobcannon.db.migrate import allow_newer_db_from_env, run_migrations
 from jobcannon.host import init_engine_seams, load_host_config
 from jobcannon.host import tasks
 
@@ -73,7 +73,7 @@ def _ensure_procrastinate_schema() -> None:
 def main() -> None:
     logging.basicConfig(level=os.environ.get("JC_LOG_LEVEL", "INFO"))
     host_config = load_host_config()
-    run_migrations(host_config.database_url)
+    run_migrations(host_config.database_url, allow_newer_db=allow_newer_db_from_env())
     init_engine_seams(host_config)
     _ensure_procrastinate_schema()
     tasks.app.run_worker(
