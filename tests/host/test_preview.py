@@ -10,13 +10,16 @@ other tests/host/ module uses).
 from __future__ import annotations
 
 import ast
+import html as html_lib
 import pathlib
+import re
 from urllib.parse import urlsplit
 
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
+from jobcannon.db._feed import FEED_PAGE_MAX
 from tests.host.conftest import create_throwaway_db, drop_throwaway_db, requires_postgres
 
 pytestmark = requires_postgres
@@ -136,6 +139,169 @@ def test_preview_is_driven_only_by_picker_selections(app):
     html_beta = client.get("/preview").get_data(as_text=True)
     assert "Distinctive Title Beta" in html_beta
     assert "Distinctive Title Alpha" not in html_beta
+
+
+# --- #156: keyset "Load more" pagination -----------------------------------
+
+_LOAD_MORE_RE = re.compile(
+    r'hx-get="([^"]+)"[^>]*data-load-more|data-load-more[^>]*hx-get="([^"]+)"'
+)
+
+
+def _extract_load_more_url(html: str) -> str | None:
+    """Un-escapes the Jinja-autoescaped `&amp;` between query params back to
+    a literal `&` — the same decode step a real browser performs on a DOM
+    attribute before htmx ever issues the request. Skipping it splits the
+    query string on the stray `&` inside `&amp;` and silently drops
+    cursor_id/cursor_last_seen (see tests/host/test_feed_pagination.py's
+    identical helper, where this was caught as a real test-harness bug)."""
+    match = _LOAD_MORE_RE.search(html)
+    if match is None:
+        return None
+    raw = match.group(1) or match.group(2)
+    return html_lib.unescape(raw)
+
+
+def _row_count(html: str) -> int:
+    return len(re.findall(r"<article[^>]*data-posting-row[^>]*>", html))
+
+
+def _seed_preview_pages_worth(dsn, company_id, count, *, title_prefix="Preview Page Row"):
+    for i in range(count):
+        _seed_posting(
+            dsn, f"preview-page-{title_prefix}-{i}", company_id, title=f"{title_prefix} {i:03d}"
+        )
+
+
+def test_preview_load_more_button_appears_when_first_page_is_full(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview Full Page Co")
+    _seed_preview_pages_worth(dsn, company_id, FEED_PAGE_MAX + 5)
+
+    html = app.test_client().get("/preview").get_data(as_text=True)
+
+    assert "data-load-more" in html
+    assert _row_count(html) == FEED_PAGE_MAX
+
+
+def test_preview_load_more_button_absent_when_fewer_than_a_full_page(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview Short Page Co")
+    _seed_preview_pages_worth(dsn, company_id, 3)
+
+    html = app.test_client().get("/preview").get_data(as_text=True)
+
+    assert "data-load-more" not in html
+    assert _row_count(html) == 3
+
+
+def test_preview_load_more_hx_request_returns_only_the_next_batch(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview HX Fragment Co")
+    _seed_preview_pages_worth(dsn, company_id, FEED_PAGE_MAX + 10)
+
+    client = app.test_client()
+    first_page_html = client.get("/preview").get_data(as_text=True)
+    load_more_url = _extract_load_more_url(first_page_html)
+    assert load_more_url is not None
+
+    resp = client.get(load_more_url, headers={"HX-Request": "true"})
+    fragment_html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert _row_count(fragment_html) == 10
+    assert "Your preview feed" not in fragment_html
+    assert "<nav" not in fragment_html
+    first_titles = set(re.findall(r"<h2[^>]*>([^<]+)</h2>", first_page_html))
+    second_titles = set(re.findall(r"<h2[^>]*>([^<]+)</h2>", fragment_html))
+    assert first_titles & second_titles == set()
+    assert len(first_titles) == FEED_PAGE_MAX
+    assert len(second_titles) == 10
+    assert "data-load-more" not in fragment_html
+
+
+def test_preview_load_more_without_hx_request_returns_the_full_page(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview No HX Header Co")
+    _seed_preview_pages_worth(dsn, company_id, FEED_PAGE_MAX + 5)
+
+    client = app.test_client()
+    first_page_html = client.get("/preview").get_data(as_text=True)
+    load_more_url = _extract_load_more_url(first_page_html)
+    assert load_more_url is not None
+
+    resp = client.get(load_more_url)
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Your preview feed" in html
+    assert _row_count(html) == 5
+
+
+def test_preview_load_more_removes_itself_when_exhausted(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview Exhausted Co")
+    _seed_preview_pages_worth(dsn, company_id, FEED_PAGE_MAX)
+
+    client = app.test_client()
+    first_page_html = client.get("/preview").get_data(as_text=True)
+    load_more_url = _extract_load_more_url(first_page_html)
+    assert load_more_url is not None
+
+    resp = client.get(load_more_url, headers={"HX-Request": "true"})
+    fragment_html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert _row_count(fragment_html) == 0
+    assert "data-load-more" not in fragment_html
+
+
+def test_preview_load_more_preserves_the_current_location_filter(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview Filter Preserve Co")
+    for i in range(FEED_PAGE_MAX + 3):
+        _seed_posting(
+            dsn,
+            f"preview-loc-match-{i}",
+            company_id,
+            title=f"Matching Remote Row {i:03d}",
+            location="Remote-Matching",
+        )
+    for i in range(5):
+        _seed_posting(
+            dsn,
+            f"preview-loc-other-{i}",
+            company_id,
+            title=f"Other Onsite Row {i:03d}",
+            location="Onsite-Other",
+        )
+
+    client = app.test_client()
+    first_page = client.get("/preview", query_string={"location": "Remote-Matching"}).get_data(
+        as_text=True
+    )
+    load_more_url = _extract_load_more_url(first_page)
+    assert load_more_url is not None
+    assert "location=Remote-Matching" in load_more_url
+
+    resp = client.get(load_more_url, headers={"HX-Request": "true"})
+    fragment_html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert _row_count(fragment_html) == 3
+    assert "Other Onsite Row" not in fragment_html
+
+
+def test_preview_malformed_cursor_degrades_to_first_page_not_500(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview Malformed Cursor Co")
+    _seed_preview_pages_worth(dsn, company_id, 3)
+
+    resp = app.test_client().get("/preview", query_string={"cursor_id": "not-a-number"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert _row_count(html) == 3
 
 
 def test_preview_shows_honest_ordering_label_when_all_rows_unranked(app):

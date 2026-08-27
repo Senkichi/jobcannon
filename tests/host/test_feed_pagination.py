@@ -174,6 +174,31 @@ def test_load_more_button_absent_when_exactly_a_full_page(app):
     assert _row_count(html) == FEED_PAGE_MAX
 
 
+def test_load_more_removes_itself_when_exhausted(app):
+    """The follow-up click promised by test_load_more_button_absent_when_
+    exactly_a_full_page's docstring: a corpus landing on exactly
+    FEED_PAGE_MAX rows still renders one "Load more" button (the route
+    cannot distinguish "exactly full" from "more exist" without a second
+    query), but clicking it must resolve to an empty batch with no further
+    button — the control removes itself (an empty _feed_page.html fragment)
+    rather than looping forever or erroring on zero rows."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app)
+    company_id = _seed_company(dsn, "Exhausted Co")
+    _seed_pages_worth(dsn, company_id, FEED_PAGE_MAX)
+
+    first_page_html = client.get("/").get_data(as_text=True)
+    load_more_url = _extract_load_more_url(first_page_html)
+    assert load_more_url is not None
+
+    resp = client.get(load_more_url, headers={"HX-Request": "true"})
+    fragment_html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert _row_count(fragment_html) == 0
+    assert "data-load-more" not in fragment_html
+
+
 def test_load_more_hx_request_returns_only_the_next_batch(app):
     """The HX-Request fragment must contain the SECOND batch of rows with no
     overlap against the first, and none of the full page's own chrome (the
