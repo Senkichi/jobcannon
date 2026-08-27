@@ -177,6 +177,22 @@ def _feed_query_kwargs(filters: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _effective_query_kwargs(
+    filters: dict[str, Any], selection_kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    """`_feed_query_kwargs(filters)` plus the one F1 workplace_type fallback
+    (an absent/non-explicit query-string value falls back to the profile's
+    saved preference) — factored out of `_read_feed_postings` (#206 follow-
+    up) so `_feed_empty_reason`'s ground-truth collision probe below can
+    resolve the SAME effective non-selection filters the real query used,
+    rather than a second, independently re-derived copy of the F1 fallback
+    logic that could drift from this one."""
+    query_kwargs = _feed_query_kwargs(filters)
+    if query_kwargs["workplace_type"] is None and not filters.get("workplace_type_explicit"):
+        query_kwargs = {**query_kwargs, "workplace_type": selection_kwargs["workplace_type"]}
+    return query_kwargs
+
+
 def _read_feed_postings(
     *,
     user_id: str,
@@ -231,14 +247,7 @@ def _read_feed_postings(
     nothing."""
     try:
         with connection_factory() as conn:
-            query_kwargs = _feed_query_kwargs(filters)
-            if query_kwargs["workplace_type"] is None and not filters.get(
-                "workplace_type_explicit"
-            ):
-                query_kwargs = {
-                    **query_kwargs,
-                    "workplace_type": selection_kwargs["workplace_type"],
-                }
+            query_kwargs = _effective_query_kwargs(filters, selection_kwargs)
             return list_feed_postings(
                 conn,
                 user_id=user_id,
@@ -256,7 +265,24 @@ def _read_feed_postings(
         return []
 
 
-def _saved_selection_indicator(selection_kwargs: dict[str, Any]) -> dict[str, int] | None:
+# singular label -> plural label, for `_count_label`. "company" is the one
+# irregular plural among the two count kinds this route ever renders;
+# everything else is a bare trailing "s".
+_PLURAL_LABELS = {"title": "titles", "company": "companies"}
+
+
+def _count_label(n: int, singular: str) -> str:
+    """`n` and its unit ("title"/"company") -> the grammatically-correct
+    display string ("1 title" / "2 titles", "0 companies" / "1 company") —
+    the ONE place this grammar is spelled out (runner review finding on
+    #226), so `_feed_list.html`'s indicator banner and its collision
+    empty-state copy — both of which quote the same saved-selection counts —
+    render identical, correctly-pluralized text instead of each hand-rolling
+    its own ` titles`/` companies` string concatenation."""
+    return f"{n} {singular}" if n == 1 else f"{n} {_PLURAL_LABELS[singular]}"
+
+
+def _saved_selection_indicator(selection_kwargs: dict[str, Any]) -> dict[str, Any] | None:
     """#206: the feed indicator's ONLY source of "does a saved selection
     apply right now, and how big is it" — reads the same `selection_kwargs`
     dict `_read_feed_postings` filters with, never a second, independent walk
@@ -266,15 +292,25 @@ def _saved_selection_indicator(selection_kwargs: dict[str, Any]) -> dict[str, in
     zeroed dict — when neither field is set, so the template's `{% if
     saved_selection %}` gate (Undefined-tolerant the same way `show_actions`/
     `load_more_url` already are elsewhere in this route) renders nothing for
-    a fresh profile or one that has just been Cleared."""
+    a fresh profile or one that has just been Cleared. `title_label`/
+    `company_label` are the pre-pluralized display strings (`_count_label`);
+    `title_count`/`company_count` stay as plain ints for any future non-copy
+    consumer."""
     titles = selection_kwargs["titles"] or []
     companies = selection_kwargs["companies"] or []
     if not titles and not companies:
         return None
-    return {"title_count": len(titles), "company_count": len(companies)}
+    return {
+        "title_count": len(titles),
+        "company_count": len(companies),
+        "title_label": _count_label(len(titles), "title"),
+        "company_label": _count_label(len(companies), "company"),
+    }
 
 
-def _feed_empty_reason(selection_kwargs: dict[str, Any], filters: dict[str, Any]) -> str:
+def _feed_empty_reason(
+    user_id: str, selection_kwargs: dict[str, Any], filters: dict[str, Any]
+) -> str:
     """#206: which empty-state copy `_feed_list.html` should render, computed
     from the same two already-derived sources as everything else this route
     does — `selection_kwargs` (never re-walking the profile row by hand) and
@@ -285,14 +321,53 @@ def _feed_empty_reason(selection_kwargs: dict[str, Any], filters: dict[str, Any]
     otherwise be non-empty for the search alone. `location` is deliberately
     excluded — it has no saved-selection counterpart (`selection_filter_kwargs`
     carries no location field), so a location-only miss is never a
-    collision, it's just genuinely zero matching postings. Every OTHER empty
-    cause (an actually-thin corpus, a saved-selection-only zero match with
-    no search typed, or `_read_feed_postings`'s own fail-closed empty list on
-    a DB error) falls through to "empty", preserving the pre-#206 flat copy
-    for every case this fix does not change."""
+    collision, it's just genuinely zero matching postings.
+
+    Ground truth, not a heuristic (post-review follow-up on #226): a saved
+    selection AND a free-text title/company search both being present is
+    necessary but not SUFFICIENT for "collision" — two review passes (an
+    adversarial refuter's probe P1 and an independent Devin pass) each found
+    a real over-promise in the plain has-both-so-it-must-be-a-collision
+    heuristic this used to be: (1) the search itself can be a corpus-wide
+    miss (saved titles=["Engineer"], search title="Zzzznonexistent" — no
+    posting anywhere has that substring, selection or no), and (2) the saved
+    selection and the free-text search can target DIFFERENT columns (saved
+    titles + a free-text COMPANY search that simply doesn't exist in the
+    corpus) — in both cases clearing the saved selection would not produce a
+    single additional row, so telling the visitor to Clear is a false
+    promise. This function only runs on the zero-result path (its sole
+    caller, `_feed_content_context`, only calls it when `entries` is already
+    empty) and, ONLY once both flags are set, re-runs `list_feed_postings`
+    (the SAME DAL function/predicate builder `_read_feed_postings` uses —
+    never a second, independently written predicate) with the saved
+    title/company selection dropped (`titles=None, companies=None`) but
+    every other filter unchanged (`_effective_query_kwargs`, the same
+    workplace_type-fallback resolution the real query used), `limit=1` as a
+    pure existence probe. "collision" iff that probe finds a row — i.e. the
+    search alone, without the saved selection, DOES match something, so
+    clearing the selection would genuinely help. Every other empty cause (an
+    actually-thin corpus, a saved-selection-only zero match with no search
+    typed, a search that misses on its own regardless of the selection, or
+    `_read_feed_postings`'s/this probe's own fail-closed empty list on a DB
+    error) falls through to "empty", preserving the pre-#206 flat copy."""
     has_selection = bool(selection_kwargs["titles"] or selection_kwargs["companies"])
     has_search = bool(filters["title"] or filters["company"])
-    return "collision" if has_selection and has_search else "empty"
+    if not (has_selection and has_search):
+        return "empty"
+    try:
+        with connection_factory() as conn:
+            query_kwargs = _effective_query_kwargs(filters, selection_kwargs)
+            without_selection = list_feed_postings(
+                conn, user_id=user_id, titles=None, companies=None, limit=1, **query_kwargs
+            )
+        return "collision" if without_selection else "empty"
+    except Exception:
+        logger.warning(
+            "collision probe failed for user %s (defaulting to 'empty')",
+            user_id,
+            exc_info=True,
+        )
+        return "empty"
 
 
 # Every `_parse_feed_filters` key's own "no filter applied" value — omitted
@@ -457,7 +532,7 @@ def _feed_content_context(
     ordering = _ordering_label(rows)
     _log_impressions(user_id, rows)
     load_more_url = _feed_load_more_url(filters, rows)
-    empty_reason = "empty" if entries else _feed_empty_reason(selection_kwargs, filters)
+    empty_reason = "empty" if entries else _feed_empty_reason(user_id, selection_kwargs, filters)
     return {
         "entries": entries,
         "ordering": ordering,
@@ -559,6 +634,20 @@ def clear_selection():
     explicitly), so omitting it here would NULL out a saved workplace
     preference this control has no business clearing.
 
+    No-profile-row guard (Devin review, #226): a signed-in user who has
+    never completed the picker has no `profiles` row (`upsert_profile` —
+    `jobcannon/db/_profiles.py` — is the only writer), and this route is
+    reachable pre-onboarding regardless — `base.html` puts a valid CSRF
+    token on every authed page's `<body>` via `hx-headers`, Clear-button-
+    visibility notwithstanding. Writing a zeroed `profiles` row for that
+    visitor (the pre-fix behavior) would flip `feed.html`'s `has_selections
+    = profile is not None` gate true, silently skipping the "Set up your
+    feed" onboarding CTA (`feed.html:4`) for someone who never ran the
+    picker. There is nothing to clear for a `profile is None` visitor, so
+    the write (and the row it would otherwise create) is skipped entirely —
+    this route still responds normally (303 / HX 200), it just never touches
+    `profiles`.
+
     HX-aware like every other mutation route in this codebase
     (`jobcannon/web/actions.py`, `jobcannon/web/onboarding.py`'s
     `start_submit`): an HX-Request (the Clear button's own `hx-post`) gets
@@ -577,15 +666,15 @@ def clear_selection():
     user_id = g.clerk_user.user_id
     with connection_factory() as conn:
         profile = get_profile(conn, user_id)
-        current_workplace_type = profile["workplace_type"] if profile is not None else None
-        upsert_profile(
-            conn,
-            user_id,
-            target_titles=[],
-            target_companies=[],
-            workplace_type=current_workplace_type,
-        )
-        profile = get_profile(conn, user_id)
+        if profile is not None:
+            upsert_profile(
+                conn,
+                user_id,
+                target_titles=[],
+                target_companies=[],
+                workplace_type=profile["workplace_type"],
+            )
+            profile = get_profile(conn, user_id)
 
     filters = _parse_feed_filters(request.args)
 

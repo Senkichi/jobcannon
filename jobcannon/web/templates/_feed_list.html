@@ -33,7 +33,7 @@
           class="mb-3 flex items-center gap-2 flex-wrap text-sm text-neutral-400"
           data-saved-selection-indicator>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <span>Filtering to your saved picks ({{ saved_selection.title_count }} titles &middot; {{ saved_selection.company_count }} companies)</span>
+      <span>Filtering to your saved picks ({{ saved_selection.title_label }} &middot; {{ saved_selection.company_label }})</span>
       <button type="submit" class="underline text-neutral-300 min-h-11 inline-flex items-center px-1"
               data-clear-selection>Clear</button>
     </form>
@@ -71,7 +71,7 @@
      form above is always on screen too -- this text points at it rather
      than duplicating a second Clear control. #}
   <p class="text-neutral-400" data-feed-empty data-feed-empty-collision>
-    Your search didn&#39;t match anything within your saved picks ({{ saved_selection.title_count }} titles &middot; {{ saved_selection.company_count }} companies). Clear your saved selection above to search your whole feed.
+    Your search didn&#39;t match anything within your saved picks ({{ saved_selection.title_label }} &middot; {{ saved_selection.company_label }}). Clear your saved selection above to search your whole feed.
   </p>
 {% else %}
   <p class="text-neutral-400" data-feed-empty>No postings match your selections yet.</p>
