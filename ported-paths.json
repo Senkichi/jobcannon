@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-27T01:20:45Z",
+  "generated_at": "2026-08-27T01:46:26Z",
   "roots": [
     "engine",
     "db",
@@ -44,19 +44,35 @@
           "text": "Divergence from the private original, deliberate and Wave-1-scoped: no"
         },
         {
-          "line": 17,
+          "line": 20,
+          "text": "body — the single point where that cost is paid, mirroring the private"
+        },
+        {
+          "line": 21,
+          "text": "original's ``set_jd_full`` (see ``job_finder/db/_jd_full.py``, read-only"
+        },
+        {
+          "line": 30,
+          "text": "``WHERE dedup_key = %s AND jd_full = %s`` (mirroring the private original)"
+        },
+        {
+          "line": 37,
+          "text": "Watermark invalidation (design decision, #152): the private original's"
+        },
+        {
+          "line": 61,
           "text": "A second Wave-1 divergence, same shape: the private original also resets a"
         },
         {
-          "line": 86,
+          "line": 131,
           "text": "Content-contract side effects (parity with the private original's I-18"
         },
         {
-          "line": 93,
+          "line": 138,
           "text": "``enrichment_tier`` reset the private original also performs, which has"
         },
         {
-          "line": 135,
+          "line": 223,
           "text": "Mirrors the private original's ``_record_jd_content_reject``, minus the"
         }
       ]
@@ -442,19 +458,19 @@
           "text": "it (private-repo D5, issue #1742). A"
         },
         {
-          "line": 440,
+          "line": 444,
           "text": "# the private repo's batch scoring does) gets self-healing for free: a"
         },
         {
-          "line": 489,
+          "line": 499,
           "text": "``job_finder.web.model_provider.call_model`` in the private repo, which"
         },
         {
-          "line": 490,
+          "line": 500,
           "text": "inherited schema retry, cascade fallback, rate limiting, and provider"
         },
         {
-          "line": 516,
+          "line": 526,
           "text": "the private repo's ``model_provider.call_model`` signature"
         }
       ]

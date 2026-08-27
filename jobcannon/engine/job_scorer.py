@@ -368,14 +368,18 @@ def scoring_precheck(job: dict) -> str | None:
 
     Deliberately fails OPEN on a NULL ``jd_content_verdict`` (no gate applied):
     this function stays pure/no-I/O (no ``classify_jd_content`` call here), so
-    a row no host has stamped yet — which, on THIS engine today, is every row,
-    since the port's public ``jobcannon.db._jd_full.set_jd_full`` does not yet
-    persist the verdict columns (Wave-1 hosted-schema gap; see that module's
-    docstring and the port's WAIVE note) — scores exactly as it did before this
-    gate existed rather than being silently blocked pending a value nothing has
-    ever computed for it. This is "measure first, gate what's proven": the
+    a row no host has stamped yet fails open — scores exactly as it did before
+    this gate existed rather than being silently blocked pending a value
+    nothing has ever computed for it. As of #152 (migration m0009), this
+    repo's own ``jobcannon.db._jd_full.set_jd_full`` DOES stamp
+    ``jd_content_verdict`` / ``jd_content_signal`` at write time (see that
+    module's docstring) and nulls ``jd_adjudicated_version`` on a
+    content-changing rewrite so the gate re-arms — the gate is LIVE for any
+    row ``set_jd_full`` has written since. A row that predates m0009, or a
+    future host that never wires an equivalent write-time stamp, still reads
+    NULL and fails open. This is "measure first, gate what's proven": the
     gate only fires for rows a persisted verdict has actually characterized,
-    and is correct-but-inert engine parity code until a host stamps the column.
+    never one nothing has computed a verdict for.
 
     ``score_job`` is the only in-tree caller. This engine ships no
     candidate-counting predicate of its own to keep in sync — a host that
@@ -440,7 +444,13 @@ def scoring_precheck(job: dict) -> str | None:
     # the private repo's batch scoring does) gets self-healing for free: a
     # REJECT/AMBIGUOUS row becomes scorable the moment the adjudicator (or a
     # re-fetch that overwrites jd_full with a clean body, re-stamping the
-    # verdict) resolves it — it cannot orphan.
+    # verdict) resolves it -- it cannot orphan, ONCE one of those two paths
+    # exists. Neither does in Wave 1: there is no adjudicator yet, and the
+    # sole set_jd_full caller (ats_scanner/_run.py) only writes when
+    # jd_full IS NULL, so it never overwrites an already-populated body. An
+    # AMBIGUOUS/REJECT-stamped row is currently a terminal state with no
+    # live path back to scorable -- tracked as a precondition on whatever
+    # PR first wires this gate into a live scoring path (see #183).
     _verdict_raw = job.get("jd_content_verdict")
     if _verdict_raw is not None:
         _adjudicated_version = job.get("jd_adjudicated_version")
