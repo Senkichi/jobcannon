@@ -146,6 +146,15 @@ def run_handoff_if_pending() -> Any:
                                 target_locations=anon_profile["target_locations"],
                                 seniority_level=anon_profile["seniority_level"],
                                 years_of_experience=anon_profile["years_of_experience"],
+                                # #28 item 2 / PR #164 review: comp_floor_usd is
+                                # collected at /start (onboarding.py) but
+                                # deliberately excluded from the session cookie
+                                # (see onboarding.py's _parse_submission), so
+                                # this handoff copy is the ONLY place it can
+                                # survive the anon row's cascade-delete below.
+                                # Omitting it here silently reset every
+                                # signed-up tenant's floor to NULL.
+                                comp_floor_usd=anon_profile["comp_floor_usd"],
                             )
                         delete_user(conn, anon_id)
             # The `with conn.raw.transaction():` block above has already
