@@ -27,6 +27,18 @@ Nullable, no DEFAULT (mirrors m0008's comp_floor_usd precedent for "no
 opinion yet" rather than a fabricated timestamp): every existing row starts
 NULL, which is exactly "never checked" — the correct initial state, not a
 migration-time backfill artifact to special-case.
+
+Deploy order: none needed, for two independent reasons. First (as of #197,
+issue #196), `jobcannon-web`'s Render `preDeployCommand` runs
+`python -m jobcannon.db.migrate` before the new web/worker code ever starts
+serving, so this migration is guaranteed applied before
+`jobcannon.db._users.mark_deletion_checked` (the only writer) or
+`list_users_pending_deletion_reconciliation` (the only reader) can run
+against code that references the column — see docs/deploy-runbook.md §3 and
+m0007's docstring for the general guarantee. Second, and true regardless of
+that ordering: this migration is purely additive (one nullable column, no
+backfill, no rewrite of existing rows), so it stays expand-compatible with
+every prior code version the same way m0007's revoked_subjects table does.
 """
 
 from __future__ import annotations
