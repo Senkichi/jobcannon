@@ -6,9 +6,11 @@
   This page needs a signed-in account.
   <a href="/start" class="underline">Start with the picker</a> if you're new here.
 </p>
-{% if clerk_sign_up_url %}
+{% if clerk_sign_in_url or clerk_sign_up_url %}
   <p class="text-neutral-400">
-    <a href="{{ clerk_sign_up_url }}" class="underline text-neutral-100">Sign in or sign up</a>
+    {% if clerk_sign_in_url %}<a href="{{ clerk_sign_in_url }}" class="underline text-neutral-100">Sign in</a>{% endif %}
+    {% if clerk_sign_in_url and clerk_sign_up_url %}or{% endif %}
+    {% if clerk_sign_up_url %}<a href="{{ clerk_sign_up_url }}" class="underline text-neutral-100">sign up</a>{% endif %}
   </p>
 {% endif %}
 {% endblock %}

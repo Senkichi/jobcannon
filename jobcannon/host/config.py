@@ -58,6 +58,18 @@ class HostConfig:
     clerk_sign_up_url: str = field(
         default="", metadata={"env": "CLERK_SIGN_UP_URL", "declare_on": ("web",)}
     )
+    # Sign-IN counterpart of clerk_sign_up_url (issue #145): both are already
+    # set on the live Render web service (accounts.jobcannon.dev/sign-up and
+    # /sign-in) but neither was ever linked from anywhere on jobcannon.dev,
+    # leaving the acquisition funnel with no discoverable entry point.
+    # jobcannon.web's header-nav context processor reads both through the
+    # same getattr-with-default tolerance as clerk_sign_up_url (a HOST_CONFIG
+    # test double that predates this field must degrade to "" rather than
+    # raise), and renders each independently -- an unset one renders nothing,
+    # never a bare href="".
+    clerk_sign_in_url: str = field(
+        default="", metadata={"env": "CLERK_SIGN_IN_URL", "declare_on": ("web",)}
+    )
     # The worker serves no requests and mints no sessions, so it never reads
     # signup_wave.
     signup_wave: str = field(
@@ -156,6 +168,7 @@ def load_host_config() -> HostConfig:
         analytics_pseudonym_salt=analytics_pseudonym_salt,
         secret_key=os.environ.get("JC_SECRET_KEY", ""),
         clerk_sign_up_url=os.environ.get("CLERK_SIGN_UP_URL", ""),
+        clerk_sign_in_url=os.environ.get("CLERK_SIGN_IN_URL", ""),
         signup_wave=os.environ.get("JC_SIGNUP_WAVE", "0"),
         clerk_secret_key=os.environ.get("CLERK_SECRET_KEY", ""),
         clerk_jwt_key=os.environ.get("CLERK_JWT_KEY", ""),
