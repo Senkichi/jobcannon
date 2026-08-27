@@ -146,6 +146,51 @@ def test_privacy_and_terms_omit_clerk_js_even_when_publishable_key_configured():
         assert "Clerk.load" not in html
 
 
+def test_signed_out_consent_page_omits_clerk_js_even_when_publishable_key_configured():
+    """Refuter-2 F1 (MED, the #158 harm class): GET /consent is
+    public_get-marked (issue #171) but deliberately NOT a PUBLIC_PATHS
+    entry, so a signed-out visitor landing there via the footer link used
+    to load clerk-js like any other non-public page -- the exact #158 harm
+    (Clerk, and Cloudflare in front of it, seeing the visitor's IP/UA and
+    setting cookies) on a page that is, for THIS visitor, informational
+    only. inject_clerk_frontend's exemption is scoped to a public_get view
+    AND g.clerk_user is None specifically (an explicit conjunction, not a
+    bare identity check) -- see the two tests below for both halves of
+    that conjunction's positive controls."""
+    app = _app(
+        _host_config(clerk_publishable_key=_TEST_PUBLISHABLE_KEY),
+        verify=lambda req: None,
+    )
+    html = app.test_client().get("/consent").get_data(as_text=True)
+    assert "clerk-publishable-key" not in html
+    assert "clerk.browser.js" not in html
+
+
+def test_signed_in_consent_page_still_loads_clerk_js():
+    """Positive control #1: a signed-in visitor hitting the SAME
+    public_get-marked GET /consent still needs clerk-js -- the header
+    nav's authed state depends on it, same as every other authed render.
+    Proves the exemption is keyed to identity, not to the route."""
+    app = _app(
+        _host_config(clerk_publishable_key=_TEST_PUBLISHABLE_KEY),
+        verify=lambda req: ClerkIdentity(user_id="user_123", claims={"sub": "user_123"}),
+    )
+    html = app.test_client().get("/consent").get_data(as_text=True)
+    assert f'data-clerk-publishable-key="{_TEST_PUBLISHABLE_KEY}"' in html
+
+
+def test_401_page_still_loads_clerk_js_when_identity_is_none():
+    """Positive control #2 (the #151 trap the fix has to avoid): error_401.html
+    is ALSO a page where identity is None, but it is not a public_get view --
+    a bare `identity is None` gate (instead of the explicit conjunction with
+    public_get) would have silently broken the #151 handshake-repair reload
+    on this page. Duplicates test_401_page_loads_clerk_js_when_publishable_key_configured
+    deliberately, as the direct regression control for this fix."""
+    app = _app(_host_config(clerk_publishable_key=_TEST_PUBLISHABLE_KEY), verify=lambda req: None)
+    html = app.test_client().get("/").get_data(as_text=True)
+    assert f'data-clerk-publishable-key="{_TEST_PUBLISHABLE_KEY}"' in html
+
+
 def test_is_public_request_path_matches_every_public_path():
     """Direct unit coverage of the shared normalization both clerk_auth's
     before_request gate and inject_clerk_frontend's clerk-js gate rely on —
