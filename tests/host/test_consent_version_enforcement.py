@@ -43,7 +43,7 @@ _SIGNUP_PAYLOAD = {
     "channel": "direct",
     "wave": "0",
     "signup_method": "clerk",
-    "referrer_url": "unknown",
+    "referrer_host": "unknown",
 }
 
 
