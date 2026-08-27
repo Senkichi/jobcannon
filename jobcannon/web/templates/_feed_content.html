@@ -1,0 +1,17 @@
+{# Wraps _feed_list.html in a stable #feed-content anchor (#206) so
+   jobcannon/web/pages.py's `clear_selection` route can hx-target this id
+   and swap in a fresh copy via outerHTML — mirroring _feed_page.html's
+   self-perpetuating "Load more" pattern (its own docstring: "clicking Load
+   more replaces THIS SAME markup ... with the next batch plus a new
+   button"). The response this template renders ALWAYS carries its own
+   `#feed-content` div, so the anchor survives every swap instead of
+   vanishing after the first Clear click.
+
+   Included from feed.html only, and rendered directly by clear_selection's
+   HX-Request branch — /preview and /demo keep including _feed_list.html
+   directly (neither passes `filters`/`saved_selection`/`empty_reason`, and
+   Clear is an authed-only control, so _feed_list.html's own `{% if filters
+   is defined %}` gate already skips the indicator/Clear form for both). #}
+<div id="feed-content">
+  {% include "_feed_list.html" %}
+</div>
