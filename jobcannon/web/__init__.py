@@ -32,7 +32,20 @@ deciding to sign up should not have their IP/UA phoned to Clerk); adds a
 context processor exposing clerk_sign_up_url/clerk_sign_in_url to every
 template, powering base.html's header sign-in/sign-up nav on public pages
 and the 401 page (issue #145 — the acquisition funnel previously had no
-discoverable entry point anywhere on the public surface)."""
+discoverable entry point anywhere on the public surface); adds a
+`request.routing_exception` re-raise at the top of clerk_auth (issue #173)
+so an unmatched path or a wrong HTTP method on a real route reaches
+Flask's normal 404/405 handling instead of being swallowed into the 401
+gate, plus branded 404/405/400 errorhandlers sharing one error.html
+template; adds public_get, a per-view GET-only auth opt-out decorator
+(issue #171) that lets GET /consent render a signed-out explanation
+without adding /consent to PUBLIC_PATHS (which would also exempt the
+POST mutation and skip clerk-js loading entirely, including for a
+signed-in visitor); extends the #158 clerk-js gate itself to also skip
+loading it on a public_get view's signed-out render specifically (a
+signed-out GET /consent is, for that request, the same class of page as
+/privacy -- nothing gated behind it -- even though the route as a whole
+isn't a PUBLIC_PATHS member)."""
 
 from __future__ import annotations
 
@@ -63,6 +76,55 @@ def _is_public_request_path() -> bool:
     so a trailing slash is stripped (falling back to "/") before the
     membership check, exactly as clerk_auth used to do inline."""
     return (request.path.rstrip("/") or "/") in PUBLIC_PATHS
+
+
+def public_get(view_func):
+    """Per-view, GET-only auth opt-out (issue #171): marks `view_func` so
+    `clerk_auth`'s before_request gate below renders it for a signed-out
+    visitor instead of aborting, while every OTHER method on the same
+    view -- critically, POST /consent -- stays fully gated, since the
+    marker is keyed to GET/HEAD specifically rather than "this endpoint is
+    public."
+
+    Deliberately NOT a PUBLIC_PATHS entry: PUBLIC_PATHS exempts a path for
+    every method (clerk_auth's gate above) AND skips clerk-js loading
+    entirely (inject_clerk_frontend, issue #158) -- neither is correct for
+    a view like GET /consent, which still wants clerk-js loaded (a
+    signed-in visitor hitting this same view needs the header nav's authed
+    state) and still wants POST /consent hard-gated (issue #171 is
+    explicit: consent is an account-level, authed-only decision; only the
+    read-only explanatory GET view opens up).
+
+    The marked view still receives whatever identity clerk_auth resolved
+    -- None when signed out, a real ClerkIdentity when the visitor happens
+    to be signed in -- and is responsible for branching on `g.clerk_user`
+    itself, the same signal every other template in this app already
+    reads."""
+    view_func._auth_optional_get = True
+    return view_func
+
+
+def _is_auth_optional_for_method(view_func, method: str) -> bool:
+    """The single predicate `clerk_auth` consults for `public_get`'s
+    marker, so a test (or any future consumer) checks the SAME rule the
+    gate itself uses rather than re-deriving it against the private
+    attribute name. Covers every safe, non-mutating method Flask will
+    route to the marked view without ever calling it: GET, HEAD (not a
+    literal reading of "GET only" from issue #171 -- HEAD requests to a
+    GET-registered view must mirror that GET's status code, that's HEAD's
+    whole contract), and OPTIONS (Flask's automatic OPTIONS responder
+    answers this itself in dispatch_request -- if the gate aborted 401
+    first, a signed-out CORS preflight or an `OPTIONS /consent` probe
+    would see 401 on a route that serves GET as 200, the same
+    routing-vs-auth-layer confusion issue #173 exists to fix, just one
+    layer down). POST is deliberately excluded: it is the one method this
+    marker must never open, since POST /consent is the account mutation
+    issue #171 keeps fully gated."""
+    return bool(getattr(view_func, "_auth_optional_get", False)) and method in (
+        "GET",
+        "HEAD",
+        "OPTIONS",
+    )
 
 
 def _source_link_context(host_config) -> dict[str, str]:
@@ -349,18 +411,33 @@ def create_app(config: dict | None = None) -> Flask:
     @app.context_processor
     def inject_clerk_frontend():
         # Issue #158: clerk-js has a job only on the 401 handshake-repair
-        # page (error_401.html, issue #151) and pages rendered for a
-        # signed-in visitor -- never on a PUBLIC_PATHS page (/demo, /start,
-        # /preview, /privacy, /terms), where loading it has no purpose
-        # other than Clerk (and Cloudflare in front of it) receiving the
-        # visitor's IP/UA and setting cookies before they've done anything.
-        # A public path is never the reason a request 401s -- clerk_auth
-        # exempts every PUBLIC_PATHS request from verification before this
-        # ever runs -- so any request that reaches a non-public path
-        # already needed clerk-js, whether it ends up 401ing or rendering
-        # an authed page. Reuses the exact same normalization clerk_auth's
-        # gate uses (_is_public_request_path) so the two can never diverge.
+        # page (error_401.html, issue #151) and pages rendered where the
+        # visitor could plausibly be signed in -- never on a page a
+        # signed-out visitor can reach with nothing gated behind it, where
+        # loading it has no purpose other than Clerk (and Cloudflare in
+        # front of it) receiving the visitor's IP/UA and setting cookies
+        # before they've done anything. That's PUBLIC_PATHS (/demo, /start,
+        # /preview, /privacy, /terms, checked below via the same
+        # _is_public_request_path clerk_auth's gate uses, so the two can
+        # never diverge) AND, separately, a public_get-marked view (issue
+        # #171) rendering ITS OWN signed-out branch -- e.g. GET /consent
+        # when g.clerk_user is None: unlike PUBLIC_PATHS, that route is
+        # reachable by a signed-in visitor too (the footer link renders on
+        # every page), and a signed-in render of it still needs clerk-js
+        # for the header nav's authed state, so the exemption is scoped to
+        # "this specific request resolved to no identity", not "this
+        # endpoint". The two conditions are deliberately ANDed, never
+        # collapsed into a bare `identity is None` check: error_401.html is
+        # exactly the page where identity IS None and clerk-js IS required
+        # (the stale-__client handshake-repair reload, issue #151) -- a
+        # bare identity-only gate would silently break that page instead.
         if _is_public_request_path():
+            return {"clerk_publishable_key": "", "clerk_frontend_api_host": ""}
+        view_func = app.view_functions.get(request.endpoint) if request.endpoint else None
+        if (
+            _is_auth_optional_for_method(view_func, request.method)
+            and getattr(g, "clerk_user", None) is None
+        ):
             return {"clerk_publishable_key": "", "clerk_frontend_api_host": ""}
         return {
             "clerk_publishable_key": clerk_publishable_key,
@@ -425,12 +502,17 @@ def create_app(config: dict | None = None) -> Flask:
     @app.errorhandler(401)
     def unauthorized(_error):
         """HTML body for every 401 in this app, not only an authed-route
-        sign-in prompt: `clerk_auth` below runs before Flask resolves
-        routing, so this handler also renders for `/static/<path>` (Flask
-        registers that rule unconditionally, and it is not in
-        PUBLIC_PATHS) and for any unmatched path, both of which would
-        otherwise 404 — they hit this 401 handler first instead. That is
-        deliberate, not a routing bug to "fix" into a distinct 404 page.
+        sign-in prompt: `clerk_auth` below still renders this for
+        `/static/<path>` (Flask registers that rule unconditionally, and
+        it is not in PUBLIC_PATHS -- a missing file 404s from inside the
+        view, but the route itself still requires a session first) and
+        for any other real, matched, non-public route a signed-out
+        visitor hits. An UNMATCHED path or a wrong HTTP method on a real
+        route no longer reaches this handler at all (issue #173):
+        clerk_auth re-raises `request.routing_exception` before any auth
+        logic runs, so Flask's own 404/405 errorhandlers below take over
+        instead -- a visitor (or a monitoring tool) can now tell a
+        typo'd/removed URL apart from a genuinely gated one.
         The status code stays 401.
 
         error_401.html's own signup link and base.html's header nav both
@@ -441,15 +523,133 @@ def create_app(config: dict | None = None) -> Flask:
         """
         return render_template("error_401.html"), 401
 
+    def _branded_error_response(status_code: int, title: str, message: str):
+        """Shared body for the 404/405/400 errorhandlers below (issue
+        #173) -- one template (error.html) instead of three near-identical
+        ones, and one place that decides the HX-Request branch so all
+        three stay consistent.
+
+        `message` must never carry request-derived data (the attempted
+        path, the method, a stack trace) -- these render for an anonymous,
+        possibly-malicious visitor, so the body has to be as safely
+        static/brandable as error_401.html already is.
+
+        HX-Request branch: htmx 2's documented default
+        (`htmx.config.responseHandling`) does NOT swap a 4xx/5xx response
+        into the DOM at all -- it fires `htmx:responseError` and leaves the
+        target untouched, and this app never overrides that default
+        anywhere (unlike the 401 case, which needs an HX-Redirect because
+        a stale session genuinely has to navigate somewhere). So unlike
+        the 401 handler, there is no navigation to force here: the status
+        code stays the REAL 404/405/400 in both branches, for a monitoring
+        tool and a browser alike. The only thing the HX-Request check
+        changes is the BODY SHAPE -- a small, non-templated plain-text
+        message instead of the full error.html document (nav, footer,
+        clerk-js script tag, the works) -- so that IF this app or some
+        future template ever configures htmx to swap on error (the docs'
+        own example flips `evt.detail.shouldSwap` for 422), a full embedded
+        HTML document never lands inside a small fragment target.
+        """
+        if (request.headers.get("HX-Request") or "").lower() == "true":
+            return message, status_code
+        return render_template(
+            "error.html", status_code=status_code, title=title, message=message
+        ), status_code
+
+    @app.errorhandler(404)
+    def not_found(_error):
+        return _branded_error_response(
+            404,
+            "Page not found",
+            "This page doesn't exist. Double-check the link, or head back to the feed.",
+        )
+
+    @app.errorhandler(405)
+    def method_not_allowed(error):
+        """Werkzeug's MethodNotAllowed carries the route's real allowed
+        methods on `.valid_methods` -- Flask's DEFAULT error handling
+        copies that onto an `Allow` response header automatically (via
+        HTTPException.get_response()), but registering a custom
+        errorhandler here means we own the response object and have to
+        copy it ourselves, or a genuinely wrong-method request (issue
+        #173's `PUT /postings/1/save` example) would come back 405 with no
+        `Allow` header -- exactly the diagnosability gap the issue names."""
+        body, status = _branded_error_response(
+            405,
+            "Method not allowed",
+            "This request method isn't supported for this page.",
+        )
+        response = app.make_response((body, status))
+        valid_methods = getattr(error, "valid_methods", None)
+        if valid_methods:
+            response.headers["Allow"] = ", ".join(sorted(valid_methods))
+        return response
+
+    @app.errorhandler(400)
+    def bad_request(_error):
+        """Covers a Werkzeug BadRequest raised from inside this app (e.g.
+        malformed request data Flask/Werkzeug itself rejects) with a
+        branded page instead of Werkzeug's plain-text default -- issue
+        #182 item 5's "very long query string renders a bare/unstyled
+        error page" is the motivating case, but note the scope limit: if
+        that report's actual query string exceeded the front proxy's
+        request-line size limit (e.g. gunicorn's `limit_request_line`,
+        ~4094 bytes by default), the request never reaches this Flask app
+        at all -- a WSGI-server/proxy-layer 400 can't be caught by any
+        errorhandler here, the same class of gap as #182 item 2's
+        Cloudflare HEAD Content-Length artifact. This handler covers every
+        BadRequest this app's own code can raise; a below-the-app rejection
+        would need a render.yaml / proxy config change, not app code."""
+        return _branded_error_response(
+            400,
+            "Bad request",
+            "This request couldn't be processed. Double-check the link and try again.",
+        )
+
     @app.before_request
     def clerk_auth():
         # before_request runs for EVERY request regardless of routing
-        # outcome — Flask raises the routing exception later, in dispatch —
-        # so an unmatched path still hits this gate and 401s before it ever
-        # gets a chance to 404 (deliberate fail-closed). URL-rule matching
-        # HAS already run by this point for matched routes, though, which is
-        # what the request.blueprint == "webhooks" exemption relies on. The
-        # public-path exemption rests solely on _is_public_request_path()'s
+        # outcome, and by this point URL matching has ALREADY happened
+        # (Flask populates request.url_rule / request.routing_exception
+        # when the request context is pushed, before any before_request
+        # hook runs) -- Flask just defers actually RAISING that exception
+        # until dispatch_request, which is later than this hook. Left
+        # alone, that gap meant an unmatched path or a wrong HTTP method on
+        # a real route fell through every check below and came back as a
+        # 401 "Sign-in required" page -- indistinguishable from a
+        # genuinely gated route (issue #173: a visitor, or a monitoring
+        # tool, can't tell a typo'd URL from a real gate, and a wrong
+        # method gets no `Allow` header). Re-raising it here, before ANY
+        # auth logic runs, hands control straight back to Flask's normal
+        # exception handling -- exactly what would happen if this
+        # before_request hook didn't exist at all -- which dispatches to
+        # the 404/405 errorhandlers below. Deliberately unconditional (no
+        # PUBLIC_PATHS / webhooks check first): a wrong-method request
+        # against a PUBLIC path must 405 too, not silently pass through as
+        # public and fail deeper in the stack. A matched /static/<path>
+        # request is NOT affected -- the rule itself matches regardless of
+        # whether the file exists, so routing_exception is None there and
+        # a missing file still 404s from inside the view, same as before.
+        if request.routing_exception is not None:
+            # g.clerk_user must be set before ANY errorhandler renders a
+            # template -- error.html (the 404/405/400 branded pages below)
+            # extends base.html exactly like error_401.html does, and reads
+            # g.clerk_user for the header nav, so this path has to honor
+            # the SAME "must never see it unset" invariant the identity
+            # assignment a few lines down documents for the 401 path.
+            # Deliberately None, not a best-effort identity resolution: URL
+            # matching hasn't even confirmed this request hit a real route
+            # yet, so calling VERIFY_REQUEST here would run it speculatively
+            # on every unmatched-path/wrong-method probe an attacker or a
+            # scanner throws at this app, and it must never be allowed to
+            # change the 404/405 status code that follows. A signed-in
+            # visitor hitting a typo'd URL sees the signed-out header nav on
+            # that one page, exactly like the public-path branch immediately
+            # below -- an accepted, documented trade-off, not a bug.
+            g.clerk_user = None
+            g.consent_granted = False
+            raise request.routing_exception
+        # The public-path exemption rests solely on _is_public_request_path()'s
         # normalized-path membership check: request.path is compared with a
         # trailing slash stripped (falling back to "/") because /demo is
         # registered strict_slashes=False, so both /demo and /demo/ must
@@ -465,6 +665,18 @@ def create_app(config: dict | None = None) -> Flask:
         # that reads g.clerk_user must never see it unset on the 401 path.
         g.clerk_user = identity
         if identity is None:
+            # public_get's per-view, GET-only opt-out (issue #171): a
+            # matched view marked with `_auth_optional_get` renders for a
+            # signed-out visitor on GET/HEAD instead of aborting -- every
+            # OTHER method on that same view (POST /consent) still falls
+            # through to abort(401) below, since the marker is checked
+            # against request.method, not the endpoint as a whole.
+            view_func = app.view_functions.get(request.endpoint)
+            if _is_auth_optional_for_method(view_func, request.method):
+                g.consent_granted = False
+                ensure_session_ids()
+                capture_attribution()
+                return None
             abort(401)
         g.consent_granted = _resolve_consent(identity)
         ensure_session_ids()
