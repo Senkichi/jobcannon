@@ -33,6 +33,7 @@ construction instead of by coincidence.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 FEED_PAGE_MAX = 25
@@ -71,6 +72,112 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _cursor_predicate(
+    rank_expr: str, after: tuple[float | None, datetime, int] | None
+) -> tuple[str, list[Any]]:
+    """The keyset "seek" WHERE fragment for `_SORTS["default"]`'s own three
+    columns (rank_score, last_seen, id) -- never a second, independently
+    invented cursor shape, so pagination can never drift out of sync with
+    that ORDER BY. `after` is (rank_score, last_seen, id) taken from a
+    previous page's last row (`cursor_from_row`), or None for a first page
+    (returns an empty fragment). `rank_expr` is the RAW SQL expression for
+    rank_score -- `fs.rank_score` on the authed branch, a literal
+    `NULL::double precision` on the anonymous one -- because WHERE cannot
+    reference the SELECT list's output alias the way ORDER BY can; the two
+    branches alias to the same output name but need their own raw
+    expression here.
+
+    `last_seen` is `timestamptz NOT NULL` (m0001), so only `rank_score`
+    needs NULLS-LAST handling: COALESCE to '-infinity' emulates "NULLS
+    LAST" in a DESC ordering by substituting a real, storable
+    double-precision sentinel that sorts behind every other *finite*
+    value, which a plain `<` seek predicate cannot express on a nullable
+    column by itself. This is NOT exactly equivalent to NULLS LAST if a
+    row ever stores a real `rank_score = -Infinity` (a valid double
+    precision value): it would then collide with the NULL sentinel and
+    could be skipped on a page boundary. `feed_state` has no writer
+    anywhere in this codebase yet (guarded by test_feed_state_not_written.py),
+    so this can't occur today — tracked as a follow-up for whenever a
+    ranker writer lands (would need a separate `IS NULL` flag in the row
+    constructor rather than a shared sentinel). Both sides of the row
+    comparison are COALESCEd, not just the column: `after`'s rank_score is
+    NULL on every real page today, and a PostgreSQL row-constructor
+    comparison treats ANY NULL element pair as unknown and drops the row,
+    so COALESCEing only the column side would silently return zero rows
+    on every "load more" click. The explicit `::double precision` cast on
+    the parameter is required: an untyped NULL inside COALESCE raises
+    "could not determine data type"."""
+    if after is None:
+        return "", []
+    after_rank_score, after_last_seen, after_id = after
+    clause = (
+        f"(COALESCE({rank_expr}, '-infinity'::double precision), p.last_seen, p.id) "
+        "< (COALESCE(%s::double precision, '-infinity'::double precision), %s, %s)"
+    )
+    return clause, [after_rank_score, after_last_seen, after_id]
+
+
+def cursor_from_row(row: Any) -> dict[str, str]:
+    """The next page's keyset cursor as URL query params, derived from the
+    LAST row of the page just rendered -- never computed independently of
+    an actual returned row, so a cursor can never point somewhere the sort
+    key didn't actually visit. Consumed by `parse_cursor` (round-trips
+    through a plain query string, not a signed/opaque token: every value
+    here is one this same row already rendered to the viewer, so there is
+    nothing a tampered cursor could expose that page 1 didn't already
+    show -- at worst a malformed value degrades to `parse_cursor` treating
+    it as no cursor, never a 500)."""
+    rank_score = row["rank_score"]
+    last_seen = row["last_seen"]
+    return {
+        "cursor_rank_score": "" if rank_score is None else repr(float(rank_score)),
+        "cursor_last_seen": last_seen.isoformat(),
+        "cursor_id": str(row["id"]),
+    }
+
+
+def parse_cursor(args: Any) -> tuple[float | None, datetime, int] | None:
+    """Query params (a Flask `request.args`-shaped mapping) -> the `after`
+    tuple `list_feed_postings` accepts, or None for "no cursor" (render a
+    first page). A cursor value that fails to *parse* (non-numeric id,
+    non-ISO timestamp, non-float rank score) degrades to None rather than
+    raising -- the caller gets a fresh first page instead of a 500, the
+    same fail-open discipline jobcannon/web/pages.py's other query-param
+    parsing already uses. This function only guards parseability, not SQL
+    validity: a value that parses but is out of range for the DB column
+    (e.g. an id wider than bigint) or is a float special value `float()`
+    accepts but SQL rejects (`nan`, `inf`) passes this function and is
+    instead caught by the caller's broad `except Exception` around the DB
+    call, which degrades to an *empty* batch rather than a fresh first
+    page -- still fail-closed (no 500, no data leak), just a different
+    empty state than "no cursor" produces."""
+    raw_id = (args.get("cursor_id") or "").strip()
+    if not raw_id:
+        return None
+    try:
+        cursor_id = int(raw_id)
+    except ValueError:
+        return None
+
+    raw_last_seen = (args.get("cursor_last_seen") or "").strip()
+    if not raw_last_seen:
+        return None
+    try:
+        last_seen = datetime.fromisoformat(raw_last_seen)
+    except ValueError:
+        return None
+
+    raw_rank = (args.get("cursor_rank_score") or "").strip()
+    rank_score: float | None = None
+    if raw_rank:
+        try:
+            rank_score = float(raw_rank)
+        except ValueError:
+            return None
+
+    return (rank_score, last_seen, cursor_id)
+
+
 def _build_filters(
     *,
     titles: list[str] | None,
@@ -80,10 +187,11 @@ def _build_filters(
     company: str | None,
     posting_id: int | None = None,
 ) -> tuple[list[str], list[Any]]:
-    """Parameterized WHERE fragments + bound params, shared by
-    `list_feed_postings` and `count_feed_postings` so the two queries can
-    never drift out of sync. Every filter value is a bound parameter; only
-    ORDER BY is ever built from the `_SORTS` allowlist.
+    """Parameterized WHERE fragments + bound params for `list_feed_postings`,
+    factored out as its own function so any future second caller of the same
+    filter set builds it identically rather than re-deriving it. Every
+    filter value is a bound parameter; only ORDER BY is ever built from the
+    `_SORTS` allowlist.
 
     `titles` (exact-match, `= ANY(%s)`) and `title_contains` (substring,
     `LIKE`) are two distinct callers, not two spellings of the same filter:
@@ -137,6 +245,7 @@ def list_feed_postings(
     sort: str = "default",
     limit: int = FEED_PAGE_MAX,
     offset: int = 0,
+    after: tuple[float | None, datetime, int] | None = None,
 ) -> list[Any]:
     """Stored values only — no score, label, or classification is computed
     here. `structural_axes` may come back NULL for a real, existing posting
@@ -146,11 +255,28 @@ def list_feed_postings(
 
     An authed reader (`user_id` not None) never sees a posting whose
     `pipeline_status.status = 'dismissed'` — that exclusion clause is added
-    only on this branch, never shared with `count_feed_postings` via
-    `_build_filters`, because it depends on `user_id` and the anonymous
-    branch has no per-user row to exclude by."""
+    only on this branch (not folded into `_build_filters`) because it
+    depends on `user_id` and the anonymous branch has no per-user row to
+    exclude by.
+
+    `after` (#156) is a keyset cursor — the `(rank_score, last_seen, id)`
+    tuple `cursor_from_row` derived from a previous page's last row, or None
+    for a first page. It is only meaningful against `_SORTS["default"]`'s
+    own ordering (see `_cursor_predicate`'s docstring), so passing a cursor
+    against any other sort token raises rather than silently seeking through
+    rows in an order the cursor was never computed against — today `_SORTS`
+    has exactly one token, so this only guards a future second one. `after`
+    and a nonzero `offset` are mutually exclusive: `OFFSET` is kept only so
+    non-cursor callers (existing callers of this function, pre-#156) are
+    unaffected, but combining it with `after` would silently skip rows past
+    the seek point — the exact drift keyset pagination exists to avoid — so
+    that combination raises rather than being allowed to compose."""
     if sort not in _SORTS:
         raise ValueError(f"unknown sort token: {sort!r}")
+    if after is not None and sort != "default":
+        raise ValueError(f"cursor pagination is only defined for sort='default', got {sort!r}")
+    if after is not None and offset != 0:
+        raise ValueError("cursor pagination (after=...) cannot be combined with offset != 0")
     order_by = _SORTS[sort]
     limit = max(0, min(limit, FEED_PAGE_MAX))
 
@@ -166,7 +292,10 @@ def list_feed_postings(
     raw = conn.raw if hasattr(conn, "raw") else conn
 
     if user_id is not None:
+        cursor_sql, cursor_params = _cursor_predicate("fs.rank_score", after)
         authed_where_clauses = [*where_clauses, "(ps.status IS DISTINCT FROM 'dismissed')"]
+        if cursor_sql:
+            authed_where_clauses.append(cursor_sql)
         where_sql = f"WHERE {' AND '.join(authed_where_clauses)}"
         sql = (
             f"SELECT {_SELECT_COLUMNS}, "
@@ -180,9 +309,11 @@ def list_feed_postings(
             f"ORDER BY {order_by} "
             "LIMIT %s OFFSET %s"
         )
-        query_params = [user_id, user_id, user_id, *params, limit, offset]
+        query_params = [user_id, user_id, user_id, *params, *cursor_params, limit, offset]
     else:
-        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        cursor_sql, cursor_params = _cursor_predicate("NULL::double precision", after)
+        all_where = [*where_clauses, cursor_sql] if cursor_sql else where_clauses
+        where_sql = f"WHERE {' AND '.join(all_where)}" if all_where else ""
         sql = (
             f"SELECT {_SELECT_COLUMNS}, "
             "NULL::double precision AS rank_score, NULL::text AS ranker_version, "
@@ -192,55 +323,62 @@ def list_feed_postings(
             f"ORDER BY {order_by} "
             "LIMIT %s OFFSET %s"
         )
-        query_params = [*params, limit, offset]
+        query_params = [*params, *cursor_params, limit, offset]
 
     return raw.execute(sql, query_params).fetchall()
 
 
-def count_feed_postings(
-    conn: Any,
-    *,
-    titles: list[str] | None = None,
-    title_contains: str | None = None,
-    workplace_type: str | None = None,
-    location_contains: str | None = None,
-    company: str | None = None,
-) -> int:
-    """Same filters as `list_feed_postings`, for the "N matches" line.
-    `user_id` is deliberately not a parameter here: the `feed_state` join is
-    a LEFT JOIN keyed on the shared corpus, so it never changes which rows
-    match, only what their `rank_score`/`ranker_version` columns read — a
-    count is identical whether or not that join is present."""
-    where_clauses, params = _build_filters(
-        titles=titles,
-        title_contains=title_contains,
-        workplace_type=workplace_type,
-        location_contains=location_contains,
-        company=company,
-    )
-    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-    raw = conn.raw if hasattr(conn, "raw") else conn
-    row = raw.execute(f"SELECT COUNT(*) AS n FROM postings p {where_sql}", params).fetchone()
-    return row["n"]
+def _distinct_matching(raw: Any, column: str, q: str | None, limit: int) -> list[str]:
+    """Shared body for `distinct_titles`/`distinct_companies` (#148): with no
+    `q`, identical to their pre-#148 behavior (alphabetical, unfiltered,
+    capped at `limit`) — every existing caller's contract is unchanged. With
+    `q`, ILIKE substring-matches `column` (case-insensitive, LIKE
+    metacharacters escaped the same way `_build_filters` already escapes
+    them for `title_contains`/`location_contains`) and ranks prefix matches
+    ahead of non-prefix matches, then alphabetically within each group — a
+    corpus that skews heavily toward a handful of alphabetically-early
+    prefixes (the bug #148 reports) no longer buries a real target title
+    outside the `limit`-item window as long as it's actually searched for.
+
+    `column` is always one of the two fixed literals its two call sites pass
+    ("title" / "company") — never request-derived — so interpolating it
+    directly into the SQL text is the same trusted, code-owned pattern
+    `_SORTS` already uses for `ORDER BY`, not a SQL-injection surface. The
+    inner `SELECT DISTINCT` is wrapped in a subquery specifically so the
+    outer `ORDER BY` can reference the prefix-match expression: PostgreSQL
+    requires every `ORDER BY` expression on a `SELECT DISTINCT` to appear in
+    its own select list, and `column ILIKE prefix_pattern` is not `column`
+    itself."""
+    if not q:
+        rows = raw.execute(
+            f"SELECT DISTINCT {column} FROM postings ORDER BY {column} LIMIT %s", (limit,)
+        ).fetchall()
+        return [row[column] for row in rows]
+    escaped = _escape_like(q)
+    contains_pattern = f"%{escaped}%"
+    prefix_pattern = f"{escaped}%"
+    rows = raw.execute(
+        f"SELECT {column} FROM ("
+        f"SELECT DISTINCT {column} FROM postings WHERE {column} ILIKE %s ESCAPE '\\'"
+        f") matched "
+        f"ORDER BY ({column} ILIKE %s ESCAPE '\\') DESC, {column} ASC "
+        "LIMIT %s",
+        (contains_pattern, prefix_pattern, limit),
+    ).fetchall()
+    return [row[column] for row in rows]
 
 
-def distinct_titles(conn: Any, *, limit: int = 50) -> list[str]:
+def distinct_titles(conn: Any, *, q: str | None = None, limit: int = 50) -> list[str]:
     """Bounded, corpus-derived option source for the picker's title field —
     options are derived from the corpus at read time, never a hardcoded list,
-    so the picker cannot drift from what the database actually contains."""
+    so the picker cannot drift from what the database actually contains.
+    `q` (#148) case-insensitively substring-filters and ranks by
+    prefix-match first — see `_distinct_matching`."""
     raw = conn.raw if hasattr(conn, "raw") else conn
-    rows = raw.execute(
-        "SELECT DISTINCT title FROM postings ORDER BY title LIMIT %s", (limit,)
-    ).fetchall()
-    return [row["title"] for row in rows]
+    return _distinct_matching(raw, "title", q, limit)
 
 
-def distinct_companies(conn: Any, *, limit: int = 50) -> list[str]:
-    """Bounded, corpus-derived option source for the picker's company field —
-    options are derived from the corpus at read time, never a hardcoded list,
-    so the picker cannot drift from what the database actually contains."""
+def distinct_companies(conn: Any, *, q: str | None = None, limit: int = 50) -> list[str]:
+    """Same contract as `distinct_titles`, for the company field (#148)."""
     raw = conn.raw if hasattr(conn, "raw") else conn
-    rows = raw.execute(
-        "SELECT DISTINCT company FROM postings ORDER BY company LIMIT %s", (limit,)
-    ).fetchall()
-    return [row["company"] for row in rows]
+    return _distinct_matching(raw, "company", q, limit)

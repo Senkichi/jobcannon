@@ -236,9 +236,19 @@ def test_footer_links_to_privacy_and_terms():
 
 
 def test_consent_copy_links_to_privacy_and_no_longer_says_pending():
-    src = pathlib.Path("jobcannon/web/templates/consent.html").read_text(encoding="utf-8")
-    assert 'href="/privacy"' in src
-    assert "pending" not in src.lower()
+    """consent.html no longer carries this copy directly (issue #182 split
+    it into _consent_panel.html, shared with the post-grant/decline
+    fragment response) -- assert BOTH that consent.html still pulls the
+    panel in, and that the panel itself (the actual owner of this copy
+    now) still links /privacy and says nothing about "pending"."""
+    consent_src = pathlib.Path("jobcannon/web/templates/consent.html").read_text(encoding="utf-8")
+    assert 'include "_consent_panel.html"' in consent_src
+
+    panel_src = pathlib.Path("jobcannon/web/templates/_consent_panel.html").read_text(
+        encoding="utf-8"
+    )
+    assert 'href="/privacy"' in panel_src
+    assert "pending" not in panel_src.lower()
 
 
 # ---------------------------------------------------------------------------

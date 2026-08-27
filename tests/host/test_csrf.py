@@ -202,7 +202,8 @@ def test_post_start_with_token_mints_anon_user(db_app):
 @requires_postgres
 def test_post_consent_with_token_records_grant(db_app):
     """Prior behavior pinned by tests/host/test_consent_route.py: a grant
-    redirects and sets analytics_consent."""
+    Post/Redirect/Gets back to GET /consent (303 -- issue #182's inline-ack
+    fix replaced the old 302-to-feed redirect) and sets analytics_consent."""
     dsn = db_app.config["_TEST_DSN"]
     with psycopg.connect(dsn) as conn:
         conn.execute("INSERT INTO users (id) VALUES (%s)", (USER_ID,))
@@ -215,7 +216,7 @@ def test_post_consent_with_token_records_grant(db_app):
     token = _token_from(get_resp.data)
 
     resp = client.post("/consent", data={"choice": "grant", "csrf_token": token})
-    assert resp.status_code == 302
+    assert resp.status_code == 303
 
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
         user = conn.execute(
