@@ -46,6 +46,23 @@ def _reset_analytics_pseudonym_salt():
 
 
 @pytest.fixture(autouse=True)
+def _reset_posthog_admin():
+    """jobcannon.host.posthog_admin's personal-API-key/project-id/host/
+    logged-once-flag are module-level globals too (issue #135) — same
+    leak-across-tests hazard as the salt above, and the same reset-only
+    rationale: unconfigured (fail-soft skip) is the free ambient state,
+    tests that exercise a configured purge opt in explicitly via
+    posthog_admin.configure(...) in their own body. Also resets
+    `_logged_unset_once` so the "logs exactly once" assertion in
+    tests/host/test_posthog_admin.py never depends on test execution order
+    within the file, let alone across files."""
+    from jobcannon.host import posthog_admin
+
+    yield
+    posthog_admin.configure(personal_api_key=None, project_id=None, host=None)
+
+
+@pytest.fixture(autouse=True)
 def _pool_watchdog_disabled_by_default(monkeypatch):
     """open_pool auto-starts the pool-watchdog daemon thread, which would leak
     a live thread (first probe at t=15s) across every host test that opens a

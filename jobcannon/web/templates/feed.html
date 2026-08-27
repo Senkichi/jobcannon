@@ -1,9 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Feed — Job Cannon{% endblock %}
 {% block content %}
-{% if not profile %}
+{% if not has_selections %}
+  {# #176: this branch covers a brand-new authed visitor who has not yet
+     run the picker (jobcannon/db/_profiles.py's upsert_profile is the only
+     writer of the `profiles` row this page checks) — copy used to claim
+     "profiles and the ranked feed arrive in the next release", which was
+     already false the moment this route started writing profiles. Mirrors
+     jobcannon/web/onboarding.py's /preview `data-no-selections` CTA. #}
   <h1 class="text-2xl font-semibold mb-3">Your feed isn't wired up yet</h1>
-  <p class="text-neutral-400">Job Cannon is in its corpus-building phase. Profiles and the ranked feed arrive in the next release — the scanner is already filling the shared corpus below.</p>
+  <p class="text-neutral-400" data-no-selections>
+    Job Cannon builds your feed from a quick picker of target titles, seniority, and preferences.
+    <a href="/start" class="underline">Set up your feed</a> to get started.
+  </p>
 {% elif stats.postings == 0 %}
   {% include "_corpus_empty.html" %}
 {% else %}

@@ -53,6 +53,14 @@ EngineCompatConnection facade), a bare connection is used as-is (the
 rollback-isolated `db_conn` test fixture), and `commit_unless_nested` makes
 each function safe to call both through a real pooled commit and inside a
 test's ambient transaction.
+
+`list_users_pending_deletion_reconciliation` / `mark_deletion_checked`
+(issue #136) are the candidate-selection half of the reconciliation sweep
+(jobcannon.host.user_deletion.run_reconciliation_sweep) that catches a
+`user.deleted` webhook Clerk never delivered. See m0011's docstring for why
+the ordering needs a rotation cursor (`deletion_checked_at`) rather than a
+plain `created_at ASC` — without it, every row past the sweep's row_cap
+would be permanently unreachable.
 """
 
 from __future__ import annotations
@@ -118,3 +126,52 @@ def reap_unconverted_anon_users(conn: Any, *, retention_days: int) -> list[str]:
     ).fetchall()
     commit_unless_nested(raw)
     return [row["id"] for row in rows]
+
+
+def list_users_pending_deletion_reconciliation(
+    conn: Any, *, settle_days: int, limit: int
+) -> list[str]:
+    """Candidate Clerk-issued `users` ids for issue #136's reconciliation
+    sweep: old enough (`settle_days`) to rule out racing a same-day Clerk
+    deletion that hasn't propagated yet, ordered `deletion_checked_at NULLS
+    FIRST, created_at ASC` so the sweep rotates through the whole table over
+    time instead of the same oldest `limit` rows forever (see m0011's
+    docstring). Read-only; the caller commits nothing here.
+
+    A POSITIVE allowlist (`id LIKE 'user\\_%'`), not a growing denylist of
+    known-non-Clerk sentinels: the previous shape (`NOT LIKE 'anon\\_%'`)
+    let the seeded `guest_demo` sentinel (a legitimate non-anon, non-Clerk
+    row — `jobcannon/db/_profiles.py`'s `GUEST_USER_ID`) reach the Clerk
+    lookup once it aged past `settle_days`, where a definitive 404 would
+    hard-delete it and break `/demo`. Clerk-issued ids are always
+    `user_`-prefixed (every real fixture/test id in this codebase follows
+    that shape); a positive allowlist can't be defeated by a future sentinel
+    that forgets to also update a denylist here."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    like_pattern = "user\\_%"
+    rows = raw.execute(
+        "SELECT id FROM users "
+        "WHERE id LIKE %s ESCAPE '\\' "
+        "AND created_at < now() - make_interval(days => %s) "
+        "ORDER BY deletion_checked_at NULLS FIRST, created_at ASC "
+        "LIMIT %s",
+        (like_pattern, settle_days, limit),
+    ).fetchall()
+    return [row["id"] for row in rows]
+
+
+def mark_deletion_checked(conn: Any, user_id: str) -> None:
+    """Stamps the rotation cursor (issue #136) so the next sweep rotates
+    past this row. Call after ANY definitive per-sweep outcome that is NOT
+    a deletion -- confirmed-present, or a lookup error (MEDIUM-5 /
+    FINDING-4: an error outcome that never stamps keeps `deletion_checked_at`
+    NULL forever, so a persistently-erroring row re-sorts to the front of
+    every future sweep under `NULLS FIRST` and can starve out rows that have
+    never been checked at all; stamping on error too makes it rotate to the
+    back like any other checked row, and it gets retried on its next natural
+    turn instead of monopolizing every tick). Never call this for a row that
+    turned out to be deleted -- delete_user's DELETE removes the row itself,
+    nothing left to stamp."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    raw.execute("UPDATE users SET deletion_checked_at = now() WHERE id = %s", (user_id,))
+    commit_unless_nested(raw)
