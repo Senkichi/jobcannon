@@ -66,9 +66,7 @@ def _authed(app, user_id):
 
 def _seed_user(dsn, user_id):
     with psycopg.connect(dsn, autocommit=True) as conn:
-        conn.execute(
-            "INSERT INTO users (id) VALUES (%s) ON CONFLICT (id) DO NOTHING", (user_id,)
-        )
+        conn.execute("INSERT INTO users (id) VALUES (%s) ON CONFLICT (id) DO NOTHING", (user_id,))
 
 
 def _seed_profile(dsn, user_id):

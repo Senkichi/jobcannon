@@ -142,9 +142,7 @@ def test_prune_expired_revocations_is_a_no_op_when_nothing_is_expired(db_conn):
 def test_reap_revoked_subjects_task_reports_a_count_not_ids(monkeypatch):
     from jobcannon.host import tasks
 
-    monkeypatch.setattr(
-        tasks, "prune_expired_revocations", lambda conn: ["user_a", "user_b"]
-    )
+    monkeypatch.setattr(tasks, "prune_expired_revocations", lambda conn: ["user_a", "user_b"])
 
     @contextlib.contextmanager
     def _fake_connection_factory():

@@ -285,9 +285,7 @@ def test_post_delete_tombstone_write_failure_never_calls_clerk(app, monkeypatch)
     "jobcannon.db.connection_factory" rather than a tasks.py-local alias)."""
     client_double = _FakeClerkClient()
     _authed(app, client_double)
-    monkeypatch.setattr(
-        "jobcannon.db._revoked_subjects.revoke_subject", _raise_tombstone_failure
-    )
+    monkeypatch.setattr("jobcannon.db._revoked_subjects.revoke_subject", _raise_tombstone_failure)
     client = app.test_client()
     with client.session_transaction() as sess:
         sess["anon_session_id"] = "anon_kept_on_tombstone_failure"
