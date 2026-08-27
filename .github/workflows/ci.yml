@@ -51,7 +51,20 @@ jobs:
       # jobcannon/db/migrations/m0005_postings_embedding.py runs
       # `CREATE EXTENSION IF NOT EXISTS vector` as its first statement, so
       # no separate psql step is needed.
-      - run: uv run pytest -q --tb=short
+      #
+      # jobcannon#162: os.fork() does not exist on Windows, so the two
+      # fork-gated proof tests in tests/host/test_posthog_fork_atexit.py
+      # cannot run on this self-hosted Windows runner (#162 also checked
+      # WSL and Docker on the runner box -- neither is installed, so
+      # there's no path to real fork() coverage here today). This env var
+      # is the explicit, documented acknowledgment of that gap:
+      # test_posthog_fork_atexit.py's _require_fork_or_fail_loud gate FAILS
+      # the build instead of silently skipping if this line is ever
+      # removed without the gap actually being closed.
+      - name: Run tests
+        run: uv run pytest -q --tb=short
+        env:
+          JC_FORK_TESTS_UNAVAILABLE: "1"
 
   tests-passed:
     name: Tests passed
