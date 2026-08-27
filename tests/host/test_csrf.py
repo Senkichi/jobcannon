@@ -132,11 +132,17 @@ def test_webhook_route_is_csrf_exempt():
     """An unknown Clerk event type is acknowledged 200 with no DB write
     (jobcannon/web/webhooks.py's own comment on that branch) — the minimal
     case that proves CSRF exemption without needing a live Postgres pool.
-    Carries no X-CSRFToken header and no csrf_token form field; a 400 here
-    would mean the webhooks blueprint exemption (jobcannon/web/__init__.py's
+    `data.id` must be present: webhooks.py's `if not user_id: return ("",
+    400)` guard runs BEFORE the event-type branch, so an empty `data` 400s
+    for that reason alone regardless of CSRF, which would make this test
+    pass for the wrong reason (or, as originally written with `"data": {}`,
+    fail on an unrelated 400 that looked like a CSRF regression but wasn't
+    one). Carries no X-CSRFToken header and no csrf_token form field; a 400
+    with an EMPTY body (not error_csrf.html/the HX fragment) would mean the
+    webhooks blueprint exemption (jobcannon/web/__init__.py's
     `csrf.exempt(webhooks_bp)`) regressed."""
     client = _stateless_app().test_client()
-    payload = b'{"type": "some.unknown.event", "object": "event", "data": {}}'
+    payload = b'{"type": "some.unknown.event", "object": "event", "data": {"id": "user_whatever"}}'
     resp = client.post("/webhooks/clerk", data=payload, headers=_svix_headers(payload))
     assert resp.status_code == 200
 
