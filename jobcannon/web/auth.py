@@ -10,14 +10,31 @@ not os.environ directly — the config-surface refactor of issue #47, so
 tests/host/test_render_config.py's required-env-var guard can derive the
 full set from HostConfig's field metadata instead of a hand-maintained
 literal.
+
+`fetch_primary_email` (issue #181) is a second Clerk Backend API call added
+here rather than in jobcannon/web/account.py or jobcannon/web/export.py:
+this module is already "the one Clerk SDK client construction site" per
+build_clerk_client's docstring, and jobcannon/web/account.py's post_delete
+reuses that SAME client instance (app.config["CLERK_CLIENT"]) for its own
+Clerk call rather than building a second one — the export route does the
+same. Duck-types the returned `models.User` (attribute access via getattr,
+never `isinstance` against a clerk_backend_api model class) so the fake
+`CLERK_CLIENT` test doubles every test in this package already uses (plain
+classes/SimpleNamespace, e.g. tests/host/test_account_route.py's
+_FakeClerkClient) can stand in without constructing real SDK model
+instances — keeping this module's "SDK never imported in tests" property
+intact for the new code path too.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from jobcannon.host.config import HostConfig
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -91,3 +108,88 @@ def build_clerk_verifier(
         return ClerkIdentity(user_id=state.payload["sub"], claims=dict(state.payload))
 
     return verify
+
+
+@dataclass(frozen=True)
+class ClerkEmailLookup:
+    """Result of `fetch_primary_email` — always one of two shapes: a
+    resolved `email` (`email_verified` a real bool, `unavailable_reason`
+    None), or `email` None with `unavailable_reason` set (never a raised
+    exception — see `fetch_primary_email`)."""
+
+    email: str | None
+    email_verified: bool | None
+    unavailable_reason: str | None
+
+
+def _clerk_failure_reason(exc: Exception) -> str:
+    """Classify a failed `users.get()` call into a stable reason string.
+    Duck-types `.status_code` rather than `isinstance`-checking
+    clerk_backend_api's `ClerkErrors`/`SDKError` (both expose it as a plain
+    int via their shared `ClerkBaseError` base) so this needs no SDK import
+    and works identically against a test double's fake exception. Never
+    reads `str(exc)`/`exc.args` — only the status code and the exception's
+    own class name — so nothing from the request (headers, bearer token)
+    can end up in the derived reason or the log line below."""
+    status_code = getattr(exc, "status_code", None)
+    if status_code == 404:
+        return "clerk_user_not_found"
+    if status_code is not None:
+        return f"clerk_api_error_{status_code}"
+    if "timeout" in type(exc).__name__.lower():
+        return "clerk_timeout"
+    return "clerk_request_failed"
+
+
+def fetch_primary_email(client: Any, user_id: str, *, timeout_ms: int = 5000) -> ClerkEmailLookup:
+    """Look up a Clerk user's primary email address + verification status
+    via `client.users.get(user_id=...)` — the SAME credentialed client
+    jobcannon.web.account's user-delete call reuses (never a second
+    `Clerk(...)` construction). Fail-soft BY DESIGN: this is called on
+    jobcannon/web/export.py's request path, so a Clerk outage, timeout, or
+    4xx/5xx must degrade to a null email + reason, never raise (which would
+    otherwise turn an unrelated-to-Clerk data export into a 500) and never
+    retry-storm the request (see `retries=None` below).
+
+    `client is None` covers both "Clerk isn't configured" (TESTING apps
+    that never set CLERK_CLIENT, matching jobcannon/web/__init__.py's
+    `app.config["CLERK_CLIENT"] = clerk_client` which stays None there) and
+    a real deployment would instead fail at boot via build_clerk_client's
+    own RuntimeError — this branch exists for the former, not to paper over
+    the latter.
+
+    `retries=None` (rather than leaving the SDK's per-call default) is
+    load-bearing: clerk_backend_api's default retry policy is exponential
+    backoff on 5XX with `max_elapsed_time=3_600_000` ms (one hour) — passing
+    only `timeout_ms` would bound a single attempt but not a run of retried
+    5xx responses. `retries=None` (a plain value, not the SDK's `UNSET`
+    sentinel — see `.get()`'s `if retries == UNSET` branch) short-circuits
+    clerk_backend_api's do_request straight to a single attempt, so
+    `timeout_ms` is the whole call's bound, matching this function's ~5s
+    contract without importing clerk_backend_api.utils.RetryConfig.
+    """
+    if client is None:
+        return ClerkEmailLookup(None, None, "clerk_client_unavailable")
+
+    # The try/except spans BOTH the network call and the response parsing
+    # below (not just client.users.get()): the fail-soft contract this
+    # function documents ("never raise") covers the whole function, and a
+    # malformed/duck-typed response (e.g. a non-list `email_addresses`) must
+    # degrade the same way a network failure does, not escape as a raw
+    # TypeError/AttributeError and 500 the caller's unrelated data export.
+    try:
+        user = client.users.get(user_id=user_id, timeout_ms=timeout_ms, retries=None)
+        primary_id = getattr(user, "primary_email_address_id", None)
+        for address in getattr(user, "email_addresses", None) or []:
+            if getattr(address, "id", None) != primary_id:
+                continue
+            verification = getattr(address, "verification", None)
+            verified = (
+                verification is not None and getattr(verification, "status", None) == "verified"
+            )
+            return ClerkEmailLookup(getattr(address, "email_address", None), verified, None)
+        return ClerkEmailLookup(None, None, "no_primary_email_on_account")
+    except Exception as exc:
+        reason = _clerk_failure_reason(exc)
+        logger.warning("Clerk get-user lookup failed for user %s (%s)", user_id, reason)
+        return ClerkEmailLookup(None, None, reason)

@@ -2,6 +2,18 @@
 self-service data-export route (closes the "No data-export route for an
 authenticated user's own data" issue).
 
+Top-level `identity` section (issue #181): this app deliberately stores no
+email server-side (Clerk holds it — see jobcannon/web/auth.py's module
+docstring), so the export's only source for the account's own email is a
+live Clerk Backend API call, `jobcannon.web.auth.fetch_primary_email`,
+reusing app.config["CLERK_CLIENT"] the same way jobcannon/web/account.py's
+delete route does. That call happens BEFORE `connection_factory()` opens a
+pooled connection below — it can take up to ~5s (its own timeout bound) and
+must not hold a DB connection idle for that long. It is fail-soft by
+design (see fetch_primary_email's docstring): Clerk being unreachable,
+slow, or returning 4xx/5xx degrades `identity.email` to null with
+`identity.email_unavailable_reason` set, never a 500.
+
 Ships ONE JSON document, served as a file download (`Content-Disposition:
 attachment`, filename carrying a date stamp), joining every per-user row
 this product stores under the requesting Clerk user id: profile
@@ -46,12 +58,13 @@ import decimal
 import json
 from typing import Any
 
-from flask import Blueprint, Response, g
+from flask import Blueprint, Response, current_app, g
 
 from jobcannon.db._events import db_now_iso, list_events_for_user, read_latest_consent_record
 from jobcannon.db._profiles import get_profile
 from jobcannon.db._user_actions import list_pipeline_status_entries, list_watchlist_entries
 from jobcannon.db.pool import connection_factory
+from jobcannon.web.auth import ClerkEmailLookup, fetch_primary_email
 
 export_bp = Blueprint("export", __name__)
 
@@ -59,7 +72,9 @@ export_bp = Blueprint("export", __name__)
 # removed, or renamed) — NOT on every route change. Exported so a future
 # consumer of this document (or a test) can import the literal instead of
 # retyping it.
-SCHEMA_VERSION = "1"
+#
+# v2 (issue #181): added the top-level `identity` section.
+SCHEMA_VERSION = "2"
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
@@ -89,12 +104,30 @@ def _json_default(value: Any) -> Any:
     raise TypeError(f"not JSON serializable: {type(value)!r}")
 
 
-def _build_export_document(conn: Any, user_id: str) -> dict[str, Any]:
+def _build_export_document(
+    conn: Any, user_id: str, email_lookup: ClerkEmailLookup
+) -> dict[str, Any]:
     profile = get_profile(conn, user_id)
+    generated_at = db_now_iso(conn)
     return {
         "schema_version": SCHEMA_VERSION,
-        "generated_at": db_now_iso(conn),
+        "generated_at": generated_at,
         "user_id": user_id,
+        "identity": {
+            "email": email_lookup.email,
+            "email_verified": email_lookup.email_verified,
+            "source": "clerk",
+            # Reuses the SAME clock read as generated_at rather than a
+            # second one -- NOT a precise timestamp of when the Clerk call
+            # itself returned. On the happy path those are close together;
+            # on a degraded path (timeout, 5xx, ...) the Clerk attempt can
+            # take up to fetch_primary_email's ~5s bound before this value
+            # is read, so it lags the actual fetch attempt by up to that
+            # bound. Read it as "this document's generation time" (same as
+            # generated_at), not as "when Clerk was queried."
+            "fetched_at": generated_at,
+            "email_unavailable_reason": email_lookup.unavailable_reason,
+        },
         "profile": _row_to_dict(profile) if profile is not None else None,
         "watchlist": [_row_to_dict(r) for r in list_watchlist_entries(conn, user_id)],
         "pipeline_status": [_row_to_dict(r) for r in list_pipeline_status_entries(conn, user_id)],
@@ -106,8 +139,12 @@ def _build_export_document(conn: Any, user_id: str) -> dict[str, Any]:
 @export_bp.get("/account/export", strict_slashes=False)
 def export_account_data():
     user_id = g.clerk_user.user_id
+    # Fetched BEFORE the DB connection is checked out below — this call can
+    # take up to ~5s (its own timeout bound) and must not hold a pooled
+    # connection idle for that long. See fetch_primary_email's docstring.
+    email_lookup = fetch_primary_email(current_app.config.get("CLERK_CLIENT"), user_id)
     with connection_factory() as conn:
-        document = _build_export_document(conn, user_id)
+        document = _build_export_document(conn, user_id, email_lookup)
 
     body = json.dumps(document, default=_json_default, indent=2)
     date_stamp = document["generated_at"][:10]  # "YYYY-MM-DD" prefix of db_now_iso's output
