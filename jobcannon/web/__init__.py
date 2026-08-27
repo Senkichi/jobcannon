@@ -161,6 +161,19 @@ def create_app(config: dict | None = None) -> Flask:
     secret_key = app.config.get("SECRET_KEY") or getattr(host_config, "secret_key", "")
     if not app.config.get("TESTING") and not secret_key:
         raise RuntimeError("JC_SECRET_KEY is required (Flask session signing key)")
+    if app.config.get("TESTING") and not secret_key:
+        # A TESTING HOST_CONFIG double that carries no secret_key of its own
+        # (e.g. tests/host/test_empty_states.py's bare
+        # `types.SimpleNamespace(clerk_sign_up_url="")`, predating issue #146)
+        # must still get a real Flask session: base.html's `csrf_meta_tag()`/
+        # `csrf_token()` (issue #146) touch the session on EVERY render now,
+        # including error_401.html, so a blank secret_key breaks page
+        # rendering itself with a RuntimeError, not just an actual CSRF
+        # check — before CSRF, a double this bare only had to survive routes
+        # that never touched Flask's session at all. Same literal the
+        # HOST_CONFIG-absent TESTING branch above already uses, so a test
+        # reading the value back sees one consistent constant either way.
+        secret_key = "testing-secret-key"
     app.config["SECRET_KEY"] = secret_key
     # Secure by default, relaxed for both test and local-dev runs. Keyed off
     # testing/debug rather than TESTING alone: a plain `flask run` /
