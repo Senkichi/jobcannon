@@ -98,6 +98,20 @@ def _fmt_years(value: Any) -> str:
         return _fmt_scalar(value)
 
 
+def _fmt_comp_floor(value: Any) -> str:
+    """#28 item 2: `comp_floor_usd` (integer, nullable — m0008) renders as a
+    thousands-separated dollar figure (e.g. "$120,000") for comp_fit
+    anchoring, or "Not specified" when the tenant hasn't set a floor. A
+    tenant that hasn't told us their floor must never anchor comp_fit
+    against a fabricated number (see m0008's migration docstring)."""
+    if value is None:
+        return _NOT_SPECIFIED
+    try:
+        return f"${int(value):,}"
+    except (TypeError, ValueError):
+        return _fmt_scalar(value)
+
+
 def build_candidate_context(profile: Mapping) -> str:
     """Render a candidate-context string from a profiles-shaped mapping.
 
@@ -113,6 +127,7 @@ def build_candidate_context(profile: Mapping) -> str:
             f"- Target titles: {_fmt_list(_get(profile, 'target_titles'))}",
             f"- Target locations: {_fmt_list(_get(profile, 'target_locations'))}",
             f"- Experience summary: {_fmt_scalar(_get(profile, 'experience_summary'))}",
+            f"- Compensation floor: {_fmt_comp_floor(_get(profile, 'comp_floor_usd'))}",
         ]
     )
 
