@@ -19,8 +19,12 @@ Things this module pins:
   (g) jobcannon.web.legal._render() calls the guard and raises at boot time
       (issue #94 guard-hardening review), against a sabotaged temp file —
       never against jobcannon/web/legal/ itself
-  (h) /privacy and /terms send Cache-Control: private, max-age=300 (issue
-      #182 item 4) — private because base.html varies per g.clerk_user
+  (h) /privacy and /terms send Cache-Control: private, max-age=300 on both
+      GET and HEAD (issue #182 item 4) — private because ensure_session_ids()
+      mints a per-visitor session cookie on first contact, NOT because these
+      routes' body varies by auth state (it doesn't: both are PUBLIC_PATHS,
+      so g.clerk_user is unconditionally None here — see
+      jobcannon/web/legal.py's Cache-Control comment for the full reasoning)
 """
 
 from __future__ import annotations
@@ -215,42 +219,49 @@ def test_legal_page_head_request_200(path):
 
 
 # ---------------------------------------------------------------------------
-# (h) Cache-Control (issue #182 item 4). `private`, not `public`: base.html
-# gates the header sign-in/sign-up nav and the footer "Export your
-# data"/"Delete account" links on g.clerk_user, so the full response is not
-# identical across visitors even though the legal markdown body is (see
-# jobcannon/web/legal.py's _legal_response docstring for the full reasoning).
-# A `public` directive would let a shared cache (CDN, corporate proxy) serve
-# one visitor's auth-state nav to a different visitor.
+# (h) Cache-Control (issue #182 item 4). `private`, not `public`: every
+# request here — including this public-path branch — mints a per-visitor
+# session cookie via ensure_session_ids() on first contact (see
+# jobcannon/web/legal.py's Cache-Control comment for the full reasoning, and
+# jobcannon/web/anon_session.py for the cookie itself). A `public` directive
+# would let a shared cache (CDN, corporate proxy) replay one visitor's
+# Set-Cookie response onto a different first-time visitor. This is NOT
+# because the auth nav varies per visitor on these two routes — it doesn't:
+# /privacy and /terms are both in PUBLIC_PATHS, so g.clerk_user is
+# unconditionally None here regardless of the requester's real session.
+# Parametrized over GET and HEAD (issue #182 item 2 was HEAD-specific) and
+# asserts the raw header string, not just the parsed cache_control
+# attributes, so a stray extra directive would also be caught.
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("method", ["get", "head"])
 @pytest.mark.parametrize("path", ["/privacy", "/terms"])
-def test_legal_page_sets_private_cache_control_with_max_age(path):
+def test_legal_page_sets_private_cache_control_with_max_age(path, method):
     app = _app(verify=lambda req: None)
     client = app.test_client()
 
-    resp = client.get(path)
+    resp = getattr(client, method)(path)
 
-    assert resp.cache_control.private is True
-    assert not resp.cache_control.public
-    assert resp.cache_control.max_age == 300
+    assert resp.headers["Cache-Control"] == "private, max-age=300"
 
 
+@pytest.mark.parametrize("method", ["get", "head"])
 @pytest.mark.parametrize("path", ["/privacy", "/terms"])
-def test_legal_page_cache_control_same_when_authed(path):
+def test_legal_page_cache_control_same_when_authed(path, method):
     """The directive is a property of the route, not of the requester's auth
-    state — an authed visitor must not get a `public` response just because
-    their own request happened to be authenticated."""
+    state — an authed VERIFY_REQUEST stub must not change it. (It also never
+    actually runs here: /privacy and /terms are PUBLIC_PATHS, so clerk_auth
+    short-circuits before VERIFY_REQUEST is called — this test still pins
+    that the header doesn't accidentally depend on it.)"""
     from jobcannon.web.auth import ClerkIdentity
 
     app = _app(verify=lambda req: ClerkIdentity(user_id="user_1", claims={"sub": "user_1"}))
     client = app.test_client()
 
-    resp = client.get(path)
+    resp = getattr(client, method)(path)
 
-    assert resp.cache_control.private is True
-    assert not resp.cache_control.public
+    assert resp.headers["Cache-Control"] == "private, max-age=300"
 
 
 # ---------------------------------------------------------------------------

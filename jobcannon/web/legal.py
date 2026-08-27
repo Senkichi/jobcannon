@@ -56,18 +56,29 @@ _LEGAL_DIR = pathlib.Path(__file__).parent / "legal"
 _MD_EXTENSIONS = ["tables", "sane_lists"]
 _H1_LINE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 
-# issue #182 item 4: the *body* markdown is identical for every visitor (see
-# the module docstring — it's built once at import time, not per request),
-# but the page around it is not: base.html gates the header sign-in/sign-up
-# nav and the footer "Export your data"/"Delete account" links on
-# `g.clerk_user` (base.html, auth-nav block and footer block), so the full
-# response varies with request-time auth state. `public` would let a shared
-# cache (Cloudflare in front of jobcannon.dev, a corporate proxy) hand one
-# visitor's rendered nav to a different visitor for up to max-age — e.g. an
-# anonymous CDN-cached copy served to a just-signed-in visitor, dropping
-# their account links until the entry expires. `private` gets the intended
-# win (a visitor's own browser skips refetching identical bytes on repeat
-# GETs within max-age) without authorizing that cross-visitor reuse. 300s
+# issue #182 item 4: `private`, not `public` — but NOT because the nav
+# varies with auth state on these two routes specifically; it doesn't.
+# /privacy and /terms are both in PUBLIC_PATHS, and clerk_auth's
+# before_request hook (jobcannon/web/__init__.py) unconditionally sets
+# `g.clerk_user = None` and returns before app.config["VERIFY_REQUEST"] is
+# ever called for any PUBLIC_PATHS request — so base.html's auth-gated nav
+# and footer links always render the signed-out variant here, regardless of
+# the requester's real session (verified: an authed VERIFY_REQUEST stub is
+# never invoked on these routes).
+#
+# `private` matters for a different, real reason: `ensure_session_ids()`
+# (jobcannon/web/anon_session.py), called on every request including this
+# public-path branch, mints a per-visitor anon_session_id into a signed
+# Set-Cookie session cookie on first contact. A shared cache (Cloudflare in
+# front of jobcannon.dev, a corporate proxy) that stored and replayed one
+# visitor's response would hand a different, distinct first-time visitor
+# that same Set-Cookie (or its absence, on a later cache hit), silently
+# corrupting per-visitor session/attribution tracking. `private` gets the
+# intended win (a visitor's own browser skips refetching identical bytes on
+# repeat GETs within max-age) without authorizing that cross-visitor reuse.
+# No Vary header is needed alongside it: `private` already forbids a shared
+# cache from storing the response at all, and (per the paragraph above)
+# there is no auth-state variance here for a Vary header to key on. 300s
 # bounds how stale a re-publish (re-run the importer + restart) can look to
 # a browser that already cached the previous version.
 _LEGAL_CACHE_MAX_AGE_S = 300
