@@ -33,6 +33,14 @@ Registry note: `app.tasks` is keyed by each task's fully-qualified dotted name
 (``<module>.<function>``, e.g. ``jobcannon.host.tasks.scan``), NOT the bare
 function name — verified empirically against 3.9.0. Callers introspecting the
 registry (see tests/host/test_scan_tasks.py) must account for this.
+
+`app` itself is constructed in `jobcannon.host.task_app` (issue #135/#136),
+not here — this module's own top-level imports (`scan_tasks` -> the ATS-
+scanning/fastembed/onnxruntime stack) must never load in the web process,
+but the web process still needs to defer tasks declared here by name (see
+`jobcannon.host.user_deletion`). Importing the bare `app` object from the
+light module keeps that possible; see task_app.py's docstring for the full
+mechanism.
 """
 
 from __future__ import annotations
@@ -40,8 +48,6 @@ from __future__ import annotations
 import datetime
 import logging
 import os
-
-import procrastinate
 
 from procrastinate import exceptions as procrastinate_exceptions
 from procrastinate import manager as procrastinate_manager
@@ -55,10 +61,7 @@ from jobcannon.host.scan_tasks import (
     run_stale_detect_task,
 )
 from jobcannon.host.storage_check import check_db_storage
-
-app = procrastinate.App(
-    connector=procrastinate.PsycopgConnector(conninfo=os.environ.get("DATABASE_URL", ""))
-)
+from jobcannon.host.task_app import app
 
 logger = logging.getLogger(__name__)
 
