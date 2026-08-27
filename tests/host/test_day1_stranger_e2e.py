@@ -213,9 +213,12 @@ def test_day_one_stranger_journey_end_to_end(app, seeded_feed_corpus):
     assert _events(dsn, stranger_id, "consent_recorded") == []
 
     # 6. POST /consent with choice=grant, through the real route (not a
-    # fixture or a direct SQL write).
+    # fixture or a direct SQL write). No longer a redirect (issue #182):
+    # the route re-renders the full page in place with an inline
+    # confirmation instead of bouncing to the feed.
     consent_resp = client.post("/consent", data={"choice": "grant"})
-    assert consent_resp.status_code in (302, 303)
+    assert consent_resp.status_code == 200
+    assert "Analytics enabled." in consent_resp.get_data(as_text=True)
 
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
         user_row = conn.execute(
