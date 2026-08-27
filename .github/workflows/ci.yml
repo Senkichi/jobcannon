@@ -15,56 +15,41 @@ permissions:
 
 jobs:
   test:
-    # No fork-PR gate: GitHub-hosted runners are ephemeral, isolated
-    # per-job VMs, so running fork PR code here is safe and standard —
-    # unlike the self-hosted runner this replaced, which needed the gate
-    # (public PR #44) as a compensating control against arbitrary code
-    # execution on the operator's own machine.
-    #
-    # HOSTED RUNNERS (2026-08-14): GitHub-hosted ubuntu-latest runners were
-    # verified working today via a probe run that completed successfully —
-    # the prior billing-block was stale. The self-hosted runner was
-    # de-registered the same day. No Windows leg is added: the deploy
-    # target is Linux, so ubuntu-latest alone gives the coverage that
-    # matters.
-    runs-on: ubuntu-latest
-    services:
-      # pgvector/pgvector:pg18, not plain postgres — the schema uses
-      # vector(384) columns (jobcannon/db/migrations/m0005), which needs the
-      # pgvector extension's shared library present in the image. A stock
-      # postgres image can't CREATE EXTENSION vector at all.
-      postgres:
-        image: pgvector/pgvector:pg18
-        env:
-          POSTGRES_PASSWORD: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-    env:
-      # Explicit and hosted-runner-local now — no runner-machine .env to
-      # reach, so there is no expression-context blanking hazard to avoid.
-      POSTGRES_ADMIN_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+    # SELF-HOSTED, PERMANENTLY (owner decision 2026-08-26): this project does
+    # not rely on GitHub-hosted runner minutes, now or ever. The `jcpub`
+    # runners are the operator's own Windows machines, so the same-repo gate
+    # below is a load-bearing compensating control, not a nicety: a
+    # pull_request event from a fork would otherwise execute arbitrary code
+    # on that machine. Fork PRs therefore do not run CI here. To test an
+    # outside contribution, a maintainer pushes the fork's commits to a
+    # branch in this repository (`git push origin <sha>:refs/heads/<name>`)
+    # and opens a same-repo PR — the diff has then been read by a human
+    # before it runs. Post-flip, "require approval for all outside
+    # collaborators" is applied in repo settings as the second layer.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Windows, X64, jcpub]
+    # No Postgres service container: the runner machine has its own PG18 +
+    # pgvector instance and its per-runner `.env` provides
+    # POSTGRES_ADMIN_DSN to every step. Do NOT re-declare that variable under
+    # `env:` here — an expression-context reference blanks the runner-level
+    # value (see the private repo's runner notes), and a literal DSN does not
+    # belong in a tracked file. The fixture chain (tests/host/conftest.py
+    # postgres_test_dsn -> jobcannon.db.migrate.run_migrations) creates a
+    # uniquely named database per session, so two runners can test at once.
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-          # Hosted runners are ephemeral with no shared local disk cache to
-          # corrupt (the self-hosted concern this guarded against no longer
-          # applies), so the GitHub Actions cache is safe and speeds up
-          # repeat installs.
-          enable-cache: true
+          # A shared local disk cache on a persistent runner is a corruption
+          # vector across concurrent jobs; the venv in _work already makes
+          # repeat installs fast.
+          enable-cache: false
       - run: uv sync --dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       # jobcannon/db/migrations/m0005_postings_embedding.py runs
       # `CREATE EXTENSION IF NOT EXISTS vector` as its first statement, so
-      # the fixture chain (tests/host/conftest.py postgres_test_dsn ->
-      # jobcannon.db.migrate.run_migrations) creates the extension itself;
       # no separate psql step is needed.
       - run: uv run pytest -q --tb=short
 
@@ -73,12 +58,14 @@ jobs:
     # Single check branch protection / merge automation should require: it
     # always reports (if: always()), so it can never be skipped-green the
     # way a conditional test job could satisfy a required check without
-    # actually running.
+    # actually running. A fork PR (test skipped) therefore fails this check
+    # by construction.
     needs: [test]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, jcpub]
     steps:
       - name: Require test success
+        shell: bash
         run: |
           if [ "${{ needs.test.result }}" != "success" ]; then
             echo "test job result: ${{ needs.test.result }}"
