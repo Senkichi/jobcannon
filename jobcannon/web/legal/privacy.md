@@ -29,7 +29,9 @@ their own copy is a separate controller whose practices we do not govern.
 - Our own application sets one cookie, and it lasts only for your browser session. Clerk,
   our sign-in provider, sets its own strictly necessary sign-in cookies once you reach a
   page that requires sign-in — including the sign-in prompt itself — never on our public
-  pages (see §10). We set no advertising or tracking cookies.
+  pages (this policy, our terms of service, the profile picker, the pre-signup preview,
+  and the sample feed — the cookies themselves are described in §10). We set no
+  advertising or tracking cookies.
 
 
 - **Analytics are off by default.** If you do not opt in, we record no behavioral

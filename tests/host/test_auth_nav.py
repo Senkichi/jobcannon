@@ -16,8 +16,10 @@ No Postgres needed: these hit either the errorhandler (no DB), the
 registered the same way test_auth.py's `/private` tests do — same shape as
 tests/host/test_clerk_loader_template.py."""
 
+import logging
+
 from jobcannon.host.config import HostConfig
-from jobcannon.web import create_app
+from jobcannon.web import _warn_if_auth_links_unset, create_app
 from jobcannon.web.auth import ClerkIdentity
 
 _WEBHOOK_SECRET = "whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3Q="
@@ -59,7 +61,14 @@ def test_401_page_shows_both_links_when_both_urls_configured():
     """The 401 page is the OTHER signed-out surface the header nav must
     cover — g.clerk_user is set to None before abort(401)
     (jobcannon/web/__init__.py's clerk_auth), same as a PUBLIC_PATHS
-    request, so the same `not g.clerk_user` gate renders it here too."""
+    request, so the same `not g.clerk_user` gate renders it here too.
+
+    error_401.html's OWN inline paragraph (distinct from base.html's header
+    nav) also gates each link on its own URL and independently emits the
+    matching text ("Sign in" / "sign up") — asserted by counting TWO
+    occurrences of each href (header + content block), not merely one,
+    so a broken content-block link can't hide behind the header nav's
+    identical href satisfying the same substring check."""
     app = _app(
         _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL),
         verify=lambda req: None,
@@ -68,8 +77,10 @@ def test_401_page_shows_both_links_when_both_urls_configured():
     html = resp.get_data(as_text=True)
 
     assert resp.status_code == 401
-    assert f'href="{_SIGN_UP_URL}"' in html
-    assert f'href="{_SIGN_IN_URL}"' in html
+    assert html.count(f'href="{_SIGN_UP_URL}"') == 2
+    assert html.count(f'href="{_SIGN_IN_URL}"') == 2
+    assert ">Sign in</a>" in html
+    assert ">sign up</a>" in html
 
 
 def test_authed_page_hides_the_header_nav():
@@ -126,6 +137,30 @@ def test_public_page_renders_neither_link_when_both_urls_unset():
     assert ">Sign up<" not in html
     assert ">Sign in<" not in html
     assert 'href=""' not in html
+
+
+def test_warn_if_auth_links_unset_logs_one_warning_per_missing_url(caplog):
+    """Non-fatal boot-time signal (unlike CLERK_PUBLISHABLE_KEY/WEBHOOK_SECRET's
+    fail-fast): a blank URL degrades the render silently everywhere else in
+    this module's tests, so the warning is the ONLY observable signal that
+    issue #145 has silently regressed. Both fields unset -> both warnings,
+    each naming its own env var."""
+    with caplog.at_level(logging.WARNING, logger="jobcannon.web"):
+        _warn_if_auth_links_unset(_host_config())
+
+    assert any("CLERK_SIGN_UP_URL" in r.message for r in caplog.records)
+    assert any("CLERK_SIGN_IN_URL" in r.message for r in caplog.records)
+
+
+def test_warn_if_auth_links_unset_silent_when_both_configured(caplog):
+    """Positive control for the test above: both URLs set -> zero warnings,
+    proving the check doesn't fire unconditionally at import/call time."""
+    with caplog.at_level(logging.WARNING, logger="jobcannon.web"):
+        _warn_if_auth_links_unset(
+            _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL)
+        )
+
+    assert caplog.records == []
 
 
 def test_auth_link_context_tolerates_a_bare_host_config_double():

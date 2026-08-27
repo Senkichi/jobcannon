@@ -99,6 +99,28 @@ def _auth_link_context(host_config) -> dict[str, str]:
     }
 
 
+def _warn_if_auth_links_unset(host_config) -> None:
+    """Both fields _auth_link_context reads are non-secret and intentionally
+    NOT fail-fast (unlike CLERK_PUBLISHABLE_KEY/WEBHOOK_SECRET below): a bare
+    HOST_CONFIG test double or a deliberate soft-launch gate must still boot.
+    But silent-degrade-to-nothing is exactly how issue #145 happened in the
+    first place (a blank CLERK_SIGN_UP_URL rendered zero sign-up affordances
+    anywhere on the public surface with no signal anyone could see short of
+    live QA) -- so a boot-time WARNING makes a future unset/typo'd var
+    self-announcing in the deploy logs instead of silently regressing #145,
+    without hard-failing the process the way a missing secret does."""
+    if not getattr(host_config, "clerk_sign_up_url", ""):
+        logger.warning(
+            "CLERK_SIGN_UP_URL is unset -- the header nav, /preview CTA, and 401 page "
+            "render no sign-up link anywhere (issue #145 regresses silently)"
+        )
+    if not getattr(host_config, "clerk_sign_in_url", ""):
+        logger.warning(
+            "CLERK_SIGN_IN_URL is unset -- the header nav renders no sign-in link "
+            "anywhere (issue #145 regresses silently)"
+        )
+
+
 def _resolve_consent(identity) -> bool:
     """One DB read per authenticated request, resolving the log_event
     chokepoint's consent gate (jobcannon/host/events.py) up front so route
@@ -162,6 +184,8 @@ def create_app(config: dict | None = None) -> Flask:
             signup_wave="0",
         )
     app.config["HOST_CONFIG"] = host_config  # ALWAYS set, both branches
+    if not app.config.get("TESTING"):
+        _warn_if_auth_links_unset(host_config)
 
     @app.context_processor
     def _inject_footer_source_link():
