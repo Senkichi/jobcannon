@@ -157,7 +157,7 @@ illustrate the migration *shape* that needs the caution going forward.
 
 ### Migration deploy-safety guard
 
-`tests/test_migration_deploy_safety.py` (issue #199) makes the two
+`tests/test_migration_deploy_safety.py` (issues #199, #219) makes the
 discipline rules above mechanical rather than prose-only. It derives every
 input from the `MIGRATIONS` registry (`jobcannon/db/migrations/__init__.py`)
 — never a hand-maintained version list — so a new migration is covered the
@@ -217,6 +217,62 @@ module docstring's "Parser" section for the specific list).
    creates *after* this migration commits — that's the actual hazard
    (completeness of the backfill), not whether the `UPDATE` happens to be
    idempotent.
+3. **Non-CONCURRENT `CREATE INDEX` lock duration against a pre-existing
+   table fails by default (issue #219).** `CREATE INDEX` (unique or not,
+   without `CONCURRENTLY`) takes a SHARE lock for its entire build, blocking
+   writes to that table — while the previous release keeps serving them
+   during the deploy overlap window — regardless of whether the index is
+   unique. This is a SEPARATE, independent check from rule 1's `CREATE
+   UNIQUE INDEX` contract-break flag above: a fast unique-index build can
+   still break the previous release's duplicate inserts (contract hazard),
+   and a slow non-unique build can hold a lock for hours without breaking
+   anything about the previous release's queries (lock-duration hazard) — a
+   migration doing both declares both flags. An index against a table THIS
+   SAME migration creates is exempt (the table is empty at that point in the
+   deploy, so the build is instant regardless of lock kind). A migration
+   that genuinely needs to accept the risk (e.g. m0005's HNSW index, built
+   against `postings` while it still holds zero rows, so the lock is held
+   for a negligible duration) declares `lock_step = True` plus a docstring
+   paragraph starting `Lock justification:` naming the expected row count /
+   build time.
+
+   The alternative to accepting that risk is `CREATE INDEX CONCURRENTLY`,
+   which never takes that lock but also can't run inside the per-migration
+   ledger transaction every other migration applies in. A migration can opt
+   into that by declaring `autocommit = True` (same module-attribute fold
+   pattern as `contract_step`/`lock_step`): `jobcannon/db/migrate.py`'s
+   `_apply_migration` then runs its `sql` statements on an autocommit
+   connection OUTSIDE the ledger transaction — on the SAME session
+   `run_migrations` already holds the cross-process advisory lock on, so
+   that lock still covers the autocommit statements — and writes the ledger
+   row only after every statement succeeds. The guard keeps this escape
+   hatch narrow: a `CONCURRENTLY` statement always requires
+   `autocommit = True` and vice versa, an autocommit migration's `sql` may
+   contain nothing but `CREATE`/`DROP INDEX` statements (no `py` hook, no
+   other DDL), and every `CREATE INDEX CONCURRENTLY` in one must use
+   `IF NOT EXISTS`.
+
+   `CREATE INDEX CONCURRENTLY` has one hazard `CONCURRENTLY` migrations must
+   survive: Postgres does not roll back a failed build — it leaves a real,
+   unusable (`pg_index.indisvalid = false`) catalog entry behind, which
+   `IF NOT EXISTS` would otherwise silently skip on retry instead of
+   finishing the build. `_apply_autocommit_migration` handles this by
+   sweeping for `NOT indisvalid` and dropping every hit (`DROP INDEX
+   CONCURRENTLY IF EXISTS`) before running an autocommit migration's
+   statements — unscoped to any particular index name, which is safe
+   because an invalid index is already unusable for anything, and because
+   the ledger guarantees any migration that could have left one behind was
+   never recorded as applied, so it's always retried before whatever comes
+   after it. This sweep only ever runs from an autocommit migration, so a
+   database with none pending never issues the query at all. An alternative
+   considered and rejected: parsing each migration's own SQL (via pglast,
+   already a dev dependency for this guard) to scope the sweep to only the
+   index names that migration's statements declare — rejected because it
+   would make `python -m jobcannon.db.migrate`, the `preDeployCommand` that
+   gates every deploy, import pglast at runtime for the first time; a
+   wheel/resolution hiccup on Render would then fail every deploy at import,
+   not just the rare failed-`CONCURRENTLY`-build case this exists to recover
+   from.
 
 **Documented coverage gaps** (fail-closed by declaration, not by scanning):
 a `DO $$ ... $$` procedural block (the body is opaque to libpg_query) and a
@@ -225,8 +281,7 @@ contract-shaped — they require `contract_step = True` even when the hidden
 DDL/Python is actually expand-safe, because this guard has no way to prove
 that. `DROP` of an object type other than `TABLE`/`INDEX` (sequences, views,
 types, ...) isn't scanned. `ALTER COLUMN ... TYPE` doesn't distinguish widen
-from narrow (deliberate over-flag). Non-unique, non-concurrent `CREATE
-INDEX` lock duration is out of scope — filed as #219.
+from narrow (deliberate over-flag).
 
 Expect these log lines on a fresh database's first worker boot (the ledger
 `name` column — and therefore the second `%s` migrate.py logs — is the

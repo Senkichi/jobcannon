@@ -1130,9 +1130,12 @@ _KNOWN_SAFE_FIXTURES = [
         ],
         id="add-constraint-not-valid-safe",
     ),
-    # plain (non-unique) CREATE INDEX on a pre-existing table: out of scope,
-    # filed as #219 -- must not be flagged here.
-    pytest.param(["CREATE INDEX ON companies(name)"], id="plain-create-index-out-of-scope"),
+    # plain (non-unique) CREATE INDEX on a pre-existing table: not a
+    # CONTRACT violation (Rule 1, this scanner) -- it IS a lock-duration
+    # violation (Rule 3, #219), but that's a separate, independent walk
+    # (_index_lock_violations below), not this one. Covered by
+    # test_index_lock_sabotage_fixtures_are_all_detected instead.
+    pytest.param(["CREATE INDEX ON companies(name)"], id="plain-create-index-not-contract-shaped"),
     # DROP CONSTRAINT on a constraint THIS migration itself added: safe
     # (mirrors the new_tables exemption; tracked via constraint_created_at).
     # NOTE: no equivalent "CREATE UNIQUE INDEX then DROP INDEX in the same
