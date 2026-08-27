@@ -156,11 +156,11 @@ MAX_TITLES_PER_SELECTION = 20
 # would break the session-cookie round trip anyway.
 MAX_TITLE_LENGTH = 140
 
-# `companies` selections never reach durable storage (there is no
-# target_companies column anywhere in this schema — see the comment at the
-# `companies` extraction site in _parse_submission below), but they DO
-# share the exact same signed-cookie round trip titles take via
-# set_pending_picker, so an uncapped `companies` submission can blow the
+# `companies` selections now reach durable storage too (m0011's
+# target_companies column — see _parse_companies's docstring below), but
+# this cap exists independently of that: they share the exact same
+# signed-cookie round trip titles take via set_pending_picker, so an
+# uncapped `companies` submission can blow the
 # same ~4093-byte RFC 6265 ceiling independently of titles (issue #80,
 # filed during #54's review). Capped with the same shape (count + per-item
 # length) MAX_TITLES_PER_SELECTION/MAX_TITLE_LENGTH use, but the split
