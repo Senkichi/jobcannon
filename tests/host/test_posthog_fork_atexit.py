@@ -1,4 +1,6 @@
-"""Decisive Linux-only proof for jobcannon#132.
+"""Decisive Linux-only proof for jobcannon#132, plus jobcannon#137's bounded
+PostHog atexit flush (the latter's newer tests near the bottom of this file
+need no os.fork() and also run on Windows dev).
 
 #132 hypothesized: "a gunicorn worker inherits the master's PostHog client
 across fork(); at worker exit, atexit runs the inherited husk's
@@ -59,7 +61,10 @@ from __future__ import annotations
 
 import atexit
 import os
+import pathlib
 import signal
+import subprocess
+import sys
 import time
 import traceback
 
@@ -68,7 +73,9 @@ import pytest
 from jobcannon.host import posthog_client, wiring
 from jobcannon.host.config import HostConfig
 
-pytestmark = pytest.mark.skipif(
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+_FORK_ONLY = pytest.mark.skipif(
     not hasattr(os, "fork"), reason="fork-only (POSIX) -- Windows dev has no os.fork"
 )
 
@@ -153,6 +160,7 @@ def _run_in_forked_child_and_wait(child_body, *, timeout_hint: str) -> float:
     return elapsed
 
 
+@_FORK_ONLY
 def test_atexit_after_real_fork_does_not_hang_worker_exit(monkeypatch):
     """A forked child that runs `atexit` at what would be a gunicorn worker's
     `sys.exit(0)` must terminate cleanly and quickly -- proving neither the
@@ -220,6 +228,7 @@ def test_atexit_after_real_fork_does_not_hang_worker_exit(monkeypatch):
     client_a.join()
 
 
+@_FORK_ONLY
 def test_husk_join_alone_after_real_fork_returns_promptly(monkeypatch):
     """Confounder-free isolation of the precise #132 claim: does the
     inherited husk A's own `Client.join()` -- and nothing else in the
@@ -267,3 +276,259 @@ def test_husk_join_alone_after_real_fork_returns_promptly(monkeypatch):
     )
 
     client_a.join()  # parent-side cleanup; independent post-fork copy
+
+
+def test_build_posthog_client_bounds_worst_case_flush_under_graceful_timeout():
+    """jobcannon#137's explicit ask: guard the constructed client's
+    timeout/max_retries product against a silent library-default bump
+    silently reopening the ~67s worst case (posthog defaults: timeout=15,
+    max_retries=3 -> max_tries=4 -> 4*15 + (1+2+4) = 67s).
+
+    Computes the same worst-case formula wiring.py's own comment derives
+    (max_tries * timeout + the backoff.expo sleeps between attempts) from
+    the REAL constructed client/consumer's attributes, not from the
+    wiring.py constants directly -- so this would also catch a mismatch
+    between what wiring.py intends to pass and what the client actually
+    ends up configured with.
+
+    No fork/subprocess needed: runs on Windows dev and CI alike.
+    """
+    host_config = _host_config()
+    client = wiring._build_posthog_client(host_config)
+    assert client is not None
+    try:
+        assert client.timeout == wiring._POSTHOG_TIMEOUT_S
+        assert len(client.consumers) == 1
+        consumer = client.consumers[0]
+        assert consumer.retries == wiring._POSTHOG_MAX_RETRIES
+
+        max_tries = consumer.retries + 1
+        # backoff.expo default: factor=1, base=2 -> sleep(n) = 2**n, one
+        # sleep between each pair of attempts (max_tries - 1 of them).
+        backoff_sleeps_s = sum(2**n for n in range(max_tries - 1))
+        worst_case_s = max_tries * consumer.timeout + backoff_sleeps_s
+
+        assert worst_case_s <= wiring._POSTHOG_ATEXIT_JOIN_TIMEOUT_S
+        # The hard backstop itself must leave real headroom under
+        # gunicorn's graceful_timeout (render.yaml's committed value,
+        # cross-checked against this same constant in
+        # test_render_config.py) -- not just be numerically less than it.
+        assert wiring._POSTHOG_ATEXIT_JOIN_TIMEOUT_S <= 15
+    finally:
+        client.join()  # cleanup: no queued items, returns promptly
+
+
+def _captured_bounded_join_closure(monkeypatch, host_config):
+    """Shared helper: build a real client via _build_posthog_client while
+    spying on atexit.register, and return the exact `_bounded_join` closure
+    it installs plus the client itself. Lets a test invoke the closure
+    directly without waiting for process exit.
+
+    Takes the LAST register call, not a fixed index/count: `_build_posthog_client`
+    does `import posthog` internally, and on this process's FIRST-EVER import
+    of posthog/requests/certifi, certifi's own `exit_cacert_ctx` atexit
+    registration fires too (module-level, so only once per process — whether
+    it happens here depends on test execution order, not on anything this
+    function does). Regardless of that, `_install_bounded_atexit_flush`
+    always runs last inside `_build_posthog_client` (client.py:316's own
+    atexit(self.join) registers when Posthog(**kwargs) is constructed, then
+    _install_bounded_atexit_flush unregisters it and registers the bounded
+    replacement — see the ["register", "unregister", "register"] tail
+    test_bounded_atexit_flush_replaces_sdk_default asserts), so the bounded
+    closure is always the last register call, whether it's call 2 or 3."""
+    calls: list[tuple[str, object]] = []
+    orig_register = atexit.register
+
+    def spy_register(func):
+        calls.append(("register", func))
+        return orig_register(func)
+
+    monkeypatch.setattr(atexit, "register", spy_register)
+    client = wiring._build_posthog_client(host_config)
+    assert client is not None
+    assert len(calls) >= 2, (
+        "expected at least the SDK's init-time register plus the bounded replacement"
+    )
+    bounded_join = calls[-1][1]
+    assert bounded_join != client.join, (
+        "last register must be the bounded replacement, not the SDK's join"
+    )
+    return bounded_join, client
+
+
+def test_bounded_join_swallows_runtimeerror_from_unstarted_consumer(monkeypatch):
+    """Mirrors the SDK's own Client.join() (client.py:791-795): a consumer
+    whose thread never started raises RuntimeError from Thread.join(), and
+    the SDK swallows it with a bare `except RuntimeError: pass`. Corroborated
+    finding (refuter-1 LOW #1 / devin LEAD 4): _bounded_join must not let
+    that divergence surface an unhandled exception inside an atexit handler.
+
+    Currently unreachable in production (this app always builds with the
+    SDK's default send=True, so every consumer's .start() runs) — this test
+    exercises the guard directly via a fake consumer rather than trying to
+    construct a real never-started one.
+    """
+    host_config = _host_config()
+    bounded_join, client = _captured_bounded_join_closure(monkeypatch, host_config)
+    try:
+
+        class _NeverStartedConsumer:
+            def pause(self):
+                pass
+
+            def join(self, timeout=None):
+                raise RuntimeError("threads can only be started once")
+
+            def is_alive(self):
+                pytest.fail("is_alive() must not be reached after a RuntimeError")
+
+        monkeypatch.setattr(client, "consumers", [_NeverStartedConsumer()])
+        bounded_join()  # must not raise
+    finally:
+        client.join()
+
+
+def test_bounded_atexit_flush_replaces_sdk_default(monkeypatch):
+    """L3-wired check for _install_bounded_atexit_flush (jobcannon#137):
+    confirms _build_posthog_client actually swaps the SDK's own
+    atexit(client.join) registration for a different callable, in the
+    right order -- not just that _install_bounded_atexit_flush exists and
+    is theoretically correct in isolation.
+
+    Spies on the real atexit.register/unregister (still calling through to
+    the originals, so the process's real atexit state stays correct) to
+    record the exact call sequence _build_posthog_client produces.
+    """
+    calls: list[tuple[str, object]] = []
+    orig_register = atexit.register
+    orig_unregister = atexit.unregister
+
+    def spy_register(func):
+        calls.append(("register", func))
+        return orig_register(func)
+
+    def spy_unregister(func):
+        calls.append(("unregister", func))
+        return orig_unregister(func)
+
+    monkeypatch.setattr(atexit, "register", spy_register)
+    monkeypatch.setattr(atexit, "unregister", spy_unregister)
+
+    host_config = _host_config()
+    client = wiring._build_posthog_client(host_config)
+    assert client is not None
+    try:
+        # Exactly three atexit calls happen while building one client:
+        # (1) posthog.Client.__init__ itself registers atexit(self.join)
+        #     (client.py:316, unconditional when send=True, the default) --
+        #     BEFORE _build_posthog_client gets a chance to touch anything.
+        # (2) _install_bounded_atexit_flush unregisters that exact
+        #     registration.
+        # (3) _install_bounded_atexit_flush registers its own replacement.
+        kinds = [kind for kind, _ in calls]
+        assert kinds == ["register", "unregister", "register"], kinds
+        assert calls[0][1] == client.join, "SDK's own init-time registration"
+        assert calls[1][1] == client.join, "must unregister that exact callable"
+        assert calls[2][1] != client.join, (
+            "must register a DIFFERENT callable, not just re-register the SDK's own unbounded join"
+        )
+    finally:
+        client.join()
+
+
+_NEVER_ANSWERS_CHILD_SCRIPT = '''
+"""Child process for
+test_atexit_flush_bounded_when_posthog_host_never_answers. Builds a real
+PostHog client against a local TCP listener that accepts the connection but
+never responds -- "a socket that never answers" -- enqueues one event, then
+exits via sys.exit(0) exactly like gunicorn's worker exit path. Success is
+measured by the PARENT (this file), as wall-clock time for the whole
+subprocess."""
+
+import socket
+import sys
+import threading
+import time
+
+from jobcannon.host import wiring
+from jobcannon.host.config import HostConfig
+
+listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+listener.bind(("127.0.0.1", 0))
+listener.listen(5)
+port = listener.getsockname()[1]
+
+
+def _accept_and_stall():
+    while True:
+        try:
+            conn, _addr = listener.accept()
+        except OSError:
+            return
+        # Deliberately never conn.recv()/conn.sendall() anything: the
+        # client's own request `timeout=` is what has to fire, not a
+        # server-side RST/refusal.
+
+
+threading.Thread(target=_accept_and_stall, daemon=True).start()
+
+host_config = HostConfig(
+    database_url="postgresql://u:p@192.0.2.9/db",
+    posthog_api_key="phc_test_never_answers",
+    posthog_host=f"http://127.0.0.1:{port}",
+    analytics_pseudonym_salt="test-salt-unused",
+)
+client = wiring._build_posthog_client(host_config)
+assert client is not None
+client.capture(distinct_id="test-user", event="test-event", properties={})
+# Give the consumer thread time to dequeue the item and be well into its
+# first request() attempt before we exit -- otherwise a lucky-fast exit
+# could reach atexit before any upload even started, proving nothing.
+time.sleep(1.0)
+sys.exit(0)
+'''
+
+
+def test_atexit_flush_bounded_when_posthog_host_never_answers(tmp_path):
+    """End-to-end proof of jobcannon#137's fix: a queued event whose target
+    host accepts the TCP connection but never answers must not block worker
+    exit past a generous bound.
+
+    Runs in a REAL subprocess (not this test process), so the measurement
+    is a genuine process-exit wall-clock time -- and, unlike the fork-based
+    tests above, this scenario needs no os.fork() at all (it only exercises
+    the retry-bound + bounded-atexit-join half of #137's fix, not the
+    fork/atexit interaction those tests cover), so it runs on Windows dev
+    too, not just POSIX CI.
+
+    Generous margin per this repo's wall-clock flake lessons: assert the
+    BOUND (well under gunicorn's 30s graceful_timeout and the hard
+    _POSTHOG_ATEXIT_JOIN_TIMEOUT_S backstop's own 10s), not a tight number
+    close to the ~9s worst case the retry math predicts. Before this fix,
+    the equivalent scenario against library defaults took ~67s -- this
+    would fail loudly (subprocess.TimeoutExpired) rather than silently
+    passing if the fix regressed.
+    """
+    script = tmp_path / "never_answers_child.py"
+    script.write_text(_NEVER_ANSWERS_CHILD_SCRIPT, encoding="utf-8")
+
+    start = time.monotonic()
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        timeout=25,  # hard ceiling: a real regression fails fast, not hangs pytest
+    )
+    elapsed = time.monotonic() - start
+
+    assert result.returncode == 0, (
+        f"child exited nonzero ({result.returncode}); stderr:\\n{result.stderr}"
+    )
+    assert elapsed < 20.0, (
+        f"child took {elapsed:.2f}s to exit against a host that accepts but "
+        "never answers -- expected well under gunicorn's 30s "
+        "graceful_timeout (generous margin over the ~9-10s worst case the "
+        "retry math + hard backstop predict); investigate before treating "
+        "this as a flake"
+    )
