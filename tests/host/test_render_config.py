@@ -159,6 +159,28 @@ def test_posthog_env_declared_identically_on_both_services():
     assert hosts["jobcannon-web"] == hosts["jobcannon-worker"]
 
 
+def test_web_graceful_timeout_covers_posthog_atexit_bound():
+    """jobcannon#137: gunicorn's --graceful-timeout must leave real headroom
+    over jobcannon.host.wiring's hard backstop on the PostHog client's
+    atexit flush (_POSTHOG_ATEXIT_JOIN_TIMEOUT_S) -- otherwise a worker
+    exiting during a PostHog outage could still get SIGKILLed mid-flush.
+    Derives both sides from their real sources (render.yaml, wiring.py) so
+    neither value drifting alone can silently violate the invariant."""
+    from jobcannon.host import wiring
+
+    bp = _blueprint()
+    web = next(s for s in bp["services"] if s["type"] == "web")
+    m = re.search(r"--graceful-timeout[= ](\d+)", web["startCommand"])
+    assert m, "web startCommand must pin --graceful-timeout explicitly"
+    graceful_timeout_s = int(m.group(1))
+
+    assert graceful_timeout_s >= wiring._POSTHOG_ATEXIT_JOIN_TIMEOUT_S
+    # Real headroom, not just "greater than": leaves margin for everything
+    # ELSE gunicorn's graceful shutdown also has to do besides this one
+    # atexit handler (finishing an in-flight request, other cleanup).
+    assert graceful_timeout_s - wiring._POSTHOG_ATEXIT_JOIN_TIMEOUT_S >= 10
+
+
 def test_scan_block_report_help():
     """Windows self-hosted CI hazard: a bare 'python' subprocess can be
     hijacked by Windows App Execution Alias stubs — always sys.executable.
