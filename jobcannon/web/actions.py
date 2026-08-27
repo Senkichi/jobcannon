@@ -28,14 +28,25 @@ both places share, rather than a second, independently-maintained
 "is this row still visible" rule living here.
 
 A `posting_id` that does not exist is a `404`, not a `500`:
-`jobcannon.db._user_actions`'s writes carry a `REFERENCES postings(id)`
-foreign key with no existence pre-check, so a nonexistent id raises
-`psycopg.errors.ForeignKeyViolation` from inside the `with connection_factory()`
-block — caught here and turned into `abort(404)`. Letting the `with` block's
-`__exit__` run (rather than catching around a bare `conn.raw.execute`) is
-what returns the aborted connection to the pool correctly; pooled connections
-already roll back on an exception leaving their context (psycopg_pool), so no
-manual rollback is needed here.
+`jobcannon.db._user_actions`'s save/dismiss/apply writes carry a
+`REFERENCES postings(id)` foreign key with no existence pre-check, so a
+nonexistent id raises `psycopg.errors.ForeignKeyViolation` from inside the
+`with connection_factory()` block — caught here and turned into
+`abort(404)`. Letting the `with` block's `__exit__` run (rather than
+catching around a bare `conn.raw.execute`) is what returns the aborted
+connection to the pool correctly; pooled connections already roll back on an
+exception leaving their context (psycopg_pool), so no manual rollback is
+needed here.
+
+`undo_apply` is the one exception to that mechanism: its write is a bare
+DELETE (`unmark_applied`), which never violates a foreign key regardless of
+whether `posting_id` exists — there is nothing for `undo_apply` to catch.
+Rather than adding an unconditional existence pre-check (which the design
+above deliberately avoids for the INSERT/UPDATE routes), `unmark_applied`
+itself returns whether the posting exists, computed with a second `SELECT`
+only on the ambiguous path where its DELETE matched zero rows — see its own
+docstring (jobcannon/db/_user_actions.py) for why that path is the only one
+where "not applied" and "doesn't exist" can't otherwise be told apart.
 
 Apply's `apply_destination` (the event payload's platform token / destination
 hostname, never a full URL) comes from `jobcannon.web.apply_url`, computed
@@ -148,13 +159,18 @@ def undo_apply(posting_id: int):
     hx-swap="outerHTML" on the row itself, unlike Apply's plain fetch) —
     `unmark_applied` deletes the `pipeline_status` row rather than writing a
     third status value, so the re-fetched entry comes back with
-    `applied=False` and the row swaps back to its normal Apply control."""
+    `applied=False` and the row swaps back to its normal Apply control.
+
+    `unmark_applied`'s own return value (not a `ForeignKeyViolation` catch —
+    a bare DELETE never raises one, see this module's own docstring) is what
+    404s a `posting_id` that never existed at all, matching save/dismiss/
+    apply's contract without 404-ing a posting that exists but was, say,
+    separately dismissed rather than applied."""
     user_id = g.clerk_user.user_id
-    try:
-        with connection_factory() as conn:
-            unmark_applied(conn, user_id, posting_id)
-            entry = _fetch_entry(conn, user_id, posting_id)
-    except psycopg.errors.ForeignKeyViolation:
-        abort(404)
+    with connection_factory() as conn:
+        posting_exists = unmark_applied(conn, user_id, posting_id)
+        if not posting_exists:
+            abort(404)
+        entry = _fetch_entry(conn, user_id, posting_id)
     log_event("posting_apply_undone", user_id=user_id, posting_id=posting_id)
     return _row_response(entry)

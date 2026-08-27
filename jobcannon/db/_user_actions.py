@@ -122,7 +122,7 @@ def mark_applied(conn: Any, user_id: str, posting_id: int) -> None:
     _set_pipeline_status(conn, user_id, posting_id, "applied", set_applied_at=True)
 
 
-def unmark_applied(conn: Any, user_id: str, posting_id: int) -> None:
+def unmark_applied(conn: Any, user_id: str, posting_id: int) -> bool:
     """Issue #177's Undo: removes the `pipeline_status` row entirely rather
     than flipping `status` to some third "neutral" value -- there is no
     neutral status in `_PIPELINE_STATUSES`; a row's absence IS the neutral
@@ -132,13 +132,30 @@ def unmark_applied(conn: Any, user_id: str, posting_id: int) -> None:
     appears on a row whose `entry.applied` is True, but the WHERE clause
     enforces that invariant at the write itself rather than trusting the
     caller). Idempotent: a repeat call against an already-undone (or never-
-    applied) posting is a no-op, matching `unsave_posting`'s contract."""
+    applied) posting is a no-op, matching `unsave_posting`'s contract.
+
+    Returns whether `posting_id` exists in `postings` at all -- a plain
+    DELETE never raises `ForeignKeyViolation` the way save/dismiss/apply's
+    INSERT/UPDATE do (jobcannon/web/actions.py's module docstring), so this
+    is the signal the route uses to 404 a truly nonexistent id the same way
+    its siblings do, without an unconditional existence pre-check on the
+    common path: the extra `SELECT` below only runs when the DELETE itself
+    matched zero rows, which is exactly the case that's ambiguous between
+    "exists but not applied" (200) and "doesn't exist" (404)."""
     raw = conn.raw if hasattr(conn, "raw") else conn
-    raw.execute(
-        "DELETE FROM pipeline_status WHERE user_id = %s AND posting_id = %s AND status = 'applied'",
+    deleted = raw.execute(
+        "DELETE FROM pipeline_status WHERE user_id = %s AND posting_id = %s "
+        "AND status = 'applied' RETURNING posting_id",
         (user_id, posting_id),
-    )
+    ).fetchone()
+    exists = deleted is not None
+    if not exists:
+        exists = (
+            raw.execute("SELECT 1 FROM postings WHERE id = %s", (posting_id,)).fetchone()
+            is not None
+        )
     commit_unless_nested(raw)
+    return exists
 
 
 def list_watchlist_entries(conn: Any, user_id: str) -> list[Any]:

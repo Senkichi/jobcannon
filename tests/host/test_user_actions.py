@@ -145,6 +145,44 @@ def test_unmark_applied_does_not_delete_a_dismissed_row(db_conn):
     assert row["status"] == "dismissed"
 
 
+def test_unmark_applied_returns_false_for_a_posting_that_does_not_exist(db_conn):
+    """The DELETE alone can't distinguish "not applied" from "never
+    existed" -- both delete zero rows. unmark_applied's return value is
+    what lets jobcannon/web/actions.py::undo_apply 404 the latter without
+    an unconditional existence pre-check on the (far more common) applied
+    path."""
+    from jobcannon.db._user_actions import unmark_applied
+
+    exists = unmark_applied(db_conn, "u-unmark-missing", 999999999)
+
+    assert exists is False
+
+
+def test_unmark_applied_returns_true_when_the_posting_exists_but_was_never_applied(db_conn):
+    from jobcannon.db._user_actions import unmark_applied
+
+    _seed_user(db_conn, "u-unmark-exists")
+    company_id = _seed_company(db_conn, "Unmark Exists Co")
+    posting_id = _seed_posting(db_conn, "unmark-exists-1", company_id)
+
+    exists = unmark_applied(db_conn, "u-unmark-exists", posting_id)
+
+    assert exists is True
+
+
+def test_unmark_applied_returns_true_when_it_actually_deletes_an_applied_row(db_conn):
+    from jobcannon.db._user_actions import mark_applied, unmark_applied
+
+    _seed_user(db_conn, "u-unmark-return-applied")
+    company_id = _seed_company(db_conn, "Unmark Return Applied Co")
+    posting_id = _seed_posting(db_conn, "unmark-return-applied-1", company_id)
+    mark_applied(db_conn, "u-unmark-return-applied", posting_id)
+
+    exists = unmark_applied(db_conn, "u-unmark-return-applied", posting_id)
+
+    assert exists is True
+
+
 def test_invalid_status_value_raises_at_the_write_boundary(db_conn):
     from jobcannon.db._user_actions import _set_pipeline_status
 

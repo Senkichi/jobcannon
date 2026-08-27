@@ -470,6 +470,19 @@ def test_undo_apply_on_a_never_applied_posting_is_a_no_op(app):
     assert row is None
 
 
+def test_undo_apply_on_a_posting_that_does_not_exist_is_a_404(app):
+    """Unlike save/dismiss/apply's INSERT/UPDATE (whose ForeignKeyViolation
+    IS the 404 mechanism, actions.py's module docstring), undo-apply's bare
+    DELETE never raises one -- unmark_applied's own return value drives the
+    404 here instead, matching the shared contract without a pre-check on
+    the common (posting exists) path (Devin F1, verified)."""
+    client = _feed_client(app, consent=True)
+
+    resp = client.post("/postings/999999999/undo-apply")
+
+    assert resp.status_code == 404
+
+
 def test_undo_apply_does_not_touch_a_dismissed_posting(app):
     """Scoped delete (status = 'applied' in the WHERE clause): undo-apply
     against a posting this user separately dismissed must never clear that
