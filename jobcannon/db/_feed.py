@@ -7,8 +7,17 @@ The default ordering is written for that state first, not as a fallback —
 other module under the scanned roots) never writing to `feed_state`.
 
 An authenticated reader (`user_id` not None) never sees a posting they have
-dismissed: `list_feed_postings` LEFT JOINs `pipeline_status` and excludes
-`status = 'dismissed'` rows. Every row also carries a `saved` flag (whether a
+dismissed by default: `list_feed_postings` LEFT JOINs `pipeline_status` and
+excludes `status = 'dismissed'` rows unless the caller passes
+`include_dismissed=True` (#200) — the narrow escape hatch
+`jobcannon/web/actions.py::_fetch_entry` uses, for save/apply/undo-apply
+only, to re-read a row one of those routes just acted on even when that row
+is (or already was) dismissed, so their own mutation re-render never comes
+back an empty body indistinguishable from failure. `dismiss` itself
+deliberately never passes the flag — its own empty re-render IS the row
+disappearing from the DOM, unrelated to #200 — and a normal feed page render
+never passes it either, so dismissed rows stay excluded there exactly as
+before this parameter existed. Every row also carries a `saved` flag (whether a
 `watchlists` row exists for that `(user_id, posting_id)` pair) and an
 `applied` flag (`pipeline_status.status = 'applied'`, #177) so
 `jobcannon/web/feed_entries.py::build_entry` can render per-user state
@@ -89,33 +98,63 @@ def _cursor_predicate(
     expression here.
 
     `last_seen` is `timestamptz NOT NULL` (m0001), so only `rank_score`
-    needs NULLS-LAST handling: COALESCE to '-infinity' emulates "NULLS
-    LAST" in a DESC ordering by substituting a real, storable
-    double-precision sentinel that sorts behind every other *finite*
-    value, which a plain `<` seek predicate cannot express on a nullable
-    column by itself. This is NOT exactly equivalent to NULLS LAST if a
-    row ever stores a real `rank_score = -Infinity` (a valid double
-    precision value): it would then collide with the NULL sentinel and
-    could be skipped on a page boundary. `feed_state` has no writer
-    anywhere in this codebase yet (guarded by test_feed_state_not_written.py),
-    so this can't occur today — tracked as a follow-up for whenever a
-    ranker writer lands (would need a separate `IS NULL` flag in the row
-    constructor rather than a shared sentinel). Both sides of the row
-    comparison are COALESCEd, not just the column: `after`'s rank_score is
-    NULL on every real page today, and a PostgreSQL row-constructor
-    comparison treats ANY NULL element pair as unknown and drops the row,
-    so COALESCEing only the column side would silently return zero rows
-    on every "load more" click. The explicit `::double precision` cast on
-    the parameter is required: an untyped NULL inside COALESCE raises
-    "could not determine data type"."""
+    needs NULLS-LAST handling. The row constructor leads with an explicit
+    `{rank_expr} IS NOT NULL` boolean instead of folding NULL into the
+    same '-infinity' sentinel used for COALESCE: a plain COALESCE-only
+    sentinel would make a genuine `rank_score = -Infinity` row (a valid
+    double precision value) indistinguishable from a `rank_score IS NULL`
+    row, which could skip the NULL row on a page boundary once `after`'s
+    leading element ties. Leading with `IS NOT NULL` (TRUE=1 for a real
+    value, FALSE=0 for NULL) makes every NULL row sort into a distinct,
+    later group than every finite row (including -Infinity) before the
+    value is ever compared -- and it has to be the "is not null" polarity,
+    not "is null": every element of this row constructor is compared with
+    a single, uniform `<`, which only produces the correct "next page"
+    predicate for a column already sorted DESC (a plain `<` seek on a DESC
+    column is the standard keyset trick every column here already uses).
+    `(x IS NOT NULL) DESC` -- real values (1) sort ahead of NULLs (0) --
+    is what's DESC-compatible with that trick; `(x IS NULL) ASC` produces
+    the identical row ordering but needs `>`, not `<`, so using the IS
+    NULL polarity here would silently invert the comparison instead of
+    just being a no-op relabeling. `(x IS NOT NULL) DESC, x DESC` is
+    exactly what `_SORTS["default"]`'s `rank_score DESC NULLS LAST`
+    already produces natively, so this predicate's ordering agrees with
+    that ORDER BY without needing to change its text. The COALESCE after
+    the flag is still required even though the flag disambiguates NULL:
+    PostgreSQL compares a row constructor element-by-element, left to
+    right, and stops at the first pair that is either unequal or NULL --
+    a NULL pair only makes the whole comparison UNKNOWN (which WHERE
+    treats as not-satisfied, dropping the row) if it is actually REACHED,
+    i.e. every earlier pair tied (see the PostgreSQL docs' row
+    constructor comparison rules,
+    https://www.postgresql.org/docs/current/functions-comparisons.html#ROW-WISE-COMPARISON
+    -- `ROW(1,2,NULL) < ROW(1,3,0)` is TRUE because the second pair is
+    already unequal, so the trailing NULL is never reached). Within the
+    NULL group the leading flag always ties (FALSE on both sides), so
+    comparison proceeds to the second element -- if that were the raw,
+    un-COALESCEd column, both sides would ALSO tie there (NULL vs NULL,
+    now reached because the flag tied), making the pair UNKNOWN and
+    silently dropping every row within the NULL group instead of falling
+    through to last_seen/id. COALESCE keeps that second element non-NULL
+    (both sides collapse to the same '-infinity' sentinel) so ties within
+    the NULL group actually reach and compare last_seen/id, while the
+    leading flag alone still carries the real NULL-vs-value distinction
+    across group boundaries. Both sides of the row comparison get both
+    the flag and the COALESCE, not just the column side: `after`'s
+    rank_score is NULL on every real page today, and COALESCEing only
+    the column side would hit the same problem on every "load more"
+    click. The explicit `::double precision` cast on the value parameter
+    is required: an untyped NULL inside COALESCE raises "could not
+    determine data type"."""
     if after is None:
         return "", []
     after_rank_score, after_last_seen, after_id = after
     clause = (
-        f"(COALESCE({rank_expr}, '-infinity'::double precision), p.last_seen, p.id) "
-        "< (COALESCE(%s::double precision, '-infinity'::double precision), %s, %s)"
+        f"({rank_expr} IS NOT NULL, COALESCE({rank_expr}, '-infinity'::double precision), "
+        "p.last_seen, p.id) "
+        "< (%s, COALESCE(%s::double precision, '-infinity'::double precision), %s, %s)"
     )
-    return clause, [after_rank_score, after_last_seen, after_id]
+    return clause, [after_rank_score is not None, after_rank_score, after_last_seen, after_id]
 
 
 def cursor_from_row(row: Any) -> dict[str, str]:
@@ -146,12 +185,24 @@ def parse_cursor(args: Any) -> tuple[float | None, datetime, int] | None:
     same fail-open discipline jobcannon/web/pages.py's other query-param
     parsing already uses. This function only guards parseability, not SQL
     validity: a value that parses but is out of range for the DB column
-    (e.g. an id wider than bigint) or is a float special value `float()`
-    accepts but SQL rejects (`nan`, `inf`) passes this function and is
-    instead caught by the caller's broad `except Exception` around the DB
-    call, which degrades to an *empty* batch rather than a fresh first
-    page -- still fail-closed (no 500, no data leak), just a different
-    empty state than "no cursor" produces."""
+    (e.g. an id wider than bigint) passes this function and is instead
+    caught by the caller's broad `except Exception` around the DB call,
+    which degrades to an *empty* batch rather than a fresh first page --
+    still fail-closed (no 500, no data leak), just a different empty
+    state than "no cursor" produces. Float special values `float()`
+    accepts (`nan`, `inf`, `-inf`) are NOT in that out-of-range bucket:
+    `_cursor_predicate` binds `after`'s rank_score through an explicit
+    `::double precision` cast, and PostgreSQL `double precision` natively
+    supports all three -- `tests/host/test_feed_dal.py` seeds each value
+    into `feed_state` and pages through it via the real
+    `cursor_from_row` -> query-string -> `parse_cursor` round trip, so
+    this is proven by a running test against Postgres, not just
+    inspection. All three bind and execute cleanly rather than raising.
+    `-inf` in particular is a real, valid `rank_score` value this
+    predicate must handle correctly, not just tolerate. `nan` sorts as
+    PostgreSQL's *greatest* double precision value -- ahead of `+inf`,
+    not IEEE-754 "unordered" -- so a NaN cursor seeks correctly under
+    this predicate's uniform `<` the same way any other value does."""
     raw_id = (args.get("cursor_id") or "").strip()
     if not raw_id:
         return None
@@ -188,6 +239,7 @@ def _build_filters(
     company: str | None,
     companies: list[str] | None = None,
     posting_id: int | None = None,
+    include_dismissed: bool = False,
 ) -> tuple[list[str], list[Any]]:
     """Parameterized WHERE fragments + bound params for `list_feed_postings`,
     factored out as its own function so any future second caller of the same
@@ -222,10 +274,22 @@ def _build_filters(
 
     `posting_id` narrows to exactly one posting. It exists so
     `jobcannon/web/actions.py` can re-fetch the single row it just mutated
-    through this SAME query — dismissed-exclusion and the `saved` flag
-    (`list_feed_postings`'s authed branch) apply identically whether the
-    caller wants a full page or one row, rather than a second,
-    independently-maintained "what does this user see for posting X" query.
+    through this SAME query — the `saved` flag (`list_feed_postings`'s
+    authed branch) applies identically whether the caller wants a full page
+    or one row, rather than a second, independently-maintained "what does
+    this user see for posting X" query.
+
+    `include_dismissed` (#200) governs the one clause that is conditional on
+    something OTHER than "was a value passed": by default (False) a
+    dismissed posting is excluded via `ps.status`, matching every existing
+    caller's behavior before this parameter existed. `ps` (`pipeline_status`)
+    is only joined on `list_feed_postings`'s authed branch, so a caller with
+    no `user_id` — including `list_feed_postings`'s own anonymous branch —
+    must always pass `include_dismissed=True` here; the clause references an
+    alias that branch's FROM clause never joins, and would raise at execute
+    time otherwise. `list_feed_postings` enforces that for its own anonymous
+    branch itself (`include_dismissed=include_dismissed or user_id is None`)
+    so a future direct caller does not have to remember it independently.
     """
     clauses: list[str] = []
     params: list[Any] = []
@@ -250,6 +314,8 @@ def _build_filters(
     if posting_id is not None:
         clauses.append("p.id = %s")
         params.append(posting_id)
+    if not include_dismissed:
+        clauses.append("(ps.status IS DISTINCT FROM 'dismissed')")
     return clauses, params
 
 
@@ -303,6 +369,7 @@ def list_feed_postings(
     company: str | None = None,
     companies: list[str] | None = None,
     posting_id: int | None = None,
+    include_dismissed: bool = False,
     sort: str = "default",
     limit: int = FEED_PAGE_MAX,
     offset: int = 0,
@@ -315,10 +382,18 @@ def list_feed_postings(
     function does not filter it out.
 
     An authed reader (`user_id` not None) never sees a posting whose
-    `pipeline_status.status = 'dismissed'` — that exclusion clause is added
-    only on this branch (not folded into `_build_filters`) because it
-    depends on `user_id` and the anonymous branch has no per-user row to
-    exclude by.
+    `pipeline_status.status = 'dismissed'` unless `include_dismissed=True`
+    (#200) — see `_build_filters`'s docstring for why that clause lives
+    there and why the anonymous branch (no `user_id`, so no `ps` join to
+    reference) is forced to `include_dismissed=True` regardless of what this
+    function's own caller passed. `jobcannon/web/actions.py::_fetch_entry`
+    is the one caller that passes `include_dismissed=True` explicitly
+    today — for its save/apply/undo-apply callers only, so a row those
+    routes just acted on re-renders honestly even if dismissed, never for
+    its dismiss caller, whose own empty re-render is unrelated and
+    intentional. A normal feed page render never passes it either, so
+    dismissed rows stay excluded there exactly as before this parameter
+    existed.
 
     `after` (#156) is a keyset cursor — the `(rank_score, last_seen, id)`
     tuple `cursor_from_row` derived from a previous page's last row, or None
@@ -349,16 +424,23 @@ def list_feed_postings(
         company=company,
         companies=companies,
         posting_id=posting_id,
+        include_dismissed=include_dismissed or user_id is None,
     )
 
     raw = conn.raw if hasattr(conn, "raw") else conn
 
     if user_id is not None:
         cursor_sql, cursor_params = _cursor_predicate("fs.rank_score", after)
-        authed_where_clauses = [*where_clauses, "(ps.status IS DISTINCT FROM 'dismissed')"]
+        authed_where_clauses = list(where_clauses)
         if cursor_sql:
             authed_where_clauses.append(cursor_sql)
-        where_sql = f"WHERE {' AND '.join(authed_where_clauses)}"
+        # Before #200, this branch's WHERE list always carried at least the
+        # hardcoded dismissed-exclusion clause, so it was never empty. Now
+        # that include_dismissed=True can leave _build_filters with nothing
+        # to say (no other filters, no cursor), guard the same way the
+        # anonymous branch below already does -- an unconditional "WHERE " +
+        # "".join([]) is a syntax error, not an unfiltered query.
+        where_sql = f"WHERE {' AND '.join(authed_where_clauses)}" if authed_where_clauses else ""
         sql = (
             f"SELECT {_SELECT_COLUMNS}, "
             "fs.rank_score AS rank_score, fs.ranker_version AS ranker_version, "

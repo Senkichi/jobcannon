@@ -5,6 +5,7 @@ so every seed in this file writes it directly."""
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -66,6 +67,30 @@ def _after_from_row(row):
     trip so pagination tests below are about `_cursor_predicate` itself, not
     about `parse_cursor`'s string parsing (covered separately)."""
     return (row["rank_score"], row["last_seen"], row["id"])
+
+
+def _cursor_via_query_string(row):
+    """The REAL cursor round trip: `cursor_from_row` -> URL-encoded query
+    string -> decoded back into a dict -> `parse_cursor`, exactly what
+    `pages.feed`/`onboarding.preview` do for a "Load more" click
+    (`url_for("pages.feed", **cursor_from_row(rows[-1]))` on the way out,
+    `parse_cursor(request.args)` on the way back in). Passing
+    `cursor_from_row`'s dict straight to `parse_cursor` — skipping the
+    encode/decode hop — would not catch a query-string-specific
+    corruption (e.g. an un-encoded `+` in an ISO timestamp's `+00:00` UTC
+    offset decoding to a space), because `parse_cursor` also happily
+    accepts a plain dict (`args.get(...)`). `keep_blank_values=True`
+    matters here: a NULL rank serializes to `""` (`cursor_from_row`),
+    which is every real page today, and both `urlencode`/`parse_qsl` and
+    Werkzeug's real `request.args` keep that blank value rather than
+    dropping the key."""
+    from urllib.parse import parse_qsl, urlencode
+
+    from jobcannon.db._feed import cursor_from_row, parse_cursor
+
+    query_string = urlencode(cursor_from_row(row))
+    args = dict(parse_qsl(query_string, keep_blank_values=True))
+    return parse_cursor(args)
 
 
 def test_returns_rows_ordered_newest_first_when_all_unranked(db_conn):
@@ -167,6 +192,55 @@ def test_dismissed_posting_is_excluded_for_the_dismissing_user_but_not_others(db
 
     assert posting_id not in dismisser_ids
     assert posting_id in other_ids
+    assert posting_id in anon_ids
+
+
+def test_include_dismissed_defaults_false_but_the_escape_hatch_shows_it(db_conn):
+    """#200: `include_dismissed` defaults to False -- calling
+    `list_feed_postings` exactly the way every pre-#200 caller already does
+    (no such keyword at all) excludes a dismissed row identically to before
+    this parameter existed, matching
+    test_dismissed_posting_is_excluded_for_the_dismissing_user_but_not_others
+    above. Passing `include_dismissed=True` is the narrow, explicit opt-in
+    `jobcannon/web/actions.py::_fetch_entry` uses for save/apply/undo-apply
+    so those mutation routes can re-render a row they just acted on even
+    when that row is (or already was) dismissed, without a normal feed page
+    render ever seeing it (pages.py never passes the flag)."""
+    from jobcannon.db._feed import list_feed_postings
+    from jobcannon.db._user_actions import dismiss_posting
+
+    _seed_user(db_conn, "u-include-dismissed")
+    company_id = _seed_company(db_conn, "Acme")
+    posting_id = _seed_posting(db_conn, "p-include-dismissed", company_id, last_seen=_BASE_TIME)
+    dismiss_posting(db_conn, "u-include-dismissed", posting_id)
+
+    default_ids = [r["id"] for r in list_feed_postings(db_conn, user_id="u-include-dismissed")]
+    included_ids = [
+        r["id"]
+        for r in list_feed_postings(db_conn, user_id="u-include-dismissed", include_dismissed=True)
+    ]
+
+    assert posting_id not in default_ids
+    assert posting_id in included_ids
+
+
+def test_include_dismissed_is_forced_true_for_an_anonymous_reader(db_conn):
+    """The anonymous branch has no `pipeline_status` join to filter by, so
+    `list_feed_postings` must force `include_dismissed=True` for it
+    regardless of what a caller passes -- a literal `include_dismissed=False`
+    from an anonymous caller must not raise (referencing a `ps` alias that
+    branch's FROM clause never joins) and must not silently drop postings no
+    per-user dismissal state can even apply to."""
+    from jobcannon.db._feed import list_feed_postings
+    from jobcannon.db._user_actions import dismiss_posting
+
+    _seed_user(db_conn, "u-anon-dismissed")
+    company_id = _seed_company(db_conn, "Acme")
+    posting_id = _seed_posting(db_conn, "p-anon-dismissed", company_id, last_seen=_BASE_TIME)
+    dismiss_posting(db_conn, "u-anon-dismissed", posting_id)
+
+    anon_ids = [r["id"] for r in list_feed_postings(db_conn, include_dismissed=False)]
+
     assert posting_id in anon_ids
 
 
@@ -671,6 +745,146 @@ def test_cursor_pagination_orders_ranked_ahead_of_unranked_across_pages(db_conn)
         db_conn, user_id="u-cursor-rank", limit=1, after=_after_from_row(page1[-1])
     )
     assert [r["id"] for r in page2] == [fresh_unranked]
+
+
+def test_cursor_pagination_visits_every_row_matching_db_order_by_across_all_value_classes(
+    db_conn,
+):
+    """#194: `_cursor_predicate` used to COALESCE both a genuine
+    `rank_score = -Infinity` row and a `rank_score IS NULL` row to the same
+    '-infinity' sentinel, so a page boundary landing exactly on the
+    -Infinity row silently skipped a NULL row with a newer last_seen --
+    the exact scenario the issue describes.
+
+    Two things this test does differently from a hand-typed expected
+    list: expected order is DERIVED from the DB's own ORDER BY, not
+    hand-typed -- a single unpaginated `list_feed_postings(after=None)`
+    call builds its ORDER BY from `_SORTS["default"]` and applies no
+    cursor predicate at all, so comparing the paginated walk against it is
+    a genuine coupling check that fails if `_cursor_predicate` and
+    `_SORTS["default"]` ever disagree, which a hand-typed expected order
+    cannot catch (an edit to one would just get a matching edit to the
+    other). And the walk is seeded via the REAL `cursor_from_row` -> URL
+    query string -> `parse_cursor` round trip (`_cursor_via_query_string`),
+    not the `_after_from_row` shortcut every other test in this file uses
+    to reach `_cursor_predicate` directly -- this is what `pages.feed` /
+    `onboarding.preview` actually do for a "Load more" click.
+
+    The corpus covers every PostgreSQL `double precision` special value
+    NULLS LAST must order correctly: NaN (PostgreSQL's own float8 order
+    makes NaN sort GREATEST, ahead of +Infinity -- not IEEE-754
+    "unordered"), +Infinity, two ordinary ranks, -Infinity (the #194
+    collision value), and a genuine NULL/NULL tie (shared last_seen, so
+    the tiebreak actually falls through to `id DESC` -- the prior version
+    of this test named itself around a NULL/NULL tie but gave the two
+    NULL rows different last_seen values, so it never actually exercised
+    one)."""
+    from jobcannon.db._feed import list_feed_postings
+
+    _seed_user(db_conn, "u-value-classes")
+    company_id = _seed_company(db_conn, "Acme")
+    nan_row = _seed_posting(db_conn, "p-vc-nan", company_id, last_seen=_BASE_TIME)
+    pinf_row = _seed_posting(
+        db_conn, "p-vc-pinf", company_id, last_seen=_BASE_TIME + timedelta(hours=1)
+    )
+    ranked_high = _seed_posting(
+        db_conn, "p-vc-high", company_id, last_seen=_BASE_TIME + timedelta(hours=2)
+    )
+    ranked_mid = _seed_posting(
+        db_conn, "p-vc-mid", company_id, last_seen=_BASE_TIME + timedelta(hours=3)
+    )
+    # Row B from #194: a genuine -Infinity rank_score.
+    neg_inf_row = _seed_posting(
+        db_conn, "p-vc-neginf", company_id, last_seen=_BASE_TIME - timedelta(hours=10)
+    )
+    # Row A from #194, doubled into a genuine tie: NULL rank_score, NEWER
+    # last_seen than the -Infinity row -- and shared with each other, so
+    # the NULL/NULL tie itself falls through to id DESC.
+    null_tied_time = _BASE_TIME + timedelta(hours=5)
+    null_a = _seed_posting(db_conn, "p-vc-null-a", company_id, last_seen=null_tied_time)
+    null_b = _seed_posting(db_conn, "p-vc-null-b", company_id, last_seen=null_tied_time)
+    _seed_feed_state(db_conn, "u-value-classes", nan_row, float("nan"))
+    _seed_feed_state(db_conn, "u-value-classes", pinf_row, float("inf"))
+    _seed_feed_state(db_conn, "u-value-classes", ranked_high, 8.0)
+    _seed_feed_state(db_conn, "u-value-classes", ranked_mid, 3.0)
+    _seed_feed_state(db_conn, "u-value-classes", neg_inf_row, float("-inf"))
+    # null_a / null_b get no feed_state row -> rank_score NULL.
+
+    all_ids = {nan_row, pinf_row, ranked_high, ranked_mid, neg_inf_row, null_a, null_b}
+
+    # Ground truth: the DB's own unpaginated ORDER BY (built from
+    # _SORTS["default"]; after=None makes _cursor_predicate return an
+    # empty clause, so this exercises the ORDER BY alone).
+    ground_truth = list_feed_postings(db_conn, user_id="u-value-classes", limit=25)
+    expected_order = [r["id"] for r in ground_truth]
+    assert set(expected_order) == all_ids
+    # NaN sorts ahead of +Infinity under PostgreSQL float8 DESC ordering
+    # (not IEEE-754 "unordered") -- pinned here since parse_cursor's
+    # docstring now makes that specific claim.
+    assert expected_order[0] == nan_row
+    assert expected_order[1] == pinf_row
+    # Both NULL rows land last, after every non-null value including
+    # -Infinity -- NULLS LAST, exactly the #194 property.
+    assert set(expected_order[-2:]) == {null_a, null_b}
+
+    by_id = {r["id"]: r for r in ground_truth}
+    visited: list[int] = []
+    after = None
+    for _ in range(len(expected_order) + 1):  # one extra call must come back empty
+        page = list_feed_postings(db_conn, user_id="u-value-classes", limit=1, after=after)
+        if not page:
+            break
+        visited.append(page[0]["id"])
+        after = _cursor_via_query_string(page[0])  # real round trip, not _after_from_row
+
+    assert visited == expected_order  # no skip, no dup: matches the DB's own ORDER BY exactly
+    assert len(set(visited)) == len(expected_order)
+
+    # The exact #194 boundary: -Infinity is immediately followed by a NULL
+    # row in the DB's own order, and the walk must cross it without a skip.
+    boundary_index = expected_order.index(neg_inf_row)
+    assert expected_order[boundary_index + 1] in (null_a, null_b)  # sanity on the fixture
+    assert visited[boundary_index + 1] == expected_order[boundary_index + 1]
+
+    # NaN and +Infinity actually bind and execute as `after` params against
+    # Postgres (not just sit in the corpus): with limit=1, nan_row/pinf_row
+    # are each some page's own last row above, so their cursor became the
+    # seek bound for the very next page -- and that seek landed correctly.
+    # Explicit round-trip fidelity too: math.isnan(), never `==`, since
+    # NaN != NaN in Python (though PostgreSQL's own NaN = NaN is TRUE).
+    nan_after = _cursor_via_query_string(by_id[nan_row])
+    assert nan_after is not None and math.isnan(nan_after[0])
+    pinf_after = _cursor_via_query_string(by_id[pinf_row])
+    assert pinf_after == (float("inf"), by_id[pinf_row]["last_seen"], pinf_row)
+
+
+def test_cursor_round_trip_across_the_neg_inf_boundary_via_query_string(db_conn):
+    """#194's actual symptom is a "Load more" click, which never sees a
+    raw `after` tuple -- it goes through `cursor_from_row` -> a URL query
+    string -> `parse_cursor` (see `test_parse_cursor_round_trips_a_real_
+    rank_score` for that round trip in isolation). This proves the fix
+    survives that full path for a genuine -Infinity cursor, not just the
+    `_after_from_row` test-only shortcut every other test in this file
+    uses to reach `_cursor_predicate` directly."""
+    from jobcannon.db._feed import list_feed_postings
+
+    _seed_user(db_conn, "u-neg-inf-roundtrip")
+    company_id = _seed_company(db_conn, "Acme")
+    neg_inf_row = _seed_posting(db_conn, "p-rt-neginf", company_id, last_seen=_BASE_TIME)
+    null_newer = _seed_posting(
+        db_conn, "p-rt-null-new", company_id, last_seen=_BASE_TIME + timedelta(hours=5)
+    )
+    _seed_feed_state(db_conn, "u-neg-inf-roundtrip", neg_inf_row, float("-inf"))
+    # null_newer gets no feed_state row -> rank_score NULL.
+
+    page1 = list_feed_postings(db_conn, user_id="u-neg-inf-roundtrip", limit=1)
+    assert [r["id"] for r in page1] == [neg_inf_row]
+
+    after = _cursor_via_query_string(page1[0])
+    assert after == (float("-inf"), page1[0]["last_seen"], page1[0]["id"])
+
+    page2 = list_feed_postings(db_conn, user_id="u-neg-inf-roundtrip", limit=1, after=after)
+    assert [r["id"] for r in page2] == [null_newer]
 
 
 def test_cursor_with_unknown_sort_token_raises(db_conn):
