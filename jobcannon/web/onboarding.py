@@ -290,16 +290,26 @@ def _merge_checked(options: list[str], checked: list[str]) -> list[str]:
 def _picker_context(
     *,
     error: str | None = None,
+    notice: str | None = None,
     q: str = "",
     checked_titles: list[str] | None = None,
     checked_companies: list[str] | None = None,
 ) -> dict[str, Any]:
+    """`error` (POST-only) is a hard validation rejection, rendered once by
+    onboarding_picker.html's own top-level block. `notice` (GET-only) is
+    the carry-forward-overage message (see `start`'s `_too_many_selected_message`
+    call) — a non-rejecting truncation notice, deliberately a SEPARATE field
+    so it renders exactly once, inside _picker_options.html (shared by both
+    the HX fragment and, via that template's inclusion, the full-page GET
+    render), without also duplicating onto _picker_options.html's shared
+    context for a POST error re-render, which never sets `notice`."""
     checked_titles = checked_titles or []
     checked_companies = checked_companies or []
     options = _read_picker_options(q)
     return {
         "submitted": False,
         "error": error,
+        "notice": notice,
         "q": q,
         "titles": _merge_checked(options["titles"], checked_titles),
         "companies": _merge_checked(options["companies"], checked_companies),
@@ -320,6 +330,18 @@ def _has_control_char(value: str) -> bool:
     return any(unicodedata.category(ch) == "Cc" for ch in value)
 
 
+def _too_many_selected_message(kind: str, count: int, limit: int) -> str | None:
+    """Single point of truth for the "too many ... selected" wording, so
+    POST /start's hard rejection (_parse_titles/_parse_companies below) and
+    GET /start's carry-forward notice (see `start` view) can never drift
+    apart into two different messages for the same bound (PR #192 review
+    finding L5 — the GET path used to truncate this same overage silently
+    instead of saying anything)."""
+    if count > limit:
+        return f"too many {kind} selected (max {limit})"
+    return None
+
+
 def _parse_titles(form: Any) -> tuple[list[str] | None, str | None]:
     """Shape-validate the submitted title selections before they can reach
     upsert_profile's target_titles column: count cap, per-item length cap,
@@ -327,8 +349,9 @@ def _parse_titles(form: Any) -> tuple[list[str] | None, str | None]:
     Deliberately NOT a membership check against the rendered option window
     — see MAX_TITLES_PER_SELECTION's module-level rationale comment."""
     raw_titles = [t for t in form.getlist("titles") if t]
-    if len(raw_titles) > MAX_TITLES_PER_SELECTION:
-        return None, f"too many titles selected (max {MAX_TITLES_PER_SELECTION})"
+    message = _too_many_selected_message("titles", len(raw_titles), MAX_TITLES_PER_SELECTION)
+    if message is not None:
+        return None, message
 
     titles: list[str] = []
     for title in raw_titles:
@@ -351,8 +374,11 @@ def _parse_companies(form: Any) -> tuple[list[str] | None, str | None]:
     the concern that check exists for doesn't apply — the cookie-budget caps
     below are the only hazard `companies` shares with `titles`."""
     raw_companies = [c for c in form.getlist("companies") if c]
-    if len(raw_companies) > MAX_COMPANIES_PER_SELECTION:
-        return None, f"too many companies selected (max {MAX_COMPANIES_PER_SELECTION})"
+    message = _too_many_selected_message(
+        "companies", len(raw_companies), MAX_COMPANIES_PER_SELECTION
+    )
+    if message is not None:
+        return None, message
 
     companies: list[str] = []
     for company in raw_companies:
@@ -455,19 +481,38 @@ def start():
     those same filtered fieldsets already rendered. `titles`/`companies`
     query params (present when the search box's hx-include carries forward
     the visitor's already-checked boxes) are read here too, capped the same
-    way POST /start caps a submission, so a pathological URL can't force an
-    unbounded render."""
+    way POST /start caps a submission — but unlike POST, an overage here
+    can't be rejected outright (there's no submission to bounce, just a
+    widened checked-set), so it's truncated for display AND surfaced via the
+    same "too many ... selected" notice POST uses, rather than silently
+    dropped (PR #192 review finding L5).
+
+    The `HX-Request` check runs BEFORE the pending-picker branch (PR #192
+    review finding L6): the search input's own hx-get can reach this route
+    while a picker submission is already pending in this session (a cross-
+    tab race — see the module docstring), and hx-swap="outerHTML" always
+    targets #picker-options specifically, so an HX-Request must always get a
+    #picker-options-rooted fragment back, never a whole document, in EVERY
+    branch of this view."""
     pending = get_pending_picker()
+    is_hx = request.headers.get("HX-Request") == "true"
     if pending is not None:
+        if is_hx:
+            return render_template("_picker_submitted.html")
         return render_template("onboarding_picker.html", submitted=True, pending=pending)
 
     q = (request.args.get("q") or "").strip()
-    checked_titles = request.args.getlist("titles")[:MAX_TITLES_PER_SELECTION]
-    checked_companies = request.args.getlist("companies")[:MAX_COMPANIES_PER_SELECTION]
+    raw_titles = request.args.getlist("titles")
+    raw_companies = request.args.getlist("companies")
+    notice = _too_many_selected_message(
+        "titles", len(raw_titles), MAX_TITLES_PER_SELECTION
+    ) or _too_many_selected_message("companies", len(raw_companies), MAX_COMPANIES_PER_SELECTION)
+    checked_titles = raw_titles[:MAX_TITLES_PER_SELECTION]
+    checked_companies = raw_companies[:MAX_COMPANIES_PER_SELECTION]
     context = _picker_context(
-        q=q, checked_titles=checked_titles, checked_companies=checked_companies
+        notice=notice, q=q, checked_titles=checked_titles, checked_companies=checked_companies
     )
-    if request.headers.get("HX-Request") == "true":
+    if is_hx:
         return render_template("_picker_options.html", **context)
     return render_template("onboarding_picker.html", **context)
 

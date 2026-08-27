@@ -1,0 +1,17 @@
+{# GET /start's HX-Request response when a picker submission is already
+   pending in this session (jobcannon.web.onboarding.start, PR #192 review
+   finding L6). The search input's hx-get can reach GET /start while a
+   picker submission from another tab has just gone pending (a cross-tab
+   race — see the module docstring on jobcannon/web/onboarding.py), and its
+   hx-swap="outerHTML" always targets #picker-options specifically — so
+   this fragment keeps that same root id and stays swappable, rather than
+   the caller falling back to onboarding_picker.html's own `submitted`
+   branch (which extends base.html and would swap a whole <html> document
+   into that target). Same copy as that branch, kept in sync by hand since
+   there are only the two of them. #}
+<div id="picker-options">
+  <p class="text-neutral-400">
+    Your selections are saved.
+    <a href="{{ url_for('onboarding.preview') }}" class="underline">See your preview</a>.
+  </p>
+</div>

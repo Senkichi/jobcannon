@@ -24,7 +24,18 @@
      jobcannon.web.onboarding._merge_checked). Deliberately its own <form>,
      not nested inside the POST form below — HTML forms cannot nest, and the
      checkboxes still need to submit through the POST form regardless of
-     which search term last filtered them into view. #}
+     which search term last filtered them into view.
+
+     `checked_titles`/`checked_companies` (the server's already-known
+     checked state — see jobcannon.web.onboarding._picker_context) are
+     echoed here as hidden inputs so a no-JS "Search" click, or pressing
+     Enter (which fires this form's native GET submit alongside — or
+     instead of, when the text didn't change — the hx-get above), carries
+     the visitor's selections into the reload via THIS form's own fields
+     rather than losing every checked box the moment it submits without
+     hx-include's help (PR #192 review finding L1). GET /start reads them
+     back with the same request.args.getlist("titles"/"companies") it
+     already used for the hx-include case. #}
   <form method="get" action="/start" class="mb-4 flex gap-2" data-picker-search>
     <input type="text" name="q" value="{{ q }}" placeholder="Search titles or companies&hellip;"
            hx-get="/start"
@@ -33,6 +44,12 @@
            hx-swap="outerHTML"
            hx-include="[name='titles']:checked,[name='companies']:checked"
            class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-sm text-neutral-100 flex-1">
+    {% for title in checked_titles %}
+      <input type="hidden" name="titles" value="{{ title }}">
+    {% endfor %}
+    {% for company in checked_companies %}
+      <input type="hidden" name="companies" value="{{ company }}">
+    {% endfor %}
     <button type="submit" class="text-sm underline text-neutral-300">Search</button>
   </form>
   <form method="post" action="/start" class="space-y-8">
