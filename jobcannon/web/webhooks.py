@@ -7,30 +7,38 @@ user.created/user.updated is an UPSERT on the Clerk user id. The primary
 email is data.email_addresses[] matched by data.primary_email_address_id —
 there is no flat data.email. user.deleted carries only data.id.
 
-user.deleted -> hard DELETE cascades to profiles/feed_state/watchlists/
-pipeline_status/byo_key_credentials AND events (m0001 FKs, all ON DELETE
-CASCADE) — spec consequence C-1 ("deletion must erase per-user raw events")
-is implemented STRUCTURALLY at the FK layer rather than by a future runbook;
-anonymous (user_id IS NULL) events are unaffected. Do not weaken the events
-FK to SET NULL — that would re-open C-1.
+user.deleted -> jobcannon.host.user_deletion.cascade_delete_user, the ONE
+deletion path (also called by issue #136's reconciliation-sweep periodic —
+never a second copy). Hard DELETE cascades to profiles/feed_state/
+watchlists/pipeline_status/byo_key_credentials AND events (m0001 FKs, all
+ON DELETE CASCADE) — spec consequence C-1 ("deletion must erase per-user
+raw events") is implemented STRUCTURALLY at the FK layer rather than by a
+future runbook; anonymous (user_id IS NULL) events are unaffected. Do not
+weaken the events FK to SET NULL — that would re-open C-1. The cascade also
+enqueues issue #135's PostHog person purge (async, worker-side, pseudonym
+only) when analytics pseudonymization is configured — see
+jobcannon.host.user_deletion's module docstring.
 
 user.deleted ALSO writes a `revoked_subjects` tombstone (issue #159) on the
-same connection as `delete_user`, before it, in the same `with
+same connection as `cascade_delete_user`, before it, in the same `with
 connection_factory()` block — this is the second of the two revocation
 writers (`jobcannon/web/account.py::post_delete` is the first, for
 in-app-triggered deletions; this branch is what covers a deletion started
 from Clerk's own Account Portal, which never touches account.py at all).
 NOTE: sharing a connection is NOT the same as sharing a transaction — both
-`revoke_subject` and `delete_user` call `commit_unless_nested` internally
-(jobcannon/db/pool.py), so each commits independently the moment it runs.
-A `delete_user` failure after a successful `revoke_subject` commit leaves
-the tombstone in place (harmless: the row is orphaned by design, see
-jobcannon/db/_revoked_subjects.py's module docstring) rather than rolling
-back with it. No try/except around either call: both are left to propagate
-to Flask's default 500 on failure, matching this handler's existing
-bare-call convention — Svix retries on a 5xx, and `revoke_subject` is an
-idempotent upsert (jobcannon/db/_revoked_subjects.py), so a retried
-delivery re-writes the same tombstone rather than erroring.
+`revoke_subject` and `cascade_delete_user`'s own `delete_user` call
+`commit_unless_nested` internally (jobcannon/db/pool.py), so each commits
+independently the moment it runs. A `cascade_delete_user` failure after a
+successful `revoke_subject` commit leaves the tombstone in place (harmless:
+the row is orphaned by design, see jobcannon/db/_revoked_subjects.py's
+module docstring) rather than rolling back with it. No try/except around
+either call: both are left to propagate to Flask's default 500 on failure,
+matching this handler's existing bare-call convention — Svix retries on a
+5xx, and `revoke_subject` is an idempotent upsert
+(jobcannon/db/_revoked_subjects.py), so a retried delivery re-writes the
+same tombstone rather than erroring, and `cascade_delete_user`'s own
+`delete_user` is a plain DELETE that no-ops on a row already gone from a
+prior successful-but-unacknowledged attempt.
 """
 
 from __future__ import annotations
@@ -86,8 +94,10 @@ def clerk_webhook():
         with connection_factory() as conn:
             _users.ensure_user(conn, user_id, email=_primary_email(data))
     elif event_type == "user.deleted":
+        from jobcannon.host.user_deletion import cascade_delete_user
+
         with connection_factory() as conn:
             _revoked_subjects.revoke_subject(conn, user_id)
-            _users.delete_user(conn, user_id)
+            cascade_delete_user(conn, user_id)
     # Unknown event types: acknowledged 200 so Clerk doesn't retry forever.
     return ("", 200)
