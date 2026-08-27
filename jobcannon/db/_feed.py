@@ -111,19 +111,32 @@ def _cursor_predicate(
     exactly what `_SORTS["default"]`'s `rank_score DESC NULLS LAST`
     already produces natively, so this predicate's ordering agrees with
     that ORDER BY without needing to change its text. The COALESCE after
-    the flag is still required even though the flag disambiguates NULL: a
-    PostgreSQL row-constructor comparison treats ANY NULL element as
-    unknown for that whole tuple pair and drops the row, so a NULL second
-    element would still silently return zero rows within the NULL group
-    (ties there fall through to last_seen/id) -- COALESCE keeps that
-    element non-NULL while the leading flag carries the actual NULL-vs-
-    value distinction. Both sides of the row comparison get both the flag
-    and the COALESCE, not just the column side: `after`'s rank_score is
-    NULL on every real page today, and COALESCEing only the column side
-    would hit the same "NULL element drops the row" problem on every
-    "load more" click. The explicit `::double precision` cast on the value
-    parameter is required: an untyped NULL inside COALESCE raises "could
-    not determine data type"."""
+    the flag is still required even though the flag disambiguates NULL:
+    PostgreSQL compares a row constructor element-by-element, left to
+    right, and stops at the first pair that is either unequal or NULL --
+    a NULL pair only makes the whole comparison UNKNOWN (which WHERE
+    treats as not-satisfied, dropping the row) if it is actually REACHED,
+    i.e. every earlier pair tied (see the PostgreSQL docs' row
+    constructor comparison rules,
+    https://www.postgresql.org/docs/current/functions-comparisons.html#ROW-WISE-COMPARISON
+    -- `ROW(1,2,NULL) < ROW(1,3,0)` is TRUE because the second pair is
+    already unequal, so the trailing NULL is never reached). Within the
+    NULL group the leading flag always ties (FALSE on both sides), so
+    comparison proceeds to the second element -- if that were the raw,
+    un-COALESCEd column, both sides would ALSO tie there (NULL vs NULL,
+    now reached because the flag tied), making the pair UNKNOWN and
+    silently dropping every row within the NULL group instead of falling
+    through to last_seen/id. COALESCE keeps that second element non-NULL
+    (both sides collapse to the same '-infinity' sentinel) so ties within
+    the NULL group actually reach and compare last_seen/id, while the
+    leading flag alone still carries the real NULL-vs-value distinction
+    across group boundaries. Both sides of the row comparison get both
+    the flag and the COALESCE, not just the column side: `after`'s
+    rank_score is NULL on every real page today, and COALESCEing only
+    the column side would hit the same problem on every "load more"
+    click. The explicit `::double precision` cast on the value parameter
+    is required: an untyped NULL inside COALESCE raises "could not
+    determine data type"."""
     if after is None:
         return "", []
     after_rank_score, after_last_seen, after_id = after
@@ -171,10 +184,16 @@ def parse_cursor(args: Any) -> tuple[float | None, datetime, int] | None:
     accepts (`nan`, `inf`, `-inf`) are NOT in that out-of-range bucket:
     `_cursor_predicate` binds `after`'s rank_score through an explicit
     `::double precision` cast, and PostgreSQL `double precision` natively
-    supports all three -- confirmed empirically (#194), they bind and
-    execute cleanly rather than raising. `-inf` in particular is a real,
-    valid `rank_score` value this predicate must handle correctly, not
-    just tolerate."""
+    supports all three -- `tests/host/test_feed_dal.py` seeds each value
+    into `feed_state` and pages through it via the real
+    `cursor_from_row` -> query-string -> `parse_cursor` round trip, so
+    this is proven by a running test against Postgres, not just
+    inspection. All three bind and execute cleanly rather than raising.
+    `-inf` in particular is a real, valid `rank_score` value this
+    predicate must handle correctly, not just tolerate. `nan` sorts as
+    PostgreSQL's *greatest* double precision value -- ahead of `+inf`,
+    not IEEE-754 "unordered" -- so a NaN cursor seeks correctly under
+    this predicate's uniform `<` the same way any other value does."""
     raw_id = (args.get("cursor_id") or "").strip()
     if not raw_id:
         return None
