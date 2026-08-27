@@ -61,6 +61,11 @@
              class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1">
     </label>
     <label class="block">
+      <span class="font-medium">Compensation floor (USD/year, optional)</span>
+      <input type="number" name="comp_floor_usd" min="0" step="1"
+             class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1">
+    </label>
+    <label class="block">
       <span class="font-medium">Workplace type</span>
       <select name="workplace_type" class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1">
         {% for wt in workplace_types %}
