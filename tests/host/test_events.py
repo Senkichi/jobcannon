@@ -110,6 +110,8 @@ def test_validate_payload_rejects_unknown_event_type():
         ("posting_impression", {"surface": "feed"}),
         ("posting_saved", {}),
         ("posting_saved", None),
+        ("posting_apply_undone", {}),
+        ("posting_apply_undone", None),
         ("user_exit_surveyed", {"exit_reason": "hired"}),
         ("user_exit_surveyed", {"exit_reason": "gave-up"}),
         ("user_exit_surveyed", {"exit_reason": "still-searching"}),

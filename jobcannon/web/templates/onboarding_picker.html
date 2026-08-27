@@ -5,7 +5,7 @@
   <h1 class="text-2xl font-semibold mb-3">Picker submitted</h1>
   <p class="text-neutral-400">
     Your selections are saved.
-    <a href="{{ url_for('onboarding.preview') }}" class="underline">See your preview</a>.
+    <a href="{{ url_for('onboarding.preview') }}" class="underline min-h-11 inline-flex items-center px-1">See your preview</a>.
   </p>
 {% else %}
   <h1 class="text-2xl font-semibold mb-3">Tell us what you're looking for</h1>
@@ -43,14 +43,14 @@
            hx-target="#picker-options"
            hx-swap="outerHTML"
            hx-include="[name='titles']:checked,[name='companies']:checked"
-           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-sm text-neutral-100 flex-1">
+           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-sm text-neutral-100 flex-1 min-h-11">
     {% for title in checked_titles %}
       <input type="hidden" name="titles" value="{{ title }}">
     {% endfor %}
     {% for company in checked_companies %}
       <input type="hidden" name="companies" value="{{ company }}">
     {% endfor %}
-    <button type="submit" class="text-sm underline text-neutral-300">Search</button>
+    <button type="submit" class="text-sm underline text-neutral-300 min-h-11 inline-flex items-center px-2">Search</button>
   </form>
   <form method="post" action="/start" class="space-y-8">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -58,41 +58,41 @@
     <fieldset>
       <legend class="font-medium mb-2">Skills</legend>
       {% for skill in skills %}
-        <label class="block text-sm text-neutral-300">
-          <input type="checkbox" name="skills" value="{{ skill }}" {% if skill in checked_skills %}checked{% endif %}> {{ skill }}
+        <label class="flex items-center gap-2 min-h-11 px-1 text-sm text-neutral-300">
+          <input type="checkbox" name="skills" value="{{ skill }}" class="h-11 w-11 shrink-0 accent-neutral-100" {% if skill in checked_skills %}checked{% endif %}> {{ skill }}
         </label>
       {% endfor %}
     </fieldset>
-    <label class="block">
+    <label class="block min-h-11">
       <span class="font-medium">Seniority level</span>
-      <select name="seniority_level" class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1">
+      <select name="seniority_level" class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 min-h-11">
         <option value="" {% if not seniority_level %}selected{% endif %}>Prefer not to say</option>
         {% for level in seniority_levels %}
           <option value="{{ level }}" {% if level == seniority_level %}selected{% endif %}>{{ level }}</option>
         {% endfor %}
       </select>
     </label>
-    <label class="block">
+    <label class="block min-h-11">
       <span class="font-medium">Years of experience</span>
       <input type="number" name="years_of_experience" min="0" max="60" step="0.5"
              value="{{ years_of_experience }}"
-             class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1">
+             class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 min-h-11">
     </label>
-    <label class="block">
+    <label class="block min-h-11">
       <span class="font-medium">Compensation floor (USD/year, optional)</span>
       <input type="number" name="comp_floor_usd" min="0" step="1"
              value="{{ comp_floor_usd }}"
-             class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1">
+             class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 min-h-11">
     </label>
-    <label class="block">
+    <label class="block min-h-11">
       <span class="font-medium">Workplace type</span>
-      <select name="workplace_type" class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1">
+      <select name="workplace_type" class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 min-h-11">
         {% for wt in workplace_types %}
           <option value="{{ wt }}" {% if wt == workplace_type %}selected{% endif %}>{{ wt }}</option>
         {% endfor %}
       </select>
     </label>
-    <button type="submit" class="bg-neutral-100 text-neutral-950 px-4 py-2 rounded font-medium">Continue</button>
+    <button type="submit" class="bg-neutral-100 text-neutral-950 px-4 py-2 rounded font-medium min-h-11 inline-flex items-center">Continue</button>
   </form>
 {% endif %}
 {% endblock %}

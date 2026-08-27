@@ -47,9 +47,8 @@ PR as (or before) your first code contribution:
 
 `CONTRIBUTORS.md` is the project's human-readable record of everyone who
 has signed, independent of whether the `CLA Assistant Lite` check has run
-yet. The check itself is intended to be the actual merge gate; until it is
-added to the repo's required checks (tracked in #167), treat it as
-authoritative signal, not yet an enforced one.
+yet. `CLA Assistant Lite` is listed in `.aviator/config.yml`'s
+`required_checks`, so the Aviator merge queue gates on it.
 
 ## Pull requests
 
