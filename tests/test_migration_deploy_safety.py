@@ -1,8 +1,9 @@
-"""Static analysis guard over jobcannon.db.migrations.MIGRATIONS (issue #199):
-fails the moment a future migration ships contract-shaped DDL against a
-table/column an EARLIER migration created, or documents/contains a backfill
+"""Static analysis guard over jobcannon.db.migrations.MIGRATIONS (issues #199,
+#219): fails the moment a future migration ships contract-shaped DDL against a
+table/column an EARLIER migration created, documents/contains a backfill
 that assumes the old "worker deploys before web" ordering Render's pre-deploy
-step now inverts.
+step now inverts, or ships a non-CONCURRENT `CREATE INDEX` against a
+pre-existing table without explicitly accepting the lock-duration risk.
 
 Why this exists: `jobcannon-web`'s preDeployCommand
 (`python -m jobcannon.db.migrate`, docs/deploy-runbook.md §3) runs
@@ -63,10 +64,36 @@ the cost of a false negative is a broken zero-downtime deploy.
   `integer` -> `bigint` flags the same as a narrowing) -- deliberate
   over-flag per the invariant above; use `contract_step` for a proven-widen
   case (see m0003's CHECK-widen pattern for the general escape-hatch shape).
-- **`CREATE INDEX` (non-unique, non-concurrent) lock duration** on a large
-  pre-existing table: explicitly out of scope here, filed as #219.
-  `CREATE UNIQUE INDEX` on a pre-existing table IS scanned (it's a contract
-  break, not just a lock-duration concern) and IS flagged.
+- **`CREATE INDEX` (non-unique, non-concurrent) lock duration** on a
+  pre-existing table: now covered by Rule 3 below (issue #219) -- flagged
+  unless the migration declares `lock_step = True` with a docstring "Lock
+  justification:" section naming the expected row count / build time.
+  `CREATE UNIQUE INDEX` on a pre-existing table is a SEPARATE, independent
+  violation (Rule 1's contract break, gated on `contract_step`) -- the two
+  hazards don't imply each other (a unique index build can finish in
+  milliseconds and still break the previous release's duplicate inserts; a
+  slow non-unique build can hold a lock for hours without breaking anything
+  about the previous release's queries), so a migration that genuinely needs
+  both accepted risks declares both flags.
+- **Rule 3 (lock duration, #219)**: a non-CONCURRENT `CREATE`/`CREATE UNIQUE
+  INDEX` against a table an EARLIER migration created holds a SHARE lock for
+  the whole build, blocking writes to that table while the previous
+  release's web instance keeps serving them during the deploy overlap
+  window. Gated on `lock_step` (same fold-pattern/docstring-marker shape as
+  `contract_step`). An index on a table THIS SAME migration creates is
+  exempt -- the table is empty at that point in the deploy, so the build is
+  instant regardless of lock kind.
+- **Rule 4 (autocommit escape hatch, #219)**: keeps the alternative --
+  `CREATE INDEX CONCURRENTLY` on an `autocommit = True` migration, run
+  outside the ledger transaction (jobcannon/db/migrate.py) -- narrow.
+  Enforced as a biconditional (a CONCURRENTLY statement always requires
+  `autocommit = True` and vice versa), plus: an autocommit migration's `sql`
+  may contain ONLY CREATE/DROP INDEX statements (no `py` hook, no other
+  DDL), and every CONCURRENTLY `CREATE INDEX` in one must use
+  `IF NOT EXISTS` (migrate.py's `_apply_autocommit_migration` drops any
+  INVALID leftover index from a previously failed CONCURRENTLY build before
+  retrying, which is what makes a bare `IF NOT EXISTS` retry a safe no-op
+  instead of the silent-skip-of-an-unusable-index hazard #219 raised).
 """
 
 from __future__ import annotations
@@ -82,7 +109,12 @@ from pglast import ast as pg_ast
 from pglast import enums, visitors
 
 import jobcannon.db.migrations as _migrations_pkg
-from jobcannon.db.migrations import MIGRATIONS, _fold_contract_step
+from jobcannon.db.migrations import (
+    MIGRATIONS,
+    _fold_autocommit,
+    _fold_contract_step,
+    _fold_lock_step,
+)
 from jobcannon.db.migrations.types import Migration
 
 # ---------------------------------------------------------------------------
@@ -526,6 +558,159 @@ def _all_migration_modules():
 
 
 # ---------------------------------------------------------------------------
+# Rule 3: non-CONCURRENT CREATE INDEX lock duration (#219). Independent
+# pglast walk, decoupled from _scan_migration/_scan_statement above so this
+# orthogonal hazard (lock duration) can never be silently absorbed by the
+# contract_step escape hatch that gates Rule 1 -- a migration can be
+# lock_step without being contract_step and vice versa (see the module
+# docstring's Rule 3 note on why CREATE UNIQUE INDEX needs BOTH flags if
+# it's ever accepted). Same walk-in-registry-order shape as Rule 2's
+# _migrations_with_backfill_signal so "pre-existing" tracks the real schema
+# history exactly.
+# ---------------------------------------------------------------------------
+
+
+def _index_lock_violations(migration: Migration, pre_existing_tables: set[str]) -> list[str]:
+    new_tables_this_migration: set[str] = set()
+    violations: list[str] = []
+    for stmt_sql in migration.sql:
+        try:
+            raw_stmts = pglast.parse_sql(stmt_sql)
+        except pglast.parser.ParseError:
+            continue
+        for raw in raw_stmts:
+            node = raw.stmt
+            if isinstance(node, pg_ast.CreateStmt):
+                new_tables_this_migration.add(node.relation.relname)
+                continue
+            if not isinstance(node, pg_ast.IndexStmt) or node.concurrent:
+                continue
+            table = node.relation.relname
+            if table in pre_existing_tables and table not in new_tables_this_migration:
+                violations.append(
+                    f"{table}: CREATE INDEX {node.idxname or '(unnamed)'} without "
+                    f"CONCURRENTLY on a pre-existing table -- holds a SHARE lock for "
+                    f"the whole build, blocking writes while the previous release "
+                    f"keeps serving (issue #219)"
+                )
+    return violations
+
+
+def _migrations_with_index_lock_signal() -> dict[int, list[str]]:
+    """version -> violation list, walked across MIGRATIONS in registry order,
+    mirroring Rule 2's _migrations_with_backfill_signal."""
+    state = _SchemaState()
+    signal: dict[int, list[str]] = {}
+    for migration in MIGRATIONS:
+        pre_existing = set(state.table_created_at)
+        signal[migration.version] = _index_lock_violations(migration, pre_existing)
+        _scan_migration(migration, state)  # advance state past this migration too
+    return signal
+
+
+# ---------------------------------------------------------------------------
+# Rule 4: keep the autocommit escape hatch narrow (#219). `autocommit = True`
+# exists for exactly one reason -- letting `CREATE INDEX CONCURRENTLY` run
+# outside the ledger transaction, since Postgres refuses to run it inside one
+# at all. This enforces that stays the ONLY thing the flag is used for:
+#   (a) CONCURRENTLY <=> autocommit = True, both directions.
+#   (b) an autocommit migration's `sql` may contain ONLY CREATE/DROP INDEX
+#       statements, and no `py` hook.
+#   (c) a CONCURRENTLY CREATE INDEX in an autocommit migration must use
+#       IF NOT EXISTS -- jobcannon/db/migrate.py's
+#       _apply_autocommit_migration drops any INVALID leftover index before
+#       re-running an autocommit migration's statements, which is what turns
+#       a bare retry into a safe no-op instead of the silent-skip hazard
+#       #219 raised.
+# ---------------------------------------------------------------------------
+
+
+def _concurrently_index_statements(migration: Migration) -> list[pg_ast.IndexStmt]:
+    nodes: list[pg_ast.IndexStmt] = []
+    for stmt_sql in migration.sql:
+        try:
+            raw_stmts = pglast.parse_sql(stmt_sql)
+        except pglast.parser.ParseError:
+            continue
+        for raw in raw_stmts:
+            node = raw.stmt
+            if isinstance(node, pg_ast.IndexStmt) and node.concurrent:
+                nodes.append(node)
+    return nodes
+
+
+def _non_index_ddl_statements(migration: Migration) -> list[str]:
+    """Every statement in this migration's `sql` that is NOT a CREATE INDEX
+    or DROP INDEX -- used to enforce (b) above. An unparseable statement
+    counts too (fail closed, same posture as _scan_migration)."""
+    offenders: list[str] = []
+    for stmt_sql in migration.sql:
+        try:
+            raw_stmts = pglast.parse_sql(stmt_sql)
+        except pglast.parser.ParseError:
+            offenders.append(stmt_sql)
+            continue
+        for raw in raw_stmts:
+            node = raw.stmt
+            if isinstance(node, pg_ast.IndexStmt):
+                continue
+            if (
+                isinstance(node, pg_ast.DropStmt)
+                and node.removeType == enums.ObjectType.OBJECT_INDEX
+            ):
+                continue
+            offenders.append(stmt_sql)
+    return offenders
+
+
+def _autocommit_escape_hatch_violations(migration: Migration) -> list[str]:
+    """Pure classification against ONE migration's already-folded flags +
+    parsed SQL shape -- decoupled from the real registry so it can be
+    sabotage-verified with synthetic fixtures independent of whether any
+    shipped migration happens to use autocommit at all (same refuter-3
+    rationale as Rule 2/Rule 3's own fixtures)."""
+    violations: list[str] = []
+    concurrently_stmts = _concurrently_index_statements(migration)
+
+    if concurrently_stmts and not migration.autocommit:
+        violations.append(
+            f"migration {migration.version} ({migration.name}) has a CONCURRENTLY "
+            f"CREATE INDEX statement but doesn't declare autocommit = True -- "
+            f"CONCURRENTLY cannot run inside the per-migration ledger transaction"
+        )
+    if migration.autocommit and not concurrently_stmts:
+        violations.append(
+            f"migration {migration.version} ({migration.name}) declares "
+            f"autocommit = True but has no CONCURRENTLY statement -- autocommit "
+            f"only exists to let CONCURRENTLY run outside the ledger transaction, "
+            f"never set it without one"
+        )
+    if migration.autocommit:
+        if migration.py is not None:
+            violations.append(
+                f"migration {migration.version} ({migration.name}) is autocommit "
+                f"but defines a `py` hook -- autocommit migrations may contain "
+                f"only CREATE/DROP INDEX statements"
+            )
+        non_index = _non_index_ddl_statements(migration)
+        if non_index:
+            violations.append(
+                f"migration {migration.version} ({migration.name}) is autocommit "
+                f"but has non-index statement(s) {non_index!r} -- autocommit "
+                f"migrations may contain only CREATE/DROP INDEX statements"
+            )
+        for node in concurrently_stmts:
+            if not node.if_not_exists:
+                violations.append(
+                    f"migration {migration.version} ({migration.name}): CREATE INDEX "
+                    f"CONCURRENTLY {node.idxname or '(unnamed)'} has no IF NOT EXISTS "
+                    f"-- required for autocommit migrations so a retry after a "
+                    f"dropped INVALID leftover index is a safe no-op"
+                )
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # The guard itself, run against the real registry.
 # ---------------------------------------------------------------------------
 
@@ -559,6 +744,34 @@ def test_contract_step_migrations_declare_a_justification():
     assert not failures, "\n".join(failures)
 
 
+def test_no_unjustified_index_lock_ddl():
+    signal = _migrations_with_index_lock_signal()
+    failures = []
+    for migration in MIGRATIONS:
+        violations = signal.get(migration.version, [])
+        if violations and not migration.lock_step:
+            failures.append(
+                f"migration {migration.version} ({migration.name}) has unjustified "
+                f"lock-duration DDL: {violations}. Declare `lock_step = True` on the "
+                f"module with a docstring 'Lock justification:' section naming the "
+                f"expected row count / build time, or use CONCURRENTLY with "
+                f"autocommit = True instead."
+            )
+    assert not failures, "\n".join(failures)
+
+
+def test_lock_step_migrations_declare_a_justification():
+    failures = []
+    for migration, module in _all_migration_modules():
+        if not _lock_step_ok(migration.lock_step, module.__doc__ or ""):
+            failures.append(
+                f"migration {migration.version} ({migration.name}) sets "
+                f"lock_step = True but its docstring has no "
+                f"'Lock justification:' section"
+            )
+    assert not failures, "\n".join(failures)
+
+
 def test_no_undeclared_inverted_deploy_order():
     backfill_signal = _migrations_with_backfill_signal()
     failures = []
@@ -576,6 +789,13 @@ def test_no_undeclared_inverted_deploy_order():
         )
         if failure:
             failures.append(failure)
+    assert not failures, "\n".join(failures)
+
+
+def test_no_undeclared_autocommit_escape_hatch_violations():
+    failures = []
+    for migration in MIGRATIONS:
+        failures.extend(_autocommit_escape_hatch_violations(migration))
     assert not failures, "\n".join(failures)
 
 
@@ -638,6 +858,21 @@ def test_contract_step_fold_neither_source_silently_overwrites_the_other():
     assert _fold_contract_step(module_attr=True, migration_kwarg=False) is True
     assert _fold_contract_step(module_attr=True, migration_kwarg=True) is True
     assert _fold_contract_step(module_attr=False, migration_kwarg=False) is False
+
+
+def test_lock_step_and_autocommit_fold_neither_source_silently_overwrites_the_other():
+    """Same #218 review M1 shape as
+    test_contract_step_fold_neither_source_silently_overwrites_the_other
+    above, applied to the two new fold helpers this issue (#219) adds."""
+    assert _fold_lock_step(module_attr=False, migration_kwarg=True) is True
+    assert _fold_lock_step(module_attr=True, migration_kwarg=False) is True
+    assert _fold_lock_step(module_attr=True, migration_kwarg=True) is True
+    assert _fold_lock_step(module_attr=False, migration_kwarg=False) is False
+
+    assert _fold_autocommit(module_attr=False, migration_kwarg=True) is True
+    assert _fold_autocommit(module_attr=True, migration_kwarg=False) is True
+    assert _fold_autocommit(module_attr=True, migration_kwarg=True) is True
+    assert _fold_autocommit(module_attr=False, migration_kwarg=False) is False
 
 
 # ---------------------------------------------------------------------------
@@ -934,6 +1169,177 @@ def test_known_safe_shapes_are_not_flagged(sql_statements):
 
 
 # ---------------------------------------------------------------------------
+# Rule 3 (lock duration, #219) sabotage fixtures, decoupled from real
+# migration modules -- same refuter-3 rationale as Rule 2's fixtures below:
+# after m0005's retroactive lock_step annotation the real registry only
+# exercises the "already declared correctly" path, so a neutered detector
+# would go uncaught by walking MIGRATIONS alone.
+# ---------------------------------------------------------------------------
+
+_INDEX_LOCK_BAD_FIXTURES = [
+    pytest.param(["CREATE INDEX ON companies(name)"], id="plain-create-index-preexisting-table"),
+    pytest.param(
+        ["CREATE INDEX idx_users_email ON users(email)"],
+        id="named-create-index-preexisting-table",
+    ),
+    pytest.param(
+        ["CREATE UNIQUE INDEX ON companies(name)"],
+        id="unique-index-preexisting-table-also-lock-flagged",
+    ),
+]
+
+
+@pytest.mark.parametrize("sql_statements", _INDEX_LOCK_BAD_FIXTURES)
+def test_index_lock_sabotage_fixtures_are_all_detected(sql_statements):
+    state = _SchemaState()
+    for migration in MIGRATIONS:
+        _scan_migration(migration, state)  # seed state with the real schema history
+    pre_existing = set(state.table_created_at)
+    probe = Migration(
+        version=999995,
+        description="index lock sabotage probe",
+        sql=sql_statements,
+        name="m999995_index_lock_sabotage",
+    )
+    violations = _index_lock_violations(probe, pre_existing)
+    assert violations, f"scanner did not flag known-bad index statement(s) {sql_statements!r}"
+    assert any("CONCURRENTLY" in v for v in violations)
+
+
+_INDEX_LOCK_SAFE_FIXTURES = [
+    pytest.param(
+        ["CREATE TABLE t_new (id bigserial PRIMARY KEY)", "CREATE INDEX ON t_new(id)"],
+        id="create-index-on-same-migration-table",
+    ),
+    pytest.param(
+        ["CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_companies_name ON companies(name)"],
+        id="concurrently-on-preexisting-table-not-lock-flagged",
+    ),
+]
+
+
+@pytest.mark.parametrize("sql_statements", _INDEX_LOCK_SAFE_FIXTURES)
+def test_index_lock_known_safe_shapes_are_not_flagged(sql_statements):
+    state = _SchemaState()
+    for migration in MIGRATIONS:
+        _scan_migration(migration, state)
+    pre_existing = set(state.table_created_at)
+    probe = Migration(
+        version=999994,
+        description="index lock safe probe",
+        sql=sql_statements,
+        name="m999994_index_lock_safe",
+    )
+    violations = _index_lock_violations(probe, pre_existing)
+    assert not violations, f"scanner false-flagged known-safe index statement(s): {violations}"
+
+
+# ---------------------------------------------------------------------------
+# Rule 4 (autocommit escape hatch, #219) sabotage fixtures -- synthetic
+# Migration objects directly (this rule reads the already-folded
+# .autocommit/.py fields, not module attributes), independent of whether any
+# shipped migration ever uses autocommit at all.
+# ---------------------------------------------------------------------------
+
+_AUTOCOMMIT_ESCAPE_HATCH_BAD_FIXTURES = [
+    pytest.param(
+        ["CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_x ON t(x)"],
+        False,
+        None,
+        "doesn't declare autocommit",
+        id="concurrently-without-autocommit",
+    ),
+    pytest.param(
+        ["CREATE INDEX IF NOT EXISTS idx_x ON t(x)"],
+        True,
+        None,
+        "no CONCURRENTLY statement",
+        id="autocommit-without-concurrently",
+    ),
+    pytest.param(
+        ["CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_x ON t(x)"],
+        True,
+        lambda ctx: None,
+        "py` hook",
+        id="autocommit-with-py-hook",
+    ),
+    pytest.param(
+        [
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_x ON t(x)",
+            "ALTER TABLE t ADD COLUMN y text",
+        ],
+        True,
+        None,
+        "non-index statement",
+        id="autocommit-with-other-ddl",
+    ),
+    pytest.param(
+        ["CREATE INDEX CONCURRENTLY idx_x ON t(x)"],
+        True,
+        None,
+        "no IF NOT EXISTS",
+        id="autocommit-without-if-not-exists",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "sql_statements,autocommit,py_hook,expected_substring", _AUTOCOMMIT_ESCAPE_HATCH_BAD_FIXTURES
+)
+def test_autocommit_escape_hatch_sabotage_fixtures(
+    sql_statements, autocommit, py_hook, expected_substring
+):
+    probe = Migration(
+        version=999993,
+        description="autocommit escape-hatch sabotage probe",
+        sql=sql_statements,
+        py=py_hook,
+        name="m999993_autocommit_sabotage",
+        autocommit=autocommit,
+    )
+    violations = _autocommit_escape_hatch_violations(probe)
+    assert violations, f"scanner did not flag known-bad autocommit shape {sql_statements!r}"
+    joined = "\n".join(violations)
+    assert expected_substring in joined, (
+        f"flagged, but not by its OWN rule -- expected {expected_substring!r} in {violations!r}"
+    )
+
+
+_AUTOCOMMIT_ESCAPE_HATCH_SAFE_FIXTURES = [
+    pytest.param(
+        ["CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_x ON t(x)"],
+        True,
+        id="concurrently-autocommit-if-not-exists",
+    ),
+    pytest.param(
+        [
+            "DROP INDEX CONCURRENTLY IF EXISTS idx_old",
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_x ON t(x)",
+        ],
+        True,
+        id="drop-and-create-concurrently-index-only",
+    ),
+    pytest.param(
+        ["ALTER TABLE t ADD COLUMN y text"],
+        False,
+        id="ordinary-migration-no-concurrently-no-autocommit",
+    ),
+]
+
+
+@pytest.mark.parametrize("sql_statements,autocommit", _AUTOCOMMIT_ESCAPE_HATCH_SAFE_FIXTURES)
+def test_autocommit_escape_hatch_known_safe_shapes(sql_statements, autocommit):
+    probe = Migration(
+        version=999992,
+        description="autocommit escape-hatch safe probe",
+        sql=sql_statements,
+        name="m999992_autocommit_safe",
+        autocommit=autocommit,
+    )
+    assert _autocommit_escape_hatch_violations(probe) == []
+
+
+# ---------------------------------------------------------------------------
 # Rule 2 (inverted deploy order) sabotage fixtures, decoupled from real
 # migration modules -- refuter-3's Finding 1: the real registry only ever
 # exercises the "already declared correctly" path (m0010), so neutering the
@@ -1033,6 +1439,21 @@ def test_contract_step_justification_rule_fixtures():
     assert not _contract_step_ok(True, "")
     assert _contract_step_ok(True, "Contract justification: widen-only CHECK, see above")
     assert _contract_step_ok(False, "")
+
+
+def _lock_step_ok(lock_step: bool, doc: str) -> bool:
+    """Mirrors _contract_step_ok exactly -- marker-presence only, no prose
+    linting. The "expected row count / build time" content of the
+    justification is a human-review concern, not something this guard
+    parses."""
+    return not (lock_step and "Lock justification:" not in doc)
+
+
+def test_lock_step_justification_rule_fixtures():
+    assert not _lock_step_ok(True, "no justification here")
+    assert not _lock_step_ok(True, "")
+    assert _lock_step_ok(True, "Lock justification: empty table at migration time, see above")
+    assert _lock_step_ok(False, "")
 
 
 # ---------------------------------------------------------------------------
