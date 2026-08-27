@@ -15,18 +15,30 @@ mistake, or offering a separate commercial license) without having to track
 down every past contributor individually. It does not take anything away
 from you — you keep full rights to your own contribution for any other use.
 
-**To sign:** open a pull request that adds a line to `CONTRIBUTORS.md` in
-the form below, in the same PR as (or before) your first code contribution:
+**To sign:** open your pull request as usual — no separate signing step
+first. If you haven't signed before, the `CLA Assistant Lite` check comments
+on the PR with a link to [CLA.md](CLA.md) and asks you to reply to that
+comment with:
+
+```
+I have read the CLA Document and I hereby sign the CLA
+```
+
+The bot records your signature (in a signatures file on the dedicated
+`cla-signatures` branch) and the `CLA Assistant Lite` check turns green.
+Comment `recheck` on the PR to re-run the check without pushing a new
+commit.
+
+Separately, add a line to `CONTRIBUTORS.md` in the form below, in the same
+PR as (or before) your first code contribution:
 
 ```
 - Your Name (@github-handle) — agrees to CLA.md as of YYYY-MM-DD
 ```
 
-`CONTRIBUTORS.md` is the project's record; it is not what gates merge. A
-required `cla-assistant` status check does that: on a first-time
-contributor's pull request, the bot comments with a link to sign the CLA
-electronically, and the check turns green once you've signed — independent
-of whether your `CONTRIBUTORS.md` line has landed yet.
+`CONTRIBUTORS.md` is the project's human-readable record of everyone who
+has signed; it is not what gates merge. The `CLA Assistant Lite` check does
+that, independent of whether your `CONTRIBUTORS.md` line has landed yet.
 
 ## Pull requests
 

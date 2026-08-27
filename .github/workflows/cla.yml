@@ -1,0 +1,55 @@
+name: CLA Assistant Lite
+
+# CLA Assistant Lite (contributor-assistant/github-action) replaces the
+# cla-assistant.io hosted App from #75/#23 — that App's own repo config
+# turned out to require the repository to already be public, so enforcement
+# stayed parked (see #23 comment 2026-08-15). This is an in-repo GitHub
+# Action instead: no external service, no App install, works on a public
+# repo from day one.
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, closed, synchronize]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cla-check:
+    name: CLA Assistant Lite
+    # SECURITY: pull_request_target reads the workflow definition from the
+    # BASE repo's default branch, never from the PR head — a fork PR cannot
+    # edit this file to change what runs (unlike `pull_request`, where the
+    # workflow file itself comes from the fork). The action also never
+    # checks out or executes the PR's code: it only reads commit-author
+    # metadata over the GitHub API, posts/reacts to PR comments, and commits
+    # a signatures file to the dedicated `cla-signatures` branch. So even
+    # though this job runs on our self-hosted `jcpub` runner, the only code
+    # that ever executes there is this action's own pinned-by-commit-SHA
+    # source — never anything from a contributor's branch.
+    runs-on: [self-hosted, Windows, X64, jcpub]
+    steps:
+      - name: CLA Assistant Lite
+        if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
+        uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-signatures: ".github/cla-signatures.json"
+          path-to-document: "https://github.com/Senkichi/jobcannon/blob/main/CLA.md"
+          # Storage branch must stay unprotected — the action commits the
+          # signatures file to it directly via the contents API. Created out
+          # of band with `git push origin main:refs/heads/cla-signatures`
+          # before this workflow's first run.
+          branch: "cla-signatures"
+          allowlist: Senkichi,dependabot[bot]
+          custom-notsigned-prcomment: |
+            Thank you for the pull request! Before it can be reviewed, please
+            read the [Contributor License Agreement](https://github.com/Senkichi/jobcannon/blob/main/CLA.md)
+            and sign it by replying to this comment with:
+
+            > I have read the CLA Document and I hereby sign the CLA
