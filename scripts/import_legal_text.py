@@ -92,22 +92,35 @@ def _strip_html_comments(text: str) -> str:
 
 
 def _collapse_blank_before_table_delimiter(text: str) -> str:
-    """Drop a blank line sitting directly between a table header row and its
-    delimiter row (see _TABLE_ROW / _TABLE_DELIMITER_ROW above)."""
+    """Drop every blank line sitting between a table header row and its
+    delimiter row (see _TABLE_ROW / _TABLE_DELIMITER_ROW above) — not just a
+    single blank line. Two adjacent HTML comments each leave their own blank
+    behind once _strip_html_comments removes their text, and
+    _collapse_blank_lines (which runs earlier in build_published_text) only
+    trims a run of 3+ blanks down to 2, never to 0, so a two-comment gap
+    still has to be handled here.
+
+    Coverage boundary: this only looks at the header-row -> delimiter-row
+    junction, the one shape that is never valid Markdown regardless of
+    cause. A whole-line comment left as a blank line between two BODY rows
+    of an already-open table, or after a table's last row, is not touched
+    here (mid-body/last-row blanks split or truncate a table without ever
+    producing this specific header/delimiter adjacency) — #190 tracks the
+    general HTML-comment-blank-line normalization that would also cover
+    those shapes."""
     lines = text.split("\n")
     out: list[str] = []
     i, n = 0, len(lines)
     while i < n:
-        if (
-            i + 2 < n
-            and _TABLE_ROW.match(lines[i])
-            and lines[i + 1].strip() == ""
-            and _TABLE_DELIMITER_ROW.match(lines[i + 2])
-        ):
-            out.append(lines[i])
-            out.append(lines[i + 2])
-            i += 3
-            continue
+        if _TABLE_ROW.match(lines[i]):
+            j = i + 1
+            while j < n and lines[j].strip() == "":
+                j += 1
+            if j > i + 1 and j < n and _TABLE_DELIMITER_ROW.match(lines[j]):
+                out.append(lines[i])
+                out.append(lines[j])
+                i = j + 1
+                continue
         out.append(lines[i])
         i += 1
     return "\n".join(out)
@@ -118,17 +131,26 @@ def _link_first_cross_reference(text: str, target: str) -> str:
     into a Markdown link to it (issue #182 item 6) — e.g. terms.md's first
     "Privacy Policy" becomes `[Privacy Policy](/privacy)`. First mention
     only: repeating the link on every occurrence is noise, not navigation.
-    Idempotent: the lookbehind/lookahead skip a mention already wrapped as
-    `[Privacy Policy](...)`, so re-running this against already-linked text
-    is a no-op rather than double-wrapping it. A target with no configured
-    cross-link (or a draft that never mentions the other document) passes
-    text through unchanged."""
+
+    Truly idempotent: short-circuits as soon as ANY occurrence of the
+    already-linked form is present anywhere in the text, not merely at the
+    specific spot about to be linked. The real terms.md has 5 plain-text
+    "Privacy Policy" mentions; a narrower per-occurrence guard (skip only a
+    mention already wrapped right where the match sits) still finds and
+    links the next plain mention on a second pass, so f(f(x)) != f(x). The
+    whole-text check makes it safe to re-run this against a target already
+    published — once the first mention is linked, every later call is a
+    no-op. A target with no configured cross-link (or a draft that never
+    mentions the other document) passes text through unchanged."""
     target_info = _CROSS_LINK_TARGETS.get(target)
     if target_info is None:
         return text
     phrase, href = target_info
+    linked_form = f"[{phrase}]({href})"
+    if linked_form in text:
+        return text
     pattern = re.compile(r"(?<!\[)" + re.escape(phrase) + r"(?!\]\()")
-    return pattern.sub(f"[{phrase}]({href})", text, count=1)
+    return pattern.sub(linked_form, text, count=1)
 
 
 def _strip_draft_banner(text: str) -> str:
