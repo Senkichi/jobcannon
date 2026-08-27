@@ -1,4 +1,4 @@
-"""The four-seam startup (1B spec §1) — the ONE call web and worker make.
+"""The five-seam startup (1B spec §1) — the ONE call web and worker make.
 
 1. services.set_services(ScanServices(...))      — persistence/hook seam
 2. runtime_config.set_config_provider(provider)  — scan-tuning knob seam
@@ -7,8 +7,20 @@
    plus posthog_client.set_analytics_salt(...) riding along in the same
    step: the pseudonymization salt gates whether that fan-out ever reaches
    PostHog with an identifier at all (posthog_client.pseudonymize's
-   fail-closed contract) — it is not a fifth seam, just the other half of
-   seam 4's configuration.
+   fail-closed contract) — it is not a separate seam, just the other half
+   of seam 4's configuration. posthog_admin.configure(...) (issue #135's
+   PostHog person-purge admin credentials) rides along here too, for the
+   same reason.
+5. task_app.configure(host_config.database_url) — procrastinate defer seam
+   (issues #135/#136 HIGH-1). Unlike every seam above, this one does NOT
+   open anything here — it only records the DSN. task_app.py's own
+   docstring has the full rationale: gunicorn's --preload means this
+   function runs once in the master before every worker forks, and opening
+   a real connection pool here would be inherited-but-broken in every
+   forked child, the same bug class jobcannon.db.pool's fork hook and this
+   module's own _reinit_posthog_after_fork hook exist to solve for their
+   resources. task_app.ensure_open() does the actual, lazy, per-process
+   open, reactively, on first need, post-fork.
 ScanServices.prober_extensions stays None (spec §3.6 ruling: fail-closed;
 multi-tenant identity is a Phase 2 design item, consequence C-2).
 
@@ -55,10 +67,18 @@ tests/host/test_posthog_fork_atexit.py is the empirical, end-to-end closure:
 a real fork() + this real after_in_child hook + real atexit handlers,
 asserting the child reaches os._exit(0) well under gunicorn's
 graceful_timeout — plus a second, confounder-free variant that joins only
-the inherited husk directly, bypassing atexit entirely. This repo's CI
-(.github/workflows/ci.yml) runs a single Python 3.12 leg, so a green run
-closes the 3.12.11 chain end-to-end; the 3.13.5 chain (this app's actual
-Render deploy target) is closed by the citation above, not by a 3.13 CI run.
+the inherited husk directly, bypassing atexit entirely. As of
+jobcannon#160's move to self-hosted Windows CI runners, CI no longer runs
+this test file's fork-gated pair at all -- os.fork() does not exist on
+Windows. jobcannon#162's investigation found WSL not installed and Docker
+not installed on the runner box either, so a CI-leg path to real os.fork()
+coverage is not currently feasible there. Both the 3.12.11 and 3.13.5
+chains therefore rest on the source-read citation above plus an on-demand
+run of tests/host/test_posthog_fork_atexit.py on a POSIX machine, not on
+any CI execution; that test file's own `_require_fork_or_fail_loud` gate
+fails CI loudly instead of silently skipping if this coverage gap is
+reintroduced without ci.yml's explicit, documented
+JC_FORK_TESTS_UNAVAILABLE=1 opt-out.
 Because of all this, the husk is deliberately left alone — never
 shutdown()/flush()/join()ed manually — leaving its already-harmless
 atexit(join) in place costs nothing, while calling shutdown()/flush() on it
@@ -85,7 +105,7 @@ import os
 from jobcannon.db import _companies, _jd_full, _jobs
 from jobcannon.db import pool as pool_mod
 from jobcannon.engine import extraction_health, runtime_config, services
-from jobcannon.host import posthog_client
+from jobcannon.host import posthog_admin, posthog_client, task_app
 from jobcannon.host.config import HostConfig
 from jobcannon.host.health_recorder import record_scan_health
 
@@ -324,7 +344,26 @@ def init_engine_seams(host_config: HostConfig) -> None:
     extraction_health.set_recorder(record_scan_health)
     posthog_client.set_posthog_client(_build_posthog_client(host_config))
     posthog_client.set_analytics_salt(host_config.analytics_pseudonym_salt)
+    # Issue #135's PostHog person-purge admin credentials ride along in
+    # seam 4 too, same rationale as the analytics salt above: not a fifth
+    # seam, just more of seam 4's configuration. Threaded unconditionally
+    # (both web and worker call init_engine_seams) even though the purge
+    # itself only ever runs worker-side (jobcannon.host.tasks.
+    # purge_posthog_person) -- HostConfig's three new fields are simply
+    # None wherever POSTHOG_PERSONAL_API_KEY/POSTHOG_PROJECT_ID/
+    # POSTHOG_ADMIN_API_HOST aren't set (e.g. the web service, which
+    # render.yaml never declares them on), so this is a harmless no-op
+    # there rather than something that needs process-type branching.
+    posthog_admin.configure(
+        personal_api_key=host_config.posthog_personal_api_key,
+        project_id=host_config.posthog_project_id,
+        host=host_config.posthog_admin_api_host,
+    )
     _install_posthog_fork_hook()
+    # Seam 5 (issues #135/#136 HIGH-1): bookkeeping only, no I/O -- see
+    # task_app.py's docstring and the module docstring above for why the
+    # actual open is deliberately deferred to task_app.ensure_open().
+    task_app.configure(host_config.database_url)
 
 
 def teardown_engine_seams() -> None:
@@ -337,6 +376,9 @@ def teardown_engine_seams() -> None:
     # would make the next init_engine_seams() call register a second
     # after_in_child hook alongside the still-installed first one.
     _current_host_config = None
+    task_app.close()
+    task_app.configure(None)
+    posthog_admin.configure(personal_api_key=None, project_id=None, host=None)
     posthog_client.set_analytics_salt(None)
     posthog_client.set_posthog_client(None)
     extraction_health.set_recorder(None)

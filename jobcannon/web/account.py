@@ -7,14 +7,19 @@ Authed only — deliberately NOT added to `jobcannon.web.PUBLIC_PATHS`: a
 signed-out visitor has no account to delete.
 
 This route TRIGGERS deletion; it does not perform it. The existing
-`user.deleted` Clerk webhook (jobcannon/web/webhooks.py) remains the sole
-writer of the cascade (profiles/watchlists/pipeline_status/
-byo_key_credentials/events, all `ON DELETE CASCADE` from `users`). Calling
-`jobcannon.db._users.delete_user` from here too would race that webhook's
-asynchronous delivery and risk a second DELETE landing on an already-gone
-row — so this route's job stops at telling Clerk to delete the account and
-clearing the local Flask session (`anon_session_id`, `feed_session_id`,
-`handoff_done`, etc.); Clerk invalidates the account's own session(s) once
+`user.deleted` Clerk webhook (jobcannon/web/webhooks.py) is the ordinary
+path that performs the cascade (profiles/watchlists/pipeline_status/
+byo_key_credentials/events, all `ON DELETE CASCADE` from `users`), and issue
+#136's reconciliation sweep (jobcannon.host.user_deletion.
+run_reconciliation_sweep) is the fallback for a webhook Clerk never
+delivered — both call the one `cascade_delete_user` path (see
+jobcannon.host.user_deletion's module docstring), never a second copy.
+Calling `jobcannon.db._users.delete_user` from here too would race the
+webhook's asynchronous delivery and risk a second DELETE landing on an
+already-gone row — so this route's job stops at telling Clerk to delete the
+account and clearing the local Flask session (`anon_session_id`,
+`feed_session_id`, `handoff_done`, etc.); Clerk invalidates the account's
+own session(s) once
 the account itself is gone.
 
 Issue #159: Clerk's own session invalidation is not enough — `auth.py`
