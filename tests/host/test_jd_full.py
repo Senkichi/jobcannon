@@ -614,3 +614,359 @@ def test_persisted_reject_verdict_gates_scoring_precheck_until_adjudicated(db_co
     )
     row = db_conn.execute("SELECT * FROM postings WHERE dedup_key = %s", (posting,)).fetchone()
     assert scoring_precheck(row) is None
+
+
+# --- #216 HTML-signal normalization: entity-encoded write-path integration --
+
+
+def test_entity_encoded_only_signal_is_normalized_before_storage(db_conn, posting):
+    """A body that signals HTML ONLY via entity-encoded tags (no literal
+    `<...>` anywhere) must be stripped to plain text before storage, not
+    left with the tags decoded-but-unstripped. Regression coverage for the
+    call-site fix alongside the #216 regex widening: html_to_plain_text
+    unescapes BEFORE stripping tags, whereas calling strip_html_to_text
+    directly on entity-encoded input leaves literal `<p>...</p>` in the
+    output (empirically confirmed while implementing this fix)."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    entity_body = "&lt;p&gt;" + GOOD_JD + "&lt;/p&gt;"
+    assert set_jd_full(_svc_conn(db_conn), posting, entity_body, source="test") is True
+    row = db_conn.execute(
+        "SELECT jd_full FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["jd_full"] is not None
+    assert "<p>" not in row["jd_full"]
+    assert "&lt;" not in row["jd_full"]
+    assert "We are hiring a Staff Data Engineer" in row["jd_full"]
+
+
+# --- #217 unresolved_reasons: malformed/NULL-value tolerance ----------------
+
+
+def test_success_write_tolerates_malformed_object_unresolved_reasons(db_conn, posting):
+    """The SQL removal expression mirrors remove_reasons's malformed-value
+    tolerance: a non-array jsonb value (e.g. a stray object) normalizes to
+    an empty array via the jsonb_typeof guard rather than erroring the
+    UPDATE."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    db_conn.execute(
+        "UPDATE postings SET unresolved_reasons = %s WHERE dedup_key = %s",
+        (Jsonb({"not": "a list"}), posting),
+    )
+    assert set_jd_full(_svc_conn(db_conn), posting, GOOD_JD, source="test") is True
+    row = db_conn.execute(
+        "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["unresolved_reasons"] == []
+
+
+def test_content_reject_tolerates_malformed_object_unresolved_reasons(db_conn, posting):
+    """Same malformed-value tolerance, exercised on _record_jd_content_reject's
+    append expression via the reject path."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    db_conn.execute(
+        "UPDATE postings SET unresolved_reasons = %s WHERE dedup_key = %s",
+        (Jsonb({"not": "a list"}), posting),
+    )
+    assert set_jd_full(_svc_conn(db_conn), posting, TRUNCATED_JD, source="test") is False
+    row = db_conn.execute(
+        "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["unresolved_reasons"] == ["jd_full_truncated"]
+
+
+def test_success_write_tolerates_json_null_unresolved_reasons(db_conn, posting):
+    """A jsonb `null` scalar (distinct from SQL NULL -- the column is
+    NOT NULL DEFAULT '[]') is the real-world analog of the Python helpers'
+    `None` input case and must be tolerated the same way (falls back to
+    treating the row as if it had no prior reasons)."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    db_conn.execute(
+        "UPDATE postings SET unresolved_reasons = 'null'::jsonb WHERE dedup_key = %s",
+        (posting,),
+    )
+    assert set_jd_full(_svc_conn(db_conn), posting, GOOD_JD, source="test") is True
+    row = db_conn.execute(
+        "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["unresolved_reasons"] == []
+
+
+def test_content_reject_tolerates_json_null_unresolved_reasons(db_conn, posting):
+    from jobcannon.db._jd_full import set_jd_full
+
+    db_conn.execute(
+        "UPDATE postings SET unresolved_reasons = 'null'::jsonb WHERE dedup_key = %s",
+        (posting,),
+    )
+    assert set_jd_full(_svc_conn(db_conn), posting, TRUNCATED_JD, source="test") is False
+    row = db_conn.execute(
+        "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["unresolved_reasons"] == ["jd_full_truncated"]
+
+
+def test_content_reject_dedupes_repeated_reason(db_conn, posting):
+    """append_reason's dedupe contract, mirrored in SQL: rejecting the same
+    body shape twice in a row must not duplicate the reason code."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    assert set_jd_full(_svc_conn(db_conn), posting, TRUNCATED_JD, source="test") is False
+    assert set_jd_full(_svc_conn(db_conn), posting, TRUNCATED_JD, source="test") is False
+    row = db_conn.execute(
+        "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["unresolved_reasons"] == ["jd_full_truncated"]
+
+
+# --- #217 lost-update proof (two independent, non-rollback connections) -----
+
+
+def test_set_jd_full_lost_update_closed_competing_addition_survives(postgres_test_dsn):
+    """DETERMINISTIC lost-update proof for set_jd_full's unresolved_reasons
+    removal (#217). Connection A calls set_jd_full with a body that
+    succeeds and clears the stale `jd_full_truncated` I-18 code. While A is
+    paused inside classify_jd_content (the same injection point
+    test_interleaved_write_during_classify_still_lands_self_consistent and
+    test_race_two_connections_never_observe_torn_jd_full_and_verdict use --
+    it runs strictly between A's initial SELECT and its final UPDATE),
+    connection B commits an UNRELATED addition (`location_missing`, not a
+    JD_CONTENT_REASON_CODE, so A's removal must never touch it) directly to
+    the same row's unresolved_reasons.
+
+    A's own SELECT read the row BEFORE B's commit (value: only
+    `jd_full_truncated`), so a Python value computed from that SELECT and
+    written back later as a literal (the pre-#217 shape) would silently
+    overwrite B's already-committed change with a value that never saw it --
+    a genuine lost update. The fixed code decides the SET-clause value via a
+    SQL expression evaluated against the row's LIVE value at
+    UPDATE-execution time, so it must reflect B's addition even though A
+    never re-read the row in Python.
+
+    Sabotage-verified (see this workstream's PR body / IMPLEMENTATION.md):
+    temporarily reverting set_jd_full's unresolved_reasons SET-clause to the
+    pre-#217 Python remove_reasons(existing_value, codes) + literal-value
+    UPDATE shape makes this test fail with
+    ``assert row["unresolved_reasons"] == ["location_missing"]`` observing
+    ``[]`` instead -- B's addition is silently lost.
+    """
+    import threading
+    import unittest.mock
+
+    import psycopg
+    from psycopg.rows import dict_row
+
+    from jobcannon.db import _jd_full as jd_full_mod
+    from jobcannon.db._jd_full import set_jd_full
+    from jobcannon.db.pool import EngineCompatConnection
+
+    dedup_key = "lostupdate-co|staff data engineer"
+    conn_a = psycopg.connect(postgres_test_dsn, row_factory=dict_row)
+    conn_b = psycopg.connect(postgres_test_dsn, row_factory=dict_row)
+    entered = threading.Event()
+    release = threading.Event()
+    writer: threading.Thread | None = None
+    try:
+        cid = conn_a.execute(
+            "INSERT INTO companies (name) VALUES ('lostupdate-co') RETURNING id"
+        ).fetchone()["id"]
+        conn_a.execute(
+            "INSERT INTO postings (dedup_key, company_id, title, company, "
+            "unresolved_reasons) VALUES (%s, %s, 'Staff Data Engineer', "
+            "'lostupdate-co', %s)",
+            (dedup_key, cid, Jsonb(["jd_full_truncated"])),
+        )
+        conn_a.commit()
+
+        real_classify = jd_full_mod.classify_jd_content
+
+        def _paused_classify(text, title, company, config):
+            entered.set()
+            release.wait(timeout=10)
+            return real_classify(text, title, company, config)
+
+        writer_result: dict = {}
+
+        def _write():
+            writer_result["ok"] = set_jd_full(
+                EngineCompatConnection(conn_a), dedup_key, GOOD_JD, source="test"
+            )
+
+        with unittest.mock.patch.object(jd_full_mod, "classify_jd_content", _paused_classify):
+            writer = threading.Thread(target=_write)
+            writer.start()
+            assert entered.wait(timeout=10), "classify_jd_content was never entered"
+
+            # Connection B commits its own, unrelated addition while A is
+            # paused mid-function -- A's earlier SELECT cannot possibly have
+            # seen this.
+            conn_b.execute(
+                "UPDATE postings SET unresolved_reasons = unresolved_reasons || "
+                "'[\"location_missing\"]'::jsonb WHERE dedup_key = %s",
+                (dedup_key,),
+            )
+            conn_b.commit()
+
+            release.set()
+            writer.join(timeout=10)
+            assert not writer.is_alive(), "writer thread did not finish within timeout"
+
+        assert writer_result.get("ok") is True
+
+        row = conn_a.execute(
+            "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (dedup_key,)
+        ).fetchone()
+        # Both writers' changes present: A's removal of the stale
+        # jd_full_truncated code AND B's location_missing addition.
+        assert row["unresolved_reasons"] == ["location_missing"]
+    finally:
+        release.set()
+        if writer is not None:
+            writer.join(timeout=10)
+        try:
+            try:
+                conn_a.rollback()
+                conn_a.execute("DELETE FROM postings WHERE dedup_key = %s", (dedup_key,))
+                conn_a.execute("DELETE FROM companies WHERE name = 'lostupdate-co'")
+                conn_a.commit()
+            finally:
+                conn_a.close()
+        finally:
+            conn_b.close()
+
+
+def test_record_jd_content_reject_concurrent_appends_both_survive(postgres_test_dsn):
+    """DETERMINISTIC lost-update proof for _record_jd_content_reject's
+    append (#217). _record_jd_content_reject is now a single atomic UPDATE
+    with no preceding SELECT, so there is no Python-visible gap left to
+    monkeypatch a pause into -- the proof instead relies on real Postgres
+    row-level locking: connection A's UPDATE is paused (via a patched
+    `execute` on A's own connection) AFTER it has run but BEFORE its
+    transaction commits, so A still holds the row lock. Connection B's
+    concurrent call for a DIFFERENT reason genuinely BLOCKS on that lock
+    (not merely races on timing) until A releases it, then B's SQL
+    expression re-evaluates against A's now-committed row and correctly
+    appends on top of it -- both reasons must survive.
+
+    Sabotage-verified (see PR body / IMPLEMENTATION.md): temporarily
+    reverting _record_jd_content_reject to the pre-#217 SELECT +
+    append_reason(...) + literal-value UPDATE shape makes this test fail --
+    the same monkeypatched-execute pause now lands after the (non-locking)
+    SELECT instead of after the UPDATE, connection B's write commits freely
+    and unblocked while A is paused, and A's later UPDATE overwrites B's
+    committed change with a stale literal value. Failing assertion:
+    ``assert set(row["unresolved_reasons"]) == {"jd_full_truncated",
+    "jd_full_offsite"}`` observes only ``{"jd_full_truncated"}`` (A's own
+    reason survives -- since A is the last writer -- but B's is lost).
+    """
+    import threading
+
+    import psycopg
+    from psycopg.rows import dict_row
+
+    from jobcannon.db._jd_full import _record_jd_content_reject
+
+    dedup_key = "concurrent-reject-co|staff data engineer"
+    conn_a = psycopg.connect(postgres_test_dsn, row_factory=dict_row)
+    conn_b = psycopg.connect(postgres_test_dsn, row_factory=dict_row)
+    entered = threading.Event()
+    release = threading.Event()
+    b_committed = threading.Event()
+    thread_a: threading.Thread | None = None
+    thread_b: threading.Thread | None = None
+    try:
+        cid = conn_a.execute(
+            "INSERT INTO companies (name) VALUES ('concurrent-reject-co') RETURNING id"
+        ).fetchone()["id"]
+        conn_a.execute(
+            "INSERT INTO postings (dedup_key, company_id, title, company) "
+            "VALUES (%s, %s, 'Staff Data Engineer', 'concurrent-reject-co')",
+            (dedup_key, cid),
+        )
+        conn_a.commit()
+
+        real_execute = conn_a.execute
+
+        def _execute_then_pause(query, *args, **kwargs):
+            cur = real_execute(query, *args, **kwargs)
+            if "unresolved_reasons" in query:
+                entered.set()
+                release.wait(timeout=10)
+            return cur
+
+        conn_a.execute = _execute_then_pause
+
+        results: dict = {}
+
+        def _run_a():
+            _record_jd_content_reject(conn_a, dedup_key, "jd_full_truncated")
+            results["a_done"] = True
+
+        def _run_b():
+            _record_jd_content_reject(conn_b, dedup_key, "jd_full_offsite")
+            results["b_done"] = True
+            b_committed.set()
+
+        thread_a = threading.Thread(target=_run_a)
+        thread_a.start()
+        assert entered.wait(timeout=10), "A's UPDATE was never entered"
+
+        # B is started only once A holds the row lock (mid-transaction,
+        # paused). B's UPDATE genuinely blocks on that lock until A
+        # releases it below.
+        thread_b = threading.Thread(target=_run_b)
+        thread_b.start()
+
+        # Deliberately NOT release.set() immediately: give B a bounded
+        # window to land BEFORE A resumes. Against the #217 fix, A's paused
+        # statement (the sole UPDATE) already holds the row lock, so B
+        # genuinely blocks here and this wait times out -- that timeout is
+        # the expected, harmless case, not a failure. Against the sabotaged
+        # pre-#217 SELECT-then-UPDATE shape, A's pause lands after a
+        # non-locking SELECT, so B is free to run unblocked; without this
+        # wait, whether B's commit lands before or after A resumes is
+        # scheduler-luck (verified empirically: the naive version of this
+        # test below intermittently passed against sabotaged code purely
+        # because B happened to finish after A), which would make the
+        # lost-update proof non-deterministic. Waiting here for B's commit
+        # (bounded to 1s, comfortably above a same-box Postgres round trip)
+        # forces the interleaving that actually exercises the bug whenever
+        # the code under test has no real lock protecting the gap.
+        b_committed.wait(timeout=1.0)
+
+        release.set()
+        thread_a.join(timeout=10)
+        thread_b.join(timeout=10)
+        assert not thread_a.is_alive(), "writer A did not finish within timeout"
+        assert not thread_b.is_alive(), "writer B did not finish within timeout"
+        assert results.get("a_done") is True
+        assert results.get("b_done") is True
+
+        row = conn_a.execute(
+            "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (dedup_key,)
+        ).fetchone()
+        assert set(row["unresolved_reasons"]) == {"jd_full_truncated", "jd_full_offsite"}
+    finally:
+        release.set()
+        if thread_a is not None:
+            thread_a.join(timeout=10)
+        if thread_b is not None:
+            thread_b.join(timeout=10)
+        try:
+            try:
+                conn_a.rollback()
+                conn_a.execute = real_execute if "real_execute" in dir() else conn_a.execute
+            except Exception:
+                pass
+            try:
+                conn_a.rollback()
+                conn_a.execute("DELETE FROM postings WHERE dedup_key = %s", (dedup_key,))
+                conn_a.execute("DELETE FROM companies WHERE name = 'concurrent-reject-co'")
+                conn_a.commit()
+            finally:
+                conn_a.close()
+        finally:
+            conn_b.close()
