@@ -3,6 +3,17 @@
 {% block content %}
 <h1 class="text-2xl font-semibold mb-3">Your preview feed</h1>
 
+{% if clerk_sign_up_url %}
+  {# Acquisition CTA (issue #145): /preview is the pre-signup feed a
+     visitor reaches after the picker, with zero path onward to an
+     account before this. Independently gated, same tolerance as the
+     header nav -- an unset clerk_sign_up_url renders nothing. #}
+  <p class="text-sm text-neutral-400 mb-4" data-signup-cta>
+    <a href="{{ clerk_sign_up_url }}" class="underline text-neutral-100">Sign up to keep this feed</a>
+    updated as new postings come in.
+  </p>
+{% endif %}
+
 {% if not has_selections %}
   <p class="text-neutral-400 mb-4" data-no-selections>
     You haven't completed the picker yet, so this is the unfiltered live feed.
