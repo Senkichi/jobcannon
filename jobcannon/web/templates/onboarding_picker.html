@@ -53,6 +53,7 @@
     <button type="submit" class="text-sm underline text-neutral-300">Search</button>
   </form>
   <form method="post" action="/start" class="space-y-8">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {% include "_picker_options.html" %}
     <fieldset>
       <legend class="font-medium mb-2">Skills</legend>
