@@ -222,6 +222,53 @@ def test_user_deleted_cascades_to_all_child_tables(app):
             assert n == 0, f"{table} row survived cascade delete for {user_id}"
 
 
+def test_user_deleted_enqueues_posthog_purge_with_pseudonym_when_salt_configured(app):
+    """#135: the user.deleted cascade (jobcannon.host.user_deletion.
+    cascade_delete_user) must defer purge_posthog_person with the user's
+    PSEUDONYM, never the raw Clerk id -- and only when analytics
+    pseudonymization is configured (posthog_client.pseudonymize's
+    fail-closed contract). The salt-UNSET case is already covered for free
+    by test_user_deleted_removes_row/test_user_deleted_cascades_to_all_
+    child_tables above: neither swaps in an InMemoryConnector, so a stray
+    real .defer() attempt reaching this test's throwaway Postgres (which
+    has no procrastinate schema applied) would raise and fail those tests
+    loudly rather than silently passing."""
+    from procrastinate import testing
+
+    from jobcannon.host import posthog_client, task_app
+    from jobcannon.host.user_deletion import PURGE_POSTHOG_PERSON_TASK
+
+    posthog_client.set_analytics_salt("webhook-test-salt")
+    try:
+        user_id = "user_posthog_purge"
+        created = json.dumps(_user_created(user_id=user_id)).encode()
+        client = app.test_client()
+        assert (
+            client.post("/webhooks/clerk", data=created, headers=_sign(created)).status_code == 200
+        )
+        expected_pseudonym = posthog_client.pseudonymize(user_id)
+
+        deleted = json.dumps(_user_deleted(user_id)).encode()
+        with task_app.app.replace_connector(testing.InMemoryConnector()) as procrastinate_app:
+            resp = client.post(
+                "/webhooks/clerk", data=deleted, headers=_sign(deleted, msg_id="msg_purge_del")
+            )
+            assert resp.status_code == 200
+            jobs = list(procrastinate_app.connector.jobs.values())
+
+        purge_jobs = [j for j in jobs if j["task_name"] == PURGE_POSTHOG_PERSON_TASK]
+        assert len(purge_jobs) == 1
+        assert purge_jobs[0]["queue_name"] == "maintenance"
+        assert purge_jobs[0]["args"]["distinct_id"] == expected_pseudonym
+        assert purge_jobs[0]["args"]["distinct_id"] != user_id
+
+        with psycopg.connect(app.config["_TEST_DSN"]) as conn:
+            n = conn.execute("SELECT count(*) FROM users WHERE id = %s", (user_id,)).fetchone()[0]
+        assert n == 0
+    finally:
+        posthog_client.set_analytics_salt(None)
+
+
 def test_stale_timestamp_replay_rejected_400(app):
     """A correctly-signed payload over a timestamp outside Svix's ~5-minute
     tolerance window must still be rejected — freshness, not just signature
