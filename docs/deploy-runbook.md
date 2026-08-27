@@ -92,10 +92,17 @@ one `applied migration V (name)` line per migration
 `SELECT version, name, applied_at FROM schema_migrations ORDER BY version;`
 against the live database. After merging any render.yaml change, also
 confirm the Blueprint actually picked it up — a `render.yaml` edit only
-takes effect on the next Blueprint sync, so the person landing the change
-must confirm `serviceDetails.preDeployCommand` is non-null for
-`jobcannon-web` via the Render API (it was observed `null` before this
-change went in).
+takes effect on the next Blueprint sync. **The Render API field for this is
+namespaced, not flat**: `serviceDetails.envSpecificDetails.preDeployCommand`
+is the field to read — a flat `serviceDetails.preDeployCommand` reads
+`null`/absent even when the Blueprint applied the command correctly
+(verified 2026-08-27; a plain `serviceDetails.preDeployCommand` read was
+mistakenly believed to be the authoritative field before this correction).
+Even stronger than reading the field is proving pre-deploy actually RAN:
+`GET /v1/services/<svc>/events` shows a `pre_deploy_started` event followed
+by `pre_deploy_ended` with `preDeployStatus: "succeeded"` for that deploy
+(verified 2026-08-27 on deploy `dep-da7uc6814ptc73969a5g`) — that pair is
+the real proof, independent of which field name happens to be current.
 
 **Rollback caveat.** A rollback of `jobcannon-web` (or `jobcannon-worker`)
 to a commit that predates a migration already recorded in the
@@ -140,6 +147,49 @@ longer rely on "the worker will boot after the writer's release lands."
 `m0010_events_referrer_host.py` itself is already applied on every existing
 deploy and is **not** affected by this — it's cited above only to
 illustrate the migration *shape* that needs the caution going forward.
+
+### Migration deploy-safety guard
+
+`tests/test_migration_deploy_safety.py` (issue #199) makes the two
+discipline rules above mechanical rather than prose-only. It derives every
+input from the `MIGRATIONS` registry (`jobcannon/db/migrations/__init__.py`)
+— never a hand-maintained version list — so a new migration is covered the
+moment its module lands, with no guard-file edit required. It needs no
+database and runs in the default `tests/` sweep, not `tests/host/`.
+
+1. **Contract-shaped DDL against a pre-existing table/column fails by
+   default.** `DROP COLUMN`, `DROP TABLE`, `ALTER COLUMN ... TYPE`,
+   `ADD COLUMN ... NOT NULL` without `DEFAULT`, `ADD CONSTRAINT ...
+   CHECK`/`UNIQUE`, and `ALTER COLUMN ... SET NOT NULL` all fail the guard
+   when they target a table/column an EARLIER migration created (the same
+   statement acting on a table/column the CURRENT migration itself just
+   created is fine — nothing running the previous release ever queried
+   it). A migration that genuinely needs one of these shapes (e.g. m0003's
+   CHECK widen, which drops and re-adds the constraint by name) declares
+   it deliberately: a bare `contract_step = True` module attribute plus a
+   docstring paragraph starting `Contract justification:` explaining why
+   the change is still safe for the previous release during the
+   zero-downtime overlap window. `jobcannon/db/migrate.py`'s
+   `_apply_migration` then logs a `CONTRACT-STEP migration ...` WARNING
+   line when applying it, so it's visible in the Render deploy log — that
+   is the exact line to check before deciding whether
+   `JC_MIGRATE_ALLOW_NEWER_DB` is safe to use for a rollback across it
+   (it is **not**, per the Rollback caveat above).
+2. **An inverted `Deploy order: ... AFTER` backfill fails by default.**
+   Pre-deploy now always runs migrations before the new release's writer
+   goes live, inverting the ordering a "run this migration AFTER the
+   writer deploys" docstring assumed. A migration whose docstring matches
+   that pattern and is genuinely safe to run before its writer exists
+   (e.g. m0010, whose backfill UPDATE is a no-op the moment no row still
+   carries the old key) declares `inverted_order_safe = True` plus a
+   docstring explanation using the word "idempotent", so the guard can
+   confirm an actual explanation exists, not just the bare flag.
+
+Both checks are pure static analysis over the registry's own SQL statement
+strings (a small paren/quote-depth-aware tokenizer plus anchored regexes —
+no `sqlglot`/`pglast` dependency) and are deliberately conservative: a
+statement shape or column reference the scanner can't positively prove is
+safe is treated as contract-shaped rather than silently passed.
 
 Expect these log lines on a fresh database's first worker boot (the ledger
 `name` column — and therefore the second `%s` migrate.py logs — is the
