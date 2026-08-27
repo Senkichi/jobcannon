@@ -73,7 +73,7 @@ def test_resolve_returns_nonempty_string_for_seeded_profile(db_conn):
     from jobcannon.host.candidate_context import resolve_candidate_context
 
     _seed_user(db_conn, "ctx-user")
-    upsert_profile(db_conn, "ctx-user", **PROFILE_FIELDS)
+    upsert_profile(db_conn, "ctx-user", **PROFILE_FIELDS, workplace_type=None)
 
     context = resolve_candidate_context(db_conn, "ctx-user")
     assert isinstance(context, str)
@@ -124,7 +124,7 @@ def test_tenants_resolve_their_own_content_never_each_others(db_conn):
         ("tenant-c", TENANT_C_FIELDS),
     ]:
         _seed_user(db_conn, user_id)
-        upsert_profile(db_conn, user_id, **fields)
+        upsert_profile(db_conn, user_id, **fields, workplace_type=None)
 
     with (
         patch(
@@ -165,7 +165,11 @@ def test_tenants_resolve_their_own_content_never_each_others(db_conn):
         # stale content here without ever going stale on the wrong tenant,
         # which the content assertions can't distinguish from a real fetch.
         upsert_profile(
-            db_conn, "tenant-b", seniority_level="principal", target_locations=["Chicago"]
+            db_conn,
+            "tenant-b",
+            seniority_level="principal",
+            target_locations=["Chicago"],
+            workplace_type=None,
         )
         after_b = resolve_candidate_context(db_conn, "tenant-b")
         assert mock_get_profile.call_count == 4

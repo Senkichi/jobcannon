@@ -81,6 +81,7 @@ def _seed_user(dsn, user_id):
 
 
 def _seed_profile(dsn, user_id, **kwargs):
+    kwargs.setdefault("workplace_type", None)
     with psycopg.connect(dsn) as conn:
         upsert_profile(conn, user_id, **kwargs)
 

@@ -39,8 +39,19 @@ column, so there is no corpus source for skill-token *options* the way
 there is for titles/companies), seniority level, years of experience, and a
 workplace-type preference. No free text, name, email, or resume is
 collected. profiles.experience_summary and profiles.target_locations stay
-NULL — workplace_type is a session-scoped filter for a later preview, never
-a profile location constraint.
+NULL. target_companies/workplace_type (m0012, #169/#170) DO reach the
+durable `profiles` row through upsert_profile, same as target_titles —
+workplace_type is written as a plain overwrite rather than
+target_titles/target_companies's COALESCE-preserve-when-omitted shape (see
+jobcannon/db/_profiles.py's docstring), and #175 guarantees at least one of
+titles/companies is non-empty on every successful submission.
+
+An empty picker submission (#175) — no title and no company checked — is a
+hard rejection at the same validation boundary as an unrecognized seniority
+level or an out-of-range value: no `users`/`profiles` write happens, and
+the form re-renders with a 200 (a small HX fragment for an HX-Request, the
+full page otherwise) rather than redirecting to a /preview that would have
+shown the entire unfiltered corpus with no indication anything went wrong.
 
 GET /preview reads those same session-held selections and renders a ranked
 list of postings driven only by them — no read of profiles.target_locations
@@ -83,6 +94,7 @@ from jobcannon.db._feed import (
     distinct_titles,
     list_feed_postings,
     parse_cursor,
+    selection_filter_kwargs,
 )
 from jobcannon.db._profiles import upsert_profile
 from jobcannon.db._users import mint_anon_user
@@ -144,11 +156,11 @@ MAX_TITLES_PER_SELECTION = 20
 # would break the session-cookie round trip anyway.
 MAX_TITLE_LENGTH = 140
 
-# `companies` selections never reach durable storage (there is no
-# target_companies column anywhere in this schema — see the comment at the
-# `companies` extraction site in _parse_submission below), but they DO
-# share the exact same signed-cookie round trip titles take via
-# set_pending_picker, so an uncapped `companies` submission can blow the
+# `companies` selections now reach durable storage too (m0012's
+# target_companies column — see _parse_companies's docstring below), but
+# this cap exists independently of that: they share the exact same
+# signed-cookie round trip titles take via set_pending_picker, so an
+# uncapped `companies` submission can blow the
 # same ~4093-byte RFC 6265 ceiling independently of titles (issue #80,
 # filed during #54's review). Capped with the same shape (count + per-item
 # length) MAX_TITLES_PER_SELECTION/MAX_TITLE_LENGTH use, but the split
@@ -294,6 +306,11 @@ def _picker_context(
     q: str = "",
     checked_titles: list[str] | None = None,
     checked_companies: list[str] | None = None,
+    checked_skills: list[str] | None = None,
+    seniority_level: str = "",
+    years_of_experience: str = "",
+    comp_floor_usd: str = "",
+    workplace_type: str = "",
 ) -> dict[str, Any]:
     """`error` (POST-only) is a hard validation rejection, rendered once by
     onboarding_picker.html's own top-level block. `notice` (GET-only) is
@@ -302,9 +319,20 @@ def _picker_context(
     so it renders exactly once, inside _picker_options.html (shared by both
     the HX fragment and, via that template's inclusion, the full-page GET
     render), without also duplicating onto _picker_options.html's shared
-    context for a POST error re-render, which never sets `notice`."""
+    context for a POST error re-render, which never sets `notice`.
+
+    `checked_skills`/`seniority_level`/`years_of_experience`/`comp_floor_usd`/
+    `workplace_type` (#175) echo the visitor's raw submitted values back into
+    an error re-render only — GET /start's own call site never passes these
+    (there is nothing submitted yet), so they default to "no selection" and
+    the rendered form is unchanged from before #175 on that path. Before
+    #175 a validation-error re-render silently dropped every field below
+    titles/companies (the visitor's seniority/years/comp-floor/workplace
+    choices vanished on an error round-trip); this closes that gap the same
+    way _merge_checked already does for titles/companies."""
     checked_titles = checked_titles or []
     checked_companies = checked_companies or []
+    checked_skills = checked_skills or []
     options = _read_picker_options(q)
     return {
         "submitted": False,
@@ -315,6 +343,11 @@ def _picker_context(
         "companies": _merge_checked(options["companies"], checked_companies),
         "checked_titles": checked_titles,
         "checked_companies": checked_companies,
+        "checked_skills": checked_skills,
+        "seniority_level": seniority_level,
+        "years_of_experience": years_of_experience,
+        "comp_floor_usd": comp_floor_usd,
+        "workplace_type": workplace_type,
         "skills": SKILLS_OPTIONS,
         "seniority_levels": SENIORITY_LEVELS,
         "workplace_types": WORKPLACE_TYPES,
@@ -347,8 +380,18 @@ def _parse_titles(form: Any) -> tuple[list[str] | None, str | None]:
     upsert_profile's target_titles column: count cap, per-item length cap,
     type check, and a control-character rejection (issue #54's proposal).
     Deliberately NOT a membership check against the rendered option window
-    — see MAX_TITLES_PER_SELECTION's module-level rationale comment."""
-    raw_titles = [t for t in form.getlist("titles") if t]
+    — see MAX_TITLES_PER_SELECTION's module-level rationale comment.
+    Filtered on the STRIPPED form (so a whitespace-only value like " "
+    can't survive as a garbage exact-match filter, #175/whitespace-bypass)
+    but the RAW value is kept — picker options are corpus-derived from
+    postings.title verbatim, and stripping the stored value would make a
+    checkbox for a title with incidental leading/trailing whitespace no
+    longer match the very posting it came from. The strip-emptiness check
+    is skipped for a non-str item (`not isinstance(t, str) or t.strip()`)
+    so a wrong-typed value can't crash here — it survives this pre-filter
+    and reaches the type check below instead, where it gets the correct
+    "must be text values" error rather than an AttributeError."""
+    raw_titles = [t for t in form.getlist("titles") if not isinstance(t, str) or t.strip()]
     message = _too_many_selected_message("titles", len(raw_titles), MAX_TITLES_PER_SELECTION)
     if message is not None:
         return None, message
@@ -367,13 +410,19 @@ def _parse_titles(form: Any) -> tuple[list[str] | None, str | None]:
 
 def _parse_companies(form: Any) -> tuple[list[str] | None, str | None]:
     """Shape-validate the submitted company selections before they reach
-    set_pending_picker's session cookie: count cap, per-item length cap, and
-    a type check — the same shape _parse_titles enforces (issue #80). No
-    control-character rejection here: unlike titles, companies never reach a
-    durable jsonb column (see the comment at this function's call site), so
-    the concern that check exists for doesn't apply — the cookie-budget caps
-    below are the only hazard `companies` shares with `titles`."""
-    raw_companies = [c for c in form.getlist("companies") if c]
+    both set_pending_picker's session cookie AND (#169) upsert_profile's
+    target_companies jsonb column: count cap, per-item length cap, a type
+    check, and a control-character rejection — the same shape _parse_titles
+    enforces (issue #80, extended by #169). Before #169, companies never
+    reached durable storage, so the control-character check titles carries
+    for issue #54 was deliberately omitted here; now that target_companies
+    is a real column (m0012), the same embedding hazard applies equally, so
+    the check does too. Filtered on the STRIPPED form, RAW value kept — see
+    _parse_titles's docstring for why (same #175/whitespace-bypass fix,
+    same corpus-verbatim-match reason not to alter the stored value, and
+    the same non-str passthrough so a wrong-typed item reaches the type
+    check below instead of crashing on .strip())."""
+    raw_companies = [c for c in form.getlist("companies") if not isinstance(c, str) or c.strip()]
     message = _too_many_selected_message(
         "companies", len(raw_companies), MAX_COMPANIES_PER_SELECTION
     )
@@ -386,6 +435,8 @@ def _parse_companies(form: Any) -> tuple[list[str] | None, str | None]:
             return None, "companies must be text values"
         if len(company) > MAX_COMPANY_LENGTH:
             return None, f"company exceeds the {MAX_COMPANY_LENGTH}-character limit"
+        if _has_control_char(company):
+            return None, "company contains invalid (control) characters"
         companies.append(company)
     return companies, None
 
@@ -436,16 +487,24 @@ def _parse_submission(form: Any) -> tuple[dict[str, Any] | None, str | None]:
     if error is not None:
         return None, error
 
+    # #175: an empty picker submission (no title AND no company checked)
+    # used to succeed silently — mint an anon user, write a profiles row
+    # with target_titles/target_companies both NULL, and redirect to
+    # /preview, which then rendered the entire unfiltered corpus with no
+    # indication anything was wrong. Rejected here, at the same validation
+    # boundary as every other field above, rather than deeper in
+    # start_submit: this is the one combination no single field-level check
+    # can catch on its own (either field alone is a legal, valid selection).
+    if not titles and not companies:
+        return None, "pick at least one title or company"
+
     selections = {
         "titles": titles,
-        # `companies` selections never reach durable storage today — there
-        # is no target_companies column anywhere in this schema (upsert_profile
-        # doesn't accept one); this list only flows into the session via
-        # set_pending_picker for /preview's read-side filter. Still
-        # shape-validated (count + length cap, see MAX_COMPANIES_PER_SELECTION)
-        # because it round-trips through the same session cookie titles do —
-        # a durable sink would additionally need titles' control-character
-        # check.
+        # `target_companies` (m0012, #169) is now a real durable column —
+        # shape-validated the same way titles is (count + length + control-
+        # character cap, see _parse_companies) because it reaches BOTH the
+        # session cookie (set_pending_picker, for /preview's read-side
+        # filter) and upsert_profile's target_companies jsonb column.
         "companies": companies,
         "skills": [s for s in form.getlist("skills") if s and s in SKILLS_OPTIONS],
         "seniority_level": seniority_level,
@@ -519,12 +578,36 @@ def start():
 
 @onboarding_bp.post("/start", strict_slashes=False)
 def start_submit():
+    """#175: a rejected submission always re-renders with 200 and never
+    redirects — the pre-existing shape every field-level validation failure
+    above already used (unrecognized seniority, an out-of-range value, an
+    oversized title/company list, ...). The one addition #175 makes to that
+    existing shape is the `is_hx` branch: an HX-Request gets a small
+    `_picker_error_fragment.html` fragment (mirroring
+    jobcannon/web/__init__.py's CSRFError handler's own HX-vs-full-page
+    split, at 200 rather than that handler's 400 — this route already
+    treats every OTHER validation failure as a 200, not a 400, and #175's
+    task direction is explicit that an empty submission is no different); a
+    non-HX request gets the full picker page re-rendered, with every field
+    the visitor actually submitted (not just titles/companies) echoed back
+    via _picker_context so a genuine mistake doesn't cost the whole form."""
+    is_hx = request.headers.get("HX-Request") == "true"
     selections, error = _parse_submission(request.form)
     if error is not None:
+        if is_hx:
+            return render_template("_picker_error_fragment.html", error=error), 200
         checked_titles = request.form.getlist("titles")[:MAX_TITLES_PER_SELECTION]
         checked_companies = request.form.getlist("companies")[:MAX_COMPANIES_PER_SELECTION]
+        checked_skills = [s for s in request.form.getlist("skills") if s in SKILLS_OPTIONS]
         context = _picker_context(
-            error=error, checked_titles=checked_titles, checked_companies=checked_companies
+            error=error,
+            checked_titles=checked_titles,
+            checked_companies=checked_companies,
+            checked_skills=checked_skills,
+            seniority_level=request.form.get("seniority_level") or "",
+            years_of_experience=request.form.get("years_of_experience") or "",
+            comp_floor_usd=request.form.get("comp_floor_usd") or "",
+            workplace_type=request.form.get("workplace_type") or "",
         )
         return render_template("onboarding_picker.html", **context), 200
 
@@ -539,10 +622,19 @@ def start_submit():
                 conn,
                 anon_id,
                 skills=selections["skills"] or None,
-                target_titles=selections["titles"] or None,
+                # #169: passed LITERALLY (never `or None`) — see
+                # jobcannon/db/_profiles.py's docstring for why an empty
+                # list must reach COALESCE as a real (non-NULL) jsonb value
+                # so an unchecked-everything resubmission actually clears a
+                # prior selection instead of silently reviving it. Safe
+                # here specifically because #175's validation above already
+                # guarantees titles and companies are never BOTH empty.
+                target_titles=selections["titles"],
+                target_companies=selections["companies"],
                 seniority_level=selections["seniority_level"],
                 years_of_experience=selections["years_of_experience"],
                 comp_floor_usd=selections["comp_floor_usd"],
+                workplace_type=selections["workplace_type"],
             )
 
     # comp_floor_usd is deliberately excluded from the session payload — see
@@ -577,8 +669,7 @@ def _current_identity() -> Any:
 
 def _read_preview_postings(
     *,
-    titles: list[str] | None,
-    workplace_type: str | None,
+    selection_kwargs: dict[str, Any],
     location_contains: str | None,
     after: tuple[float | None, Any, int] | None,
 ) -> list[Any]:
@@ -587,16 +678,28 @@ def _read_preview_postings(
     (_feed_list.html's empty-state branch still renders) rather than a 500
     on a public entry point. `after` (#156) is the keyset cursor for
     "Load more" — see jobcannon/db/_feed.py's list_feed_postings/
-    _cursor_predicate."""
+    _cursor_predicate.
+
+    #169: `selection_kwargs` is the SAME predicate — already derived by the
+    caller (`preview()`) from the session-held pending_picker dict via
+    jobcannon.db._feed.selection_filter_kwargs — that jobcannon/web/pages.py's
+    authed feed derives from a `profiles` row (see that module's
+    _read_feed_postings). Taking the already-built kwargs rather than the raw
+    `selections` dict avoids computing selection_filter_kwargs twice per
+    request (preview() also needs it for `has_selections`), and keeps this
+    function from picking individual keys (titles, workplace_type) back out
+    by hand — that was the actual bug behind #169: the old hand-picked call
+    here never read `companies` at all, so a company-only picker selection
+    was parsed, shape-validated, and stored, then silently dropped on every
+    read."""
     try:
         with connection_factory() as conn:
             return list_feed_postings(
                 conn,
                 user_id=None,
-                titles=titles,
-                workplace_type=workplace_type,
                 location_contains=location_contains,
                 after=after,
+                **selection_kwargs,
             )
     except Exception:
         logger.warning("preview feed read failed (defaulting to empty result set)", exc_info=True)
@@ -673,9 +776,36 @@ def preview():
     location_contains = (request.args.get("location") or "").strip() or None
     after = parse_cursor(request.args)
 
+    # Computed once and reused below for both the read and `has_selections`
+    # — #169's shared predicate is a pure function of `selections`, so
+    # deriving it twice per request would just be duplicate work on the
+    # same in-memory dict.
+    selection_kwargs = selection_filter_kwargs(selections)
+
+    # #175: NOT `bool(selections)` — `selections` always carries `anon_id`
+    # once /start has been submitted even once, so that check is truthy
+    # even for a hollow selection. It also stayed truthy for a session
+    # cookie minted by the pre-#175 build, which let a fully-blank
+    # submission through and stored it verbatim; that cookie is still live
+    # in production today. Derive it from the same "at least one title or
+    # company" predicate _parse_submission now enforces on write, so a
+    # pre-existing hollow cookie shows the same honest banner a fresh
+    # blank submission is rejected before ever producing.
+    #
+    # Computed BEFORE the read (F4, refuter-1 LOW): a legacy pre-#175
+    # cookie can carry a workplace-only selection (no titles, no
+    # companies) — has_selections=False, "you haven't completed the
+    # picker" banner — while the corpus read below still applied that
+    # workplace_type filter, so the preview silently narrowed under a
+    # banner claiming nothing had been selected. When there is no real
+    # selection, drop workplace_type from the read too, so the banner and
+    # the results agree: neither field is applied.
+    has_selections = bool(selection_kwargs["titles"] or selection_kwargs["companies"])
+    if not has_selections:
+        selection_kwargs = {**selection_kwargs, "workplace_type": None}
+
     rows = _read_preview_postings(
-        titles=selections.get("titles") or None,
-        workplace_type=selections.get("workplace_type"),
+        selection_kwargs=selection_kwargs,
         location_contains=location_contains,
         after=after,
     )
@@ -688,7 +818,7 @@ def preview():
     return render_template(
         "preview.html",
         entries=entries,
-        has_selections=bool(selections),
+        has_selections=has_selections,
         load_more_url=load_more_url,
         ordering=_ordering_label(rows),
         location_contains=location_contains or "",
