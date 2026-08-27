@@ -200,7 +200,7 @@ def test_signup_event_passes_consent_explicitly_not_from_stale_g(app, monkeypatc
     assert fake.captured == []
 
 
-def test_referrer_url_payload_is_hostname_only(app):
+def test_referrer_host_payload_is_hostname_only(app):
     dsn = app.config["_TEST_DSN"]
     client = app.test_client()
     _authed(app)
@@ -208,7 +208,7 @@ def test_referrer_url_payload_is_hostname_only(app):
     client.get("/", headers={"Referer": "https://example.com/path?x=1"})
 
     rows = _events_rows(dsn, CLERK_ID, "user_signed_up")
-    assert rows[0]["payload"]["referrer_url"] == "example.com"
+    assert rows[0]["payload"]["referrer_host"] == "example.com"
 
 
 def test_anon_profile_is_rekeyed_to_clerk_id_and_anon_user_row_is_deleted(app):
