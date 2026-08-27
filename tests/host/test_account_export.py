@@ -259,12 +259,28 @@ def test_export_document_pins_expected_key_sets(app):
         "schema_version",
         "generated_at",
         "user_id",
+        "identity",
         "profile",
         "watchlist",
         "pipeline_status",
         "consent",
         "events",
     }
+
+    # No CLERK_CLIENT configured (this module's `app` fixture never sets
+    # one, matching fetch_primary_email's fail-soft "unconfigured" branch)
+    # -- covered for real by tests/host/test_clerk_email_lookup.py and the
+    # identity-specific tests below, this just pins the shape.
+    assert set(doc["identity"].keys()) == {
+        "email",
+        "email_verified",
+        "source",
+        "fetched_at",
+        "email_unavailable_reason",
+    }
+    assert doc["identity"]["source"] == "clerk"
+    assert doc["identity"]["email"] is None
+    assert doc["identity"]["email_unavailable_reason"] == "clerk_client_unavailable"
 
     assert set(doc["profile"].keys()) == {
         "user_id",
@@ -358,3 +374,166 @@ def test_export_for_user_with_no_data_still_produces_valid_document(app):
     assert doc["pipeline_status"] == []
     assert doc["consent"] is None
     assert doc["events"] == []
+
+
+# --- issue #181: the `identity` section's Clerk lookup ---------------------
+#
+# Mocked at the HTTP boundary (a fake `.users.get(...)`), never at
+# `fetch_primary_email`/`_build_export_document` themselves, so the route's
+# real wiring — calling fetch_primary_email before the DB connection opens,
+# threading its result into `_build_export_document`, and that function's
+# own extraction/fail-soft logic — all runs for real here. Unit coverage of
+# fetch_primary_email's own classification branches (timeout/404/5xx/no-
+# primary-address/...) lives in tests/host/test_clerk_email_lookup.py; these
+# tests are the route-level integration on top of it.
+
+
+class _FakeUsersGet:
+    def __init__(self, *, result=None, error=None):
+        self._result = result
+        self._error = error
+
+    def get(self, *, user_id, timeout_ms=None, retries=None):
+        if self._error is not None:
+            raise self._error
+        return self._result
+
+
+class _FakeClerkClient:
+    def __init__(self, users):
+        self.users = users
+
+
+class _StatusError(Exception):
+    def __init__(self, status_code):
+        super().__init__(f"simulated Clerk {status_code}")
+        self.status_code = status_code
+
+
+class _TimeoutError(Exception):
+    """Named to mirror httpx's *Timeout* exception family that a real Clerk
+    timeout raises — auth.py's `_clerk_failure_reason` classifies off the
+    exception's class name for the no-status-code case."""
+
+
+def _clerk_user(primary_id, email_address, verified):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        primary_email_address_id=primary_id,
+        email_addresses=[
+            SimpleNamespace(
+                id=primary_id,
+                email_address=email_address,
+                verification=SimpleNamespace(status="verified" if verified else "unverified"),
+            )
+        ],
+    )
+
+
+def test_export_identity_carries_email_from_clerk(app):
+    dsn = app.config["_TEST_DSN"]
+    posting_id = _shared_posting(dsn)
+    _seed_full_account(dsn, USER_A, posting_id)
+    client = _seeded_client(app, dsn, USER_A)
+    app.config["CLERK_CLIENT"] = _FakeClerkClient(
+        _FakeUsersGet(result=_clerk_user("addr_1", "a@example.com", True))
+    )
+
+    doc = client.get("/account/export").get_json()
+
+    assert doc["identity"] == {
+        "email": "a@example.com",
+        "email_verified": True,
+        "source": "clerk",
+        "fetched_at": doc["generated_at"],
+        "email_unavailable_reason": None,
+    }
+
+
+def test_export_identity_degrades_on_clerk_timeout_without_500(app):
+    dsn = app.config["_TEST_DSN"]
+    posting_id = _shared_posting(dsn)
+    _seed_full_account(dsn, USER_A, posting_id)
+    client = _seeded_client(app, dsn, USER_A)
+    app.config["CLERK_CLIENT"] = _FakeClerkClient(_FakeUsersGet(error=_TimeoutError("timed out")))
+
+    resp = client.get("/account/export")
+
+    assert resp.status_code == 200
+    doc = resp.get_json()
+    assert doc["identity"]["email"] is None
+    assert doc["identity"]["email_verified"] is None
+    assert doc["identity"]["email_unavailable_reason"] == "clerk_timeout"
+    # The rest of the document is unaffected by the Clerk failure.
+    assert doc["profile"]["experience_summary"] == f"{USER_A} summary"
+
+
+def test_export_identity_degrades_on_clerk_5xx_without_500(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _seeded_client(app, dsn, "user_export_5xx")
+    app.config["CLERK_CLIENT"] = _FakeClerkClient(_FakeUsersGet(error=_StatusError(503)))
+
+    resp = client.get("/account/export")
+
+    assert resp.status_code == 200
+    doc = resp.get_json()
+    assert doc["identity"]["email"] is None
+    assert doc["identity"]["email_unavailable_reason"] == "clerk_api_error_503"
+
+
+def test_export_identity_degrades_on_clerk_404_without_500(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _seeded_client(app, dsn, "user_export_404")
+    app.config["CLERK_CLIENT"] = _FakeClerkClient(_FakeUsersGet(error=_StatusError(404)))
+
+    resp = client.get("/account/export")
+
+    assert resp.status_code == 200
+    doc = resp.get_json()
+    assert doc["identity"]["email"] is None
+    assert doc["identity"]["email_unavailable_reason"] == "clerk_user_not_found"
+
+
+def test_export_identity_degrades_when_clerk_client_is_unconfigured(app):
+    """The `app` fixture never sets CLERK_CLIENT — mirrors a TESTING app
+    that never built one (jobcannon/web/__init__.py leaves it None), the
+    same state test_export_document_pins_expected_key_sets already pins."""
+    dsn = app.config["_TEST_DSN"]
+    client = _seeded_client(app, dsn, "user_export_no_client")
+
+    doc = client.get("/account/export").get_json()
+
+    assert doc["identity"]["email"] is None
+    assert doc["identity"]["email_unavailable_reason"] == "clerk_client_unavailable"
+
+
+def test_export_document_never_contains_the_configured_clerk_secret(app):
+    """Regression guard for issue #181's "never log the key": the export
+    route reuses app.config["CLERK_CLIENT"] (an already-built client) and
+    never reads HOST_CONFIG.clerk_secret_key directly, so that value must
+    never reach the response body. A positive control proves the substring
+    search itself works (an absent string proves nothing on its own —
+    see the negative-result verification rule): the same search DOES find
+    the secret in a document doctored to contain it.
+    """
+    from jobcannon.host.config import HostConfig
+
+    fake_secret = "sk_test_FAKE_MUST_NEVER_LEAK_9f3ab21c"
+    app.config["HOST_CONFIG"] = HostConfig(database_url="", clerk_secret_key=fake_secret)
+    dsn = app.config["_TEST_DSN"]
+    client = _seeded_client(app, dsn, "user_export_secret_check")
+    app.config["CLERK_CLIENT"] = _FakeClerkClient(
+        _FakeUsersGet(result=_clerk_user("addr_1", "a@example.com", True))
+    )
+
+    resp = client.get("/account/export")
+
+    body = resp.get_data(as_text=True)
+    assert fake_secret not in body
+
+    # Positive control: the identical search DOES find the secret when a
+    # document actually contains it, so the assertion above isn't passing
+    # because the search is broken.
+    doctored = body + fake_secret
+    assert fake_secret in doctored

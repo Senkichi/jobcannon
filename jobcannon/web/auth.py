@@ -141,9 +141,7 @@ def _clerk_failure_reason(exc: Exception) -> str:
     return "clerk_request_failed"
 
 
-def fetch_primary_email(
-    client: Any, user_id: str, *, timeout_ms: int = 5000
-) -> ClerkEmailLookup:
+def fetch_primary_email(client: Any, user_id: str, *, timeout_ms: int = 5000) -> ClerkEmailLookup:
     """Look up a Clerk user's primary email address + verification status
     via `client.users.get(user_id=...)` — the SAME credentialed client
     jobcannon.web.account's user-delete call reuses (never a second
