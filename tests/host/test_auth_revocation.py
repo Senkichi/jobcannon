@@ -115,6 +115,40 @@ def test_revoked_subject_401s_on_account_export(app):
     assert resp.status_code == 401
 
 
+def test_revoked_subject_401_page_hides_authed_nav(app):
+    """Issue #205 follow-up, and the regression test that actually
+    motivates it: base.html's header nav, My-postings link, and footer
+    Export/Delete links were repointed from `g.clerk_user` to
+    `visitor_is_authed` so a signed-in visitor sees the right nav on a
+    PUBLIC_PATHS page (test_auth_nav.py / test_demo_feed.py /
+    test_preview.py). Naively deriving `visitor_is_authed` from
+    `_visitor_is_anonymous()`'s existing fallback (onboarding.
+    _current_identity(), a raw VERIFY_REQUEST re-check that knows nothing
+    about revoked_subjects) would have re-authenticated this exact
+    cryptographically-valid-but-tombstoned JWT on THIS page and shown
+    "My postings" / "Export your data" / "Delete account" on the very
+    response telling this visitor they're signed out -- the account-
+    mutation-link leak jobcannon/web/__init__.py's revoked-subject comment
+    already warned `g.clerk_user` itself must never suffer.
+    _visitor_is_anonymous() is tightened to fail CLOSED (anonymous)
+    whenever g.clerk_user is None off of an actual PUBLIC_PATHS render --
+    this proves that holds for the one non-public-path case where
+    g.clerk_user is deliberately reset to None: the revocation abort."""
+    dsn = app.config["_TEST_DSN"]
+    _authed(app, REVOKED_USER)
+    _revoke(dsn, REVOKED_USER)
+    client = app.test_client()
+
+    resp = client.get("/account/export")
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 401
+    assert "data-postings-history-nav-link" not in html
+    assert ">My postings<" not in html
+    assert ">Export your data<" not in html
+    assert ">Delete account<" not in html
+
+
 def test_revoked_subject_401s_on_feed_root(app):
     dsn = app.config["_TEST_DSN"]
     _authed(app, REVOKED_USER)
