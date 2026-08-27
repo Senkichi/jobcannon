@@ -324,15 +324,16 @@ def test_posting_with_no_usable_url_renders_degraded_apply_control(app):
 
 def test_authed_feed_never_shows_the_anonymous_signup_cta(app):
     """Negative control for issue #174's anonymous per-row CTA
-    (_posting_row.html, gated on `not show_actions and (clerk_sign_up_url
-    or clerk_sign_in_url)`): the authed feed always renders with
-    show_actions=True (jobcannon/web/pages.py's feed()), and this module's
-    `app` fixture never overrides HOST_CONFIG, so TESTING's default
-    configures BOTH clerk_sign_up_url and clerk_sign_in_url
-    (jobcannon/web/__init__.py) -- if the gate were keyed on the URLs
-    alone instead of `not show_actions`, this CTA would leak onto every
-    signed-in visitor's real feed. The row still renders (positive
-    control) so the CTA's absence isn't just an empty/error page."""
+    (_posting_row.html, gated on `signup_cta_url`): jobcannon.web's
+    _inject_auth_links context processor derives signup_cta_url as None
+    for any authed visitor (jobcannon.web._visitor_is_anonymous, via the
+    g.clerk_user this route's before_request already populated), and this
+    module's `app` fixture never overrides HOST_CONFIG, so TESTING's
+    default configures BOTH clerk_sign_up_url and clerk_sign_in_url
+    (jobcannon/web/__init__.py) -- if the gate keyed on the URLs alone
+    instead of real identity, this CTA would leak onto every signed-in
+    visitor's real feed. The row still renders (positive control) so the
+    CTA's absence isn't just an empty/error page."""
     dsn = app.config["_TEST_DSN"]
     client = _feed_client(app, consent=True)
     company_id = _seed_company(dsn, "No Anon CTA Co")

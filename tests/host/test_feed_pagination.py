@@ -289,10 +289,11 @@ def test_load_more_appended_rows_carry_save_dismiss_controls(app):
     assert "data-action-save" in fragment_html
     assert "data-action-dismiss" in fragment_html
     # Negative control for issue #174's anonymous per-row CTA
-    # (_posting_row.html, gated on `not show_actions and (...)`): appended
-    # rows on the authed load-more fragment carry the real actions above,
-    # never the anonymous "Sign up to apply" prompt — closing the same
-    # gap tests/host/test_preview.py's
+    # (_posting_row.html, gated on `signup_cta_url`, which
+    # jobcannon.web._inject_auth_links derives as None for any authed
+    # visitor): appended rows on the authed load-more fragment carry the
+    # real actions above, never the anonymous "Sign up to apply" prompt —
+    # closing the same gap tests/host/test_preview.py's
     # test_preview_load_more_fragment_includes_row_signup_cta pins for the
     # anonymous fragment.
     assert "data-action-signup" not in fragment_html

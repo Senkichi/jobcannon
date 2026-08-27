@@ -24,6 +24,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from jobcannon.db._profiles import GUEST_USER_ID, upsert_profile
+from jobcannon.web.auth import ClerkIdentity
 from tests.host.conftest import create_throwaway_db, drop_throwaway_db, requires_postgres
 
 pytestmark = requires_postgres
@@ -286,13 +287,19 @@ def test_demo_requires_no_cookie_and_no_signup(app):
 
 # ---------------------------------------------------------------------------
 # /start + sign-up CTA (issue #182, item 3): /demo previously had no path
-# onward to /start or a Clerk account. demo.html renders the CTA
-# unconditionally, ahead of the corpus-empty/unseeded-profile/populated
-# branch chain, reusing the same #165 auth-link globals and sign-up-
-# preferred fallback as /preview's page-level (#145) and per-row (#174)
-# CTAs. The per-row "Sign up to apply" CTA on a seeded posting is #174's
-# own deliverable, exercised here end-to-end on the /demo route (the
-# tests/host/test_preview.py module owns the /preview route's coverage).
+# onward to /start or a Clerk account. demo.html renders the /start half of
+# the CTA unconditionally, ahead of the corpus-empty/unseeded-profile/
+# populated branch chain; the "sign up" half of both the demo CTA and the
+# per-row CTA gate on signup_cta_url -- the single, identity-derived value
+# jobcannon.web's _inject_auth_links context processor computes (same
+# sign-up-preferred fallback as /preview's page-level (#145) and per-row
+# (#174) CTAs, but None for an authed visitor regardless of what's
+# configured). The per-row "Sign up to apply" CTA on a seeded posting is
+# #174's own deliverable, exercised here end-to-end on the /demo route (the
+# tests/host/test_preview.py module owns the /preview route's coverage);
+# test_demo_hides_signup_cta_for_an_authed_visitor below is the negative
+# control proving both CTA halves respect real identity, not just
+# show_actions.
 # ---------------------------------------------------------------------------
 
 
@@ -340,6 +347,59 @@ def test_demo_start_cta_present_when_guest_profile_unseeded(app):
     assert "The guest profile isn't seeded yet" in html
     assert "data-demo-cta" in html
     assert 'href="/start"' in html
+
+
+def test_demo_hides_signup_cta_for_an_authed_visitor(app):
+    """Issue #174 fix: /demo has no _current_identity() check and never
+    passed show_actions, so before this fix an authed visitor still saw
+    the anonymous "Sign up to apply" row CTA and the demo CTA's own "sign
+    up" nudge -- the gate (formerly `not show_actions`, Undefined-is-falsy)
+    never actually checked identity. /demo keeps serving authed visitors
+    (it's a public showcase, so it stays in PUBLIC_PATHS and is never
+    redirected the way /preview is) -- just without either signup CTA.
+
+    Mutates VERIFY_REQUEST post-creation, same pattern as
+    tests/host/test_feed_events.py's `_authed()` helper: /demo is a
+    PUBLIC_PATHS route, so before_request's clerk_auth() sets g.clerk_user
+    = None unconditionally without ever calling VERIFY_REQUEST -- the
+    identity signal only reaches the page via
+    jobcannon.web._visitor_is_anonymous()'s fallback to
+    onboarding._current_identity(), which reads VERIFY_REQUEST fresh from
+    app.config on every call, exactly like /preview's own authed-redirect
+    check does.
+
+    Assertions are scoped to the two signup_cta_url-gated blocks
+    (data-action-signup / the demo CTA's "sign up" fragment), not a bare
+    "sign-up href not anywhere on the page" check: base.html's header nav
+    (issue #145) is gated on `not g.clerk_user`, a DIFFERENT, pre-existing
+    mechanism this PR does not touch -- and g.clerk_user is force-None on
+    every PUBLIC_PATHS render regardless of real identity, so the header
+    nav renders its own sign-up link on /demo/ /preview unconditionally.
+    That's an existing, out-of-scope gap (not introduced or widened by
+    #174), flagged separately rather than asserted against here."""
+    app.config["VERIFY_REQUEST"] = lambda req: ClerkIdentity(
+        user_id="user_authed_demo", claims={"sub": "user_authed_demo"}
+    )
+    dsn = app.config["_TEST_DSN"]
+    _seed_guest_profile(dsn, target_titles=["Authed Demo Title"])
+    company_id = _seed_company(dsn, "Authed Demo Co")
+    _seed_posting(dsn, "demo-authed-1", company_id, title="Authed Demo Title")
+
+    resp = app.test_client().get("/demo")
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    # Positive control: the authed visitor still gets the real populated
+    # page, not an empty state or a 401 -- proving the absences below mean
+    # "CTA correctly hidden," not "page never rendered."
+    assert "Authed Demo Title" in html
+    assert "data-why-chips" in html
+    assert 'href="/start"' in html
+    assert "Build your own feed" in html
+    assert "data-action-signup" not in html
+    assert "data-posting-signup" not in html
+    assert "Sign up to apply" not in html
+    assert "sign up</a> to save it" not in html
 
 
 def test_demo_row_omits_signup_cta_when_both_urls_unset(app):

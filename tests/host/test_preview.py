@@ -615,9 +615,9 @@ def test_preview_omits_clerk_js_even_when_publishable_key_configured(app_with_cl
     assert "clerk.browser.js" not in html
     assert "Clerk.load" not in html
     # Positive control within the same response: the CTA (gated on
-    # clerk_sign_up_url alone via _auth_link_context, unaffected by #158's
-    # gate) IS present -- proves this is a real 200 render of the route,
-    # not an empty/error page that would vacuously lack clerk-js too.
+    # signup_cta_url via _inject_auth_links, unaffected by #158's gate) IS
+    # present -- proves this is a real 200 render of the route, not an
+    # empty/error page that would vacuously lack clerk-js too.
     assert "data-signup-cta" in html
 
 
@@ -627,9 +627,10 @@ def test_preview_omits_clerk_js_even_when_publishable_key_configured(app_with_cl
 # feed) -- /preview never does, so an anonymous visitor previously had a
 # fully actionless row: no apply link, no hint that signing up unlocks one.
 # The new block is a pure addition in _posting_row.html gated on
-# `not show_actions and (clerk_sign_up_url or clerk_sign_in_url)`, reusing
-# the same #165 auth-link globals and sign-up-preferred fallback as the
-# page-level CTA above.
+# `signup_cta_url`, the single identity-derived value
+# jobcannon.web._inject_auth_links computes (sign-up preferred, sign-in
+# fallback, None for any authed visitor regardless of URL config) -- the
+# same value the page-level CTA above gates on.
 # ---------------------------------------------------------------------------
 
 

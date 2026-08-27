@@ -1,22 +1,27 @@
 {% extends "base.html" %}
 {% block title %}Demo — Job Cannon{% endblock %}
 {% block content %}
-{# Demo CTA (issue #182, item 3): the demo page had no direct link
-   onward to /start or a Clerk account before this -- a visitor who
-   liked the canned feed had nowhere to go. Rendered unconditionally,
-   ahead of the corpus-empty/unseeded-profile/populated branches below,
-   so it's visible in all three states rather than only the populated
-   one. Worded to complement, not contradict, the populated branch's
-   "no signup required" line below (line 15 as of this comment): /demo
-   and /start themselves stay signup-free, and the fallback sign-up/
-   sign-in link is offered only as the optional way to save the feed the
-   picker builds -- same #165 fallback the /preview per-row and
-   page-level CTAs use, never a hardcoded Clerk URL. #}
+{# Demo CTA (issue #182 item 3; identity-gated by #174): the demo page
+   had no direct link onward to /start or a Clerk account before this --
+   a visitor who liked the canned feed had nowhere to go. Rendered
+   unconditionally, ahead of the corpus-empty/unseeded-profile/populated
+   branches below, so it's visible in all three states rather than only
+   the populated one -- /demo keeps serving authed visitors too (it's a
+   public showcase), just without this CTA. Worded to complement, not
+   contradict, the populated branch's "no signup required" line below
+   (line 15 as of this comment): /demo and /start themselves stay
+   signup-free, and the fallback sign-up/sign-in link is offered only as
+   the optional way to save the feed the picker builds. The `<a>` half
+   gates on signup_cta_url -- the same app-wide, identity-derived value
+   the /preview per-row and page-level CTAs gate on
+   (jobcannon/web/__init__.py's _inject_auth_links) -- so a signed-in
+   visitor never sees a redundant "sign up" nudge; "Build your own feed"
+   stays visible to everyone regardless. #}
 <p class="text-sm text-neutral-400 mb-4" data-demo-cta>
   This is a canned demo profile.
   <a href="/start" class="underline text-neutral-100">Build your own feed</a>
-  {% if clerk_sign_up_url or clerk_sign_in_url %}
-    or <a href="{{ clerk_sign_up_url or clerk_sign_in_url }}" class="underline text-neutral-100">sign up</a> to save it as new postings come in.
+  {% if signup_cta_url %}
+    or <a href="{{ signup_cta_url }}" class="underline text-neutral-100">sign up</a> to save it as new postings come in.
   {% endif %}
 </p>
 {% if stats.postings == 0 %}
