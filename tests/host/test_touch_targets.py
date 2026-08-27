@@ -121,8 +121,19 @@ _TAG_RE = re.compile(
     r"""<(a|button|input|label|select|textarea)\b((?:"[^"]*"|'[^']*'|[^>"'])*)>""",
     re.IGNORECASE,
 )
-_CLASS_RE = re.compile(r"""class\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE)
-_TYPE_RE = re.compile(r"""type\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE)
+# `(?<![\w-])` anchors each attribute name against a preceding word-char or
+# hyphen (Devin LOW, review/review-devin.md finding 4): without it, a
+# `data-class="..."`/`data-type="..."`-style attribute occurring BEFORE the
+# real `class=`/`type=` on the same tag would satisfy `.search()` first (the
+# unanchored pattern matches "class=" inside "data-class=" just as readily
+# as a bare "class="), silently misclassifying or dropping the element. No
+# template today has such a decoy attribute (grepped for `-class=`/`-type=`
+# across jobcannon/web/templates/ -- zero hits), so this was a latent,
+# fail-open gap rather than a live bug --
+# test_class_and_type_regexes_are_anchored_against_decoy_dash_prefixed_attrs
+# below proves the scan continues past a decoy to the real attribute.
+_CLASS_RE = re.compile(r"""(?<![\w-])class\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE)
+_TYPE_RE = re.compile(r"""(?<![\w-])type\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE)
 # Matches a `touch_target(...)` Jinja-global call inside a class attribute's
 # raw source text -- `kind` is None for the bare/default-arg form
 # (`touch_target()`), or the quoted argument's text for an explicit one
@@ -291,6 +302,24 @@ def test_collector_handles_quoted_arrow_fn_attrs_and_single_quotes():
     filename, tag_name, input_type, attrs = cases[3]
     assert (filename, tag_name, input_type) == ("fixture.html", "textarea", None)
     assert _class_value(attrs) == "min-h-11"
+
+
+def test_class_and_type_regexes_are_anchored_against_decoy_dash_prefixed_attrs():
+    """Devin LOW (review/review-devin.md finding 4): `_CLASS_RE`/`_TYPE_RE`
+    are `.search()`-based and, unanchored, would match "class="/"type=" as a
+    substring of a preceding "data-class="/"data-type=" attribute on the
+    same tag before ever reaching the real one -- a decoy attribute earlier
+    on the tag could silently misclassify or drop an element from the scan.
+    No template today has this shape, but the regex wasn't structurally
+    hardened against it. Proves the fix: a `data-class="x"` (resp.
+    `data-type="text"`) attribute placed BEFORE the real `class=`/`type=`
+    must not be picked up -- the real attribute's value must still be the
+    one returned."""
+    decoy_class = 'data-class="x" class="{{ touch_target() }} shrink-0"'
+    assert _class_value(decoy_class) == "{{ touch_target() }} shrink-0"
+
+    decoy_type = 'data-type="text" type="checkbox" class="{{ touch_target(\'checkbox\') }}"'
+    assert _attr_value(_TYPE_RE.search(decoy_type)) == "checkbox"
 
 
 @pytest.mark.parametrize(
