@@ -256,6 +256,59 @@ def test_post_posting_save_with_header_token_is_the_htmx_path(db_app):
     assert resp.status_code == 200
 
 
+def test_wtf_csrf_enabled_defaults_true_outside_testing(monkeypatch):
+    """jobcannon/web/__init__.py's `app.config.setdefault("WTF_CSRF_ENABLED",
+    not app.config.get("TESTING"))` is the ONLY thing that turns CSRF on in
+    production. Every test above passes `WTF_CSRF_ENABLED: True` explicitly
+    (needed to exercise enforcement under TESTING, which defaults it False),
+    so none of them observes the derived default itself — if that expression
+    ever flipped, or the setdefault moved after `app.config.update`, this
+    entire suite would stay green while a real deploy shipped with CSRF
+    silently off (issue #146 regressed with zero test signal). This test
+    constructs a genuinely non-TESTING app (no `TESTING` key at all) so the
+    branch under test is the one actually observed.
+
+    `init_engine_seams` (the ONE non-TESTING wiring site, called before CSRF
+    is even configured) is monkeypatched to a no-op rather than routed
+    through a real throwaway Postgres DB: a `@requires_postgres`-gated
+    version of this test would silently skip (prove nothing) on any machine
+    without POSTGRES_ADMIN_DSN set -- exactly the "opt-out guard proves
+    compliance, not absence" failure mode the gap this test closes is about.
+    The route under test (`/postings/1/save` with no token) 400s in
+    CSRFProtect's before_request, before any DB access -- same reasoning
+    tests/host/test_csrf.py's own module docstring gives for every other
+    "without token" case above."""
+    import jobcannon.host
+
+    monkeypatch.setattr(jobcannon.host, "init_engine_seams", lambda *_a, **_kw: None)
+
+    from jobcannon.host.config import HostConfig
+    from jobcannon.web import create_app
+
+    pk = "pk_test_" + base64.b64encode(b"clerk.test$").decode()
+    host_config = HostConfig(
+        database_url="postgresql://unused/unused",
+        secret_key="prod-shaped-secret",
+        clerk_sign_up_url="https://clerk.test/sign-up",
+        clerk_sign_in_url="https://clerk.test/sign-in",
+        signup_wave="0",
+        clerk_publishable_key=pk,
+        clerk_webhook_signing_secret=WEBHOOK_SECRET,
+    )
+    app = create_app(
+        config={
+            "HOST_CONFIG": host_config,
+            "VERIFY_REQUEST": lambda req: ClerkIdentity(user_id=USER_ID, claims={"sub": USER_ID}),
+        }
+    )
+    assert app.config["WTF_CSRF_ENABLED"] is True
+
+    client = app.test_client()
+    resp = client.post("/postings/1/save")
+    assert resp.status_code == 400
+    assert b"Request could not be verified" in resp.data
+
+
 def test_post_account_delete_with_token_calls_clerk():
     """No throwaway DB needed (account.py never touches Postgres itself —
     same rationale as tests/host/test_account_route.py's module docstring,

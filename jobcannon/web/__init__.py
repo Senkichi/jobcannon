@@ -39,7 +39,7 @@ from __future__ import annotations
 import logging
 import os
 
-from flask import Flask, abort, g, render_template, request
+from flask import Flask, abort, g, make_response, render_template, request
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
 
@@ -280,9 +280,26 @@ def create_app(config: dict | None = None) -> Flask:
         # document, so swapping in a full HTML page there would corrupt the
         # layout the same way any other fragment route returning a full page
         # would (jobcannon/CLAUDE.md's HTMX conventions).
+        #
+        # `HX-CSRF-Error` (custom, not an htmx-reserved header) is set on
+        # BOTH branches so the signal stays consistent regardless of shape.
+        # It matters for the htmx one specifically: htmx 2.0.4's default
+        # `responseHandling` maps every 4xx to `{swap: false, error: true}`,
+        # so the fragment body above is discarded, never swapped into the
+        # DOM — only the `htmx:responseError` event fires. base.html's
+        # listener on that event reads this header to surface a visible
+        # "refresh and try again" toast without it, a CSRF-rejected
+        # save/dismiss click did (and looked exactly like) nothing at all.
         if request.headers.get("HX-Request"):
-            return render_template("_csrf_error_fragment.html", reason=error.description), 400
-        return render_template("error_csrf.html", reason=error.description), 400
+            response = make_response(
+                render_template("_csrf_error_fragment.html", reason=error.description), 400
+            )
+        else:
+            response = make_response(
+                render_template("error_csrf.html", reason=error.description), 400
+            )
+        response.headers["HX-CSRF-Error"] = "1"
+        return response
 
     # Clerk frontend (clerk-js) wiring — issue #149. A blank or malformed
     # publishable key must never silently reproduce #149 (clerk-js never

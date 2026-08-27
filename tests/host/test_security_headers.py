@@ -210,6 +210,38 @@ def db_app():
         drop_throwaway_db(db_name)
 
 
+# ---------------------------------------------------------------------------
+# A CSRF-rejected 400: the one response shape a real forged/expired-token
+# request actually produces. jobcannon.web's `@app.errorhandler(CSRFError)`
+# renders its own template (error_csrf.html / _csrf_error_fragment.html) at
+# 400 rather than letting Flask/Werkzeug's default exception path run --
+# Flask still calls `finalize_request` -> `process_response` for a handled
+# HTTPException the same as any other response, so `register_security_headers`'s
+# `after_request` hook should still fire, but nothing asserted that until now.
+# No DB needed: CSRFProtect's before_request 400s before the view (and
+# therefore before any DB access) runs -- same reasoning
+# tests/host/test_csrf.py's module docstring gives for its own "without
+# token" cases.
+# ---------------------------------------------------------------------------
+
+
+def test_csrf_400_carries_security_headers():
+    client = _app(WTF_CSRF_ENABLED=True).test_client()
+    resp = client.post("/account/delete", data={"confirm": "delete-my-account"})
+    assert resp.status_code == 400
+    _assert_static_headers(resp.headers)
+    _assert_csp(resp.headers)
+
+
+def test_csrf_400_htmx_fragment_carries_security_headers():
+    client = _app(WTF_CSRF_ENABLED=True).test_client()
+    resp = client.post("/postings/1/save", headers={"HX-Request": "true"})
+    assert resp.status_code == 400
+    assert b"<html" not in resp.data  # confirms this is the fragment path, not error_csrf.html
+    _assert_static_headers(resp.headers)
+    _assert_csp(resp.headers)
+
+
 @requires_postgres
 def test_htmx_fragment_carries_security_headers(db_app):
     dsn = db_app.config["_TEST_DSN"]
