@@ -81,6 +81,11 @@ services:
         sync: false
       - key: CLERK_SIGN_UP_URL
         sync: false
+      # Sign-in counterpart (issue #145) -- already set live to
+      # https://accounts.jobcannon.dev/sign-in alongside CLERK_SIGN_UP_URL
+      # above; both were unlinked from any page until this change.
+      - key: CLERK_SIGN_IN_URL
+        sync: false
       # First cohort's signup wave label; captured into every session's
       # attribution at first contact (jobcannon.web.anon_session) so a later
       # signup can be attributed back to a cohort. Literal value, not a
