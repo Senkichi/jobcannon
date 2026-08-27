@@ -23,8 +23,8 @@
     <legend class="font-medium mb-2">Titles</legend>
     {% if titles %}
       {% for title in titles %}
-        <label class="flex items-center gap-2 min-h-11 px-1 text-sm text-neutral-300">
-          <input type="checkbox" name="titles" value="{{ title }}" {% if title in checked_titles %}checked{% endif %} class="h-11 w-11 shrink-0 accent-neutral-100"> {{ title }}
+        <label class="flex items-center gap-2 {{ touch_target() }} px-1 text-sm text-neutral-300">
+          <input type="checkbox" name="titles" value="{{ title }}" {% if title in checked_titles %}checked{% endif %} class="{{ touch_target('checkbox') }} shrink-0 accent-neutral-100"> {{ title }}
         </label>
       {% endfor %}
     {% elif q %}
@@ -37,8 +37,8 @@
     <legend class="font-medium mb-2">Companies</legend>
     {% if companies %}
       {% for company in companies %}
-        <label class="flex items-center gap-2 min-h-11 px-1 text-sm text-neutral-300">
-          <input type="checkbox" name="companies" value="{{ company }}" {% if company in checked_companies %}checked{% endif %} class="h-11 w-11 shrink-0 accent-neutral-100"> {{ company }}
+        <label class="flex items-center gap-2 {{ touch_target() }} px-1 text-sm text-neutral-300">
+          <input type="checkbox" name="companies" value="{{ company }}" {% if company in checked_companies %}checked{% endif %} class="{{ touch_target('checkbox') }} shrink-0 accent-neutral-100"> {{ company }}
         </label>
       {% endfor %}
     {% elif q %}

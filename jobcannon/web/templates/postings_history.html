@@ -5,7 +5,7 @@
 <nav class="flex gap-4 text-sm mb-6" data-postings-history-tabs>
   {% for token in views %}
     <a href="{{ url_for('postings_history.index', view=token) }}"
-       class="{{ 'text-neutral-100 underline' if token == view else 'text-neutral-400 hover:text-neutral-100' }} min-h-11 inline-flex items-center px-1"
+       class="{{ 'text-neutral-100 underline' if token == view else 'text-neutral-400 hover:text-neutral-100' }} {{ touch_target() }} inline-flex items-center px-1"
        {% if token == view %}aria-current="page"{% endif %}
        data-postings-history-tab="{{ token }}">
       {{ token | capitalize }}

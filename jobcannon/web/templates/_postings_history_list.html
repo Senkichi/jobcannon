@@ -23,11 +23,11 @@
     <span class="flex gap-4">
       {% if pagination.has_prev %}
         <a href="{{ url_for('postings_history.index', view=view, page=pagination.prev_page) }}"
-           class="underline text-neutral-300 min-h-11 inline-flex items-center px-1" data-postings-history-prev>Previous</a>
+           class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1" data-postings-history-prev>Previous</a>
       {% endif %}
       {% if pagination.has_next %}
         <a href="{{ url_for('postings_history.index', view=view, page=pagination.next_page) }}"
-           class="underline text-neutral-300 min-h-11 inline-flex items-center px-1" data-postings-history-next>Next</a>
+           class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1" data-postings-history-next>Next</a>
       {% endif %}
     </span>
   </div>

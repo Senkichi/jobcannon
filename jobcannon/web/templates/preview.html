@@ -17,7 +17,7 @@
      cut), so #174 extends it with the fallback rather than adding a
      second, duplicate paragraph. #}
   <p class="text-sm text-neutral-400 mb-4" data-signup-cta>
-    <a href="{{ signup_cta_url }}" class="underline text-neutral-100 min-h-11 inline-flex items-center px-1">Sign up to keep this feed</a>
+    <a href="{{ signup_cta_url }}" class="underline text-neutral-100 {{ touch_target() }} inline-flex items-center px-1">Sign up to keep this feed</a>
     updated as new postings come in.
   </p>
 {% endif %}
@@ -25,7 +25,7 @@
 {% if not has_selections %}
   <p class="text-neutral-400 mb-4" data-no-selections>
     You haven't completed the picker yet, so this is the unfiltered live feed.
-    <a href="/start" class="underline min-h-11 inline-flex items-center px-1">Tell us what you're looking for</a> to narrow it down.
+    <a href="/start" class="underline {{ touch_target() }} inline-flex items-center px-1">Tell us what you're looking for</a> to narrow it down.
   </p>
 {% endif %}
 
@@ -39,8 +39,8 @@
 
 <form method="get" action="/preview" class="mb-6 flex gap-2">
   <input type="text" name="location" value="{{ location_contains }}" placeholder="Filter by location"
-         class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-sm text-neutral-100 min-h-11">
-  <button type="submit" class="text-sm underline min-h-11 inline-flex items-center px-2">Filter</button>
+         class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-sm text-neutral-100 {{ touch_target() }}">
+  <button type="submit" class="text-sm underline {{ touch_target() }} inline-flex items-center px-2">Filter</button>
 </form>
 
 {% include "_feed_list.html" %}

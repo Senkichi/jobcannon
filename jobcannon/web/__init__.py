@@ -99,6 +99,7 @@ from flask_wtf.csrf import CSRFError
 from jobcannon.web.anon_session import capture_attribution, ensure_session_ids
 from jobcannon.web.handoff import run_handoff_if_pending
 from jobcannon.web.security_headers import register_security_headers
+from jobcannon.web.template_globals import touch_target
 
 logger = logging.getLogger(__name__)
 
@@ -447,6 +448,13 @@ def create_app(config: dict | None = None) -> Flask:
         context["signup_cta_url"] = _signup_cta_url(host_config, is_anonymous=is_anonymous)
         context["visitor_is_authed"] = not is_anonymous
         return context
+
+    # Single-sourced touch-target floor class(es) (issue #207) — a Jinja
+    # global rather than a context-processor value, since it's called with
+    # an argument (`{{ touch_target('checkbox') }}`) inside a `class="..."`
+    # attribute, not injected ambiently like the two context processors
+    # above. See jobcannon/web/template_globals.py for the full rationale.
+    app.jinja_env.globals["touch_target"] = touch_target
 
     if "WEBHOOK_SECRET" in app.config:
         secret = app.config["WEBHOOK_SECRET"]
