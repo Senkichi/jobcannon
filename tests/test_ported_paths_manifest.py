@@ -218,8 +218,8 @@ def test_provenance_regex_rejects_local_underscore_privacy_near_filename():
 
 
 def test_provenance_regex_rejects_dotted_attribute_named_private():
-    """Regression for a real false positive found while fixing issue #178/
-    #182 (issue #191): jobcannon/web/legal.py's Werkzeug Cache-Control usage
+    """Regression for a real false positive found (and fixed) while working
+    on issue #178/#182: jobcannon/web/legal.py's Werkzeug Cache-Control usage
     `response.cache_control.private = True` is ordinary Python attribute
     access whose last segment happens to be spelled "private" — it is ONE
     identifier chain, not a code-artifact filename/module-path followed by a
