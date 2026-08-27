@@ -12,6 +12,16 @@ An unrecognized `view` degrades to "saved" (the tolerant-default discipline
 `jobcannon/web/pages.py::_parse_feed_filters` already uses for
 workplace_type/sort) rather than a 400 or 500.
 
+`page` (query string, default 1) selects a `FEED_PAGE_MAX`-sized slice of
+that cohort's id list -- 1-based, validated as an int, and defaulted back to
+1 on anything non-numeric or below 1; a page past the end of the list is not
+an error, it just yields zero entries (the same "degrade, never 500"
+discipline `view` uses). This is what turns `list_postings_by_ids`'s own
+FEED_PAGE_MAX cap (jobcannon/db/_feed.py) into a page size instead of a
+silent truncation: `_paginate_ids` below slices the id list BEFORE any row
+is read, so only the current page's ids are ever handed to that function --
+its own cap can no longer discard a row this page was supposed to show.
+
 Every row is rendered through the SAME `jobcannon.web.feed_entries.build_entry`
 + `_posting_row.html` pair the authed feed uses (`jobcannon.db._feed.
 list_postings_by_ids` is the one new read query — see its own docstring for
@@ -45,7 +55,7 @@ from typing import Any
 
 from flask import Blueprint, g, render_template, request
 
-from jobcannon.db._feed import list_postings_by_ids
+from jobcannon.db._feed import FEED_PAGE_MAX, list_postings_by_ids
 from jobcannon.db._profiles import get_profile
 from jobcannon.db._user_actions import list_pipeline_status_entries, list_watchlist_entries
 from jobcannon.db.pool import connection_factory
@@ -70,7 +80,62 @@ def _parse_view(args: Any) -> str:
     return view if view in _VIEWS else _DEFAULT_VIEW
 
 
-def _read_entries(user_id: str, view: str) -> list[dict[str, Any]]:
+def _parse_page(args: Any) -> int:
+    """1-based, tolerant-default the same way `_parse_view` is: anything
+    that doesn't parse as an int, or parses below 1, degrades to page 1
+    rather than a 400. A value past the last page is left as-is (never
+    clamped) -- `_paginate_ids` below already turns that into an empty
+    slice via ordinary Python slicing, never an IndexError."""
+    raw = args.get("page")
+    if raw is None:
+        return 1
+    try:
+        page = int(raw)
+    except (TypeError, ValueError):
+        return 1
+    return page if page >= 1 else 1
+
+
+def _paginate_ids(posting_ids: list[int], page: int) -> tuple[list[int], dict[str, Any]]:
+    """Slices the caller's already-user-scoped id list into one
+    `FEED_PAGE_MAX`-sized page in Python, before a single posting row is
+    read. Returns the page's own id slice plus the rendering metadata
+    `_postings_history_list.html` needs for its "Showing X-Y of N" line and
+    prev/next links. `page_start`/`page_end`/`has_prev`/`has_next` all come
+    back as the empty-page defaults (0 / False) when the slice is empty --
+    page 1 of an empty cohort and a page past the end look identical here,
+    which is fine: both render this page's ordinary empty-state copy, never
+    a distinct "you've gone too far" message."""
+    total = len(posting_ids)
+    start_index = (page - 1) * FEED_PAGE_MAX
+    page_ids = posting_ids[start_index : start_index + FEED_PAGE_MAX]
+    if not page_ids:
+        return page_ids, {
+            "page": page,
+            "total": total,
+            "page_start": 0,
+            "page_end": 0,
+            "has_prev": False,
+            "has_next": False,
+            "prev_page": page - 1,
+            "next_page": page + 1,
+        }
+    page_end = start_index + len(page_ids)
+    return page_ids, {
+        "page": page,
+        "total": total,
+        "page_start": start_index + 1,
+        "page_end": page_end,
+        "has_prev": page > 1,
+        "has_next": page_end < total,
+        "prev_page": page - 1,
+        "next_page": page + 1,
+    }
+
+
+def _read_entries(
+    user_id: str, view: str, page: int
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Fail-closed read, the same discipline as jobcannon/web/pages.py's
     `_read_feed_postings`: an unopened connection pool or a genuine DB
     outage degrades to an empty result list (this page's own empty-state
@@ -79,9 +144,11 @@ def _read_entries(user_id: str, view: str) -> list[dict[str, Any]]:
     Newest-first ordering: `list_watchlist_entries` /
     `list_pipeline_status_entries` both return oldest-first (their own
     docstrings, `ORDER BY created_at` / `status_changed_at`), so the id list
-    handed to `list_postings_by_ids` is built from the REVERSED rows —
-    that function preserves whatever order its caller's id list is already
-    in, it does not re-sort by any DB column itself."""
+    `_paginate_ids` slices is built from the REVERSED rows -- that
+    ordering, not `list_postings_by_ids`, is what makes page 1 "most
+    recent" rather than "oldest"; `list_postings_by_ids` preserves whatever
+    order its caller's id list is already in, it does not re-sort by any DB
+    column itself."""
     try:
         with connection_factory() as conn:
             if view == "saved":
@@ -94,9 +161,10 @@ def _read_entries(user_id: str, view: str) -> list[dict[str, Any]]:
             else:
                 rows = list_pipeline_status_entries(conn, user_id)
                 posting_ids = [row["posting_id"] for row in reversed(rows) if row["status"] == view]
-            postings = list_postings_by_ids(conn, posting_ids, user_id=user_id)
+            page_ids, pagination = _paginate_ids(posting_ids, page)
+            postings = list_postings_by_ids(conn, page_ids, user_id=user_id)
             profile = get_profile(conn, user_id)
-            return [build_entry(row, profile) for row in postings]
+            return [build_entry(row, profile) for row in postings], pagination
     except Exception:
         logger.warning(
             "postings history read failed for user %s view %s (defaulting to empty)",
@@ -104,19 +172,25 @@ def _read_entries(user_id: str, view: str) -> list[dict[str, Any]]:
             view,
             exc_info=True,
         )
-        return []
+        _, empty_pagination = _paginate_ids([], page)
+        return [], empty_pagination
 
 
 @postings_history_bp.get("/postings", strict_slashes=False)
 def index():
     user_id = g.clerk_user.user_id
     view = _parse_view(request.args)
-    entries = _read_entries(user_id, view)
+    page = _parse_page(request.args)
+    entries, pagination = _read_entries(user_id, view, page)
     empty_copy = _EMPTY_COPY[view]
 
     if request.headers.get("HX-Request") == "true":
         return render_template(
-            "_postings_history_list.html", entries=entries, empty_copy=empty_copy
+            "_postings_history_list.html",
+            entries=entries,
+            empty_copy=empty_copy,
+            view=view,
+            pagination=pagination,
         )
 
     return render_template(
@@ -125,4 +199,5 @@ def index():
         view=view,
         views=_VIEWS,
         empty_copy=empty_copy,
+        pagination=pagination,
     )

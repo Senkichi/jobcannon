@@ -409,8 +409,10 @@ def list_postings_by_ids(conn: Any, posting_ids: list[int], *, user_id: str) -> 
     would raise a type-mismatch error against a `bigint` `postings.id`
     compared to a same-width but not identical `int[]` cast. Capped at
     `FEED_PAGE_MAX`, the same bound every other list path in this module
-    enforces (no pagination for this view yet -- a known limitation, not
-    silently unbounded)."""
+    enforces -- the caller (jobcannon/web/postings_history.py's
+    `_paginate_ids`) now pages BEFORE calling this, handing it only one
+    page's worth of ids at a time, so this cap is a defensive backstop
+    rather than the thing actually limiting what a caller sees."""
     if not posting_ids:
         return []
     capped_ids = posting_ids[:FEED_PAGE_MAX]

@@ -11,6 +11,7 @@ from __future__ import annotations
 import psycopg
 import pytest
 
+from jobcannon.db._feed import FEED_PAGE_MAX
 from jobcannon.web.handoff import _HANDOFF_DONE_KEY
 from tests.host.conftest import create_throwaway_db, drop_throwaway_db, requires_postgres
 
@@ -141,6 +142,62 @@ def test_dismissed_view_shows_only_dismissed_postings_that_the_feed_itself_exclu
 
     html = client.get("/postings?view=dismissed").get_data(as_text=True)
     assert "Dismissed Row" in html
+
+
+def test_pagination_splits_across_pages_and_renders_the_total(app):
+    """Seeds one more than a page's worth of saved postings: page 1 must
+    carry exactly FEED_PAGE_MAX rows (the cap becomes a page size, not a
+    truncation, #200/review-1 F5+Devin F5), page 2 the overflow, and the
+    total-count line must reflect every saved row, not just the current
+    page's worth."""
+    dsn = app.config["_TEST_DSN"]
+    client = _client(app)
+    company_id = _seed_company(dsn, "Pagination Co")
+    total = FEED_PAGE_MAX + 1
+    for i in range(total):
+        posting_id = _seed_posting(dsn, f"pagination-{i}", company_id, title=f"Pagination Row {i}")
+        assert client.post(f"/postings/{posting_id}/save").status_code == 200
+
+    page1 = client.get("/postings?view=saved&page=1").get_data(as_text=True)
+    assert page1.count("data-posting-row") == FEED_PAGE_MAX
+    assert f"Showing 1&ndash;{FEED_PAGE_MAX} of {total}" in page1
+    assert "data-postings-history-next" in page1
+    assert "data-postings-history-prev" not in page1
+
+    page2 = client.get("/postings?view=saved&page=2").get_data(as_text=True)
+    assert page2.count("data-posting-row") == 1
+    assert f"Showing {total}&ndash;{total} of {total}" in page2
+    assert "data-postings-history-prev" in page2
+    assert "data-postings-history-next" not in page2
+
+
+def test_non_numeric_or_sub_one_page_param_defaults_to_page_one(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _client(app)
+    company_id = _seed_company(dsn, "Bad Page Co")
+    saved_id = _seed_posting(dsn, "bad-page-1", company_id, title="Bad Page Row")
+    assert client.post(f"/postings/{saved_id}/save").status_code == 200
+
+    for page_param in ("abc", "0", "-3"):
+        resp = client.get(f"/postings?view=saved&page={page_param}")
+        html = resp.get_data(as_text=True)
+        assert resp.status_code == 200
+        assert "Bad Page Row" in html
+
+
+def test_out_of_range_page_param_renders_empty_not_500(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _client(app)
+    company_id = _seed_company(dsn, "Out Of Range Co")
+    saved_id = _seed_posting(dsn, "oor-1", company_id, title="Out Of Range Row")
+    assert client.post(f"/postings/{saved_id}/save").status_code == 200
+
+    resp = client.get("/postings?view=saved&page=999")
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Out Of Range Row" not in html
+    assert "No saved postings yet." in html
 
 
 def test_default_view_is_saved_when_view_param_missing(app):

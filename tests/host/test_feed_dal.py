@@ -209,6 +209,46 @@ def test_limit_is_capped_at_feed_page_max(db_conn):
     assert len(rows) == FEED_PAGE_MAX
 
 
+def test_list_postings_by_ids_caps_at_feed_page_max(db_conn):
+    """The backstop `list_postings_by_ids` itself keeps even though its
+    caller now pages before calling it (jobcannon/web/postings_history.py's
+    `_paginate_ids`) -- a caller that hands it more than FEED_PAGE_MAX ids
+    still gets capped, not a 500 or an unbounded query."""
+    from jobcannon.db._feed import FEED_PAGE_MAX, list_postings_by_ids
+
+    _seed_user(db_conn, "u-ids-cap")
+    company_id = _seed_company(db_conn, "Acme")
+    posting_ids = [
+        _seed_posting(
+            db_conn, f"p-ids-{i}", company_id, last_seen=_BASE_TIME + timedelta(minutes=i)
+        )
+        for i in range(FEED_PAGE_MAX + 5)
+    ]
+
+    rows = list_postings_by_ids(db_conn, posting_ids, user_id="u-ids-cap")
+
+    assert len(rows) == FEED_PAGE_MAX
+    assert [r["id"] for r in rows] == posting_ids[:FEED_PAGE_MAX]
+
+
+def test_list_postings_by_ids_silently_skips_an_id_absent_from_postings(db_conn):
+    """A caller-supplied id (e.g. a watchlist row whose posting was since
+    hard-deleted) that no longer exists in `postings` must be dropped, not
+    crash the caller-order sort -- `WHERE p.id = ANY(...)` naturally
+    excludes it from the result set, so `order[row["id"]]` never sees a key
+    that isn't there."""
+    from jobcannon.db._feed import list_postings_by_ids
+
+    _seed_user(db_conn, "u-ids-missing")
+    company_id = _seed_company(db_conn, "Acme")
+    real_id = _seed_posting(db_conn, "p-ids-real", company_id, last_seen=_BASE_TIME)
+    missing_id = real_id + 999999
+
+    rows = list_postings_by_ids(db_conn, [missing_id, real_id], user_id="u-ids-missing")
+
+    assert [r["id"] for r in rows] == [real_id]
+
+
 def test_null_structural_axes_row_is_returned_not_filtered_out(db_conn):
     from jobcannon.db._feed import list_feed_postings
 
