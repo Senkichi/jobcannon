@@ -114,15 +114,15 @@ def fetch_dir_versions(repo: str, ref: str, token: str, transport: Transport) ->
     return parse_versions(names)
 
 
-def fetch_merge_base(repo: str, base_ref: str, head_sha: str, token: str, transport: Transport) -> str:
+def fetch_merge_base(
+    repo: str, base_ref: str, head_sha: str, token: str, transport: Transport
+) -> str:
     url = f"{_API_ROOT}/repos/{repo}/compare/{base_ref}...{head_sha}"
     data = transport("GET", url, token)
     return data["merge_base_commit"]["sha"]
 
 
-def fetch_open_prs(
-    repo: str, token: str, transport: Transport, exclude_number: int
-) -> list[dict]:
+def fetch_open_prs(repo: str, token: str, transport: Transport, exclude_number: int) -> list[dict]:
     prs: list[dict] = []
     page = 1
     while True:
@@ -152,7 +152,9 @@ def run(
     out: Callable[[str], None] = print,
 ) -> int:
     if event_name != "pull_request":
-        out(f"check_migration_collisions: event={event_name!r}, not a pull_request event -- skipping")
+        out(
+            f"check_migration_collisions: event={event_name!r}, not a pull_request event -- skipping"
+        )
         return 0
 
     try:
@@ -167,7 +169,9 @@ def run(
 
         others = {"origin/main": fetch_dir_versions(repo, base_ref, token, transport)}
         for pr in fetch_open_prs(repo, token, transport, exclude_number=pr_number):
-            others[f"PR #{pr['number']}"] = fetch_dir_versions(repo, pr["head"]["sha"], token, transport)
+            others[f"PR #{pr['number']}"] = fetch_dir_versions(
+                repo, pr["head"]["sha"], token, transport
+            )
     except (urllib.error.URLError, KeyError, ValueError, TypeError) as exc:
         out(f"check_migration_collisions: GitHub API error while checking -- {exc!r}")
         return 1
@@ -188,7 +192,9 @@ def run(
 def main() -> int:
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
     if event_name != "pull_request":
-        print(f"check_migration_collisions: event={event_name!r}, not a pull_request event -- skipping")
+        print(
+            f"check_migration_collisions: event={event_name!r}, not a pull_request event -- skipping"
+        )
         return 0
 
     try:
@@ -197,7 +203,10 @@ def main() -> int:
         pr_number = int(os.environ["PR_NUMBER"])
         pr_head_sha = os.environ["PR_HEAD_SHA"]
     except (KeyError, ValueError) as exc:
-        print(f"check_migration_collisions: missing/invalid required env var -- {exc}", file=sys.stderr)
+        print(
+            f"check_migration_collisions: missing/invalid required env var -- {exc}",
+            file=sys.stderr,
+        )
         return 1
     base_ref = os.environ.get("GITHUB_BASE_REF", "main")
 

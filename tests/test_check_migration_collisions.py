@@ -124,7 +124,9 @@ def _base_responses(head_files, base_files, main_files, merge_base_sha="deadbeef
         f"contents/jobcannon/db/migrations?ref={merge_base_sha}": [
             {"name": n, "type": "file"} for n in base_files
         ],
-        "contents/jobcannon/db/migrations?ref=main": [{"name": n, "type": "file"} for n in main_files],
+        "contents/jobcannon/db/migrations?ref=main": [
+            {"name": n, "type": "file"} for n in main_files
+        ],
     }
 
 
@@ -328,7 +330,11 @@ def test_main_wires_env_vars_into_run(monkeypatch):
     responses = _base_responses(
         head_files=["m0001_x.py"], base_files=["m0001_x.py"], main_files=["m0001_x.py"]
     )
-    monkeypatch.setattr(cmc, "_default_transport", lambda method, url, token: _fake_transport(responses)(method, url, token))
+    monkeypatch.setattr(
+        cmc,
+        "_default_transport",
+        lambda method, url, token: _fake_transport(responses)(method, url, token),
+    )
 
     rc = cmc.main()
     assert rc == 0

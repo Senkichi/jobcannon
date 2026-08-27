@@ -127,7 +127,12 @@ def _open_pr_versions(repo_root: Path, repo: str) -> tuple[set[int], bool]:
             check=True,
         )
         prs = json.loads(listing.stdout)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        json.JSONDecodeError,
+        OSError,
+    ):
         return set(), False
 
     versions: set[int] = set()

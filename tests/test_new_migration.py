@@ -152,9 +152,13 @@ def test_open_pr_versions_one_unreachable_ref_is_unverified(monkeypatch, tmp_pat
 
     def fake_run(cmd, **kwargs):
         if cmd[:2] == ["gh", "pr"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps([{"number": 99}]), stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=json.dumps([{"number": 99}]), stderr=""
+            )
         if cmd[:2] == ["git", "fetch"]:
-            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="fatal: couldn't find remote ref")
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout="", stderr="fatal: couldn't find remote ref"
+            )
         raise AssertionError(f"unexpected command: {cmd}")
 
     monkeypatch.setattr(nm.subprocess, "run", fake_run)
@@ -225,7 +229,9 @@ def test_main_accounts_for_open_pr_version_beyond_local_max(fake_repo, monkeypat
 
     def fake_run(cmd, **kwargs):
         if cmd[:2] == ["gh", "pr"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps([{"number": 7}]), stderr="")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=json.dumps([{"number": 7}]), stderr=""
+            )
         if cmd[:2] == ["git", "fetch"]:
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         if cmd[:2] == ["git", "ls-tree"]:
