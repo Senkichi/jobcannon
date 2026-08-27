@@ -550,7 +550,7 @@ def test_negative_comp_floor_usd_rerenders_without_writing(app):
     )
 
     assert resp.status_code == 200
-    assert f"compensation floor must be between 0 and {MAX_COMP_FLOOR_USD}" in resp.get_data(
+    assert f"compensation floor must be between 0 and {MAX_COMP_FLOOR_USD:,}" in resp.get_data(
         as_text=True
     )
     assert _anon_user_count(app.config["_TEST_DSN"]) == 0
@@ -573,7 +573,7 @@ def test_comp_floor_usd_above_int4_range_rerenders_without_writing(app):
     )
 
     assert resp.status_code == 200
-    assert f"compensation floor must be between 0 and {MAX_COMP_FLOOR_USD}" in resp.get_data(
+    assert f"compensation floor must be between 0 and {MAX_COMP_FLOOR_USD:,}" in resp.get_data(
         as_text=True
     )
     assert _anon_user_count(app.config["_TEST_DSN"]) == 0

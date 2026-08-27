@@ -356,7 +356,7 @@ def _parse_submission(form: Any) -> tuple[dict[str, Any] | None, str | None]:
         except ValueError:
             return None, "compensation floor must be a whole number"
         if not (0 <= comp_floor_usd <= MAX_COMP_FLOOR_USD):
-            return None, f"compensation floor must be between 0 and {MAX_COMP_FLOOR_USD}"
+            return None, (f"compensation floor must be between 0 and {MAX_COMP_FLOOR_USD:,}")
 
     titles, error = _parse_titles(form)
     if error is not None:
@@ -387,10 +387,11 @@ def _parse_submission(form: Any) -> tuple[dict[str, Any] | None, str | None]:
         # below — unlike titles/skills/seniority_level/years_of_experience/
         # workplace_type, nothing on GET /preview reads a compensation
         # floor (it exists purely for the host scoring path's comp_fit
-        # anchoring), so carrying it through the session cookie would only
-        # spend bytes against the already-tight measured budget
-        # MAX_COMPANY_LENGTH's module comment documents, for a value with
-        # no session-side reader.
+        # anchoring). Filtering the key out unconditionally means this
+        # field changes the session-cookie payload not at all — verified by
+        # rerunning test_company_selections_at_the_cap_boundary_write_
+        # successfully unmodified (MAX_COMPANY_LENGTH's module comment
+        # documents that boundary is already tight), not just reasoned about.
         "comp_floor_usd": comp_floor_usd,
         "workplace_type": _WORKPLACE_FILTERS[workplace_type],
     }
