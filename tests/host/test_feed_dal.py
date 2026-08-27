@@ -1,7 +1,7 @@
-"""Feed read DAL: list_feed_postings / count_feed_postings / distinct_titles
-/ distinct_companies (jobcannon/db/_feed.py). The first postings-list query
-and the first feed_state read in this repo's history — feed_state has no
-writer anywhere, so every seed in this file writes it directly."""
+"""Feed read DAL: list_feed_postings / distinct_titles / distinct_companies
+(jobcannon/db/_feed.py). The first postings-list query and the first
+feed_state read in this repo's history — feed_state has no writer anywhere,
+so every seed in this file writes it directly."""
 
 from __future__ import annotations
 

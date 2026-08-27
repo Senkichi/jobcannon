@@ -187,10 +187,11 @@ def _build_filters(
     company: str | None,
     posting_id: int | None = None,
 ) -> tuple[list[str], list[Any]]:
-    """Parameterized WHERE fragments + bound params, shared by
-    `list_feed_postings` and `count_feed_postings` so the two queries can
-    never drift out of sync. Every filter value is a bound parameter; only
-    ORDER BY is ever built from the `_SORTS` allowlist.
+    """Parameterized WHERE fragments + bound params for `list_feed_postings`,
+    factored out as its own function so any future second caller of the same
+    filter set builds it identically rather than re-deriving it. Every
+    filter value is a bound parameter; only ORDER BY is ever built from the
+    `_SORTS` allowlist.
 
     `titles` (exact-match, `= ANY(%s)`) and `title_contains` (substring,
     `LIKE`) are two distinct callers, not two spellings of the same filter:
@@ -254,9 +255,9 @@ def list_feed_postings(
 
     An authed reader (`user_id` not None) never sees a posting whose
     `pipeline_status.status = 'dismissed'` — that exclusion clause is added
-    only on this branch, never shared with `count_feed_postings` via
-    `_build_filters`, because it depends on `user_id` and the anonymous
-    branch has no per-user row to exclude by.
+    only on this branch (not folded into `_build_filters`) because it
+    depends on `user_id` and the anonymous branch has no per-user row to
+    exclude by.
 
     `after` (#156) is a keyset cursor — the `(rank_score, last_seen, id)`
     tuple `cursor_from_row` derived from a previous page's last row, or None
@@ -325,33 +326,6 @@ def list_feed_postings(
         query_params = [*params, *cursor_params, limit, offset]
 
     return raw.execute(sql, query_params).fetchall()
-
-
-def count_feed_postings(
-    conn: Any,
-    *,
-    titles: list[str] | None = None,
-    title_contains: str | None = None,
-    workplace_type: str | None = None,
-    location_contains: str | None = None,
-    company: str | None = None,
-) -> int:
-    """Same filters as `list_feed_postings`, for the "N matches" line.
-    `user_id` is deliberately not a parameter here: the `feed_state` join is
-    a LEFT JOIN keyed on the shared corpus, so it never changes which rows
-    match, only what their `rank_score`/`ranker_version` columns read — a
-    count is identical whether or not that join is present."""
-    where_clauses, params = _build_filters(
-        titles=titles,
-        title_contains=title_contains,
-        workplace_type=workplace_type,
-        location_contains=location_contains,
-        company=company,
-    )
-    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-    raw = conn.raw if hasattr(conn, "raw") else conn
-    row = raw.execute(f"SELECT COUNT(*) AS n FROM postings p {where_sql}", params).fetchone()
-    return row["n"]
 
 
 def _distinct_matching(raw: Any, column: str, q: str | None, limit: int) -> list[str]:
