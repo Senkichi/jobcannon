@@ -43,11 +43,16 @@ pattern: it is a single nullable `text` column whose only valid "no
 preference" value (NULL, mapped from the picker's "any" option — see
 `onboarding.py`'s `_WORKPLACE_FILTERS`) is indistinguishable from "omitted"
 under COALESCE, which would make reverting to "any" from a specific
-preference impossible. Both current callers (`start_submit`,
-`jobcannon/web/handoff.py`'s re-key) always submit the field's true current
-value on every call, so a plain (non-COALESCE) overwrite is both correct
-and simpler here — there is no caller today that needs "leave this column
-alone."
+preference impossible. So `workplace_type` is a plain (non-COALESCE)
+overwrite, and every caller passes it EXPLICITLY on every call — the
+keyword argument below has no default, so an omitting caller gets a
+`TypeError` at the call site instead of silently NULLing a saved
+preference the next time this row is touched. `target_companies` stays
+COALESCE-preserve (a caller may legitimately want to touch only some
+fields); `workplace_type` cannot, because a partial-update caller would
+have no way to say "leave it" without that meaning "clear it," so the
+signature makes "leave it" unrepresentable instead — pass the field's
+current value back explicitly if that's the intent.
 
 Row access: STRING-KEY only (Reconciliation Preamble item 12) — `get_profile`
 returns the row mapping as-is (both the pooled hybrid_row and the test
@@ -82,7 +87,7 @@ def upsert_profile(
     years_of_experience: float | None = None,
     comp_floor_usd: int | None = None,
     target_companies: list | None = None,
-    workplace_type: str | None = None,
+    workplace_type: str | None,
 ) -> None:
     raw = conn.raw if hasattr(conn, "raw") else conn
     raw.execute(
