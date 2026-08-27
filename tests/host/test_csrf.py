@@ -278,9 +278,7 @@ def test_post_account_delete_with_token_calls_clerk():
         config={
             "TESTING": True,
             "WTF_CSRF_ENABLED": True,
-            "VERIFY_REQUEST": lambda req: ClerkIdentity(
-                user_id=USER_ID, claims={"sub": USER_ID}
-            ),
+            "VERIFY_REQUEST": lambda req: ClerkIdentity(user_id=USER_ID, claims={"sub": USER_ID}),
             "WEBHOOK_SECRET": WEBHOOK_SECRET,
             "CLERK_CLIENT": _FakeClerkClient(),
         }
