@@ -71,6 +71,7 @@ def _seed_user(dsn, user_id):
 
 
 def _seed_profile(dsn, user_id, **kwargs):
+    kwargs.setdefault("workplace_type", None)
     with psycopg.connect(dsn) as conn:
         upsert_profile(conn, user_id, **kwargs)
 
@@ -476,6 +477,40 @@ def test_profile_workplace_type_applies_when_no_query_string_override(app):
     assert "Fallback Onsite Row" not in html
 
 
+def test_explicit_workplace_type_any_clears_the_profile_saved_preference(app):
+    """F1 (refuter-1 MED): an absent `?workplace_type=` and an EXPLICIT
+    `?workplace_type=any` both display as "any", but only the latter is the
+    visitor actively asking to widen back to every workplace type — before
+    this fix, `_read_feed_postings` could not tell them apart and silently
+    fell back to the profile's saved REMOTE preference, leaving the "Any"
+    dropdown selected while results stayed REMOTE-only."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, workplace_type="REMOTE")
+    company_id = _seed_company(dsn, "Workplace Any Co")
+    _seed_posting(
+        dsn,
+        "feed-wt-any-remote",
+        company_id,
+        title="Any Clears Remote Row",
+        workplace_type="REMOTE",
+    )
+    _seed_posting(
+        dsn,
+        "feed-wt-any-onsite",
+        company_id,
+        title="Any Clears Onsite Row",
+        workplace_type="ONSITE",
+    )
+
+    resp = client.get("/", query_string={"workplace_type": "any"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Any Clears Remote Row" in html
+    assert "Any Clears Onsite Row" in html
+    assert 'value="any" selected' in html
+
+
 def test_preview_and_authed_feed_return_identical_rows_for_equivalent_selections(app):
     """#169/#170 end-to-end parity: GET /preview (a session-held
     pending_picker dict) and the authed GET / (a profiles row) must render
@@ -515,6 +550,71 @@ def test_preview_and_authed_feed_return_identical_rows_for_equivalent_selections
     for html in (authed_html, preview_html):
         assert "Distinctive Parity Match Title" in html
         assert "Distinctive Parity Nomatch Title" not in html
+
+
+def test_preview_and_authed_feed_return_identical_rows_for_a_title_selection(app):
+    """Same parity guarantee as the company-selection test above, for a
+    title selection (F5, refuter-1 LOW: the existing route-level parity
+    test only covered companies; title parity was correct by construction
+    via the shared `selection_filter_kwargs` builder but untested at the
+    route level)."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Title Parity Co")
+    _seed_posting(dsn, "title-parity-match", company_id, title="Distinctive Title Parity Match")
+    _seed_posting(dsn, "title-parity-nomatch", company_id, title="Distinctive Title Parity Nomatch")
+
+    authed_client = _feed_client(app, target_titles=["Distinctive Title Parity Match"])
+    authed_html = authed_client.get("/").get_data(as_text=True)
+
+    app.config["VERIFY_REQUEST"] = lambda r: None
+    preview_client = app.test_client()
+    with preview_client.session_transaction() as sess:
+        sess["pending_picker"] = {
+            "anon_id": "anon_title_parity",
+            "titles": ["Distinctive Title Parity Match"],
+        }
+    preview_html = preview_client.get("/preview").get_data(as_text=True)
+
+    for html in (authed_html, preview_html):
+        assert "Distinctive Title Parity Match" in html
+        assert "Distinctive Title Parity Nomatch" not in html
+
+
+def test_preview_and_authed_feed_return_identical_rows_for_a_workplace_type_selection(app):
+    """Same parity guarantee, for a workplace_type selection."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "WT Parity Co")
+    _seed_posting(
+        dsn,
+        "wt-parity-match",
+        company_id,
+        title="Distinctive WT Parity Remote",
+        workplace_type="REMOTE",
+    )
+    _seed_posting(
+        dsn,
+        "wt-parity-nomatch",
+        company_id,
+        title="Distinctive WT Parity Onsite",
+        workplace_type="ONSITE",
+    )
+
+    authed_client = _feed_client(app, workplace_type="REMOTE")
+    authed_html = authed_client.get("/").get_data(as_text=True)
+
+    app.config["VERIFY_REQUEST"] = lambda r: None
+    preview_client = app.test_client()
+    with preview_client.session_transaction() as sess:
+        sess["pending_picker"] = {
+            "anon_id": "anon_wt_parity",
+            "titles": ["Distinctive WT Parity Remote", "Distinctive WT Parity Onsite"],
+            "workplace_type": "REMOTE",
+        }
+    preview_html = preview_client.get("/preview").get_data(as_text=True)
+
+    for html in (authed_html, preview_html):
+        assert "Distinctive WT Parity Remote" in html
+        assert "Distinctive WT Parity Onsite" not in html
 
 
 def test_db_failure_degrades_to_empty_state_not_500(app, monkeypatch):
