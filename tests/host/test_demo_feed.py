@@ -282,3 +282,86 @@ def test_demo_requires_no_cookie_and_no_signup(app):
     # itself reached the page rather than the empty-state fallback.
     assert "data-why-chips" in html
     assert "No postings match your selections yet." not in html
+
+
+# ---------------------------------------------------------------------------
+# /start + sign-up CTA (issue #182, item 3): /demo previously had no path
+# onward to /start or a Clerk account. demo.html renders the CTA
+# unconditionally, ahead of the corpus-empty/unseeded-profile/populated
+# branch chain, reusing the same #165 auth-link globals and sign-up-
+# preferred fallback as /preview's page-level (#145) and per-row (#174)
+# CTAs. The per-row "Sign up to apply" CTA on a seeded posting is #174's
+# own deliverable, exercised here end-to-end on the /demo route (the
+# tests/host/test_preview.py module owns the /preview route's coverage).
+# ---------------------------------------------------------------------------
+
+
+def test_demo_shows_start_and_row_signup_cta_on_populated_feed(app):
+    """Positive control: this module's `app` fixture never overrides
+    HOST_CONFIG, so TESTING's default configures BOTH clerk_sign_up_url
+    and clerk_sign_in_url (jobcannon/web/__init__.py) -- both the
+    page-level /start CTA and the per-row CTA on the seeded posting must
+    render, sign-up winning the `or` fallback."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_guest_profile(dsn, target_titles=["Demo CTA Title"])
+    company_id = _seed_company(dsn, "Demo CTA Co")
+    _seed_posting(dsn, "demo-cta-1", company_id, title="Demo CTA Title")
+
+    html = app.test_client().get("/demo").get_data(as_text=True)
+
+    assert "Demo CTA Title" in html
+    assert "data-demo-cta" in html
+    assert 'href="/start"' in html
+    assert "Build your own feed" in html
+    assert "data-action-signup" in html
+    assert "Sign up to apply" in html
+    assert 'href="https://clerk.test/sign-up"' in html
+
+
+def test_demo_start_cta_present_when_corpus_empty(app):
+    """The CTA sits ahead of the if/elif/else branch chain in demo.html,
+    so it must survive even the corpus-empty state (no corpus pre-seed
+    run yet against this deploy) -- the exact state the design direction
+    calls out as needing a clear path to /start regardless."""
+    html = app.test_client().get("/demo").get_data(as_text=True)
+
+    assert "The corpus is warming up" in html
+    assert "data-demo-cta" in html
+    assert 'href="/start"' in html
+
+
+def test_demo_start_cta_present_when_guest_profile_unseeded(app):
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Demo CTA Unseeded Co")
+    _seed_posting(dsn, "demo-cta-unseeded-1", company_id, title="Demo CTA Unseeded Posting")
+
+    html = app.test_client().get("/demo").get_data(as_text=True)
+
+    assert "The guest profile isn't seeded yet" in html
+    assert "data-demo-cta" in html
+    assert 'href="/start"' in html
+
+
+def test_demo_row_omits_signup_cta_when_both_urls_unset(app):
+    """Tolerant-default floor, mirroring
+    test_preview.py::test_preview_omits_signup_cta_when_both_urls_unset:
+    both Clerk URLs unset must drop the per-row CTA and the demo CTA's own
+    sign-up fragment, while /start (a plain internal link, never gated on
+    either URL) keeps rendering."""
+    from jobcannon.host.config import HostConfig
+
+    dsn = app.config["_TEST_DSN"]
+    _seed_guest_profile(dsn, target_titles=["Demo No CTA Title"])
+    company_id = _seed_company(dsn, "Demo No CTA Co")
+    _seed_posting(dsn, "demo-no-cta-1", company_id, title="Demo No CTA Title")
+
+    app.config["HOST_CONFIG"] = HostConfig(database_url="", secret_key="testing-secret-key")
+
+    html = app.test_client().get("/demo").get_data(as_text=True)
+
+    assert "Demo No CTA Title" in html
+    assert 'href="/start"' in html
+    assert "data-action-signup" not in html
+    assert "Sign up to apply" not in html
+    assert "sign up</a> to save it" not in html
+    assert 'href=""' not in html
