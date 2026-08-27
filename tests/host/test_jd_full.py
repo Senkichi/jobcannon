@@ -317,6 +317,96 @@ def test_content_change_nulls_adjudicated_version_and_restamps_verdict(db_conn, 
     assert row["jd_adjudicated_version"] is None
 
 
+def test_missing_posting_row_returns_false(db_conn):
+    """dedup_key with no postings row is a no-op: both UPDATEs would affect
+    0 rows silently (Postgres raises nothing), so without this guard the
+    function returned a false 'wrote' signal and ran classify_jd_content for
+    nothing. Mirrors _record_jd_content_reject's existing `is None` guard."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    assert set_jd_full(_svc_conn(db_conn), "no-such-dedup-key", GOOD_JD, source="test") is False
+
+
+def test_unchanged_content_with_no_verdict_stamps_without_nulling_adjudicated_version(
+    db_conn, posting
+):
+    """Self-heal branch: content unchanged but no verdict on record (e.g. a
+    legacy pre-m0009 row, or one whose verdict columns were wiped, re-touched
+    with the identical body). Stamps a fresh verdict but must NOT null
+    jd_adjudicated_version -- content_changed is False on this branch, so
+    the invalidation condition (a genuine content change) never fires."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    db_conn.execute(
+        "UPDATE postings SET jd_content_verdict = NULL, jd_content_signal = NULL, "
+        "jd_adjudicated_version = 8 WHERE dedup_key = %s",
+        (posting,),
+    )
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    row = db_conn.execute(
+        "SELECT jd_full, jd_content_verdict, jd_content_signal, jd_adjudicated_version "
+        "FROM postings WHERE dedup_key = %s",
+        (posting,),
+    ).fetchone()
+    assert row["jd_full"] == CLEAN_JD
+    assert row["jd_content_verdict"] == "clean"
+    assert row["jd_content_signal"] == "shape+grounded"
+    assert row["jd_adjudicated_version"] == 8
+
+
+def test_cas_guard_rejects_stamp_when_jd_full_changes_mid_write(db_conn, posting, monkeypatch):
+    """CAS guard (#152): the jd_full UPDATE and the verdict-stamp UPDATE are
+    two separately-committed statements; a concurrent writer's own jd_full
+    UPDATE could land in the window between them. Simulate that by having
+    classify_jd_content -- which runs in exactly that window, see
+    set_jd_full -- mutate jd_full as a side effect. The stamp's
+    `WHERE jd_full = %s` guard must then match 0 rows, leaving
+    jd_content_verdict untouched rather than stamping a verdict describing
+    text that is no longer current."""
+    from jobcannon.db import _jd_full as jd_full_mod
+    from jobcannon.db._jd_full import set_jd_full
+
+    real_classify = jd_full_mod.classify_jd_content
+    concurrent_body = "z" * 250
+
+    def _racing_classify(text, title, company, config):
+        db_conn.execute(
+            "UPDATE postings SET jd_full = %s WHERE dedup_key = %s",
+            (concurrent_body, posting),
+        )
+        return real_classify(text, title, company, config)
+
+    monkeypatch.setattr(jd_full_mod, "classify_jd_content", _racing_classify)
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    row = db_conn.execute(
+        "SELECT jd_full, jd_content_verdict FROM postings WHERE dedup_key = %s",
+        (posting,),
+    ).fetchone()
+    # The "concurrent writer" landed last and won the jd_full column...
+    assert row["jd_full"] == concurrent_body
+    # ...and the CAS guard correctly refused to stamp CLEAN_JD's verdict
+    # onto a row that no longer holds CLEAN_JD's text.
+    assert row["jd_content_verdict"] is None
+
+
 def test_persisted_reject_verdict_gates_scoring_precheck_until_adjudicated(db_conn, posting):
     """Integration (#152): a full `SELECT * FROM postings` row -- the exact
     shape a host passes to scoring_precheck, since this repo has no

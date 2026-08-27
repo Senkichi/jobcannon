@@ -444,7 +444,13 @@ def scoring_precheck(job: dict) -> str | None:
     # the private repo's batch scoring does) gets self-healing for free: a
     # REJECT/AMBIGUOUS row becomes scorable the moment the adjudicator (or a
     # re-fetch that overwrites jd_full with a clean body, re-stamping the
-    # verdict) resolves it — it cannot orphan.
+    # verdict) resolves it -- it cannot orphan, ONCE one of those two paths
+    # exists. Neither does in Wave 1: there is no adjudicator yet, and the
+    # sole set_jd_full caller (ats_scanner/_run.py) only writes when
+    # jd_full IS NULL, so it never overwrites an already-populated body. An
+    # AMBIGUOUS/REJECT-stamped row is currently a terminal state with no
+    # live path back to scorable -- tracked as a precondition on whatever
+    # PR first wires this gate into a live scoring path (see #183).
     _verdict_raw = job.get("jd_content_verdict")
     if _verdict_raw is not None:
         _adjudicated_version = job.get("jd_adjudicated_version")

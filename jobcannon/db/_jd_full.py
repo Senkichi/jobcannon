@@ -22,7 +22,11 @@ original's ``set_jd_full`` (see ``job_finder/db/_jd_full.py``, read-only
 reference). ``jobcannon.engine.job_scorer.scoring_precheck`` then reads this
 persisted column instead of recomputing per row. Stamped whenever the text
 changed, or whenever no verdict is on record yet (self-healing a legacy row
-the moment it happens to be re-touched). CAS-guarded on
+the moment it happens to be re-touched) -- but Wave 1 has exactly one
+caller, ``ats_scanner/_run.py``, and it only invokes this function when
+``jd_full IS NULL`` (see call site), so an already-populated legacy row is
+never re-touched by it: the self-heal-on-re-touch path described above has
+no live trigger until a future caller writes to a non-NULL jd_full. CAS-guarded on
 ``WHERE dedup_key = %s AND jd_full = %s`` (mirroring the private original)
 because the jd_full write and the verdict stamp are two separate statements:
 a concurrent writer could interleave a second ``set_jd_full`` call between
@@ -163,12 +167,19 @@ def set_jd_full(
         "FROM postings WHERE dedup_key = %s",
         (dedup_key,),
     ).fetchone()
-    existing_jd = existing["jd_full"] if existing is not None else None
-    existing_company = existing["company"] if existing is not None else None
-    existing_verdict = existing["jd_content_verdict"] if existing is not None else None
+    if existing is None:
+        # No posting row for this dedup_key -- nothing to write. Mirrors
+        # _record_jd_content_reject's existing is None guard below. Without
+        # this, both UPDATEs below would silently affect 0 rows (Postgres
+        # raises nothing) and this function would return True -- a false
+        # "wrote" signal for a no-op, plus a wasted classify_jd_content call.
+        return False
+    existing_jd = existing["jd_full"]
+    existing_company = existing["company"]
+    existing_verdict = existing["jd_content_verdict"]
     content_changed = text != existing_jd
     new_reasons = remove_reasons(
-        existing["unresolved_reasons"] if existing is not None else None,
+        existing["unresolved_reasons"],
         list(JD_CONTENT_REASON_CODES),
     )
     with raw.transaction():
