@@ -231,6 +231,14 @@ def test_csrf_400_carries_security_headers():
     assert resp.status_code == 400
     _assert_static_headers(resp.headers)
     _assert_csp(resp.headers)
+    # HX-CSRF-Error is the sole signal base.html's htmx:responseError listener
+    # keys off to show the CSRF toast (issue #146 MED-1) -- without this
+    # assertion, reverting jobcannon/web/__init__.py's csrf_error handler back
+    # to a bare `return render_template(...), 400` would silently drop the
+    # header, the toast would stop firing, and this whole suite would stay
+    # green (the same "green while the protection is off" failure mode #147's
+    # WTF_CSRF_ENABLED test exists to catch one layer down).
+    assert resp.headers.get("HX-CSRF-Error") == "1"
 
 
 def test_csrf_400_htmx_fragment_carries_security_headers():
@@ -240,6 +248,7 @@ def test_csrf_400_htmx_fragment_carries_security_headers():
     assert b"<html" not in resp.data  # confirms this is the fragment path, not error_csrf.html
     _assert_static_headers(resp.headers)
     _assert_csp(resp.headers)
+    assert resp.headers.get("HX-CSRF-Error") == "1"
 
 
 @requires_postgres
