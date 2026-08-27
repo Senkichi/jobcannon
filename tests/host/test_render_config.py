@@ -8,6 +8,8 @@ import re
 
 import yaml
 
+from tests.host.conftest import requires_postgres
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
@@ -179,6 +181,109 @@ def test_web_graceful_timeout_covers_posthog_atexit_bound():
     # ELSE gunicorn's graceful shutdown also has to do besides this one
     # atexit handler (finishing an in-flight request, other cleanup).
     assert graceful_timeout_s - wiring._POSTHOG_ATEXIT_JOIN_TIMEOUT_S >= 10
+
+
+def test_web_predeploy_command_runs_migrations():
+    """jobcannon#196: web and worker deploy independently with no ordering
+    guarantee (docs/deploy-runbook.md §3), so web's preDeployCommand is THE
+    mechanism that makes schema migrations land before the new web code ever
+    serves a request against the old schema. Derives the assertion from the
+    parsed startCommand-shaped string rather than restating a literal command
+    copy, mirroring test_web_start_command_preloads_app's pattern."""
+    bp = _blueprint()
+    web = next(s for s in bp["services"] if s["type"] == "web")
+    predeploy = web.get("preDeployCommand", "")
+    assert predeploy, "jobcannon-web must declare preDeployCommand"
+    assert predeploy.split()[:2] == ["uv", "run"], predeploy
+    assert "--no-sync" in predeploy.split(), predeploy
+    m = re.search(r"-m\s+([\w.]+)", predeploy)
+    assert m and m.group(1) == "jobcannon.db.migrate", (
+        f"preDeployCommand must invoke `python -m jobcannon.db.migrate`, got: {predeploy!r}"
+    )
+
+
+@requires_postgres
+def test_migrate_module_runs_end_to_end_as_a_subprocess():
+    """L4-functional proof that `python -m jobcannon.db.migrate` (the command
+    render.yaml's preDeployCommand runs) actually works when invoked exactly
+    the way Render invokes it: as a subprocess reading DATABASE_URL from the
+    environment, not by calling run_migrations() in-process. Always
+    sys.executable (Windows App Execution Alias hazard — see
+    test_scan_block_report_help above)."""
+    import os
+    import subprocess
+    import sys
+
+    from tests.host.conftest import create_throwaway_db, drop_throwaway_db
+
+    dsn, db_name = create_throwaway_db("jobcannon_predeploy_e2e")
+    try:
+        env = dict(os.environ)
+        env["DATABASE_URL"] = dsn
+
+        first = subprocess.run(
+            [sys.executable, "-m", "jobcannon.db.migrate"],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert first.returncode == 0, (
+            f"first run must apply everything and exit 0; stderr:\n{first.stderr}"
+        )
+
+        second = subprocess.run(
+            [sys.executable, "-m", "jobcannon.db.migrate"],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert second.returncode == 0, (
+            f"second run must be a no-op and still exit 0; stderr:\n{second.stderr}"
+        )
+    finally:
+        drop_throwaway_db(db_name)
+
+
+def test_migrate_module_exits_nonzero_on_bogus_dsn():
+    """Negative counterpart: a broken DSN must abort (non-zero exit), never
+    silently succeed — this is what makes a Render pre-deploy failure actually
+    block promotion of the new web code (render.com/docs/deploys: "If any
+    command fails or times out, the entire deploy fails").
+
+    connect_timeout=3 is load-bearing, not decoration: an unreachable
+    127.0.0.1 port is silently dropped rather than RST on this Windows CI
+    box, so a bare psycopg connect() hangs on the OS-level TCP timeout
+    (tens of seconds) instead of failing fast — verified directly against
+    this port before adding the bound.
+
+    Asserting returncode != 0 alone would pass "vacuously" for the wrong
+    reason too (e.g. an ImportError or a typo'd module path also exits
+    non-zero) — this negative test is not @requires_postgres-gated, so on a
+    box without POSTGRES_ADMIN_DSN it is the ONLY one of the two subprocess
+    tests that runs, with no positive-control sibling to catch that. Also
+    assert main()'s own logged failure line is present, so this can only
+    pass on a genuine connect failure."""
+    import os
+    import subprocess
+    import sys
+
+    env = dict(os.environ)
+    env["DATABASE_URL"] = "postgresql://bogus:bogus@127.0.0.1:1/does_not_exist?connect_timeout=3"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "jobcannon.db.migrate"],
+        cwd=str(ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode != 0
+    assert "pre-deploy migration run failed" in result.stderr, result.stderr
 
 
 def test_scan_block_report_help():
