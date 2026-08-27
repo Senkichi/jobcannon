@@ -53,6 +53,14 @@ EngineCompatConnection facade), a bare connection is used as-is (the
 rollback-isolated `db_conn` test fixture), and `commit_unless_nested` makes
 each function safe to call both through a real pooled commit and inside a
 test's ambient transaction.
+
+`list_users_pending_deletion_reconciliation` / `mark_deletion_checked`
+(issue #136) are the candidate-selection half of the reconciliation sweep
+(jobcannon.host.user_deletion.run_reconciliation_sweep) that catches a
+`user.deleted` webhook Clerk never delivered. See m0011's docstring for why
+the ordering needs a rotation cursor (`deletion_checked_at`) rather than a
+plain `created_at ASC` — without it, every row past the sweep's row_cap
+would be permanently unreachable.
 """
 
 from __future__ import annotations
@@ -118,3 +126,37 @@ def reap_unconverted_anon_users(conn: Any, *, retention_days: int) -> list[str]:
     ).fetchall()
     commit_unless_nested(raw)
     return [row["id"] for row in rows]
+
+
+def list_users_pending_deletion_reconciliation(
+    conn: Any, *, settle_days: int, limit: int
+) -> list[str]:
+    """Candidate non-anon `users` ids for issue #136's reconciliation sweep:
+    old enough (`settle_days`) to rule out racing a same-day Clerk deletion
+    that hasn't propagated yet, ordered `deletion_checked_at NULLS FIRST,
+    created_at ASC` so the sweep rotates through the whole table over time
+    instead of the same oldest `limit` rows forever (see m0011's docstring).
+    Read-only; the caller commits nothing here."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    like_pattern = ANON_ID_PREFIX.replace("_", "\\_") + "%"
+    rows = raw.execute(
+        "SELECT id FROM users "
+        "WHERE id NOT LIKE %s ESCAPE '\\' "
+        "AND created_at < now() - make_interval(days => %s) "
+        "ORDER BY deletion_checked_at NULLS FIRST, created_at ASC "
+        "LIMIT %s",
+        (like_pattern, settle_days, limit),
+    ).fetchall()
+    return [row["id"] for row in rows]
+
+
+def mark_deletion_checked(conn: Any, user_id: str) -> None:
+    """Stamps a row as checked-and-confirmed-present (issue #136) so the
+    next sweep rotates past it. Never call this for a row that turned out
+    to be deleted (delete_user's DELETE removes the row itself — nothing
+    left to stamp) or after a lookup ERROR (an erroring row should float
+    back to the front of the next sweep for a prompt retry, not be treated
+    as confirmed-present)."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    raw.execute("UPDATE users SET deletion_checked_at = now() WHERE id = %s", (user_id,))
+    commit_unless_nested(raw)
