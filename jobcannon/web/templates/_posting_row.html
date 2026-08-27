@@ -61,7 +61,7 @@
               hx-post="{{ url_for('actions.save', posting_id=entry.row.id) }}"
               hx-target="closest [data-posting-row]"
               hx-swap="outerHTML"
-              class="underline text-neutral-300"
+              class="underline text-neutral-300 min-h-11 inline-flex items-center px-1"
               data-action-save>
         {{ "Saved" if entry.saved else "Save" }}
       </button>
@@ -69,7 +69,7 @@
               hx-post="{{ url_for('actions.dismiss', posting_id=entry.row.id) }}"
               hx-target="closest [data-posting-row]"
               hx-swap="outerHTML"
-              class="underline text-neutral-300"
+              class="underline text-neutral-300 min-h-11 inline-flex items-center px-1"
               data-action-dismiss>
         Dismiss
       </button>
@@ -109,7 +109,7 @@
            target="_blank"
            rel="noopener noreferrer"
            hx-on:click="fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true, headers: {'X-CSRFToken': document.querySelector('meta[name=csrf-token]').content}}).then(function(resp){ if (!resp.ok && window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — refresh the page and try again.'); } }).catch(function(){ if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — check your connection and try again.'); } })"
-           class="underline text-neutral-300"
+           class="underline text-neutral-300 min-h-11 inline-flex items-center px-1"
            data-action-apply>
           Apply
         </a>
