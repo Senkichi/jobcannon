@@ -67,10 +67,18 @@ tests/host/test_posthog_fork_atexit.py is the empirical, end-to-end closure:
 a real fork() + this real after_in_child hook + real atexit handlers,
 asserting the child reaches os._exit(0) well under gunicorn's
 graceful_timeout — plus a second, confounder-free variant that joins only
-the inherited husk directly, bypassing atexit entirely. This repo's CI
-(.github/workflows/ci.yml) runs a single Python 3.12 leg, so a green run
-closes the 3.12.11 chain end-to-end; the 3.13.5 chain (this app's actual
-Render deploy target) is closed by the citation above, not by a 3.13 CI run.
+the inherited husk directly, bypassing atexit entirely. As of
+jobcannon#160's move to self-hosted Windows CI runners, CI no longer runs
+this test file's fork-gated pair at all -- os.fork() does not exist on
+Windows. jobcannon#162's investigation found WSL not installed and Docker
+not installed on the runner box either, so a CI-leg path to real os.fork()
+coverage is not currently feasible there. Both the 3.12.11 and 3.13.5
+chains therefore rest on the source-read citation above plus an on-demand
+run of tests/host/test_posthog_fork_atexit.py on a POSIX machine, not on
+any CI execution; that test file's own `_require_fork_or_fail_loud` gate
+fails CI loudly instead of silently skipping if this coverage gap is
+reintroduced without ci.yml's explicit, documented
+JC_FORK_TESTS_UNAVAILABLE=1 opt-out.
 Because of all this, the husk is deliberately left alone — never
 shutdown()/flush()/join()ed manually — leaving its already-harmless
 atexit(join) in place costs nothing, while calling shutdown()/flush() on it

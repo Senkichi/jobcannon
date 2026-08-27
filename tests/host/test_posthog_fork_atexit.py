@@ -49,12 +49,26 @@ Two tests, two different confounder profiles:
   directly in the child, bypassing `atexit` entirely, so nothing else in the
   process can produce a false positive or misattribute a failure.
 
-CI caveat (see wiring.py's module docstring for the full citation): this
-repo's CI (.github/workflows/ci.yml) runs a single Python 3.12 leg. A green
-run here closes the 3.12.11 fork/join chain end-to-end. It does NOT by
-itself close the 3.13.5 chain (this app's actual Render deploy target) --
-that rests on the threading.py:937-940 comment plus the imposed-state
-measurement recorded in scratchpad/eng/132-analysis.md, not on a 3.13 CI run.
+CI caveat (see wiring.py's module docstring for the full citation, and
+jobcannon#162 for the investigation this paragraph reflects): as of
+jobcannon#160, this repo's CI runs ONLY on self-hosted Windows runners
+(.github/workflows/ci.yml, the `jcpub` label) -- os.fork() does not exist
+on Windows, so neither test in this file's fork-gated pair executes in CI
+anymore. WSL is not installed on the runner box and Docker is not
+installed either (verified 2026-08-27: `wsl.exe --status` reports "The
+Windows Subsystem for Linux is not installed"; no `docker` on PATH;
+enabling WSL would need an elevated DISM call plus a reboot of the shared
+runner box, which is out of scope to do unilaterally). The
+`_require_fork_or_fail_loud` gate below (not a plain skipif) means CI
+would now FAIL rather than silently re-skip if this regressed further --
+ci.yml sets `JC_FORK_TESTS_UNAVAILABLE=1` explicitly, with a comment
+citing #162, to document that the gap is known and deliberate rather than
+accidental. So today NEITHER the 3.12.11 nor the 3.13.5 chain is closed by
+any CI run; both rest on the source-read citation in wiring.py's module
+docstring plus this test file, which any maintainer can still run
+directly on a POSIX machine (WSL, Linux, macOS, CI with a real fork-
+capable leg) on demand -- real, working coverage, just not CI-gated
+coverage.
 """
 
 from __future__ import annotations
@@ -75,9 +89,132 @@ from jobcannon.host.config import HostConfig
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
-_FORK_ONLY = pytest.mark.skipif(
-    not hasattr(os, "fork"), reason="fork-only (POSIX) -- Windows dev has no os.fork"
-)
+_JC_FORK_TESTS_UNAVAILABLE_ENV = "JC_FORK_TESTS_UNAVAILABLE"
+
+
+def _require_fork_or_fail_loud() -> None:
+    """Gate for the two real os.fork() tests below (POSIX-only). Local
+    Windows dev quietly skips -- same as any other platform-gated test.
+    Caveat: detection below treats ANY non-empty `CI` env var as on-CI, so
+    a dev box with a stray `CI` value set by unrelated tooling (some
+    npm/yarn/cargo wrappers use it too) and no opt-out would `pytest.fail`
+    here instead of skipping -- not narrowed to `GITHUB_ACTIONS` alone
+    since this repo's CI is exclusively self-hosted GitHub Actions and
+    erring toward on_ci=True is the fail-loud-safe direction this gate
+    wants anyway.
+
+    CI is different (jobcannon#162): after #160 moved this repo's CI to
+    self-hosted Windows runners, os.fork() stopped existing there too, and
+    a plain skipif made both tests SKIP silently on every CI run forever --
+    CI stayed green either way, so nobody noticed the #132 proof lost its
+    only CI coverage. This gate makes that failure mode structurally
+    impossible to repeat: on CI, missing os.fork() now FAILS the test
+    unless the workflow explicitly opts out via JC_FORK_TESTS_UNAVAILABLE=1
+    (ci.yml sets it today, with a comment citing #162, because WSL and
+    Docker are both absent from the jcpub runner box -- see this file's
+    module docstring). Remove that opt-out believing CI gained real fork
+    coverage and these tests fail loudly instead of silently skipping if
+    that belief was wrong; genuinely restore fork-capable CI and deleting
+    the opt-out is all it takes for these tests to start proving #132
+    again for real.
+    """
+    if hasattr(os, "fork"):
+        return
+    on_ci = bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+    opted_out = os.environ.get(_JC_FORK_TESTS_UNAVAILABLE_ENV) == "1"
+    if on_ci and not opted_out:
+        pytest.fail(
+            "os.fork() is unavailable on this CI runner and "
+            f"{_JC_FORK_TESTS_UNAVAILABLE_ENV}=1 is not set -- refusing to "
+            "silently skip (jobcannon#162). Either this CI leg gained a "
+            "path to real os.fork() coverage (great -- then this failure "
+            "is a real regression to chase down, not a config problem), "
+            f"or the workflow needs {_JC_FORK_TESTS_UNAVAILABLE_ENV}=1 set "
+            "explicitly to acknowledge the gap."
+        )
+    pytest.skip("fork-only (POSIX) -- Windows dev has no os.fork")
+
+
+def test_require_fork_or_fail_loud_fails_on_ci_without_optout(monkeypatch):
+    """jobcannon#162 proof, case 1: CI set, no opt-out, no os.fork -> must
+    FAIL, not skip. This is the exact silent-skip failure mode #162 found
+    (CI stayed green while losing the #132 proof's only coverage) made
+    structurally impossible to repeat unnoticed."""
+    monkeypatch.delattr(os, "fork", raising=False)
+    monkeypatch.setenv("CI", "1")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv(_JC_FORK_TESTS_UNAVAILABLE_ENV, raising=False)
+    with pytest.raises(pytest.fail.Exception):
+        _require_fork_or_fail_loud()
+
+
+def test_require_fork_or_fail_loud_skips_on_ci_with_optout(monkeypatch):
+    """Case 2: CI set, workflow's documented opt-out present -> skips. This
+    is ci.yml's actual configuration today (JC_FORK_TESTS_UNAVAILABLE=1 on
+    the pytest step, with a comment citing #162)."""
+    monkeypatch.delattr(os, "fork", raising=False)
+    monkeypatch.setenv("CI", "1")
+    monkeypatch.setenv(_JC_FORK_TESTS_UNAVAILABLE_ENV, "1")
+    with pytest.raises(pytest.skip.Exception):
+        _require_fork_or_fail_loud()
+
+
+def test_require_fork_or_fail_loud_skips_off_ci(monkeypatch):
+    """Case 3: neither CI nor GITHUB_ACTIONS set (ordinary local Windows
+    dev) -> skips, same as every other platform-gated test. A local dev
+    run must never fail just for lacking os.fork()."""
+    monkeypatch.delattr(os, "fork", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv(_JC_FORK_TESTS_UNAVAILABLE_ENV, raising=False)
+    with pytest.raises(pytest.skip.Exception):
+        _require_fork_or_fail_loud()
+
+
+def test_require_fork_or_fail_loud_noop_when_fork_exists(monkeypatch):
+    """Case 4: os.fork present (the real POSIX path, or a hypothetical
+    future fork-capable CI leg) -> returns normally, no skip or fail,
+    regardless of CI env -- the gate only ever engages when os.fork is
+    actually missing."""
+    monkeypatch.setattr(os, "fork", lambda: 0, raising=False)
+    monkeypatch.setenv("CI", "1")
+    monkeypatch.delenv(_JC_FORK_TESTS_UNAVAILABLE_ENV, raising=False)
+    _require_fork_or_fail_loud()  # must not raise
+
+
+def test_require_fork_or_fail_loud_noop_when_fork_exists_and_optout_set(monkeypatch):
+    """Case 5 (PR #213 refuter-1 MED): fork present + CI set + the opt-out
+    ALSO set -> still returns normally, never skip/fail. Pins the exact
+    ordering the gate depends on -- `hasattr(os, "fork")` must be checked
+    BEFORE JC_FORK_TESTS_UNAVAILABLE. Cases 1-3 all monkeypatch os.fork
+    away, so none of them can distinguish "gate checks fork first" from
+    "gate checks the opt-out first"; only a fork-present + opt-out-set
+    case can. That reordering would silently re-skip these tests on a real
+    future fork-capable CI leg that still carries today's opt-out, which
+    is the precise #162 failure mode this gate exists to make impossible.
+
+    Deliberately does NOT call `_require_fork_or_fail_loud()` bare: a
+    hoisted opt-out check makes it raise `pytest.skip.Exception`, and an
+    *uncaught* skip would report this test as SKIPPED, not FAILED --
+    which would NOT break CI's `tests-passed` gate (skips are not
+    failures), silently defeating the point of this case. Catching both
+    outcome exceptions and converting them to an explicit `pytest.fail()`
+    is what makes the regression an actual red build.
+    """
+    monkeypatch.setattr(os, "fork", lambda: 0, raising=False)
+    monkeypatch.setenv("CI", "1")
+    monkeypatch.setenv(_JC_FORK_TESTS_UNAVAILABLE_ENV, "1")
+    try:
+        _require_fork_or_fail_loud()  # must return normally -- fork wins over opt-out
+    except (pytest.skip.Exception, pytest.fail.Exception) as exc:
+        pytest.fail(
+            "_require_fork_or_fail_loud() must return normally when "
+            "os.fork() is present, even with the opt-out set -- got "
+            f"{type(exc).__name__}: {exc}. This means the opt-out check "
+            "ran before the fork check, reintroducing jobcannon#162's "
+            "silent-skip failure mode on a future fork-capable CI leg."
+        )
+
 
 # TEST-NET-1 (RFC 5737): syntactically valid, guaranteed non-routable. Never
 # actually dialed -- this test bypasses init_engine_seams's pool_mod.open_pool
@@ -160,7 +297,6 @@ def _run_in_forked_child_and_wait(child_body, *, timeout_hint: str) -> float:
     return elapsed
 
 
-@_FORK_ONLY
 def test_atexit_after_real_fork_does_not_hang_worker_exit(monkeypatch):
     """A forked child that runs `atexit` at what would be a gunicorn worker's
     `sys.exit(0)` must terminate cleanly and quickly -- proving neither the
@@ -176,6 +312,7 @@ def test_atexit_after_real_fork_does_not_hang_worker_exit(monkeypatch):
     the proof: a `join()` that blocked forever would never let the child get
     there, so the parent's own bounded wait is what would fail instead.
     """
+    _require_fork_or_fail_loud()
     host_config = _host_config()
 
     # Real seam pieces, exactly what init_engine_seams wires for PostHog
@@ -228,7 +365,6 @@ def test_atexit_after_real_fork_does_not_hang_worker_exit(monkeypatch):
     client_a.join()
 
 
-@_FORK_ONLY
 def test_husk_join_alone_after_real_fork_returns_promptly(monkeypatch):
     """Confounder-free isolation of the precise #132 claim: does the
     inherited husk A's own `Client.join()` -- and nothing else in the
@@ -243,6 +379,7 @@ def test_husk_join_alone_after_real_fork_returns_promptly(monkeypatch):
     full-stack production fidelity but, on a failure, cannot say which
     handler was at fault.
     """
+    _require_fork_or_fail_loud()
     host_config = _host_config()
     monkeypatch.setattr(wiring, "_current_host_config", host_config)
     client_a = wiring._build_posthog_client(host_config)
