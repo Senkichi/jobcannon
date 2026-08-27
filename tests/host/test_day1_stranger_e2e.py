@@ -220,9 +220,16 @@ def test_day_one_stranger_journey_end_to_end(app, seeded_feed_corpus):
     assert _events(dsn, stranger_id, "consent_recorded") == []
 
     # 6. POST /consent with choice=grant, through the real route (not a
-    # fixture or a direct SQL write).
+    # fixture or a direct SQL write). No longer a 302-to-feed that discards
+    # the ack (issue #182): a direct/no-JS POST like this one now
+    # Post/Redirect/Gets back to GET /consent instead, which still shows
+    # the choice ("Current choice: allowed.") after the round-trip -- never
+    # silently bounced to the feed with no visible confirmation.
     consent_resp = client.post("/consent", data={"choice": "grant"})
-    assert consent_resp.status_code in (302, 303)
+    assert consent_resp.status_code == 303
+    assert consent_resp.headers["Location"].rstrip("/").endswith("/consent")
+    consent_page = client.get("/consent")
+    assert "Current choice: allowed." in consent_page.get_data(as_text=True)
 
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
         user_row = conn.execute(
