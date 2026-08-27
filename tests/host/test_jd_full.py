@@ -38,6 +38,30 @@ TITLE_ZERO_OVERLAP_JD = (
     "here at the company over the next several quarters ahead."
 )
 
+# >=600 chars (clears _CLEAN_MIN_CHARS), JD-shaped, grounded in both the
+# posting's title AND company -- classify_jd_content(CLEAN_JD, "Staff Data
+# Engineer", "jd-co", None) verifies to JdVerdict.CLEAN / "shape+grounded"
+# (verified via a REPL check, #152).
+CLEAN_JD = (
+    "We are hiring a Staff Data Engineer at jd-co to build our analytics platform. "
+    "Responsibilities include designing pipelines, mentoring engineers, and "
+    "partnering with product teams on experimentation infrastructure. This is a "
+    "senior role reporting to the Director of Data Engineering, working closely "
+    "with product and analytics stakeholders across the organization. "
+    "Qualifications: 8+ years of data engineering experience, strong SQL and "
+    "Python skills, and hands-on experience with batch and streaming systems "
+    "at scale. You will own the roadmap for our core data platform, working "
+    "with distributed systems, Kafka, Spark, and cloud data warehouses. "
+    "What you will bring: a track record of shipping reliable, well-tested "
+    "systems in production and mentoring more junior engineers on your team. "
+    "In this role you will collaborate cross-functionally with product, "
+    "design, and go-to-market teams to unlock new data-driven capabilities "
+    "for jd-co customers worldwide."
+)
+# A second, still-CLEAN body (verified the same way) used to exercise the
+# content-changed invalidation path without also flipping the verdict.
+CLEAN_JD_V2 = CLEAN_JD + " Additional detail: this role also owns our streaming ingestion SLAs."
+
 
 @pytest.fixture()
 def posting(db_conn):
@@ -187,3 +211,229 @@ def test_content_reject_keeps_non_jd_content_reasons_on_success(db_conn, posting
         "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (posting,)
     ).fetchone()
     assert row["unresolved_reasons"] == ["location_missing"]
+
+
+# --- D5 jd-content verdict stamping (#152, m0009) ---------------------------
+
+
+def test_stamps_clean_verdict_and_signal_on_write(db_conn, posting):
+    """A successful write of a CLEAN-shaped body stamps jd_content_verdict /
+    jd_content_signal at the write chokepoint, leaving jd_adjudicated_version
+    NULL (nothing has adjudicated this row)."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    row = db_conn.execute(
+        "SELECT jd_content_verdict, jd_content_signal, jd_adjudicated_version "
+        "FROM postings WHERE dedup_key = %s",
+        (posting,),
+    ).fetchone()
+    assert row["jd_content_verdict"] == "clean"
+    assert row["jd_content_signal"] == "shape+grounded"
+    assert row["jd_adjudicated_version"] is None
+
+
+def test_stamps_ambiguous_verdict_for_needs_adjudication_body(db_conn, posting):
+    """A body that clears the write gate (jd_content_reject) but is too
+    short to clear the CLEAN bar is stamped AMBIGUOUS, not left NULL -- the
+    D5 gate must see a verdict to defer this row for adjudication."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    assert set_jd_full(_svc_conn(db_conn), posting, GOOD_JD, source="test") is True
+    row = db_conn.execute(
+        "SELECT jd_content_verdict, jd_content_signal FROM postings WHERE dedup_key = %s",
+        (posting,),
+    ).fetchone()
+    assert row["jd_content_verdict"] == "ambiguous"
+    assert row["jd_content_signal"] == "needs_adjudication"
+
+
+def test_rewrite_with_identical_content_preserves_adjudicated_version(db_conn, posting):
+    """CAS / no-overwrite (#152): re-storing the SAME body (content
+    unchanged, e.g. an idempotent re-fetch) must not clobber a
+    jd_adjudicated_version the adjudicator already stamped -- only a
+    genuine content change may null it."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    db_conn.execute(
+        "UPDATE postings SET jd_adjudicated_version = 8 WHERE dedup_key = %s", (posting,)
+    )
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    row = db_conn.execute(
+        "SELECT jd_content_verdict, jd_adjudicated_version FROM postings WHERE dedup_key = %s",
+        (posting,),
+    ).fetchone()
+    assert row["jd_content_verdict"] == "clean"
+    assert row["jd_adjudicated_version"] == 8
+
+
+def test_content_change_nulls_adjudicated_version_and_restamps_verdict(db_conn, posting):
+    """A materially different body must re-arm the D5 gate: a stale
+    adjudication no longer vouches for text it never saw, so
+    jd_adjudicated_version is nulled in the same write that re-stamps the
+    verdict against the new text."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    db_conn.execute(
+        "UPDATE postings SET jd_adjudicated_version = 8 WHERE dedup_key = %s", (posting,)
+    )
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD_V2, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    row = db_conn.execute(
+        "SELECT jd_full, jd_content_verdict, jd_adjudicated_version FROM postings "
+        "WHERE dedup_key = %s",
+        (posting,),
+    ).fetchone()
+    assert row["jd_full"] == CLEAN_JD_V2
+    assert row["jd_content_verdict"] == "clean"
+    assert row["jd_adjudicated_version"] is None
+
+
+def test_missing_posting_row_returns_false(db_conn):
+    """dedup_key with no postings row is a no-op: both UPDATEs would affect
+    0 rows silently (Postgres raises nothing), so without this guard the
+    function returned a false 'wrote' signal and ran classify_jd_content for
+    nothing. Mirrors _record_jd_content_reject's existing `is None` guard."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    assert set_jd_full(_svc_conn(db_conn), "no-such-dedup-key", GOOD_JD, source="test") is False
+
+
+def test_unchanged_content_with_no_verdict_stamps_without_nulling_adjudicated_version(
+    db_conn, posting
+):
+    """Self-heal branch: content unchanged but no verdict on record (e.g. a
+    legacy pre-m0009 row, or one whose verdict columns were wiped, re-touched
+    with the identical body). Stamps a fresh verdict but must NOT null
+    jd_adjudicated_version -- content_changed is False on this branch, so
+    the invalidation condition (a genuine content change) never fires."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    db_conn.execute(
+        "UPDATE postings SET jd_content_verdict = NULL, jd_content_signal = NULL, "
+        "jd_adjudicated_version = 8 WHERE dedup_key = %s",
+        (posting,),
+    )
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    row = db_conn.execute(
+        "SELECT jd_full, jd_content_verdict, jd_content_signal, jd_adjudicated_version "
+        "FROM postings WHERE dedup_key = %s",
+        (posting,),
+    ).fetchone()
+    assert row["jd_full"] == CLEAN_JD
+    assert row["jd_content_verdict"] == "clean"
+    assert row["jd_content_signal"] == "shape+grounded"
+    assert row["jd_adjudicated_version"] == 8
+
+
+def test_cas_guard_rejects_stamp_when_jd_full_changes_mid_write(db_conn, posting, monkeypatch):
+    """CAS guard (#152): the jd_full UPDATE and the verdict-stamp UPDATE are
+    two separately-committed statements; a concurrent writer's own jd_full
+    UPDATE could land in the window between them. Simulate that by having
+    classify_jd_content -- which runs in exactly that window, see
+    set_jd_full -- mutate jd_full as a side effect. The stamp's
+    `WHERE jd_full = %s` guard must then match 0 rows, leaving
+    jd_content_verdict untouched rather than stamping a verdict describing
+    text that is no longer current."""
+    from jobcannon.db import _jd_full as jd_full_mod
+    from jobcannon.db._jd_full import set_jd_full
+
+    real_classify = jd_full_mod.classify_jd_content
+    concurrent_body = "z" * 250
+
+    def _racing_classify(text, title, company, config):
+        db_conn.execute(
+            "UPDATE postings SET jd_full = %s WHERE dedup_key = %s",
+            (concurrent_body, posting),
+        )
+        return real_classify(text, title, company, config)
+
+    monkeypatch.setattr(jd_full_mod, "classify_jd_content", _racing_classify)
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    row = db_conn.execute(
+        "SELECT jd_full, jd_content_verdict FROM postings WHERE dedup_key = %s",
+        (posting,),
+    ).fetchone()
+    # The "concurrent writer" landed last and won the jd_full column...
+    assert row["jd_full"] == concurrent_body
+    # ...and the CAS guard correctly refused to stamp CLEAN_JD's verdict
+    # onto a row that no longer holds CLEAN_JD's text.
+    assert row["jd_content_verdict"] is None
+
+
+def test_persisted_reject_verdict_gates_scoring_precheck_until_adjudicated(db_conn, posting):
+    """Integration (#152): a full `SELECT * FROM postings` row -- the exact
+    shape a host passes to scoring_precheck, since this repo has no
+    JOBS_ALL_COLUMNS-style explicit projection -- carries the three D5
+    columns and the gate reads them correctly end to end.
+
+    set_jd_full itself can never persist a REJECT verdict: jd_content_reject
+    (the write gate) already blocks storage of anything classify_jd_content
+    would REJECT, since both run the identical deterministic check on the
+    identical (text, title, config). This simulates the state a re-sweep /
+    adjudicator write path would leave on the row instead -- a REJECT
+    verdict with no adjudication on record -- directly via UPDATE."""
+    from jobcannon.engine.jd_content_contract import JD_CONTENT_VERSION
+    from jobcannon.engine.job_scorer import scoring_precheck
+
+    db_conn.execute(
+        "UPDATE postings SET jd_full = %s, location = 'Remote', "
+        "jd_content_verdict = 'reject', jd_content_signal = 'head_block_or_wiki', "
+        "jd_adjudicated_version = NULL WHERE dedup_key = %s",
+        (GOOD_JD, posting),
+    )
+    row = db_conn.execute("SELECT * FROM postings WHERE dedup_key = %s", (posting,)).fetchone()
+    assert scoring_precheck(row) == "awaiting_jd_adjudication"
+
+    db_conn.execute(
+        "UPDATE postings SET jd_adjudicated_version = %s WHERE dedup_key = %s",
+        (JD_CONTENT_VERSION, posting),
+    )
+    row = db_conn.execute("SELECT * FROM postings WHERE dedup_key = %s", (posting,)).fetchone()
+    assert scoring_precheck(row) is None
