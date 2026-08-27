@@ -92,13 +92,12 @@ one `applied migration V (name)` line per migration
 `SELECT version, name, applied_at FROM schema_migrations ORDER BY version;`
 against the live database. After merging any render.yaml change, also
 confirm the Blueprint actually picked it up — a `render.yaml` edit only
-takes effect on the next Blueprint sync. **The Render API field for this is
-namespaced, not flat**: `serviceDetails.envSpecificDetails.preDeployCommand`
-is the field to read — a flat `serviceDetails.preDeployCommand` reads
-`null`/absent even when the Blueprint applied the command correctly
-(verified 2026-08-27; a plain `serviceDetails.preDeployCommand` read was
-mistakenly believed to be the authoritative field before this correction).
-Even stronger than reading the field is proving pre-deploy actually RAN:
+takes effect on the next Blueprint sync, so the person landing the change
+must confirm `serviceDetails.envSpecificDetails.preDeployCommand` (NOT the
+top-level `serviceDetails.preDeployCommand`, which stays `null` even after
+a successful sync — a red herring observed during #188's landing) is
+non-null for `jobcannon-web` via the Render API. Even stronger than
+reading the field is proving pre-deploy actually RAN:
 `GET /v1/services/<svc>/events` shows a `pre_deploy_started` event followed
 by `pre_deploy_ended` with `preDeployStatus: "succeeded"` for that deploy
 (verified 2026-08-27 on deploy `dep-da7uc6814ptc73969a5g`) — that pair is
@@ -272,6 +271,15 @@ read/write `postings`, `companies`, etc. will error until the worker has
 applied both schemas; that window is normally seconds on a fresh deploy and
 is otherwise closed once the worker service reports healthy in the Render
 dashboard.
+
+**Migration 7 (`revoked_subjects`)** previously had a real, not-benign
+deploy-order dependency on this section's general worker-first case (a
+missing table would raise inside `jobcannon.db._revoked_subjects.
+revoke_subject`, called from `jobcannon/web/account.py`'s account-deletion
+route and `jobcannon/web/webhooks.py`'s `user.deleted` handler). That
+dependency is resolved by issue #196's web pre-deploy migration step
+(#197) — see `m0007_revoked_subjects.py`'s docstring for the current
+guarantee and the narrow self-healing window that remains.
 
 ## 4. Webhook endpoint registration
 
