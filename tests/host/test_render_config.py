@@ -258,7 +258,15 @@ def test_migrate_module_exits_nonzero_on_bogus_dsn():
     127.0.0.1 port is silently dropped rather than RST on this Windows CI
     box, so a bare psycopg connect() hangs on the OS-level TCP timeout
     (tens of seconds) instead of failing fast — verified directly against
-    this port before adding the bound."""
+    this port before adding the bound.
+
+    Asserting returncode != 0 alone would pass "vacuously" for the wrong
+    reason too (e.g. an ImportError or a typo'd module path also exits
+    non-zero) — this negative test is not @requires_postgres-gated, so on a
+    box without POSTGRES_ADMIN_DSN it is the ONLY one of the two subprocess
+    tests that runs, with no positive-control sibling to catch that. Also
+    assert main()'s own logged failure line is present, so this can only
+    pass on a genuine connect failure."""
     import os
     import subprocess
     import sys
@@ -275,6 +283,7 @@ def test_migrate_module_exits_nonzero_on_bogus_dsn():
         timeout=30,
     )
     assert result.returncode != 0
+    assert "pre-deploy migration run failed" in result.stderr, result.stderr
 
 
 def test_scan_block_report_help():

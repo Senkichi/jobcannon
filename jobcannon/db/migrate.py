@@ -83,6 +83,13 @@ def run_migrations(dsn: str) -> None:
         # same database — e.g. web's pre-deploy racing the worker's boot-time
         # call — blocks here until the first releases, so the two never
         # interleave DDL or ledger writes.
+        # Logged before the (unbounded, blocking) acquire call: if a peer
+        # holding this lock was SIGKILLed mid-migration, Postgres releases
+        # its session-level lock immediately on backend termination, but
+        # until then this call blocks with no output of its own — this line
+        # is what makes that wait visible in a Render deploy log instead of
+        # looking like silence.
+        logger.info("waiting for schema_migrations advisory lock")
         with conn.transaction():
             conn.execute("SELECT pg_advisory_lock(%s)", (_ADVISORY_LOCK_KEY,))
         try:

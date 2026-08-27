@@ -96,12 +96,17 @@ def test_run_migrations_serializes_concurrent_callers_via_advisory_lock(monkeypa
     same database (e.g. jobcannon-web's preDeployCommand and
     jobcannon-worker's boot-time call, or two overlapping deploys) must never
     interleave the ledger DDL/read/insert. Without the advisory lock this is
-    a real, reproducible race: both threads can read applied_versions() as
-    empty while the slow migration is still mid-flight, both attempt
-    _apply_migration(), and the loser's INSERT INTO schema_migrations hits
-    the version PRIMARY KEY and raises -- run_migrations() propagates that,
-    so the test below (no exception from either thread) would fail without
-    the lock.
+    a real, reproducible race -- verified by sabotage (temporarily removing
+    the lock acquisition and rerunning this test 3x, all 3 failed). The
+    observed failure mode was two threads racing `CREATE TABLE IF NOT
+    EXISTS schema_migrations` itself: both see the table absent and both
+    attempt to create it, and the loser's implicit catalog row insert hits
+    a UniqueViolation on pg_type's own namespace/name index -- an even
+    earlier collision than the ledger row PRIMARY KEY it also guards against
+    (two callers reading applied_versions() as empty while a slow migration
+    is still mid-flight would otherwise collide there next). Either
+    collision propagates out of run_migrations(), so the test below (no
+    exception from either thread) would fail without the lock.
 
     Patches MIGRATIONS with one migration whose py hook sleeps ~1s, fires
     two real threads with independent connections at run_migrations() via a

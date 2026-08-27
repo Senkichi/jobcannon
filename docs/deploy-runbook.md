@@ -103,9 +103,25 @@ shipped) but does mean a rolled-back web serves against whatever schema
 version is newest in the ledger, not necessarily the schema its own code
 was written against. Keep migrations additive/backward-compatible for this
 reason (§10 already documents this for the general rollback case) — that
-practice no longer exists to cover "web deploys before worker" ordering
-(the pre-deploy command now guarantees that), only "a rollback can't
-un-apply a migration."
+practice no longer needs to cover "web deploys before worker" ordering (the
+pre-deploy command now guarantees that), but it still covers "a rollback
+can't un-apply a migration."
+
+**Migration/writer ordering also inverted, not just eliminated.** Pre-deploy
+runs migrations *before* the new web code goes live, which flips the
+ordering a data-backfill-shaped migration wants: one written to rewrite
+rows that only the *new* release's writer produces (e.g.
+`m0010_events_referrer_host.py`'s "Deploy order" docstring, which predates
+this guarantee) previously wanted migration-after-code, since only after
+web deployed would there be new-format rows to backfill. Now migrations
+always land before the new writer is live, so a backfill of that shape
+strands every row the outgoing release's writer produced in the gap
+between migration commit and web's cutover — pre-deploy closes the
+old race but opens this one for that migration *shape* specifically.
+A future migration that rewrites rows a not-yet-deployed writer will
+produce must either be order-independent (safe against running before its
+own writer exists) or ship with an explicit follow-up sweep; it can no
+longer rely on "the worker will boot after the writer's release lands."
 
 Expect these log lines on a fresh database's first worker boot (the ledger
 `name` column — and therefore the second `%s` migrate.py logs — is the
