@@ -42,6 +42,7 @@ import psycopg
 import pytest
 from psycopg.rows import dict_row
 
+from jobcannon.db._profiles import get_profile, upsert_profile
 from jobcannon.web.auth import ClerkIdentity
 from jobcannon.web.handoff import _HANDOFF_DONE_KEY
 from tests.host.conftest import create_throwaway_db, drop_throwaway_db, requires_postgres
@@ -324,6 +325,39 @@ def test_wtf_csrf_enabled_defaults_true_outside_testing(monkeypatch):
     resp = client.post("/postings/1/save")
     assert resp.status_code == 400
     assert b"Request could not be verified" in resp.data
+
+
+@requires_postgres
+def test_post_clear_selection_with_token_clears_selection(db_app):
+    """Devin review finding (#226): every OTHER success-path assertion for
+    `/feed/clear-selection` lives in tests/host/test_feed_clear_selection.py,
+    whose `app` fixture defaults `WTF_CSRF_ENABLED` off (TESTING implies it),
+    so none of those tests exercise the route end-to-end WITH CSRF actually
+    enforced — only the negative "without token" case above does. Mirrors
+    the established `/start`/`/consent`/`/account/delete` pattern in this
+    module: GET a page that mints a token, extract it via `_CSRF_FIELD_RE`,
+    POST with it, assert a non-400 status (prior behavior, unchanged by
+    CSRF)."""
+    dsn = db_app.config["_TEST_DSN"]
+    with psycopg.connect(dsn) as conn:
+        conn.execute("INSERT INTO users (id, plan_tier) VALUES (%s, 'free')", (USER_ID,))
+        conn.commit()
+    with psycopg.connect(dsn) as conn:
+        upsert_profile(conn, USER_ID, target_titles=["Engineer"], workplace_type=None)
+
+    client = db_app.test_client()
+    with client.session_transaction() as sess:
+        sess[_HANDOFF_DONE_KEY] = True
+    get_resp = client.get("/")
+    token = _token_from(get_resp.data)
+
+    resp = client.post("/feed/clear-selection", data={"csrf_token": token})
+    assert resp.status_code != 400
+    assert resp.status_code == 303
+
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        profile = get_profile(conn, USER_ID)
+    assert profile["target_titles"] == []
 
 
 @requires_postgres

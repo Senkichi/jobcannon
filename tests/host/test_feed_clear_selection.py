@@ -133,7 +133,7 @@ def test_indicator_renders_with_counts_for_saved_selection(app):
     html = client.get("/").get_data(as_text=True)
 
     assert "Filtering to your saved picks (2 titles" in html
-    assert "1 companies)" in html
+    assert "1 company)" in html
     assert "data-saved-selection-indicator" in html
     assert "data-clear-selection" in html
 
@@ -162,7 +162,10 @@ def test_indicator_absent_for_fresh_profile(app):
 def test_indicator_renders_for_titles_only_or_companies_only(app):
     """Either field alone is enough to trigger the indicator — matches
     `selection_filter_kwargs`'s own "titles OR companies" gate, not an
-    AND-both-required rule this route might otherwise be tempted to write."""
+    AND-both-required rule this route might otherwise be tempted to write.
+    Also pins pluralization (runner review finding on #226): a singular
+    count ("1 title") must not render with a bare-`s` plural suffix
+    ("1 titles") the way the pre-fix template did."""
     dsn = app.config["_TEST_DSN"]
     client = _feed_client(app, target_titles=["Solo Title Co Role"], target_companies=[])
     company_id = _seed_company(dsn, "Titles Only Co")
@@ -170,7 +173,8 @@ def test_indicator_renders_for_titles_only_or_companies_only(app):
 
     html = client.get("/").get_data(as_text=True)
 
-    assert "Filtering to your saved picks (1 titles" in html
+    assert "Filtering to your saved picks (1 title" in html
+    assert "1 titles" not in html
     assert "0 companies)" in html
 
 
@@ -190,6 +194,80 @@ def test_clear_selection_zeroes_target_titles_and_companies(app):
         profile = get_profile(conn, CLERK_ID)
     assert profile["target_titles"] == []
     assert profile["target_companies"] == []
+
+
+def test_clear_selection_titles_only_seed_clears_both_target_lists(app):
+    """Devin review finding (#226): every other write test seeds BOTH
+    target_titles and target_companies together, so a hypothetical reversed-
+    COALESCE regression that clears titles but leaves a stale companies list
+    (or vice versa) would only be caught incidentally. This isolates a
+    titles-only seed (companies never set, so it starts NULL, not `[]`) and
+    asserts both come back `[]` after Clear."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, target_titles=["Engineer"])
+
+    resp = client.post("/feed/clear-selection")
+
+    assert resp.status_code == 303
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        profile = get_profile(conn, CLERK_ID)
+    assert profile["target_titles"] == []
+    assert profile["target_companies"] == []
+
+
+def test_clear_selection_is_idempotent_on_double_post(app):
+    """A second Clear POST against an already-cleared profile must not error
+    or change behavior — both `[]` -> `[]` writes and both responses look
+    identical."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, target_titles=["Engineer"], target_companies=["Clear Write Co"])
+
+    first = client.post("/feed/clear-selection")
+    second = client.post("/feed/clear-selection")
+
+    assert first.status_code == 303
+    assert second.status_code == 303
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        profile = get_profile(conn, CLERK_ID)
+    assert profile["target_titles"] == []
+    assert profile["target_companies"] == []
+
+
+def test_clear_selection_with_no_profile_row_skips_write_and_still_responds(app):
+    """Devin review finding (#226): a signed-in user who never completed the
+    picker has no `profiles` row at all — `_feed_client` normally seeds one
+    via `_seed_profile`, so this test seeds only the `users` row directly,
+    matching a real pre-onboarding visitor. Before the fix, POSTing here
+    created a zeroed `profiles` row (workplace_type NULL, both target lists
+    `[]`), which would flip `feed.html`'s `has_selections = profile is not
+    None` gate true and silently suppress the "Set up your feed" onboarding
+    CTA for someone who never ran the picker. Positive control below (a
+    SEPARATE user who DOES have a profile) proves this test would actually
+    detect a phantom-row regression rather than passing for an unrelated
+    reason (e.g. the route 500ing before touching `profiles` at all)."""
+    dsn = app.config["_TEST_DSN"]
+    no_profile_user = "user_feed_clear_selection_no_profile"
+    _authed(app, no_profile_user)
+    _seed_user(dsn, no_profile_user)
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess[_HANDOFF_DONE_KEY] = True
+
+    resp = client.post("/feed/clear-selection")
+
+    assert resp.status_code == 303
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        profile = get_profile(conn, no_profile_user)
+    assert profile is None
+
+    # Positive control: a user who DOES have a profile still gets zeroed —
+    # proves the guard is "skip when profile is None", not "never write".
+    other_client = _feed_client(app, target_titles=["Engineer"])
+    other_resp = other_client.post("/feed/clear-selection")
+    assert other_resp.status_code == 303
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        other_profile = get_profile(conn, CLERK_ID)
+    assert other_profile["target_titles"] == []
 
 
 def test_clear_selection_preserves_other_coalesce_fields(app):
@@ -307,13 +385,25 @@ def test_anonymous_post_to_clear_selection_is_401():
 # ---------------------------------------------------------------------------
 
 
-def test_empty_state_collision_copy_when_saved_selection_and_search_present(app):
+def test_empty_state_collision_copy_when_search_would_match_without_selection(app):
+    """Ground truth (#226 post-review follow-up on `_feed_empty_reason`):
+    "collision" must mean dropping the saved selection actually WOULD
+    surface a row, not merely "a selection and a search happen to
+    coexist". `clear-collision-2` ("Product Manager") is the row that makes
+    this a genuine collision — it matches the free-text `title=Manager`
+    search but not the saved `target_titles=["Engineer"]` selection, so the
+    ground-truth probe (re-running the same query with titles dropped) finds
+    it and correctly reports "collision"."""
     dsn = app.config["_TEST_DSN"]
     client = _feed_client(app, target_titles=["Engineer"])
     company_id = _seed_company(dsn, "Collision Co")
     # Matches the saved selection but NOT the free-text search below — the
     # AND (#206) zeroes the result set even though a matching row exists.
     _seed_posting(dsn, "clear-collision-1", company_id, title="Engineer")
+    # Matches the free-text search but NOT the saved selection — this is
+    # what the saved selection is actually excluding, i.e. the genuine
+    # collision.
+    _seed_posting(dsn, "clear-collision-2", company_id, title="Product Manager")
 
     resp = client.get("/", query_string={"title": "Manager"})
     html = resp.get_data(as_text=True)
@@ -334,6 +424,50 @@ def test_empty_state_default_copy_when_genuinely_empty(app):
     _seed_posting(dsn, "clear-genuine-empty-1", company_id, title="Nonmatching Title")
 
     resp = client.get("/")
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "No postings match your selections yet." in html
+    assert "within your saved picks" not in html
+    assert "data-feed-empty-collision" not in html
+
+
+def test_empty_state_empty_copy_for_corpus_wide_miss_despite_selection_and_search(app):
+    """Adversarial refuter's probe P1: a saved selection AND a free-text
+    search both being present is NOT sufficient for "collision" when the
+    search itself matches nothing anywhere in the corpus — clearing the
+    saved selection would not produce a single additional row, so the old
+    has-both-so-it-must-be-a-collision heuristic over-promised here. Only
+    posting in the corpus is "Engineer" (matches the saved selection, not
+    the search); no posting anywhere contains "Zzzznonexistent"."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, target_titles=["Engineer"])
+    company_id = _seed_company(dsn, "Corpus Wide Miss Co")
+    _seed_posting(dsn, "clear-corpus-miss-1", company_id, title="Engineer")
+
+    resp = client.get("/", query_string={"title": "Zzzznonexistent"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "No postings match your selections yet." in html
+    assert "within your saved picks" not in html
+    assert "data-feed-empty-collision" not in html
+
+
+def test_empty_state_empty_copy_for_cross_column_miss(app):
+    """Devin review finding (#226): a saved TITLES selection and a free-text
+    COMPANY search are independent AND clauses on different columns.
+    Dropping the saved titles selection would not help a company search
+    that itself matches zero rows — "Nonexistent Co" never appears in this
+    corpus regardless of the titles filter — so this must stay "empty", not
+    "collision" (the pre-fix `has_selection and has_search` heuristic OR'd
+    across both columns and would have mislabeled this)."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, target_titles=["Engineer"])
+    company_id = _seed_company(dsn, "Cross Column Co")
+    _seed_posting(dsn, "clear-cross-column-1", company_id, title="Engineer")
+
+    resp = client.get("/", query_string={"company": "Nonexistent Co"})
     html = resp.get_data(as_text=True)
 
     assert resp.status_code == 200
