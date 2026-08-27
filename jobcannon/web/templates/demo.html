@@ -19,9 +19,9 @@
    stays visible to everyone regardless. #}
 <p class="text-sm text-neutral-400 mb-4" data-demo-cta>
   This is a canned demo profile.
-  <a href="/start" class="underline text-neutral-100">Build your own feed</a>
+  <a href="/start" class="underline text-neutral-100 min-h-11 inline-flex items-center px-1">Build your own feed</a>
   {% if signup_cta_url %}
-    or <a href="{{ signup_cta_url }}" class="underline text-neutral-100">sign up</a> to save it as new postings come in.
+    or <a href="{{ signup_cta_url }}" class="underline text-neutral-100 min-h-11 inline-flex items-center px-1">sign up</a> to save it as new postings come in.
   {% endif %}
 </p>
 {% if stats.postings == 0 %}
