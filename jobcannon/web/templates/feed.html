@@ -11,7 +11,7 @@
   <h1 class="text-2xl font-semibold mb-3">Your feed isn't wired up yet</h1>
   <p class="text-neutral-400" data-no-selections>
     Job Cannon builds your feed from a quick picker of target titles, seniority, and preferences.
-    <a href="/start" class="underline min-h-11 inline-flex items-center px-1">Set up your feed</a> to get started.
+    <a href="/start" class="underline {{ touch_target() }} inline-flex items-center px-1">Set up your feed</a> to get started.
   </p>
 {% elif stats.postings == 0 %}
   {% include "_corpus_empty.html" %}
