@@ -321,6 +321,159 @@ def test_distinct_companies_q_finds_and_ranks_prefix_first(db_conn):
     assert matches == ["Zeta Acquisitions", "Beta Zeta Holdings"]
 
 
+# --- #169/#170: companies filter + selection_filter_kwargs -----------------
+
+
+def _seed_grid(db_conn, companies, titles):
+    """3 companies x 3 titles = 9 postings, one per (company, title) pair —
+    the exact corpus shape #169/#170 asks the filter-combo tests to prove
+    exact row sets against. Returns {(company, title): posting_id}."""
+    company_ids = {name: _seed_company(db_conn, name) for name in companies}
+    grid = {}
+    for company in companies:
+        for title in titles:
+            grid[(company, title)] = _seed_posting(
+                db_conn,
+                f"grid-{company}-{title}",
+                company_ids[company],
+                title=title,
+                company=company,
+                last_seen=_BASE_TIME,
+            )
+    return grid
+
+
+def test_companies_filter_matches_exact_selection_list(db_conn):
+    """issue #169: `companies` (the picker's multi-select, exact-match list)
+    must return exactly the rows for companies named in the list — not more
+    (an unlisted company), not fewer (every title under a listed company)."""
+    from jobcannon.db._feed import list_feed_postings
+
+    companies = ["Acme Corp", "Globex Inc", "Initech LLC"]
+    titles = ["Engineer", "Analyst", "Manager"]
+    grid = _seed_grid(db_conn, companies, titles)
+
+    rows = list_feed_postings(db_conn, companies=["Acme Corp", "Globex Inc"])
+
+    expected = {grid[(c, t)] for c in ("Acme Corp", "Globex Inc") for t in titles}
+    assert {r["id"] for r in rows} == expected
+
+
+def test_titles_and_companies_filters_and_together(db_conn):
+    """#169: `titles` and `companies` are two independent exact-match
+    filters that AND together (same composability `_build_filters`'s
+    docstring already documents for titles/title_contains) — selecting one
+    title and one company returns only the single row at that intersection,
+    not the union of "everything with that title" and "everything at that
+    company"."""
+    from jobcannon.db._feed import list_feed_postings
+
+    companies = ["Acme Corp", "Globex Inc"]
+    titles = ["Engineer", "Analyst"]
+    grid = _seed_grid(db_conn, companies, titles)
+
+    rows = list_feed_postings(db_conn, titles=["Engineer"], companies=["Acme Corp"])
+
+    assert [r["id"] for r in rows] == [grid[("Acme Corp", "Engineer")]]
+
+
+def test_titles_only_filter_matches_across_every_company(db_conn):
+    """The title-only half of the same grid: a title selection with no
+    company selection returns that title at every seeded company."""
+    from jobcannon.db._feed import list_feed_postings
+
+    companies = ["Acme Corp", "Globex Inc", "Initech LLC"]
+    titles = ["Engineer", "Analyst"]
+    grid = _seed_grid(db_conn, companies, titles)
+
+    rows = list_feed_postings(db_conn, titles=["Analyst"])
+
+    expected = {grid[(c, "Analyst")] for c in companies}
+    assert {r["id"] for r in rows} == expected
+
+
+def test_no_title_or_company_filter_returns_the_whole_grid(db_conn):
+    """Neither filter set: every seeded posting comes back — the "none"
+    combo in #169/#170's required title x company matrix."""
+    from jobcannon.db._feed import list_feed_postings
+
+    companies = ["Acme Corp", "Globex Inc"]
+    titles = ["Engineer", "Analyst"]
+    grid = _seed_grid(db_conn, companies, titles)
+
+    rows = list_feed_postings(db_conn)
+
+    assert {r["id"] for r in rows} == set(grid.values())
+
+
+def test_empty_companies_list_applies_no_company_filter(db_conn):
+    """An empty `companies` list (falsy, same as `titles`'s existing
+    "if titles:" guard in _build_filters) must mean "no filter", not "match
+    nothing" — mirrors the falsy-titles behavior implicitly relied on
+    everywhere else in this module."""
+    from jobcannon.db._feed import list_feed_postings
+
+    company_id = _seed_company(db_conn, "Acme")
+    posting_id = _seed_posting(db_conn, "p-empty-companies", company_id, last_seen=_BASE_TIME)
+
+    rows = list_feed_postings(db_conn, companies=[])
+
+    assert [r["id"] for r in rows] == [posting_id]
+
+
+def test_selection_filter_kwargs_reads_pending_picker_shape(db_conn):
+    """A session-held pending_picker dict (keys titles/companies/
+    workplace_type) -> filter kwargs, unchanged."""
+    from jobcannon.db._feed import selection_filter_kwargs
+
+    selections = {
+        "anon_id": "anon_x",
+        "titles": ["Engineer"],
+        "companies": ["Acme"],
+        "workplace_type": "REMOTE",
+    }
+    assert selection_filter_kwargs(selections) == {
+        "titles": ["Engineer"],
+        "companies": ["Acme"],
+        "workplace_type": "REMOTE",
+    }
+
+
+def test_selection_filter_kwargs_reads_profile_row_shape(db_conn):
+    """A `profiles` row (keys target_titles/target_companies/
+    workplace_type) -> the SAME kwargs shape titles/companies pending_picker
+    reads produce — the single point of enforcement #169/#170 require so
+    /preview and the authed feed can never diverge."""
+    from jobcannon.db._feed import selection_filter_kwargs
+
+    profile = {
+        "user_id": "u1",
+        "target_titles": ["Engineer"],
+        "target_companies": ["Acme"],
+        "workplace_type": "REMOTE",
+    }
+    assert selection_filter_kwargs(profile) == {
+        "titles": ["Engineer"],
+        "companies": ["Acme"],
+        "workplace_type": "REMOTE",
+    }
+
+
+def test_selection_filter_kwargs_none_or_empty_means_no_filter(db_conn):
+    from jobcannon.db._feed import selection_filter_kwargs
+
+    assert selection_filter_kwargs(None) == {
+        "titles": None,
+        "companies": None,
+        "workplace_type": None,
+    }
+    assert selection_filter_kwargs({"anon_id": "anon_x", "titles": [], "companies": []}) == {
+        "titles": None,
+        "companies": None,
+        "workplace_type": None,
+    }
+
+
 # --- #156: keyset cursor pagination ----------------------------------------
 
 
@@ -357,6 +510,51 @@ def test_cursor_pagination_across_three_pages_no_duplicates_no_skips(db_conn):
     # way a real HTTP request would (exercised separately below); this just
     # confirms it produces the shape list_feed_postings actually consumes.
     assert set(cursor_from_row(page1[-1])) == {"cursor_rank_score", "cursor_last_seen", "cursor_id"}
+
+
+def test_cursor_pagination_respects_companies_filter_across_pages(db_conn):
+    """#169's Load-more requirement: page 2 must filter identically to page
+    1. 15 matching-company postings (paged at limit=10: pages of 10 then 5)
+    interleaved in time with 5 distractor-company postings — a `companies`
+    filter that only applied to page 1 (e.g. dropped on the second call, or
+    applied outside the keyset predicate so page 2 "leaks" past it) would
+    either surface a distractor row on page 2 or duplicate/skip a matching
+    one across the boundary."""
+    from jobcannon.db._feed import list_feed_postings
+
+    matching_id = _seed_company(db_conn, "Matching Co")
+    other_id = _seed_company(db_conn, "Other Co")
+    matching_ids = [
+        _seed_posting(
+            db_conn,
+            f"p-match-{i}",
+            matching_id,
+            company="Matching Co",
+            last_seen=_BASE_TIME + timedelta(seconds=2 * i),
+        )
+        for i in range(15)
+    ]
+    for i in range(5):
+        _seed_posting(
+            db_conn,
+            f"p-other-{i}",
+            other_id,
+            company="Other Co",
+            last_seen=_BASE_TIME + timedelta(seconds=2 * i + 1),
+        )
+    expected_order = list(reversed(matching_ids))
+
+    page1 = list_feed_postings(db_conn, companies=["Matching Co"], limit=10)
+    assert [r["id"] for r in page1] == expected_order[0:10]
+
+    page2 = list_feed_postings(
+        db_conn, companies=["Matching Co"], limit=10, after=_after_from_row(page1[-1])
+    )
+    assert [r["id"] for r in page2] == expected_order[10:15]
+
+    all_seen = [r["id"] for r in page1] + [r["id"] for r in page2]
+    assert all_seen == expected_order
+    assert len(set(all_seen)) == 15
 
 
 def test_cursor_pagination_is_deterministic_with_last_seen_ties(db_conn):
