@@ -51,7 +51,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from flask import Blueprint, g, render_template, request
+from flask import Blueprint, g, render_template, request, url_for
 
 from jobcannon.db import _feed
 from jobcannon.db._feed import list_feed_postings
@@ -152,7 +152,9 @@ def _feed_query_kwargs(filters: dict[str, str]) -> dict[str, Any]:
     }
 
 
-def _read_feed_postings(*, user_id: str, filters: dict[str, str]) -> list[Any]:
+def _read_feed_postings(
+    *, user_id: str, filters: dict[str, str], after: tuple[float | None, Any, int] | None = None
+) -> list[Any]:
     """Fail-closed feed read, the same discipline as `_read_page_data` /
     jobcannon/web/onboarding.py's `_read_preview_postings`: an unopened
     connection pool or a genuine DB outage degrades to an empty result list
@@ -160,10 +162,14 @@ def _read_feed_postings(*, user_id: str, filters: dict[str, str]) -> list[Any]:
     500 on an authenticated route. A sibling of `_read_page_data` rather than
     an extension of it — the no-profile / empty-corpus branches never need a
     feed read at all, so keeping this a separate call avoids querying
-    postings when the page will not render them."""
+    postings when the page will not render them. `after` (#156) is the
+    keyset cursor for "Load more" — see jobcannon/db/_feed.py's
+    list_feed_postings/_cursor_predicate."""
     try:
         with connection_factory() as conn:
-            return list_feed_postings(conn, user_id=user_id, **_feed_query_kwargs(filters))
+            return list_feed_postings(
+                conn, user_id=user_id, after=after, **_feed_query_kwargs(filters)
+            )
     except Exception:
         logger.warning(
             "feed postings read failed for user %s (defaulting to empty result set)",
@@ -171,6 +177,37 @@ def _read_feed_postings(*, user_id: str, filters: dict[str, str]) -> list[Any]:
             exc_info=True,
         )
         return []
+
+
+# Every `_parse_feed_filters` key's own "no filter applied" value — omitted
+# from a "Load more" URL's query string rather than round-tripped literally,
+# so the next-page link stays as clean as a fresh, unfiltered GET / would be
+# (and, for workplace_type/sort specifically, never risks reading back as a
+# real filter value on the next request — see _feed_load_more_url).
+_FILTER_DEFAULTS = {
+    "title": "",
+    "company": "",
+    "location": "",
+    "workplace_type": "any",
+    "sort": "default",
+}
+
+
+def _feed_load_more_url(filters: dict[str, str], rows: list[Any]) -> str | None:
+    """Next-page URL for the authed feed's "Load more" control, or None when
+    this page came back short of FEED_PAGE_MAX — a keyset page shorter than
+    the cap proves there is nothing left to seek past (#156's stable-cursor
+    requirement: this is a seek, never an OFFSET, so there is no drift
+    between the row a click was expecting and the row it gets even if the
+    corpus changes between clicks). Carries forward every non-default filter
+    value already on this page (`_FILTER_DEFAULTS`) plus the cursor derived
+    from the LAST row actually rendered (`cursor_from_row`) — a "Load more"
+    click can never land on a different filter set than what the visitor is
+    currently looking at."""
+    if len(rows) < _feed.FEED_PAGE_MAX:
+        return None
+    query = {k: v for k, v in filters.items() if v != _FILTER_DEFAULTS.get(k, "")}
+    return url_for("pages.feed", **query, **_feed.cursor_from_row(rows[-1]))
 
 
 def _read_demo_feed_postings(profile: Any) -> list[Any]:
@@ -229,17 +266,37 @@ def _log_impressions(user_id: str, rows: list[Any]) -> None:
 
 @pages_bp.get("/", strict_slashes=False)
 def feed():
+    """#156: paginates via a keyset cursor read from `cursor_id`/
+    `cursor_last_seen`/`cursor_rank_score` query params (jobcannon.db._feed.
+    parse_cursor — a malformed/tampered value degrades to a first page, not
+    a 500). Same HX-Request split as GET /start (#148): the "Load more"
+    button hx-gets THIS route with the current filters plus the next cursor
+    attached, so an HX-Request returns only the next batch (+ a further
+    "Load more", or nothing when exhausted — `_feed_page.html`, WITH
+    show_actions so save/dismiss/apply keep working on appended rows); a
+    direct browser hit gets the full page, at whatever page the cursor
+    names. Impressions are logged for every row this response actually
+    renders, including "Load more" continuations — a later batch is exactly
+    as much a real impression as the first one."""
     user_id = g.clerk_user.user_id
     stats, profile = _read_page_data(user_id)
     filters = _parse_feed_filters(request.args)
+    after = _feed.parse_cursor(request.args)
 
     entries: list[dict[str, Any]] = []
     ordering = {"personalized": False, "ranker_version": UNRANKED_VERSION}
+    load_more_url = None
     if profile is not None and stats.get("postings", 0) > 0:
-        rows = _read_feed_postings(user_id=user_id, filters=filters)
+        rows = _read_feed_postings(user_id=user_id, filters=filters, after=after)
         entries = [build_entry(row, profile) for row in rows]
         ordering = _ordering_label(rows)
         _log_impressions(user_id, rows)
+        load_more_url = _feed_load_more_url(filters, rows)
+
+    if request.headers.get("HX-Request") == "true":
+        return render_template(
+            "_feed_page.html", entries=entries, load_more_url=load_more_url, show_actions=True
+        )
 
     return render_template(
         "feed.html",
@@ -251,6 +308,7 @@ def feed():
         sort_tokens=sorted(_feed._SORTS),
         workplace_types=_WORKPLACE_TYPES,
         show_actions=True,
+        load_more_url=load_more_url,
     )
 
 
