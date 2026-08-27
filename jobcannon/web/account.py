@@ -17,6 +17,19 @@ clearing the local Flask session (`anon_session_id`, `feed_session_id`,
 `handoff_done`, etc.); Clerk invalidates the account's own session(s) once
 the account itself is gone.
 
+Issue #159: Clerk's own session invalidation is not enough — `auth.py`
+verifies the `__session` JWT locally (no network call), so a token minted
+moments before this request stays independently valid until its own `exp`.
+This route writes a `revoked_subjects` tombstone (`jobcannon.db.
+_revoked_subjects.revoke_subject`) BEFORE calling Clerk's delete, not
+after: the gate in `jobcannon/web/__init__.py` must be able to reject that
+still-valid JWT on this user's very next request, and ordering the write
+first closes that window from the instant this handler returns rather than
+from whenever Clerk's async webhook eventually arrives. If the tombstone
+write itself fails, this handler stops there (502, Clerk never called) —
+proceeding to delete the account without a working revocation path would
+reopen the exact window this route exists to close.
+
 Reuses the Clerk SDK client `jobcannon.web.__init__.create_app` builds once
 (`jobcannon.web.auth.build_clerk_client`) and shares with the JWT verifier,
 via `current_app.config["CLERK_CLIENT"]` — this module never constructs a
@@ -63,12 +76,36 @@ def post_delete():
     user_id = g.clerk_user.user_id
 
     try:
+        _write_revocation_tombstone(user_id)
+    except Exception:
+        # Same fail-closed stance as the Clerk-call failure below, but
+        # distinguished in the log line: this failure means the account is
+        # NOT deleted AND the revocation gate has no row to check against,
+        # so calling Clerk next would delete the account while leaving its
+        # just-issued JWT valid for the rest of its lifetime — the window
+        # issue #159 exists to close. Stop here instead.
+        logger.exception(
+            "revocation tombstone write failed for user %s (account NOT deleted)",
+            user_id,
+        )
+        return (
+            render_template(
+                "account_delete.html",
+                error="Something went wrong deleting your account. Try again in a moment.",
+            ),
+            502,
+        )
+
+    try:
         clerk_users.delete(user_id=user_id)
     except Exception:
         # Fail-closed, matching jobcannon/web/consent.py's and
         # jobcannon/web/handoff.py's stance on an external call failing
         # mid-request: log with the traceback, never destroy local session
-        # state for a deletion that didn't actually happen.
+        # state for a deletion that didn't actually happen. The tombstone
+        # written above stays in place regardless (harmless: it only ever
+        # denies further requests from a JWT belonging to a user who just
+        # asked to be deleted, and it expires on its own).
         logger.exception("Clerk account-delete call failed for user %s", user_id)
         return (
             render_template(
@@ -80,3 +117,16 @@ def post_delete():
 
     session.clear()
     return render_template("account_deleted.html")
+
+
+def _write_revocation_tombstone(user_id: str) -> None:
+    """Commit a `revoked_subjects` row for `user_id` on its own pooled
+    connection, synchronously, before the caller proceeds to Clerk. Split
+    out so tests can monkeypatch `jobcannon.db._revoked_subjects.
+    revoke_subject` (imported here, not aliased at module scope) to force
+    the failure branch above without needing the pool itself to fail."""
+    from jobcannon.db import _revoked_subjects
+    from jobcannon.db.pool import connection_factory
+
+    with connection_factory() as conn:
+        _revoked_subjects.revoke_subject(conn, user_id)

@@ -32,14 +32,19 @@ deciding to sign up should not have their IP/UA phoned to Clerk); adds a
 context processor exposing clerk_sign_up_url/clerk_sign_in_url to every
 template, powering base.html's header sign-in/sign-up nav on public pages
 and the 401 page (issue #145 — the acquisition funnel previously had no
-discoverable entry point anywhere on the public surface)."""
+discoverable entry point anywhere on the public surface); adds a
+revoked_subjects tombstone check to clerk_auth (issue #159), closing the
+stale-JWT window a networkless-verified session leaves open after an
+account deletion; adds an HX-Request-aware branch to the 401 errorhandler
+(issue #155) so a stale-session htmx fragment request gets an HX-Redirect
+instead of a full HTML document swapped into a fragment target."""
 
 from __future__ import annotations
 
 import logging
 import os
 
-from flask import Flask, abort, g, render_template, request
+from flask import Flask, abort, g, render_template, request, session
 
 from jobcannon.web.anon_session import capture_attribution, ensure_session_ids
 from jobcannon.web.handoff import run_handoff_if_pending
@@ -150,6 +155,44 @@ def _resolve_consent(identity) -> bool:
     except Exception:
         logger.warning(
             "consent lookup failed for user %s (defaulting to no consent)",
+            identity.user_id,
+            exc_info=True,
+        )
+        return False
+
+
+def _is_subject_revoked(identity) -> bool:
+    """One DB read per authenticated request, checked in `clerk_auth` right
+    after JWT verification succeeds (issue #159). `auth.py` verifies the
+    `__session` JWT purely locally (RS256, zero network calls per request),
+    so a token stays independently valid until its own `exp` even after
+    `jobcannon/web/account.py::post_delete` or the `user.deleted` webhook
+    has already tombstoned this subject — this is the read half of that
+    tombstone, and the whole reason it exists.
+
+    Fails OPEN (not-revoked) on any error, same shape as `_resolve_consent`
+    above -- but the justification differs and is worth stating explicitly,
+    since "matches the neighboring function" is not on its own a security
+    argument: `connection_factory()` raising here means the DB pool is
+    unusable, and EVERY authed route already depends on that same pool
+    (consent lookup above, `/account/export`, the feed, etc.) -- so this
+    failing open does not create a new "revoked user reaches real data"
+    path, it only means a revoked user gets the same degraded response
+    every other signed-in user gets during a pool outage. Logged at WARNING
+    with a message naming "revocation" specifically (not a generic "lookup
+    failed") so this failure mode -- e.g. an instance rolling before the
+    worker applies migration m0007 -- is greppable in deploy logs instead
+    of silently leaving the feature inert.
+    """
+    from jobcannon.db import _revoked_subjects
+    from jobcannon.db.pool import connection_factory
+
+    try:
+        with connection_factory() as conn:
+            return _revoked_subjects.is_subject_revoked(conn, identity.user_id)
+    except Exception:
+        logger.warning(
+            "revocation lookup failed for user %s (defaulting to not-revoked)",
             identity.user_id,
             exc_info=True,
         )
@@ -366,7 +409,35 @@ def create_app(config: dict | None = None) -> Flask:
         from the global _inject_auth_links context processor above, not a
         route-specific kwarg here -- that processor is the one HOST_CONFIG
         accessor for both fields, reached the same way on every render.
+
+        Issue #155: an HTMX fragment request (HX-Request: true) that lands
+        here -- most commonly a stale-session tab firing a swap after the
+        server-side session/JWT has gone bad -- must NOT get this full HTML
+        document back. htmx would swap the whole document's markup into the
+        small fragment target the original request named, corrupting the
+        page. Checked case-insensitively (`.lower()`) rather than an exact
+        "true" match: htmx itself always sends lowercase "true", but an
+        exact-match miss on some other casing would silently fall through
+        to the full-document bug this branch exists to prevent, so the
+        cheap defensive compare is worth it. That branch returns a tiny,
+        non-HTML body (never contains "<html") and an HX-Redirect header
+        instead -- HX-Redirect forces htmx to do a full client-side
+        navigation (window.location = ...) rather than any swap at all, so
+        the stale fragment's target is never touched. Redirect target is
+        clerk_sign_in_url when configured, else "/" (the public feed
+        preview), same source as the header nav's sign-in link above -- an
+        unconfigured sign-in URL must still send the visitor SOMEWHERE
+        useful, never to a broken/blank href.
+
+        The non-HX branch (below) is unchanged from before this issue --
+        still the full error_401.html document, still status 401 -- so
+        #165's existing sign-in/sign-up-link tests on that page stay green.
         """
+        if (request.headers.get("HX-Request") or "").lower() == "true":
+            sign_in_url = getattr(app.config["HOST_CONFIG"], "clerk_sign_in_url", "") or "/"
+            response = app.make_response(("", 401))
+            response.headers["HX-Redirect"] = sign_in_url
+            return response
         return render_template("error_401.html"), 401
 
     @app.before_request
@@ -393,6 +464,25 @@ def create_app(config: dict | None = None) -> Flask:
         # that reads g.clerk_user must never see it unset on the 401 path.
         g.clerk_user = identity
         if identity is None:
+            abort(401)
+        if _is_subject_revoked(identity):
+            # Issue #159: the JWT verified (it is cryptographically valid
+            # and unexpired), but its subject has an unexpired
+            # revoked_subjects tombstone -- a deletion (in-app or via
+            # Clerk's Account Portal) already happened for this account,
+            # and this token was simply minted/refreshed before that. Undo
+            # the g.clerk_user set two lines up before aborting: base.html
+            # gates the header sign-in/up nav AND the authed footer links on
+            # `g.clerk_user`, and error_401.html extends base.html, so a
+            # left-set g.clerk_user would render "Export your data /
+            # Delete account" links on the very page telling this visitor
+            # they're signed out. session.clear() also runs here, not only
+            # in account.py's post_delete -- this is the ONLY gate on the
+            # webhook-triggered deletion path (an Account-Portal deletion
+            # never goes through post_delete at all), and a stale Flask
+            # session cookie must not survive a revoked identity either way.
+            g.clerk_user = None
+            session.clear()
             abort(401)
         g.consent_granted = _resolve_consent(identity)
         ensure_session_ids()
