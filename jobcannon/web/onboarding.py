@@ -3,10 +3,17 @@
 GET /start renders the picker, sourcing its title/company options from the
 live corpus (jobcannon.db._feed.distinct_titles / distinct_companies —
 never a hardcoded list) so the options can never drift from what the
-database actually contains. Once a picker submission is pending in the
-session, GET /start instead renders a "submitted" confirmation state
-linking to GET /preview — an in-scope, independently-tested render, not a
-placeholder for a later PR.
+database actually contains. A corpus that skews heavily toward a handful of
+alphabetically-early titles otherwise buries every other real title outside
+the unfiltered top-N window, so GET /start also accepts an optional `q`
+search term (#148) that narrows both fieldsets server-side (ILIKE,
+prefix-match ranked first — jobcannon.db._feed._distinct_matching); the
+picker's own search input hx-gets this SAME route (gated on the
+`HX-Request` header — see the `start` view for the fragment-vs-full-page
+split) with a plain `?q=` GET as the no-JS fallback. Once a picker
+submission is pending in the session, GET /start instead renders a
+"submitted" confirmation state linking to GET /preview — an in-scope,
+independently-tested render, not a placeholder for a later PR.
 
 POST /start validates the submission at the boundary (an unknown seniority
 level, an out-of-range years-of-experience value, or a title selection that
@@ -69,7 +76,14 @@ from typing import Any
 
 from flask import Blueprint, current_app, redirect, render_template, request, url_for
 
-from jobcannon.db._feed import distinct_companies, distinct_titles, list_feed_postings
+from jobcannon.db._feed import (
+    FEED_PAGE_MAX,
+    cursor_from_row,
+    distinct_companies,
+    distinct_titles,
+    list_feed_postings,
+    parse_cursor,
+)
 from jobcannon.db._profiles import upsert_profile
 from jobcannon.db._users import mint_anon_user
 from jobcannon.db.pool import connection_factory
@@ -234,19 +248,24 @@ SKILLS_OPTIONS = (
 _EMPTY_OPTIONS: dict[str, list[str]] = {"titles": [], "companies": []}
 
 
-def _corpus_options(conn: Any) -> dict[str, list[str]]:
-    return {"titles": distinct_titles(conn), "companies": distinct_companies(conn)}
+def _corpus_options(conn: Any, q: str) -> dict[str, list[str]]:
+    return {
+        "titles": distinct_titles(conn, q=q or None),
+        "companies": distinct_companies(conn, q=q or None),
+    }
 
 
-def _read_picker_options() -> dict[str, list[str]]:
+def _read_picker_options(q: str = "") -> dict[str, list[str]]:
     """Fail-closed corpus read, mirroring jobcannon/web/pages.py's
     _read_page_data shape: an unopened pool or a genuine DB outage degrades
     to empty title/company option lists (the picker still renders — its
     fixed-enum fields are unaffected) rather than a 500 on the public
-    onboarding entry point."""
+    onboarding entry point. `q` (#148) narrows both option lists through
+    jobcannon.db._feed's ILIKE search; empty/None means the original
+    unfiltered, alphabetical, corpus-derived window."""
     try:
         with connection_factory() as conn:
-            return _corpus_options(conn)
+            return _corpus_options(conn, q)
     except Exception:
         logger.warning(
             "picker option read failed (defaulting to empty corpus options)", exc_info=True
@@ -254,13 +273,48 @@ def _read_picker_options() -> dict[str, list[str]]:
         return dict(_EMPTY_OPTIONS)
 
 
-def _picker_context(*, error: str | None = None) -> dict[str, Any]:
-    options = _read_picker_options()
+def _merge_checked(options: list[str], checked: list[str]) -> list[str]:
+    """`options` (the corpus search/window result, already ordered) with any
+    already-checked value not present in that window appended at the end
+    (#148) — so a selection made before a narrower search term, or before a
+    validation-error re-render, never silently disappears from the rendered
+    fieldset. Not coincidentally, this is also what lets the fieldset carry
+    forward a `checked` attribute at all: before this, GET /start had no
+    state-restoration mechanism of any kind, so any in-page re-render (the
+    search box's own hx-get swap being the first one this route ever had)
+    would have silently unchecked everything outside the new window."""
+    seen = set(options)
+    return [*options, *[value for value in checked if value not in seen]]
+
+
+def _picker_context(
+    *,
+    error: str | None = None,
+    notice: str | None = None,
+    q: str = "",
+    checked_titles: list[str] | None = None,
+    checked_companies: list[str] | None = None,
+) -> dict[str, Any]:
+    """`error` (POST-only) is a hard validation rejection, rendered once by
+    onboarding_picker.html's own top-level block. `notice` (GET-only) is
+    the carry-forward-overage message (see `start`'s `_too_many_selected_message`
+    call) — a non-rejecting truncation notice, deliberately a SEPARATE field
+    so it renders exactly once, inside _picker_options.html (shared by both
+    the HX fragment and, via that template's inclusion, the full-page GET
+    render), without also duplicating onto _picker_options.html's shared
+    context for a POST error re-render, which never sets `notice`."""
+    checked_titles = checked_titles or []
+    checked_companies = checked_companies or []
+    options = _read_picker_options(q)
     return {
         "submitted": False,
         "error": error,
-        "titles": options["titles"],
-        "companies": options["companies"],
+        "notice": notice,
+        "q": q,
+        "titles": _merge_checked(options["titles"], checked_titles),
+        "companies": _merge_checked(options["companies"], checked_companies),
+        "checked_titles": checked_titles,
+        "checked_companies": checked_companies,
         "skills": SKILLS_OPTIONS,
         "seniority_levels": SENIORITY_LEVELS,
         "workplace_types": WORKPLACE_TYPES,
@@ -276,6 +330,18 @@ def _has_control_char(value: str) -> bool:
     return any(unicodedata.category(ch) == "Cc" for ch in value)
 
 
+def _too_many_selected_message(kind: str, count: int, limit: int) -> str | None:
+    """Single point of truth for the "too many ... selected" wording, so
+    POST /start's hard rejection (_parse_titles/_parse_companies below) and
+    GET /start's carry-forward notice (see `start` view) can never drift
+    apart into two different messages for the same bound (PR #192 review
+    finding L5 — the GET path used to truncate this same overage silently
+    instead of saying anything)."""
+    if count > limit:
+        return f"too many {kind} selected (max {limit})"
+    return None
+
+
 def _parse_titles(form: Any) -> tuple[list[str] | None, str | None]:
     """Shape-validate the submitted title selections before they can reach
     upsert_profile's target_titles column: count cap, per-item length cap,
@@ -283,8 +349,9 @@ def _parse_titles(form: Any) -> tuple[list[str] | None, str | None]:
     Deliberately NOT a membership check against the rendered option window
     — see MAX_TITLES_PER_SELECTION's module-level rationale comment."""
     raw_titles = [t for t in form.getlist("titles") if t]
-    if len(raw_titles) > MAX_TITLES_PER_SELECTION:
-        return None, f"too many titles selected (max {MAX_TITLES_PER_SELECTION})"
+    message = _too_many_selected_message("titles", len(raw_titles), MAX_TITLES_PER_SELECTION)
+    if message is not None:
+        return None, message
 
     titles: list[str] = []
     for title in raw_titles:
@@ -307,8 +374,11 @@ def _parse_companies(form: Any) -> tuple[list[str] | None, str | None]:
     the concern that check exists for doesn't apply — the cookie-budget caps
     below are the only hazard `companies` shares with `titles`."""
     raw_companies = [c for c in form.getlist("companies") if c]
-    if len(raw_companies) > MAX_COMPANIES_PER_SELECTION:
-        return None, f"too many companies selected (max {MAX_COMPANIES_PER_SELECTION})"
+    message = _too_many_selected_message(
+        "companies", len(raw_companies), MAX_COMPANIES_PER_SELECTION
+    )
+    if message is not None:
+        return None, message
 
     companies: list[str] = []
     for company in raw_companies:
@@ -400,17 +470,63 @@ def _parse_submission(form: Any) -> tuple[dict[str, Any] | None, str | None]:
 
 @onboarding_bp.get("/start", strict_slashes=False)
 def start():
+    """#148: `q` (an optional search term) narrows the Titles/Companies
+    fieldsets server-side. The exact same computation serves two shapes,
+    gated on the `HX-Request` header — the picker's search input hx-gets
+    THIS route, so the two can never drift out of sync the way a separate
+    fragment endpoint could: an `HX-Request` returns just the fieldsets
+    (`_picker_options.html`, swapped into `#picker-options`); anything else
+    — a direct browser hit on `/start?q=...`, or a JS-disabled visitor
+    submitting the search form's own GET fallback — gets the full page with
+    those same filtered fieldsets already rendered. `titles`/`companies`
+    query params (present when the search box's hx-include carries forward
+    the visitor's already-checked boxes) are read here too, capped the same
+    way POST /start caps a submission — but unlike POST, an overage here
+    can't be rejected outright (there's no submission to bounce, just a
+    widened checked-set), so it's truncated for display AND surfaced via the
+    same "too many ... selected" notice POST uses, rather than silently
+    dropped (PR #192 review finding L5).
+
+    The `HX-Request` check runs BEFORE the pending-picker branch (PR #192
+    review finding L6): the search input's own hx-get can reach this route
+    while a picker submission is already pending in this session (a cross-
+    tab race — see the module docstring), and hx-swap="outerHTML" always
+    targets #picker-options specifically, so an HX-Request must always get a
+    #picker-options-rooted fragment back, never a whole document, in EVERY
+    branch of this view."""
     pending = get_pending_picker()
+    is_hx = request.headers.get("HX-Request") == "true"
     if pending is not None:
+        if is_hx:
+            return render_template("_picker_submitted.html")
         return render_template("onboarding_picker.html", submitted=True, pending=pending)
-    return render_template("onboarding_picker.html", **_picker_context())
+
+    q = (request.args.get("q") or "").strip()
+    raw_titles = request.args.getlist("titles")
+    raw_companies = request.args.getlist("companies")
+    notice = _too_many_selected_message(
+        "titles", len(raw_titles), MAX_TITLES_PER_SELECTION
+    ) or _too_many_selected_message("companies", len(raw_companies), MAX_COMPANIES_PER_SELECTION)
+    checked_titles = raw_titles[:MAX_TITLES_PER_SELECTION]
+    checked_companies = raw_companies[:MAX_COMPANIES_PER_SELECTION]
+    context = _picker_context(
+        notice=notice, q=q, checked_titles=checked_titles, checked_companies=checked_companies
+    )
+    if is_hx:
+        return render_template("_picker_options.html", **context)
+    return render_template("onboarding_picker.html", **context)
 
 
 @onboarding_bp.post("/start", strict_slashes=False)
 def start_submit():
     selections, error = _parse_submission(request.form)
     if error is not None:
-        return render_template("onboarding_picker.html", **_picker_context(error=error)), 200
+        checked_titles = request.form.getlist("titles")[:MAX_TITLES_PER_SELECTION]
+        checked_companies = request.form.getlist("companies")[:MAX_COMPANIES_PER_SELECTION]
+        context = _picker_context(
+            error=error, checked_titles=checked_titles, checked_companies=checked_companies
+        )
+        return render_template("onboarding_picker.html", **context), 200
 
     pending = get_pending_picker()
     with connection_factory() as conn:
@@ -460,12 +576,18 @@ def _current_identity() -> Any:
 
 
 def _read_preview_postings(
-    *, titles: list[str] | None, workplace_type: str | None, location_contains: str | None
+    *,
+    titles: list[str] | None,
+    workplace_type: str | None,
+    location_contains: str | None,
+    after: tuple[float | None, Any, int] | None,
 ) -> list[Any]:
     """Fail-closed corpus read, same shape as _read_picker_options: an
     unopened pool or a genuine DB outage degrades to an empty result list
     (_feed_list.html's empty-state branch still renders) rather than a 500
-    on a public entry point."""
+    on a public entry point. `after` (#156) is the keyset cursor for
+    "Load more" — see jobcannon/db/_feed.py's list_feed_postings/
+    _cursor_predicate."""
     try:
         with connection_factory() as conn:
             return list_feed_postings(
@@ -474,10 +596,27 @@ def _read_preview_postings(
                 titles=titles,
                 workplace_type=workplace_type,
                 location_contains=location_contains,
+                after=after,
             )
     except Exception:
         logger.warning("preview feed read failed (defaulting to empty result set)", exc_info=True)
         return []
+
+
+def _preview_load_more_url(location_contains: str | None, rows: list[Any]) -> str | None:
+    """Next-page URL for /preview's "Load more" control, or None when this
+    page came back short of FEED_PAGE_MAX — a keyset page shorter than the
+    cap proves there is nothing left to seek past (#156). `titles`/
+    `workplace_type` need no explicit carry-forward here: they come from the
+    session-held picker selections (get_pending_picker), which every request
+    on this route already re-reads identically, unlike `location`, which is
+    this route's own query-string filter and must round-trip through the
+    URL the same way jobcannon/web/pages.py's `_feed_load_more_url` carries
+    its filters forward."""
+    if len(rows) < FEED_PAGE_MAX:
+        return None
+    query = {"location": location_contains} if location_contains else {}
+    return url_for("onboarding.preview", **query, **cursor_from_row(rows[-1]))
 
 
 def _ordering_label(rows: list[Any]) -> dict[str, Any]:
@@ -517,24 +656,40 @@ def _ordering_label(rows: list[Any]) -> dict[str, Any]:
 
 @onboarding_bp.get("/preview", strict_slashes=False)
 def preview():
+    """#156: paginates via a keyset cursor read from `cursor_id`/
+    `cursor_last_seen`/`cursor_rank_score` query params (jobcannon.db._feed.
+    parse_cursor — a malformed/tampered value degrades to a first page, not
+    a 500). Same HX-Request split as GET /start (#148): the "Load more"
+    button hx-gets THIS route with the next cursor attached, so an
+    HX-Request returns only the next batch (+ a further "Load more", or
+    nothing when exhausted — `_feed_page.html`); a direct browser hit — the
+    first real GET /preview, or someone opening a "Load more" URL straight
+    in a new tab — gets the full page, at whatever page the cursor names."""
     if _current_identity() is not None:
         return redirect(url_for("pages.feed"))
 
     pending = get_pending_picker()
     selections: dict[str, Any] = pending if pending is not None else {}
     location_contains = (request.args.get("location") or "").strip() or None
+    after = parse_cursor(request.args)
 
     rows = _read_preview_postings(
         titles=selections.get("titles") or None,
         workplace_type=selections.get("workplace_type"),
         location_contains=location_contains,
+        after=after,
     )
     entries = [{"row": row, "chips": why_chips(row, selections)} for row in rows]
+    load_more_url = _preview_load_more_url(location_contains, rows)
+
+    if request.headers.get("HX-Request") == "true":
+        return render_template("_feed_page.html", entries=entries, load_more_url=load_more_url)
 
     return render_template(
         "preview.html",
         entries=entries,
         has_selections=bool(selections),
+        load_more_url=load_more_url,
         ordering=_ordering_label(rows),
         location_contains=location_contains or "",
     )

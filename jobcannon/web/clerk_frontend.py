@@ -17,8 +17,20 @@ from __future__ import annotations
 
 import base64
 import binascii
+import re
 
 _PREFIXES = ("pk_live_", "pk_test_")
+
+# RFC 1123 hostname shape: dot-separated labels of letters/digits/hyphens,
+# each 1-63 chars, no leading/trailing hyphen. No port, no path, no scheme.
+# The decoded host is interpolated unsanitized into the CSP header
+# (`security_headers.py` builds `f"https://{frontend_api_host}"` into
+# script-src/connect-src/frame-src); a decoded value containing `;`, spaces,
+# quotes, or `/` could inject an extra CSP directive or source expression.
+_HOSTNAME_RE = re.compile(
+    r"^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
+)
 
 
 def frontend_api_host(publishable_key: str) -> str:
@@ -56,4 +68,9 @@ def frontend_api_host(publishable_key: str) -> str:
     host = decoded[:-1]
     if not host:
         raise ValueError(f"decoded publishable key host is empty: {publishable_key!r}")
+    if not _HOSTNAME_RE.match(host):
+        raise ValueError(
+            f"decoded publishable key host is not a valid hostname: {host!r} "
+            f"(from key {publishable_key!r})"
+        )
     return host

@@ -9,6 +9,7 @@ tests/host/ module reads inside a rollback-isolated transaction.
 from __future__ import annotations
 
 import random
+import re
 import string
 
 import psycopg
@@ -635,4 +636,199 @@ def test_repeat_get_start_after_submit_shows_completion_state(app):
 
     assert resp.status_code == 200
     assert "picker submitted" in html.lower()
-    assert 'href="/preview"' in html
+
+
+# --- #148: picker search (`q`) ---------------------------------------------
+
+
+def test_picker_search_q_narrows_titles_and_companies(app):
+    """Route-level version of the DAL's own q-narrowing test
+    (tests/host/test_feed_dal.py) — proves GET /start?q=... is actually
+    wired to distinct_titles/distinct_companies's q parameter, not just
+    that the DAL function itself supports it."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_postings(dsn, [f"Aardvark Role {i:03d}" for i in range(55)] + ["Software Engineer"])
+
+    unfiltered = app.test_client().get("/start").get_data(as_text=True)
+    assert "Software Engineer" not in unfiltered  # sanity: reproduces #148's bug
+
+    filtered = (
+        app.test_client().get("/start", query_string={"q": "Software"}).get_data(as_text=True)
+    )
+    assert "Software Engineer" in filtered
+    assert "Aardvark Role 000" not in filtered
+
+
+def test_picker_search_hx_request_returns_fragment_only(app):
+    """The search input's own hx-get must return just the filtered
+    fieldsets (_picker_options.html), never the surrounding page chrome —
+    proving this is genuinely a fragment response, not the full page
+    reused."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_postings(dsn, ["Data Engineer"])
+
+    resp = app.test_client().get(
+        "/start", query_string={"q": "Data"}, headers={"HX-Request": "true"}
+    )
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert 'id="picker-options"' in html
+    assert "Data Engineer" in html
+    assert "Tell us what you're looking for" not in html
+    assert "<nav" not in html
+
+
+def test_picker_search_without_hx_request_returns_full_page(app):
+    """No-JS fallback: a plain GET /start?q=... (the search form's own
+    submit button, no HTMX) must still get the full chromed page with the
+    filtered fieldsets already rendered server-side — never a bare
+    fragment."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_postings(dsn, ["Data Engineer"])
+
+    resp = app.test_client().get("/start", query_string={"q": "Data"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Tell us what you're looking for" in html
+    assert "Data Engineer" in html
+
+
+def test_picker_search_carries_forward_checked_selection_outside_the_window(app):
+    """A title checked before narrowing the search must not silently
+    disappear from the rendered fieldset just because a later search term
+    no longer matches it (jobcannon.web.onboarding._merge_checked) — the
+    box stays present and checked; a title that was never checked and
+    doesn't match the new q is not checked."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_postings(dsn, ["Data Engineer", "Product Manager"])
+
+    resp = app.test_client().get(
+        "/start",
+        query_string={"q": "Product", "titles": "Data Engineer"},
+        headers={"HX-Request": "true"},
+    )
+    html = resp.get_data(as_text=True)
+
+    assert re.search(r'value="Data Engineer"[^>]*checked', html) is not None
+    assert re.search(r'value="Product Manager"[^>]*checked', html) is None
+
+
+def test_picker_search_escapes_percent_and_underscore(app):
+    """Route-level version of the DAL's own escaping test — a q containing a
+    LIKE metacharacter must match only a title literally containing that
+    character, never every row (proving the route passes q through to the
+    escaping DAL call rather than, say, a raw string format)."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_postings(dsn, ["50% Remote Engineer", "Back_End Developer", "Plain Title"])
+
+    percent_html = app.test_client().get("/start", query_string={"q": "%"}).get_data(as_text=True)
+    assert "50% Remote Engineer" in percent_html
+    assert "Back_End Developer" not in percent_html
+    assert "Plain Title" not in percent_html
+
+
+# --- PR #192 review fixes: L1 (search form drops checked boxes), L5 (silent
+# GET carry-forward truncation), L6 (HX during pending swaps a whole
+# document) ---------------------------------------------------------------
+
+
+def test_search_form_echoes_checked_selections_as_hidden_inputs(app):
+    """Review finding L1: onboarding_picker.html's search `<form
+    method="get">` used to carry only `q` — a no-JS "Search" click, or
+    pressing Enter in the search box (which fires this form's own native GET
+    submit whenever the text itself doesn't change, so htmx's "keyup
+    changed" trigger does NOT also fire), dropped every checked title/
+    company box because the GET form had no field for them at all. The
+    search form now echoes the server's already-known checked state as
+    hidden inputs, and GET /start reads them back exactly like it already
+    read the hx-include case (request.args.getlist) — so the fix is a plain
+    route-level round trip: request with checked boxes, confirm the
+    response's OWN search form still carries them as hidden inputs, and a
+    follow-up GET built from exactly that hidden-input state still shows
+    both checked."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_postings(dsn, ["Data Engineer", "Product Manager"])
+
+    resp = app.test_client().get(
+        "/start",
+        query_string={"q": "Product", "titles": "Data Engineer", "companies": SEEDED_COMPANY},
+    )
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert '<input type="hidden" name="titles" value="Data Engineer">' in html
+    assert f'<input type="hidden" name="companies" value="{SEEDED_COMPANY}">' in html
+
+    # The no-JS round trip: exactly what a plain "Search" click would
+    # resubmit next (this form's own `q` field plus the hidden echoes above)
+    # — previously this dropped both checked boxes since the form carried
+    # only `q`.
+    resubmit = app.test_client().get(
+        "/start", query_string={"q": "", "titles": "Data Engineer", "companies": SEEDED_COMPANY}
+    )
+    resubmit_html = resubmit.get_data(as_text=True)
+    assert re.search(r'value="Data Engineer"[^>]*checked', resubmit_html) is not None
+    assert re.search(rf'value="{re.escape(SEEDED_COMPANY)}"[^>]*checked', resubmit_html) is not None
+
+
+def test_hx_search_while_picker_pending_returns_picker_options_fragment(app):
+    """Review finding L6: GET /start's pending-picker early return used to
+    render the FULL onboarding_picker.html (extends base.html) regardless of
+    HX-Request — a cross-tab race (tab A's search box hx-gets /start while
+    tab B's submission just went pending in the shared session cookie) would
+    then swap a whole <html> document into #picker-options via outerHTML.
+    The HX-Request check now runs before the pending branch, so this exact
+    request gets a #picker-options-rooted fragment instead."""
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess["pending_picker"] = {"anon_id": "anon_test_pending"}
+
+    resp = client.get("/start", query_string={"q": "x"}, headers={"HX-Request": "true"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert 'id="picker-options"' in html
+    assert "See your preview" in html
+    assert "<nav" not in html
+    assert (
+        "picker submitted" not in html.lower()
+    )  # onboarding_picker.html's own <h1>, not this fragment
+
+
+def test_get_search_carry_forward_title_overage_shows_notice(app):
+    """Review finding L5: the GET/HX carry-forward path used to truncate
+    checked-box overage at MAX_TITLES_PER_SELECTION silently, while POST
+    rejects the identical overage loudly ("too many ... selected (max N)").
+    Now symmetric: the GET path surfaces the same notice — and still
+    truncates the checked state for display (never wipes it), same as
+    POST's own re-render does on its error path."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_postings(dsn, ["Data Engineer"])
+    titles = [f"Title {i}" for i in range(MAX_TITLES_PER_SELECTION + 1)]
+
+    resp = app.test_client().get(
+        "/start", query_string={"titles": titles}, headers={"HX-Request": "true"}
+    )
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert f"too many titles selected (max {MAX_TITLES_PER_SELECTION})" in html
+    assert re.search(r'value="Title 0"[^>]*checked', html) is not None
+
+
+def test_get_search_carry_forward_company_overage_shows_notice_on_full_page(app):
+    """Same notice on the no-JS full-page path (not just the HX fragment) —
+    _picker_options.html's `notice` block is shared via onboarding_picker.html's
+    {% include %}, so both render paths carry it identically."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_postings(dsn, ["Data Engineer"])
+    companies = [f"Company {i}" for i in range(MAX_COMPANIES_PER_SELECTION + 1)]
+
+    resp = app.test_client().get("/start", query_string={"companies": companies})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert f"too many companies selected (max {MAX_COMPANIES_PER_SELECTION})" in html
+    assert "Tell us what you're looking for" in html  # confirms full page, not a bare fragment
