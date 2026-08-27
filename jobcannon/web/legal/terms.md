@@ -10,7 +10,7 @@ These Terms of Service ("Terms") are a contract between you and Senkichi, LLC
 account or using the Service you agree to these Terms. If you do not agree, do not use
 the Service.
 
-Our Privacy Policy describes how we handle personal data and is incorporated into these
+Our [Privacy Policy](/privacy) describes how we handle personal data and is incorporated into these
 Terms by reference. It is available at https://jobcannon.dev/privacy.
 
 
