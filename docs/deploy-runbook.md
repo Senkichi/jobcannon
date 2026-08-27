@@ -154,41 +154,71 @@ discipline rules above mechanical rather than prose-only. It derives every
 input from the `MIGRATIONS` registry (`jobcannon/db/migrations/__init__.py`)
 — never a hand-maintained version list — so a new migration is covered the
 moment its module lands, with no guard-file edit required. It needs no
-database and runs in the default `tests/` sweep, not `tests/host/`.
+database and runs in the default `tests/` sweep, not `tests/host/`. It
+parses every migration's SQL with **pglast** (libpg_query/Postgres-grammar
+bindings, a prebuilt wheel — no compiler needed) into a real parse tree and
+classifies the AST directly, so quoting, schema-qualification, `ONLY`/`IF
+EXISTS`, comments, and multi-statement `;`-splitting are handled by the
+parser itself rather than a hand-rolled tokenizer that could desync from
+real Postgres syntax (an earlier regex/tokenizer version of this guard did
+exactly that and silently passed several contract-shaped shapes — see the
+module docstring's "Parser" section for the specific list).
 
 1. **Contract-shaped DDL against a pre-existing table/column fails by
-   default.** `DROP COLUMN`, `DROP TABLE`, `ALTER COLUMN ... TYPE`,
-   `ADD COLUMN ... NOT NULL` without `DEFAULT`, `ADD CONSTRAINT ...
-   CHECK`/`UNIQUE`, and `ALTER COLUMN ... SET NOT NULL` all fail the guard
-   when they target a table/column an EARLIER migration created (the same
-   statement acting on a table/column the CURRENT migration itself just
-   created is fine — nothing running the previous release ever queried
-   it). A migration that genuinely needs one of these shapes (e.g. m0003's
-   CHECK widen, which drops and re-adds the constraint by name) declares
-   it deliberately: a bare `contract_step = True` module attribute plus a
-   docstring paragraph starting `Contract justification:` explaining why
-   the change is still safe for the previous release during the
-   zero-downtime overlap window. `jobcannon/db/migrate.py`'s
-   `_apply_migration` then logs a `CONTRACT-STEP migration ...` WARNING
-   line when applying it, so it's visible in the Render deploy log — that
-   is the exact line to check before deciding whether
-   `JC_MIGRATE_ALLOW_NEWER_DB` is safe to use for a rollback across it
-   (it is **not**, per the Rollback caveat above).
-2. **An inverted `Deploy order: ... AFTER` backfill fails by default.**
-   Pre-deploy now always runs migrations before the new release's writer
-   goes live, inverting the ordering a "run this migration AFTER the
-   writer deploys" docstring assumed. A migration whose docstring matches
-   that pattern and is genuinely safe to run before its writer exists
-   (e.g. m0010, whose backfill UPDATE is a no-op the moment no row still
-   carries the old key) declares `inverted_order_safe = True` plus a
-   docstring explanation using the word "idempotent", so the guard can
-   confirm an actual explanation exists, not just the bare flag.
+   default — fail-CLOSED, not an enumerated deny-list.** `DROP COLUMN`,
+   `DROP TABLE`, `RENAME COLUMN`/`RENAME TABLE`, `DROP CONSTRAINT`,
+   `TRUNCATE`, `DROP INDEX` (of an index not created in the same
+   migration), `CREATE UNIQUE INDEX` on a pre-existing table, `ALTER
+   COLUMN ... TYPE`, `ALTER COLUMN ... SET NOT NULL`, `ADD COLUMN ...
+   NOT NULL` with no DEFAULT/identity/generated value source, and `ADD
+   CONSTRAINT` (named or anonymous `CHECK`/`UNIQUE`/`PRIMARY
+   KEY`/`FOREIGN KEY`/`EXCLUDE`, unless added `NOT VALID`) all fail the
+   guard when they target a table/column/constraint/index an EARLIER
+   migration created. Just as important: every `ALTER TABLE` sub-command
+   this guard doesn't have a specific rule for — including a future
+   Postgres syntax this file has never seen — ALSO fails by default; only
+   a small, explicit allowlist of genuinely expand-safe shapes (`DROP NOT
+   NULL`, `SET`/`DROP DEFAULT`, `VALIDATE CONSTRAINT`, `SET STATISTICS`,
+   column/table storage options, `OWNER TO`, `ENABLE`/`FORCE ROW LEVEL
+   SECURITY`) is exempt. The same statement acting on a table/column the
+   CURRENT migration itself just created is fine — nothing running the
+   previous release ever queried it. A migration that genuinely needs one
+   of the flagged shapes (e.g. m0003's CHECK widen, which drops and
+   re-adds the constraint by name) declares it deliberately: a bare
+   `contract_step = True` module attribute plus a docstring paragraph
+   starting `Contract justification:` explaining why the change is still
+   safe for the previous release during the zero-downtime overlap window.
+   `jobcannon/db/migrate.py`'s `_apply_migration` then logs a
+   `CONTRACT-STEP migration ...` WARNING line when applying it, so it's
+   visible in the Render deploy log — that is the exact line to check
+   before deciding whether `JC_MIGRATE_ALLOW_NEWER_DB` is safe to use for
+   a rollback across it (it is **not**, per the Rollback caveat above).
+2. **An inverted deploy-order backfill fails by default — prose OR
+   structural signal.** Pre-deploy now always runs migrations before the
+   new release's writer goes live, inverting the ordering a "run this
+   migration AFTER the writer deploys" docstring assumed. This is flagged
+   two ways, either one triggers it: (a) a docstring matching `Deploy
+   order: ... AFTER`, or (b) a structural signal — an `UPDATE`, or an
+   `INSERT ... SELECT` (not a literal `VALUES` insert), targeting a table
+   an earlier migration created, independent of whether the author wrote a
+   "Deploy order" paragraph at all. A migration that's genuinely safe to
+   run before its writer exists (e.g. m0010, whose backfill `UPDATE` is a
+   no-op the moment no row still carries the old key) declares
+   `inverted_order_safe = True` plus a docstring `Stragglers:` line
+   describing what happens to rows the OLD (not-yet-replaced) writer
+   creates *after* this migration commits — that's the actual hazard
+   (completeness of the backfill), not whether the `UPDATE` happens to be
+   idempotent.
 
-Both checks are pure static analysis over the registry's own SQL statement
-strings (a small paren/quote-depth-aware tokenizer plus anchored regexes —
-no `sqlglot`/`pglast` dependency) and are deliberately conservative: a
-statement shape or column reference the scanner can't positively prove is
-safe is treated as contract-shaped rather than silently passed.
+**Documented coverage gaps** (fail-closed by declaration, not by scanning):
+a `DO $$ ... $$` procedural block (the body is opaque to libpg_query) and a
+`migration.py` callable hook (arbitrary Python) are both always treated as
+contract-shaped — they require `contract_step = True` even when the hidden
+DDL/Python is actually expand-safe, because this guard has no way to prove
+that. `DROP` of an object type other than `TABLE`/`INDEX` (sequences, views,
+types, ...) isn't scanned. `ALTER COLUMN ... TYPE` doesn't distinguish widen
+from narrow (deliberate over-flag). Non-unique, non-concurrent `CREATE
+INDEX` lock duration is out of scope — filed as #219.
 
 Expect these log lines on a fresh database's first worker boot (the ledger
 `name` column — and therefore the second `%s` migrate.py logs — is the
