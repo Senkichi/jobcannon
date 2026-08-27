@@ -105,6 +105,7 @@ import re
 import pytest
 
 from jobcannon.web import legal
+from jobcannon.web.template_globals import touch_target
 
 _TEMPLATES_DIR = pathlib.Path("jobcannon/web/templates")
 _LEGAL_PAGE_TEMPLATE = _TEMPLATES_DIR / "legal_page.html"
@@ -200,6 +201,25 @@ def _collect_cases():
 
 _CASES = _collect_cases()
 _CASE_IDS = [f"{i:03d}-{f}-{t}-{it or ''}" for i, (f, t, it, _a) in enumerate(_CASES)]
+
+
+def test_touch_target_returns_the_documented_literal_tokens():
+    """review-1 MED-1: the single-sourced floor itself had no return-value
+    test -- every test below (and the whole rest of this suite) only checks
+    that the `touch_target(...)` MARKER is present, never what it actually
+    renders. Editing `_KIND_TOKENS["block"]` in template_globals.py to
+    "min-h-10" would leave every marker-based case here green (65 sites
+    still call the marker, still resolve to kind "block") while silently
+    shipping a sub-44px floor at all 61 non-checkbox sites -- the exact
+    #207 failure mode relocated one layer up to the single source this
+    module's docstring already names but never tested. Literal expected
+    values, never derived from `_KIND_TOKENS` itself, so an edit there
+    can't drag its own test along with it."""
+    assert touch_target() == "min-h-11"
+    assert touch_target("block") == "min-h-11"
+    assert touch_target("checkbox") == "h-11 w-11"
+    with pytest.raises(ValueError):
+        touch_target("radio")
 
 
 def test_scan_found_a_plausible_number_of_interactive_elements():
