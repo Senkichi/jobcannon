@@ -45,7 +45,14 @@ signed-in visitor); extends the #158 clerk-js gate itself to also skip
 loading it on a public_get view's signed-out render specifically (a
 signed-out GET /consent is, for that request, the same class of page as
 /privacy -- nothing gated behind it -- even though the route as a whole
-isn't a PUBLIC_PATHS member)."""
+isn't a PUBLIC_PATHS member); that same context processor also derives
+signup_cta_url — clerk_sign_up_url, falling back to clerk_sign_in_url,
+but ONLY when the current visitor is anonymous, else None — the single
+source every anonymous-visitor CTA (the /preview page-level line, its
+per-row _posting_row.html CTA, and the /demo CTA) gates on, so no
+template computes its own anonymous fallback and no future public route
+can leak the CTA to a signed-in visitor by forgetting to pass a flag
+(issue #174)."""
 
 from __future__ import annotations
 
@@ -164,6 +171,51 @@ def _auth_link_context(host_config) -> dict[str, str]:
     }
 
 
+def _signup_cta_url(host_config, *, is_anonymous: bool) -> str | None:
+    """The single derived value every anonymous-visitor CTA (issue #174:
+    /preview's page-level line, its per-row _posting_row.html CTA, and
+    /demo's CTA) gates on. Pure function of (host_config, is_anonymous) so
+    it's unit-testable with no request/app context.
+
+    Returns clerk_sign_up_url, falling back to clerk_sign_in_url, exactly
+    like _auth_link_context's header nav -- but ONLY when is_anonymous is
+    True. A signed-in visitor always gets None, regardless of what's
+    configured, so no caller can render the "sign up" CTA to someone who
+    already has an account. Both-unset (or non-anonymous) collapses to
+    None rather than a bare href=""."""
+    if not is_anonymous:
+        return None
+    sign_up = getattr(host_config, "clerk_sign_up_url", "")
+    sign_in = getattr(host_config, "clerk_sign_in_url", "")
+    return sign_up or sign_in or None
+
+
+def _visitor_is_anonymous() -> bool:
+    """Whether the current request's visitor is anonymous, for
+    _signup_cta_url. Reuses the SAME identity resolution the auth gate
+    itself uses rather than re-implementing it:
+
+    - On a non-public path, before_request's clerk_auth() has already run
+      VERIFY_REQUEST and set g.clerk_user (aborting 401 if it were None),
+      so g.clerk_user is non-None on every render that reaches here --
+      trust that cached result instead of re-verifying.
+    - On a PUBLIC_PATHS render (/preview, /demo, /privacy, /terms, the
+      401 page), clerk_auth() unconditionally sets g.clerk_user = None
+      without ever checking real identity, so g.clerk_user tells us
+      nothing there; fall back to onboarding._current_identity(), the
+      same re-check preview() already calls at onboarding.py to decide
+      whether to redirect an authed visitor away from /preview. It fails
+      open to anonymous on any verifier error -- the safe direction for
+      an accessor that only ever gates whether a CTA is offered, never
+      access to a page."""
+    if getattr(g, "clerk_user", None) is not None:
+        return False
+
+    from jobcannon.web.onboarding import _current_identity
+
+    return _current_identity() is None
+
+
 def _warn_if_auth_links_unset(host_config) -> None:
     """Both fields _auth_link_context reads are non-secret and intentionally
     NOT fail-fast (unlike CLERK_PUBLISHABLE_KEY/WEBHOOK_SECRET below): a bare
@@ -267,8 +319,16 @@ def create_app(config: dict | None = None) -> Flask:
         # above -- base.html's header nav is gated in the template on
         # `not g.clerk_user` (public pages and the 401 page render it,
         # authed pages don't), not on request.path, so this needs no
-        # PUBLIC_PATHS-based logic of its own.
-        return _auth_link_context(app.config["HOST_CONFIG"])
+        # PUBLIC_PATHS-based logic of its own. Also derives signup_cta_url
+        # (issue #174) -- the single value every anonymous-visitor CTA
+        # gates on, computed here so no template re-derives its own
+        # anonymous fallback or forgets to check identity.
+        host_config = app.config["HOST_CONFIG"]
+        context = _auth_link_context(host_config)
+        context["signup_cta_url"] = _signup_cta_url(
+            host_config, is_anonymous=_visitor_is_anonymous()
+        )
+        return context
 
     if "WEBHOOK_SECRET" in app.config:
         secret = app.config["WEBHOOK_SECRET"]
