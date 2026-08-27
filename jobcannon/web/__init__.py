@@ -232,9 +232,19 @@ def _visitor_is_anonymous() -> bool:
       identity: fall back to onboarding._current_identity(), the same
       re-check preview() already calls at onboarding.py to decide whether
       to redirect an authed visitor away from /preview. It fails open to
-      anonymous on any verifier error -- an accepted trade-off there,
-      since the only things that ever gated on it were a CTA offer and a
-      redirect, never account-mutation nav.
+      anonymous on any verifier error, and it never consults
+      revoked_subjects (only clerk_auth's non-public-path branch does) --
+      accepted trade-offs when the only things gating on it were a CTA
+      offer and a redirect, and NOW also slightly widened by issue #205:
+      a tombstoned-but-cryptographically-valid JWT on a PUBLIC_PATHS page
+      will re-verify non-None here and show visitor_is_authed = True, so
+      My-postings / Export / Delete render on that public page for a
+      revoked visitor. Not a security hole -- every one of those links
+      targets a non-public route, where clerk_auth's revocation check
+      runs for real and 401s on click (test_revoked_subject_401s_on_*) --
+      just a narrow, cosmetic UX wart for an edge-case visitor, traded
+      for not adding a DB read to every public-page render (issue #193's
+      cacheability goal).
     - g.clerk_user is None on any OTHER path -- the 404/405 pre-route-match
       branch (deliberately never resolved, see the routing_exception
       comment above) and, more importantly, the revoked-subject 401 branch
@@ -872,9 +882,13 @@ def create_app(config: dict | None = None) -> Flask:
             # Clerk's Account Portal) already happened for this account,
             # and this token was simply minted/refreshed before that. Undo
             # the g.clerk_user set two lines up before aborting: base.html
-            # gates the header sign-in/up nav AND the authed footer links on
-            # `g.clerk_user`, and error_401.html extends base.html, so a
-            # left-set g.clerk_user would render "Export your data /
+            # gates the header sign-in/up nav, My-postings, and the authed
+            # footer links on `visitor_is_authed` (issue #205), which is
+            # fail-closed to anonymous whenever g.clerk_user is None off of
+            # a PUBLIC_PATHS render (see _visitor_is_anonymous's docstring)
+            # -- this g.clerk_user reset is what that fail-closed branch
+            # keys off of. error_401.html extends base.html, so a left-set
+            # g.clerk_user would otherwise render "Export your data /
             # Delete account" links on the very page telling this visitor
             # they're signed out. session.clear() also runs here, not only
             # in account.py's post_delete -- this is the ONLY gate on the
