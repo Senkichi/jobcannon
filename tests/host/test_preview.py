@@ -328,3 +328,36 @@ def test_preview_shows_a_real_salary_currency_label(app):
     assert "Real Currency Posting" in html
     assert "GBP" in html
     assert "95000" in html
+
+
+# ---------------------------------------------------------------------------
+# Sign-up CTA (issue #145): /preview is the pre-signup feed a visitor
+# reaches after the picker, with no path onward to an account before this
+# fix. Tolerant-default gating, same shape as the header nav
+# (tests/host/test_auth_nav.py) — mutating app.config["HOST_CONFIG"] after
+# the fixture creates the app works here because
+# jobcannon.web._inject_auth_links reads app.config["HOST_CONFIG"] fresh on
+# every render rather than closing over a value captured at create_app time.
+# ---------------------------------------------------------------------------
+
+
+def test_preview_shows_signup_cta_when_sign_up_url_configured(app):
+    """The `app` fixture never overrides HOST_CONFIG, so TESTING's default
+    (clerk_sign_up_url="https://clerk.test/sign-up",
+    jobcannon/web/__init__.py) applies -- this is the positive control."""
+    html = app.test_client().get("/preview").get_data(as_text=True)
+
+    assert "data-signup-cta" in html
+    assert "Sign up to keep this feed" in html
+    assert 'href="https://clerk.test/sign-up"' in html
+
+
+def test_preview_omits_signup_cta_when_sign_up_url_unset(app):
+    from jobcannon.host.config import HostConfig
+
+    app.config["HOST_CONFIG"] = HostConfig(database_url="", secret_key="testing-secret-key")
+
+    html = app.test_client().get("/preview").get_data(as_text=True)
+
+    assert "data-signup-cta" not in html
+    assert "Sign up to keep this feed" not in html

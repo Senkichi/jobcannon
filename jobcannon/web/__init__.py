@@ -25,14 +25,21 @@ clerk-js frontend loader wiring (fail-fast CLERK_PUBLISHABLE_KEY
 validation + a context processor exposing
 clerk_publishable_key/clerk_frontend_api_host to every template, issue
 #149) that completes Clerk's cross-domain sign-in handshake, which the
-Python backend SDK alone cannot do)."""
+Python backend SDK alone cannot do); gates that clerk-js loader off of
+every PUBLIC_PATHS page via the shared _is_public_request_path()
+normalization (issue #158: a visitor reading /privacy before ever
+deciding to sign up should not have their IP/UA phoned to Clerk); adds a
+context processor exposing clerk_sign_up_url/clerk_sign_in_url to every
+template, powering base.html's header sign-in/sign-up nav on public pages
+and the 401 page (issue #145 — the acquisition funnel previously had no
+discoverable entry point anywhere on the public surface)."""
 
 from __future__ import annotations
 
 import logging
 import os
 
-from flask import Flask, abort, current_app, g, render_template, request
+from flask import Flask, abort, g, render_template, request
 
 from jobcannon.web.anon_session import capture_attribution, ensure_session_ids
 from jobcannon.web.handoff import run_handoff_if_pending
@@ -43,6 +50,16 @@ PUBLIC_PATHS = frozenset({"/healthz", "/demo", "/start", "/preview", "/privacy",
 
 # Terms of Service §8's AGPL Corresponding Source offer names this repo.
 _REPO_URL = "https://github.com/Senkichi/jobcannon"
+
+
+def _is_public_request_path() -> bool:
+    """The one normalization PUBLIC_PATHS membership is checked against,
+    shared by clerk_auth's before_request gate and inject_clerk_frontend's
+    clerk-js loader gate (issue #158) so the two can never drift apart --
+    strict_slashes=False routes like /demo register both /demo and /demo/,
+    so a trailing slash is stripped (falling back to "/") before the
+    membership check, exactly as clerk_auth used to do inline."""
+    return (request.path.rstrip("/") or "/") in PUBLIC_PATHS
 
 
 def _source_link_context(host_config) -> dict[str, str]:
@@ -64,6 +81,22 @@ def _source_link_context(host_config) -> dict[str, str]:
     if not sha:
         return {"source_url": _REPO_URL, "source_sha_short": ""}
     return {"source_url": f"{_REPO_URL}/tree/{sha}", "source_sha_short": sha[:7]}
+
+
+def _auth_link_context(host_config) -> dict[str, str]:
+    """base.html's header sign-in/sign-up nav (issue #145), derived from
+    HOST_CONFIG the same way _source_link_context derives the footer's
+    Source link: getattr, not a bare attribute access, so a HOST_CONFIG test
+    double that predates one or both fields -- e.g.
+    tests/host/test_pages.py's bare types.SimpleNamespace(clerk_sign_up_url=
+    ""), which every request renders through this same context processor --
+    degrades to "" for whichever field it lacks instead of raising
+    AttributeError. Each URL renders independently in the template (an
+    unset one renders nothing, never a bare href="")."""
+    return {
+        "clerk_sign_up_url": getattr(host_config, "clerk_sign_up_url", ""),
+        "clerk_sign_in_url": getattr(host_config, "clerk_sign_in_url", ""),
+    }
 
 
 def _resolve_consent(identity) -> bool:
@@ -125,6 +158,7 @@ def create_app(config: dict | None = None) -> Flask:
             database_url="",  # tests open the pool with their own throwaway DSN
             secret_key="testing-secret-key",
             clerk_sign_up_url="https://clerk.test/sign-up",
+            clerk_sign_in_url="https://clerk.test/sign-in",
             signup_wave="0",
         )
     app.config["HOST_CONFIG"] = host_config  # ALWAYS set, both branches
@@ -137,6 +171,15 @@ def create_app(config: dict | None = None) -> Flask:
         # object, which also carries Clerk/webhook secrets no template
         # should be able to touch.
         return _source_link_context(app.config["HOST_CONFIG"])
+
+    @app.context_processor
+    def _inject_auth_links():
+        # Runs on every template render, same as the footer source link
+        # above -- base.html's header nav is gated in the template on
+        # `not g.clerk_user` (public pages and the 401 page render it,
+        # authed pages don't), not on request.path, so this needs no
+        # PUBLIC_PATHS-based logic of its own.
+        return _auth_link_context(app.config["HOST_CONFIG"])
 
     if "WEBHOOK_SECRET" in app.config:
         secret = app.config["WEBHOOK_SECRET"]
@@ -210,6 +253,20 @@ def create_app(config: dict | None = None) -> Flask:
 
     @app.context_processor
     def inject_clerk_frontend():
+        # Issue #158: clerk-js has a job only on the 401 handshake-repair
+        # page (error_401.html, issue #151) and pages rendered for a
+        # signed-in visitor -- never on a PUBLIC_PATHS page (/demo, /start,
+        # /preview, /privacy, /terms), where loading it has no purpose
+        # other than Clerk (and Cloudflare in front of it) receiving the
+        # visitor's IP/UA and setting cookies before they've done anything.
+        # A public path is never the reason a request 401s -- clerk_auth
+        # exempts every PUBLIC_PATHS request from verification before this
+        # ever runs -- so any request that reaches a non-public path
+        # already needed clerk-js, whether it ends up 401ing or rendering
+        # an authed page. Reuses the exact same normalization clerk_auth's
+        # gate uses (_is_public_request_path) so the two can never diverge.
+        if _is_public_request_path():
+            return {"clerk_publishable_key": "", "clerk_frontend_api_host": ""}
         return {
             "clerk_publishable_key": clerk_publishable_key,
             "clerk_frontend_api_host": clerk_frontend_api_host,
@@ -280,15 +337,13 @@ def create_app(config: dict | None = None) -> Flask:
         deliberate, not a routing bug to "fix" into a distinct 404 page.
         The status code stays 401.
 
-        Reads clerk_sign_up_url through the one HOST_CONFIG accessor
-        (app.config["HOST_CONFIG"], set on every create_app code path
-        above, including TESTING) rather than a second os.environ read.
-        getattr tolerates a test double that only carries the attributes a
-        given test cares about; the template branches on an empty value
-        rather than rendering href="".
+        error_401.html's own signup link and base.html's header nav both
+        read clerk_sign_up_url (and, for the header nav, clerk_sign_in_url)
+        from the global _inject_auth_links context processor above, not a
+        route-specific kwarg here -- that processor is the one HOST_CONFIG
+        accessor for both fields, reached the same way on every render.
         """
-        clerk_sign_up_url = getattr(current_app.config["HOST_CONFIG"], "clerk_sign_up_url", "")
-        return render_template("error_401.html", clerk_sign_up_url=clerk_sign_up_url), 401
+        return render_template("error_401.html"), 401
 
     @app.before_request
     def clerk_auth():
@@ -298,11 +353,12 @@ def create_app(config: dict | None = None) -> Flask:
         # gets a chance to 404 (deliberate fail-closed). URL-rule matching
         # HAS already run by this point for matched routes, though, which is
         # what the request.blueprint == "webhooks" exemption relies on. The
-        # public-path exemption rests solely on the normalized-path
-        # membership check below: request.path is compared with a trailing
-        # slash stripped (falling back to "/") because /demo is registered
-        # strict_slashes=False, so both /demo and /demo/ must match.
-        if (request.path.rstrip("/") or "/") in PUBLIC_PATHS or request.blueprint == "webhooks":
+        # public-path exemption rests solely on _is_public_request_path()'s
+        # normalized-path membership check: request.path is compared with a
+        # trailing slash stripped (falling back to "/") because /demo is
+        # registered strict_slashes=False, so both /demo and /demo/ must
+        # match.
+        if _is_public_request_path() or request.blueprint == "webhooks":
             g.clerk_user = None
             g.consent_granted = False
             ensure_session_ids()

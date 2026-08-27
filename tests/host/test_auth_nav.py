@@ -1,0 +1,155 @@
+"""base.html's header sign-in/sign-up nav (issue #145): before this, every
+signed-out surface (/, /start, /preview, /demo, /privacy, the 401 page) had
+zero link to Clerk's hosted sign-up/sign-in pages, so a visitor who
+completed the /start -> /preview funnel had no discoverable path to create
+an account.
+
+The nav is gated on `not g.clerk_user` in base.html, not on request.path —
+the same auth-state signal the footer's existing export/delete links use
+(`{% if g.clerk_user %}`) — so it renders on every public page AND the 401
+page (both leave g.clerk_user unset/None) and hides itself on an authed
+page. Each of the two links (clerk_sign_up_url / clerk_sign_in_url) is
+independently optional: an unset URL renders nothing, never a bare href="".
+
+No Postgres needed: these hit either the errorhandler (no DB), the
+/privacy route (jobcannon.web.legal, no DB), or a custom throwaway route
+registered the same way test_auth.py's `/private` tests do — same shape as
+tests/host/test_clerk_loader_template.py."""
+
+from jobcannon.host.config import HostConfig
+from jobcannon.web import create_app
+from jobcannon.web.auth import ClerkIdentity
+
+_WEBHOOK_SECRET = "whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3Q="
+_SIGN_UP_URL = "https://accounts.jobcannon.test/sign-up"
+_SIGN_IN_URL = "https://accounts.jobcannon.test/sign-in"
+
+
+def _host_config(**overrides) -> HostConfig:
+    fields = dict(database_url="", secret_key="testing-secret-key")
+    fields.update(overrides)
+    return HostConfig(**fields)
+
+
+def _app(host_config: HostConfig, verify):
+    return create_app(
+        config={
+            "TESTING": True,
+            "HOST_CONFIG": host_config,
+            "VERIFY_REQUEST": verify,
+            "WEBHOOK_SECRET": _WEBHOOK_SECRET,
+        }
+    )
+
+
+def test_public_page_shows_both_links_when_both_urls_configured():
+    app = _app(
+        _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL),
+        verify=lambda req: None,
+    )
+    html = app.test_client().get("/privacy").get_data(as_text=True)
+
+    assert f'href="{_SIGN_UP_URL}"' in html
+    assert f'href="{_SIGN_IN_URL}"' in html
+    assert ">Sign up<" in html
+    assert ">Sign in<" in html
+
+
+def test_401_page_shows_both_links_when_both_urls_configured():
+    """The 401 page is the OTHER signed-out surface the header nav must
+    cover — g.clerk_user is set to None before abort(401)
+    (jobcannon/web/__init__.py's clerk_auth), same as a PUBLIC_PATHS
+    request, so the same `not g.clerk_user` gate renders it here too."""
+    app = _app(
+        _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL),
+        verify=lambda req: None,
+    )
+    resp = app.test_client().get("/")
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 401
+    assert f'href="{_SIGN_UP_URL}"' in html
+    assert f'href="{_SIGN_IN_URL}"' in html
+
+
+def test_authed_page_hides_the_header_nav():
+    """Negative control: a signed-in visitor doesn't need a sign-in/sign-up
+    prompt — the nav must be absent even though both URLs are configured,
+    proving the gate is `not g.clerk_user`, not "URLs are set"."""
+    app = _app(
+        _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL),
+        verify=lambda req: ClerkIdentity(user_id="user_123", claims={"sub": "user_123"}),
+    )
+
+    @app.get("/render-base")
+    def render_base():
+        from flask import render_template
+
+        return render_template("base.html")
+
+    html = app.test_client().get("/render-base").get_data(as_text=True)
+
+    assert "data-auth-nav" not in html
+    assert _SIGN_UP_URL not in html
+    assert _SIGN_IN_URL not in html
+
+
+def test_public_page_omits_sign_in_link_when_sign_in_url_unset():
+    """Tolerant defaults, first state: clerk_sign_in_url unset (dataclass
+    default "") must render nothing for that link specifically — never a
+    bare href="" — while the configured sign-up link still renders."""
+    app = _app(_host_config(clerk_sign_up_url=_SIGN_UP_URL), verify=lambda req: None)
+    html = app.test_client().get("/privacy").get_data(as_text=True)
+
+    assert f'href="{_SIGN_UP_URL}"' in html
+    assert ">Sign in<" not in html
+    assert 'href=""' not in html
+
+
+def test_public_page_omits_sign_up_link_when_sign_up_url_unset():
+    """Tolerant defaults, second state: the mirror image of the test above —
+    clerk_sign_up_url unset, clerk_sign_in_url configured."""
+    app = _app(_host_config(clerk_sign_in_url=_SIGN_IN_URL), verify=lambda req: None)
+    html = app.test_client().get("/privacy").get_data(as_text=True)
+
+    assert f'href="{_SIGN_IN_URL}"' in html
+    assert ">Sign up<" not in html
+    assert 'href=""' not in html
+
+
+def test_public_page_renders_neither_link_when_both_urls_unset():
+    """Both blank (the bare HostConfig default) must render the nav
+    container with neither link, never a bare href="" for either."""
+    app = _app(_host_config(), verify=lambda req: None)
+    html = app.test_client().get("/privacy").get_data(as_text=True)
+
+    assert ">Sign up<" not in html
+    assert ">Sign in<" not in html
+    assert 'href=""' not in html
+
+
+def test_auth_link_context_tolerates_a_bare_host_config_double():
+    """Regression guard mirroring
+    tests/host/test_pages.py::test_footer_source_link_tolerates_a_bare_host_config_double:
+    _inject_auth_links runs on EVERY request, including the 401 path, so a
+    HOST_CONFIG double that predates clerk_sign_in_url entirely (a bare
+    types.SimpleNamespace carrying only clerk_sign_up_url, the exact shape
+    tests/host/test_empty_states.py uses) must not raise AttributeError."""
+    import types
+
+    host_config = types.SimpleNamespace(clerk_sign_up_url=_SIGN_UP_URL)
+    app = create_app(
+        config={
+            "TESTING": True,
+            "VERIFY_REQUEST": lambda req: None,
+            "WEBHOOK_SECRET": _WEBHOOK_SECRET,
+            "HOST_CONFIG": host_config,
+        }
+    )
+
+    resp = app.test_client().get("/")
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 401
+    assert f'href="{_SIGN_UP_URL}"' in html
+    assert ">Sign in<" not in html
