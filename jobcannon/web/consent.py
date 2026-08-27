@@ -2,10 +2,18 @@
 product: `GET /consent` renders the current choice, `POST /consent` records
 a grant or decline.
 
-Authed only — deliberately NOT added to `jobcannon.web.PUBLIC_PATHS`: an
-anonymous visitor has no identity to attach a consent decision to. Reachable
-two ways: the one-time redirect `jobcannon.web.handoff.run_handoff_if_pending`
-issues right after a signup with no prior choice, and the persistent link in
+`POST /consent` stays authed only — an anonymous visitor has no identity to
+attach a consent decision to. `GET /consent` is marked `@public_get` (issue
+#171): the footer's "Analytics preferences" link is rendered on every page
+regardless of auth state, so a signed-out visitor who clicks it gets a
+signed-out explanation (consent_signed_out.html) instead of the generic
+401 gate. This is a per-view, GET-only opt-out, NOT a `PUBLIC_PATHS` entry —
+`PUBLIC_PATHS` would also exempt the POST mutation (wrong: consent is an
+account-level, authed-only decision) and skip clerk-js loading entirely
+(wrong: a signed-in visitor hitting this same view still needs the header
+nav's authed state). Reachable two ways beyond the footer link: the
+one-time redirect `jobcannon.web.handoff.run_handoff_if_pending` issues
+right after a signup with no prior choice, and the persistent link in
 `base.html`.
 
 `record_consent` (jobcannon/db/_events.py) remains the single writer of
@@ -33,6 +41,7 @@ from flask import Blueprint, g, redirect, render_template, request, url_for
 
 from jobcannon.db import _events
 from jobcannon.db.pool import commit_unless_nested, connection_factory
+from jobcannon.web import public_get
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +78,14 @@ def _read_consent_context() -> dict:
 
 
 @consent_bp.get("/consent", strict_slashes=False)
+@public_get
 def get_consent():
+    # A signed-out visitor has no consent state to read -- render the
+    # explanatory signed-out variant instead of touching the DB at all.
+    # A signed-in visitor (clerk_auth still resolves identity when it's
+    # present, even on a public_get-marked view) gets the normal page.
+    if g.clerk_user is None:
+        return render_template("consent_signed_out.html")
     return render_template("consent.html", **_read_consent_context())
 
 

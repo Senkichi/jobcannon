@@ -185,7 +185,10 @@ def test_never_chosen_is_distinguishable_from_declined(app):
         assert _events.read_consent_choice_made(conn, USER_ID, current_version="v1") is True
 
 
-def test_consent_route_is_authed_only(app):
+def test_consent_post_stays_401_when_signed_out(app):
+    """POST /consent -- the actual mutation -- stays fully gated (issue
+    #171 is explicit: consent is an account-level, authed-only decision;
+    only the read-only explanatory GET view opens up)."""
     from jobcannon.web import PUBLIC_PATHS
 
     assert "/consent" not in PUBLIC_PATHS
@@ -193,8 +196,26 @@ def test_consent_route_is_authed_only(app):
     app.config["VERIFY_REQUEST"] = lambda req: None
     client = app.test_client()
 
-    assert client.get("/consent").status_code == 401
     assert client.post("/consent", data={"choice": "grant"}).status_code == 401
+
+
+def test_consent_get_renders_signed_out_variant_instead_of_401(app):
+    """issue #171: the footer's "Analytics preferences" link is rendered
+    on every page regardless of auth state, so a signed-out visitor
+    clicking it must not land on the generic 401 gate -- GET /consent is
+    marked @public_get and renders consent_signed_out.html instead, with
+    working sign-in/sign-up links sourced from the same HOST_CONFIG
+    fields issue #145 wired up everywhere else."""
+    app.config["VERIFY_REQUEST"] = lambda req: None
+    client = app.test_client()
+
+    resp = client.get("/consent")
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Analytics preferences" in html
+    assert 'href="https://clerk.test/sign-in"' in html
+    assert 'href="https://clerk.test/sign-up"' in html
 
 
 def test_no_python_wallclock_in_the_consent_route():

@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 
 from jobcannon.host.config import HostConfig
-from jobcannon.web import PUBLIC_PATHS, create_app
+from jobcannon.web import PUBLIC_PATHS, _is_auth_optional_for_method, create_app
 
 _WEBHOOK_SECRET = "whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3Q="
 
@@ -160,11 +160,18 @@ def test_gate_covers_every_registered_route_for_every_declared_method():
     non-public route still 401s a signed-out visitor, for every method it
     declares -- derived from app.url_map.iter_rules() itself (never a
     hand-maintained path list), so a future route is automatically
-    covered by this test too. Two exemptions, both intentional and
-    pre-existing: PUBLIC_PATHS members (clerk_auth's own public-path
-    branch) and the `webhooks` blueprint (signature-verified instead of
-    session-gated -- tests/host/test_auth.py already covers its own
-    behavior in isolation)."""
+    covered by this test too. Three exemptions, all intentional and
+    pre-existing or from issue #171, none hand-picked by route name:
+    PUBLIC_PATHS members (clerk_auth's own public-path branch), the
+    `webhooks` blueprint (signature-verified instead of session-gated --
+    tests/host/test_auth.py already covers its own behavior in
+    isolation), and a method `_is_auth_optional_for_method` (public_get's
+    marker predicate, the SAME one clerk_auth itself consults) says is
+    exempt for that view -- e.g. GET/HEAD /consent, issue #171 --
+    verified with a `!= 401` assertion (proving the gate stood down)
+    rather than a hardcoded expected status, since a marked view's
+    signed-out response shape is that view's own choice, not this
+    gate-coverage test's concern."""
     app = _app()
     client = app.test_client()
 
@@ -176,11 +183,18 @@ def test_gate_covers_every_registered_route_for_every_declared_method():
         normalized = path.rstrip("/") or "/"
         if normalized in PUBLIC_PATHS:
             continue
+        view_func = app.view_functions.get(rule.endpoint)
         for method in sorted(rule.methods - {"OPTIONS"}):
             resp = client.open(path, method=method)
-            assert resp.status_code == 401, (
-                f"{method} {path} (endpoint={rule.endpoint}) -> {resp.status_code}, expected 401"
-            )
+            if _is_auth_optional_for_method(view_func, method):
+                assert resp.status_code != 401, (
+                    f"{method} {path} (endpoint={rule.endpoint}) is public_get-marked "
+                    f"but still 401'd signed out"
+                )
+            else:
+                assert resp.status_code == 401, (
+                    f"{method} {path} (endpoint={rule.endpoint}) -> {resp.status_code}, expected 401"
+                )
             checked += 1
 
     # Sanity floor so a future refactor that accidentally empties the

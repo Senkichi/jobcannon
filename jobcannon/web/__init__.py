@@ -96,6 +96,18 @@ def public_get(view_func):
     return view_func
 
 
+def _is_auth_optional_for_method(view_func, method: str) -> bool:
+    """The single predicate `clerk_auth` consults for `public_get`'s
+    marker, so a test (or any future consumer) checks the SAME rule the
+    gate itself uses rather than re-deriving it against the private
+    attribute name. HEAD is included alongside GET deliberately, not a
+    literal reading of "GET only" from issue #171 -- HEAD requests to a
+    GET-registered view must mirror that GET's status code (that's HEAD's
+    whole contract), so a marked view that opened up for GET but not HEAD
+    would be self-contradictory."""
+    return bool(getattr(view_func, "_auth_optional_get", False)) and method in ("GET", "HEAD")
+
+
 def _source_link_context(host_config) -> dict[str, str]:
     """base.html's footer "Source" link, derived from HOST_CONFIG rather than
     read ad hoc in the template: `getattr(..., "render_git_commit", "")`
@@ -542,10 +554,7 @@ def create_app(config: dict | None = None) -> Flask:
             # through to abort(401) below, since the marker is checked
             # against request.method, not the endpoint as a whole.
             view_func = app.view_functions.get(request.endpoint)
-            if getattr(view_func, "_auth_optional_get", False) and request.method in (
-                "GET",
-                "HEAD",
-            ):
+            if _is_auth_optional_for_method(view_func, request.method):
                 g.consent_granted = False
                 ensure_session_ids()
                 capture_attribution()
