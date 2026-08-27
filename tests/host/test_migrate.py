@@ -384,6 +384,48 @@ def test_unlock_failure_in_finally_does_not_mask_migration_exception(monkeypatch
         drop_throwaway_db(db_name)
 
 
+def test_contract_step_migration_logs_a_loud_notice_when_applied(monkeypatch, caplog):
+    """Issue #199: a contract_step=True migration must log a loud (WARNING)
+    one-line notice naming its version + name when it actually applies --
+    docs/deploy-runbook.md's "Migration deploy-safety guard" subsection
+    points an operator at this exact line before trusting
+    JC_MIGRATE_ALLOW_NEWER_DB for a rollback across it. A non-contract
+    migration must NOT log it (regression guard against the notice firing
+    unconditionally)."""
+    import logging
+
+    import jobcannon.db.migrate as migrate_mod
+    from jobcannon.db.migrations.types import Migration
+
+    fake_migrations = [
+        Migration(
+            version=900401,
+            description="plain",
+            sql=["CREATE TABLE t_plain (id int)"],
+            name="m900401_plain",
+        ),
+        Migration(
+            version=900402,
+            description="contract",
+            sql=["CREATE TABLE t_contract (id int)"],
+            name="m900402_contract",
+            contract_step=True,
+        ),
+    ]
+    monkeypatch.setattr(migrate_mod, "MIGRATIONS", fake_migrations)
+
+    dsn, db_name = create_throwaway_db("jobcannon_mig_contract_step")
+    try:
+        with caplog.at_level(logging.WARNING, logger="jobcannon.db.migrate"):
+            migrate_mod.run_migrations(dsn)
+
+        assert "CONTRACT-STEP migration 900402" in caplog.text
+        assert "m900402_contract" in caplog.text
+        assert "CONTRACT-STEP migration 900401" not in caplog.text
+    finally:
+        drop_throwaway_db(db_name)
+
+
 def test_main_import_time_failure_still_logs_the_failure_line(monkeypatch, caplog):
     """Regression for cross-family review LEAD 3: main()'s
     `from jobcannon.host.config import load_host_config` now sits INSIDE the
