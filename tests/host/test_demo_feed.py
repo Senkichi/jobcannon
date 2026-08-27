@@ -153,6 +153,22 @@ def test_demo_renders_postings_with_why_chips_unauthenticated(app):
     assert "No postings match your selections yet." not in html
 
 
+def test_demo_shows_header_signup_nav_and_hides_authed_nav_for_anonymous_visitor(app):
+    """Issue #205 negative control: /demo's default fixture VERIFY_REQUEST
+    (lambda r: None) is a genuinely anonymous visitor, so base.html's
+    header sign-in/up nav must render and the My-postings / footer
+    Export-Delete links (authed-only) must not — proving visitor_is_authed
+    resolves real identity on /demo rather than defaulting every visitor to
+    authed."""
+    html = app.test_client().get("/demo").get_data(as_text=True)
+
+    assert "data-auth-nav" in html
+    assert "data-postings-history-nav-link" not in html
+    assert ">My postings<" not in html
+    assert ">Export your data<" not in html
+    assert ">Delete account<" not in html
+
+
 def test_demo_titles_filter_is_exact_match_against_hand_authored_titles(app):
     """Documents a real characteristic of the current wiring, not a
     requirement this PR is asserting as correct: `_read_demo_feed_postings`
@@ -368,15 +384,17 @@ def test_demo_hides_signup_cta_for_an_authed_visitor(app):
     app.config on every call, exactly like /preview's own authed-redirect
     check does.
 
-    Assertions are scoped to the two signup_cta_url-gated blocks
-    (data-action-signup / the demo CTA's "sign up" fragment), not a bare
-    "sign-up href not anywhere on the page" check: base.html's header nav
-    (issue #145) is gated on `not g.clerk_user`, a DIFFERENT, pre-existing
-    mechanism this PR does not touch -- and g.clerk_user is force-None on
-    every PUBLIC_PATHS render regardless of real identity, so the header
-    nav renders its own sign-up link on /demo/ /preview unconditionally.
-    That's an existing, out-of-scope gap (not introduced or widened by
-    #174), flagged separately rather than asserted against here."""
+    Assertions cover both the two signup_cta_url-gated blocks
+    (data-action-signup / the demo CTA's "sign up" fragment) AND
+    base.html's header sign-in/up nav (issue #145): before issue #205, that
+    header nav was gated on `not g.clerk_user`, which is force-None on
+    every PUBLIC_PATHS render regardless of real identity, so it rendered
+    its own sign-up link on /demo unconditionally even for this authed
+    visitor -- a gap flagged in this docstring but not asserted against.
+    #205 switched the gate to `visitor_is_authed`, which resolves real
+    identity via _visitor_is_anonymous()'s PUBLIC_PATHS fallback, so this
+    test now also asserts the header nav is absent and the authed-only
+    My-postings / footer Export-Delete links are present."""
     app.config["VERIFY_REQUEST"] = lambda req: ClerkIdentity(
         user_id="user_authed_demo", claims={"sub": "user_authed_demo"}
     )
@@ -400,6 +418,13 @@ def test_demo_hides_signup_cta_for_an_authed_visitor(app):
     assert "data-posting-signup" not in html
     assert "Sign up to apply" not in html
     assert "sign up</a> to save it" not in html
+    # Issue #205: the header sign-in/up nav must also be hidden, and the
+    # authed-only My-postings / footer Export-Delete links must render.
+    assert "data-auth-nav" not in html
+    assert "data-postings-history-nav-link" in html
+    assert ">My postings<" in html
+    assert ">Export your data<" in html
+    assert ">Delete account<" in html
 
 
 def test_demo_row_omits_signup_cta_when_both_urls_unset(app):
