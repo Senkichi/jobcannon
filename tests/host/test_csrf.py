@@ -187,7 +187,9 @@ def test_post_start_with_token_mints_anon_user(db_app):
     get_resp = client.get("/start")
     token = _token_from(get_resp.data)
 
-    resp = client.post("/start", data={"seniority_level": "", "csrf_token": token})
+    resp = client.post(
+        "/start", data={"titles": ["Engineer"], "seniority_level": "", "csrf_token": token}
+    )
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith("/preview")
 

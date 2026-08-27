@@ -1,10 +1,16 @@
 """GET / (authed feed) and GET /demo (public guest demo).
 
 GET / now renders the authed user's profile plus a real, server-filtered
-posting list: title/company/workplace-type/location filters and a sort
-token, all read from the query string and validated against a fixed
-allowlist before any of it reaches SQL — an unrecognized token degrades to
-the unfiltered/default value rather than a 500. Each row carries its own
+posting list: a free-text title/company/location box and a sort token,
+read from the query string and validated against a fixed allowlist before
+any of it reaches SQL — an unrecognized token degrades to the
+unfiltered/default value rather than a 500. On top of those query-string
+filters (#170), the signed-in user's saved picker selections
+(profiles.target_titles/target_companies/workplace_type, written by
+jobcannon/web/onboarding.py's POST /start) ALSO filter this feed, through
+the exact same jobcannon.db._feed.selection_filter_kwargs predicate builder
+onboarding.py's pre-signup /preview calls (#169) — see `_read_feed_postings`
+below for the one collision (workplace_type) and how it resolves. Each row carries its own
 literal "why" chips (jobcannon.web.feed_entries.build_entry, which wraps
 jobcannon.web.why.why_chips); a row whose `structural_axes` is still NULL
 (the axes batch caps at 500 rows per scan tick, so a large pre-seed leaves
@@ -153,7 +159,11 @@ def _feed_query_kwargs(filters: dict[str, str]) -> dict[str, Any]:
 
 
 def _read_feed_postings(
-    *, user_id: str, filters: dict[str, str], after: tuple[float | None, Any, int] | None = None
+    *,
+    user_id: str,
+    filters: dict[str, str],
+    profile: Any,
+    after: tuple[float | None, Any, int] | None = None,
 ) -> list[Any]:
     """Fail-closed feed read, the same discipline as `_read_page_data` /
     jobcannon/web/onboarding.py's `_read_preview_postings`: an unopened
@@ -164,11 +174,37 @@ def _read_feed_postings(
     feed read at all, so keeping this a separate call avoids querying
     postings when the page will not render them. `after` (#156) is the
     keyset cursor for "Load more" — see jobcannon/db/_feed.py's
-    list_feed_postings/_cursor_predicate."""
+    list_feed_postings/_cursor_predicate.
+
+    #170: `profile` (the caller's already-read `profiles` row) flows through
+    `jobcannon.db._feed.selection_filter_kwargs` — the SAME predicate
+    builder `jobcannon/web/onboarding.py`'s pre-signup /preview calls against
+    a session-held `pending_picker` dict (#169) — so titles/companies/
+    workplace_type filter identically on both surfaces by construction, not
+    by two independently-written call sites staying in sync by discipline.
+    `titles`/`companies` have no query-string equivalent on this route (the
+    feed's own title/company boxes are free-text `title_contains`/`company`,
+    a different filter — see `_feed_query_kwargs`), so they compose
+    additively with no collision. `workplace_type` is the one key both
+    sources can supply: an explicit `?workplace_type=` query-string value
+    (`_parse_feed_filters` already validated it against the same allowlist)
+    always wins, since it reflects what THIS request is asking for right
+    now; the profile's saved preference applies only as a fallback when the
+    visitor hasn't overridden it, mirroring `_feed_query_kwargs`'s existing
+    "any" -> None -> no filter mapping for the same field."""
     try:
         with connection_factory() as conn:
+            query_kwargs = _feed_query_kwargs(filters)
+            selection_kwargs = _feed.selection_filter_kwargs(profile)
+            if query_kwargs["workplace_type"] is None:
+                query_kwargs["workplace_type"] = selection_kwargs["workplace_type"]
             return list_feed_postings(
-                conn, user_id=user_id, after=after, **_feed_query_kwargs(filters)
+                conn,
+                user_id=user_id,
+                after=after,
+                titles=selection_kwargs["titles"],
+                companies=selection_kwargs["companies"],
+                **query_kwargs,
             )
     except Exception:
         logger.warning(
@@ -287,7 +323,7 @@ def feed():
     ordering = {"personalized": False, "ranker_version": UNRANKED_VERSION}
     load_more_url = None
     if profile is not None and stats.get("postings", 0) > 0:
-        rows = _read_feed_postings(user_id=user_id, filters=filters, after=after)
+        rows = _read_feed_postings(user_id=user_id, filters=filters, profile=profile, after=after)
         entries = [build_entry(row, profile) for row in rows]
         ordering = _ordering_label(rows)
         _log_impressions(user_id, rows)

@@ -141,6 +141,74 @@ def test_preview_is_driven_only_by_picker_selections(app):
     assert "Distinctive Title Alpha" not in html_beta
 
 
+def test_preview_filters_by_company_selection(app):
+    """#169: the actual bug this issue reports — a company-only picker
+    selection was parsed, shape-validated, and stored in the session, but
+    silently ignored by /preview's read side (the old _read_preview_postings
+    never passed `companies` to list_feed_postings at all). This is the
+    positive+negative pair proving the read side now honors it."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Company Filter Co")
+    _seed_posting(
+        dsn,
+        "preview-company-match",
+        company_id,
+        title="Distinctive Company Match Title",
+        company="Company Filter Co",
+    )
+    other_company_id = _seed_company(dsn, "Company Filter Other Co")
+    _seed_posting(
+        dsn,
+        "preview-company-nomatch",
+        other_company_id,
+        title="Distinctive Company Nomatch Title",
+        company="Company Filter Other Co",
+    )
+
+    client = app.test_client()
+    _set_pending_picker(client, companies=["Company Filter Co"])
+    html = client.get("/preview").get_data(as_text=True)
+
+    assert "Distinctive Company Match Title" in html
+    assert "Distinctive Company Nomatch Title" not in html
+
+
+def test_preview_combines_title_and_company_selections(app):
+    """Both `titles` and `companies` set at once in the session: proves the
+    company selection doesn't silently override or disable title filtering
+    (or vice versa) at the route/session-wiring level — the exact AND
+    composition of the two SQL clauses is already unit-tested directly at
+    the DAL layer (tests/host/test_feed_dal.py's
+    test_titles_and_companies_filters_and_together)."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Combined Filter Co")
+    _seed_posting(
+        dsn,
+        "preview-combined-match",
+        company_id,
+        title="Distinctive Combined Match Title",
+        company="Combined Filter Co",
+    )
+    _seed_posting(
+        dsn,
+        "preview-combined-distractor",
+        company_id,
+        title="Distinctive Combined Distractor Title",
+        company="Combined Filter Co",
+    )
+
+    client = app.test_client()
+    _set_pending_picker(
+        client,
+        titles=["Distinctive Combined Match Title"],
+        companies=["Combined Filter Co"],
+    )
+    html = client.get("/preview").get_data(as_text=True)
+
+    assert "Distinctive Combined Match Title" in html
+    assert "Distinctive Combined Distractor Title" not in html
+
+
 # --- #156: keyset "Load more" pagination -----------------------------------
 
 _LOAD_MORE_RE = re.compile(
@@ -389,7 +457,10 @@ def test_preview_without_picker_selections_renders_the_designed_prompt_not_a_500
 
 def test_picker_submit_now_redirects_to_preview(app):
     client = app.test_client()
-    resp = client.post("/start", data={"seniority_level": "mid", "workplace_type": "any"})
+    resp = client.post(
+        "/start",
+        data={"titles": ["Engineer"], "seniority_level": "mid", "workplace_type": "any"},
+    )
 
     assert resp.status_code in (302, 303)
     assert resp.headers["Location"].rstrip("/").endswith("/preview")

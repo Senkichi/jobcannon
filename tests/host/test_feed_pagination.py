@@ -272,6 +272,74 @@ def test_load_more_preserves_the_current_title_filter(app):
     assert "Other Analyst" not in fragment_html
 
 
+def test_load_more_respects_the_profile_saved_company_filter_across_pages(app):
+    """#170: a signed-in user's saved company selection
+    (profiles.target_companies) filters the authed feed with NO explicit
+    `?company=`/`?companies=` query-string param needed — every request on
+    this route re-reads the profile fresh (jobcannon/web/pages.py's
+    `_read_page_data`), so a company filter set once during onboarding
+    applies on every page, including "Load more" continuations. Mirrors
+    test_load_more_preserves_the_current_title_filter above, but for a
+    PROFILE-derived filter rather than a query-string one: this route's own
+    company control is the free-text `?company=` box (a different filter —
+    see jobcannon/web/pages.py's `_feed_query_kwargs` docstring), so there is
+    no query-string equivalent to carry forward here at all. The excluded
+    company's postings are seeded with LATER `last_seen` timestamps than
+    every matching row, so a broken (unapplied) filter would put them on
+    PAGE ONE, not just leak them into page two — a stronger regression
+    signal than same-vintage distractors would give."""
+    from jobcannon.db._profiles import upsert_profile
+
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app)
+    with psycopg.connect(dsn) as conn:
+        upsert_profile(conn, CLERK_ID, target_companies=["Matching Co"])
+
+    matching_id = _seed_company(dsn, "Matching Co")
+    other_id = _seed_company(dsn, "Other Co")
+    # NOT _seed_pages_worth: that helper hardcodes company="Pagination Test
+    # Co" on every row regardless of company_id (postings.company is a
+    # denormalized text column, independent of the company_id FK) — a
+    # company TEXT filter needs the literal column set, so this seeds
+    # directly instead.
+    for i in range(FEED_PAGE_MAX + 3):
+        _seed_posting(
+            dsn,
+            f"matching-co-row-{i}",
+            matching_id,
+            title=f"Matching Engineer {i:03d}",
+            last_seen=_BASE_TIME + timedelta(seconds=i),
+            company="Matching Co",
+        )
+    for i in range(5):
+        _seed_posting(
+            dsn,
+            f"other-co-row-{i}",
+            other_id,
+            title=f"Other Analyst {i:03d}",
+            last_seen=_BASE_TIME + timedelta(seconds=10_000 + i),
+            company="Other Co",
+        )
+
+    first_page = client.get("/").get_data(as_text=True)
+    assert _row_count(first_page) == FEED_PAGE_MAX
+    assert "Other Analyst" not in first_page
+
+    load_more_url = _extract_load_more_url(first_page)
+    assert load_more_url is not None
+    # No explicit company param on the Load More URL — the filter is
+    # profile-derived, not query-string-carried, unlike
+    # test_load_more_preserves_the_current_title_filter's `title=Matching`.
+    assert "company" not in load_more_url
+
+    resp = client.get(load_more_url, headers={"HX-Request": "true"})
+    fragment_html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert _row_count(fragment_html) == 3
+    assert "Other Analyst" not in fragment_html
+
+
 def test_load_more_appended_rows_carry_save_dismiss_controls(app):
     """A regression the fragment route must not introduce: appended rows
     still need show_actions (save/dismiss/apply), the same as the first

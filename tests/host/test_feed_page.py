@@ -358,6 +358,165 @@ def test_filters_are_additive_not_independently_matched(app):
     assert "No postings match your selections yet." not in html
 
 
+# --- #169/#170: profiles.target_titles/target_companies/workplace_type -----
+# also filter the authed feed, through the SAME jobcannon.db._feed.
+# selection_filter_kwargs /preview's read side uses (tests/host/test_feed_dal.py
+# unit-tests the predicate builder itself across both shapes) ----------------
+
+
+def test_profile_target_titles_filter_the_authed_feed_with_no_query_string(app):
+    """The authed feed's own free-text title box (`?title=`) is a SEPARATE
+    filter from the picker's saved exact-match target_titles (see
+    _feed_query_kwargs's docstring for `title_contains` vs `titles`) — this
+    proves the saved selection filters the feed on its own, with no
+    query-string parameter involved at all."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, target_titles=["Distinctive Profile Title Match"])
+    company_id = _seed_company(dsn, "Profile Title Filter Co")
+    _seed_posting(
+        dsn, "feed-profile-title-match", company_id, title="Distinctive Profile Title Match"
+    )
+    _seed_posting(
+        dsn, "feed-profile-title-other", company_id, title="Distinctive Profile Title Other"
+    )
+
+    html = client.get("/").get_data(as_text=True)
+
+    assert "Distinctive Profile Title Match" in html
+    assert "Distinctive Profile Title Other" not in html
+
+
+def test_profile_target_companies_filter_the_authed_feed_with_no_query_string(app):
+    """#169/#170's central bug for the authed feed: before this fix,
+    profiles.target_companies was read nowhere in this route — a saved
+    company selection had zero effect on GET /."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, target_companies=["Profile Company Filter Co"])
+    match_co = _seed_company(dsn, "Profile Company Filter Co")
+    other_co = _seed_company(dsn, "Profile Company Filter Other Co")
+    _seed_posting(
+        dsn,
+        "feed-profile-company-match",
+        match_co,
+        title="Profile Company Match Row",
+        company="Profile Company Filter Co",
+    )
+    _seed_posting(
+        dsn,
+        "feed-profile-company-other",
+        other_co,
+        title="Profile Company Other Row",
+        company="Profile Company Filter Other Co",
+    )
+
+    html = client.get("/").get_data(as_text=True)
+
+    assert "Profile Company Match Row" in html
+    assert "Profile Company Other Row" not in html
+
+
+def test_query_string_workplace_type_overrides_the_profile_saved_preference(app):
+    """The one key `selection_filter_kwargs` and `_feed_query_kwargs` both
+    produce (workplace_type): an explicit `?workplace_type=` on THIS request
+    always wins over the profile's saved preference — see
+    `_read_feed_postings`'s docstring for why (the query string reflects
+    what the visitor is asking for right now, the profile is what they
+    picked once during onboarding)."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, workplace_type="REMOTE")
+    company_id = _seed_company(dsn, "Workplace Override Co")
+    _seed_posting(
+        dsn,
+        "feed-wt-override-remote",
+        company_id,
+        title="Override Remote Row",
+        workplace_type="REMOTE",
+    )
+    _seed_posting(
+        dsn,
+        "feed-wt-override-onsite",
+        company_id,
+        title="Override Onsite Row",
+        workplace_type="ONSITE",
+    )
+
+    resp = client.get("/", query_string={"workplace_type": "onsite"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Override Onsite Row" in html
+    assert "Override Remote Row" not in html
+
+
+def test_profile_workplace_type_applies_when_no_query_string_override(app):
+    """The fallback half of the same merge: with no `?workplace_type=` at
+    all on this request (the query string default is "any" -> None), the
+    profile's saved preference applies."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, workplace_type="REMOTE")
+    company_id = _seed_company(dsn, "Workplace Fallback Co")
+    _seed_posting(
+        dsn,
+        "feed-wt-fallback-remote",
+        company_id,
+        title="Fallback Remote Row",
+        workplace_type="REMOTE",
+    )
+    _seed_posting(
+        dsn,
+        "feed-wt-fallback-onsite",
+        company_id,
+        title="Fallback Onsite Row",
+        workplace_type="ONSITE",
+    )
+
+    html = client.get("/").get_data(as_text=True)
+
+    assert "Fallback Remote Row" in html
+    assert "Fallback Onsite Row" not in html
+
+
+def test_preview_and_authed_feed_return_identical_rows_for_equivalent_selections(app):
+    """#169/#170 end-to-end parity: GET /preview (a session-held
+    pending_picker dict) and the authed GET / (a profiles row) must render
+    the identical row set for an equivalent company selection — both routes
+    derive their filter kwargs through the SAME
+    jobcannon.db._feed.selection_filter_kwargs (tests/host/test_feed_dal.py
+    unit-tests that function's dual-shape guarantee directly; this is the
+    route-level proof both call sites actually reached it, not just that the
+    shared function itself is correct)."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Parity Filter Co")
+    _seed_posting(
+        dsn,
+        "parity-match",
+        company_id,
+        title="Distinctive Parity Match Title",
+        company="Parity Filter Co",
+    )
+    other_id = _seed_company(dsn, "Parity Other Co")
+    _seed_posting(
+        dsn,
+        "parity-nomatch",
+        other_id,
+        title="Distinctive Parity Nomatch Title",
+        company="Parity Other Co",
+    )
+
+    authed_client = _feed_client(app, target_companies=["Parity Filter Co"])
+    authed_html = authed_client.get("/").get_data(as_text=True)
+
+    app.config["VERIFY_REQUEST"] = lambda r: None
+    preview_client = app.test_client()
+    with preview_client.session_transaction() as sess:
+        sess["pending_picker"] = {"anon_id": "anon_parity", "companies": ["Parity Filter Co"]}
+    preview_html = preview_client.get("/preview").get_data(as_text=True)
+
+    for html in (authed_html, preview_html):
+        assert "Distinctive Parity Match Title" in html
+        assert "Distinctive Parity Nomatch Title" not in html
+
+
 def test_db_failure_degrades_to_empty_state_not_500(app, monkeypatch):
     from jobcannon.web import pages
 

@@ -259,6 +259,37 @@ def test_comp_floor_usd_survives_the_anon_to_clerk_handoff(app):
     assert clerk_profile["comp_floor_usd"] == 120000
 
 
+def test_target_companies_and_workplace_type_survive_the_anon_to_clerk_handoff(app):
+    """#169/#170 regression guard, same shape as the comp_floor_usd test
+    above: unlike comp_floor_usd, target_companies/workplace_type ARE in the
+    session cookie (onboarding.py's pending_picker), but that session copy
+    is discarded once handoff completes — it is never read again after
+    sign-up. Before this fix, the handoff's upsert_profile copy omitted both
+    fields, so every signed-up tenant's saved company/workplace-type
+    selections silently reset to NULL/"any" the moment they signed up."""
+    dsn = app.config["_TEST_DSN"]
+    client = app.test_client()
+
+    resp = client.post(
+        "/start",
+        data={
+            "titles": ["Engineer"],
+            "companies": ["Acme Corp"],
+            "seniority_level": "senior",
+            "workplace_type": "remote",
+        },
+    )
+    assert resp.status_code in (302, 303)
+
+    _authed(app)
+    client.get("/")
+
+    clerk_profile = _profile_row(dsn, CLERK_ID)
+    assert clerk_profile is not None
+    assert clerk_profile["target_companies"] == ["Acme Corp"]
+    assert clerk_profile["workplace_type"] == "REMOTE"
+
+
 def test_handoff_writes_no_consent_row(app):
     dsn = app.config["_TEST_DSN"]
     client = app.test_client()

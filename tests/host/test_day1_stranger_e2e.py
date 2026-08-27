@@ -141,6 +141,13 @@ def test_day_one_stranger_journey_end_to_end(app, seeded_feed_corpus):
     submit_resp = client.post(
         "/start",
         data={
+            # #175: a picker submission must select at least one title or
+            # company. A company (not a title) is chosen deliberately here,
+            # to preserve this test's downstream "all three seeded titles
+            # appear, unfiltered by title" assertions below — every seeded
+            # posting shares this one company, so a company-only selection
+            # still passes every one of them through #169's new filter.
+            "companies": ["Day One Stranger Test Co"],
             "skills": ["python", "sql"],
             "seniority_level": "senior",
             "years_of_experience": "6",

@@ -175,15 +175,24 @@ def test_picker_submit_mints_exactly_one_anon_user_row(app):
     client = app.test_client()
     client.post(
         "/start",
-        data={"seniority_level": "senior", "years_of_experience": "5", "workplace_type": "any"},
+        data={
+            "titles": ["Engineer"],
+            "seniority_level": "senior",
+            "years_of_experience": "5",
+            "workplace_type": "any",
+        },
     )
     assert _anon_user_count(app.config["_TEST_DSN"]) == 1
 
 
 def test_repeat_submit_reuses_the_same_anon_id(app):
     client = app.test_client()
-    client.post("/start", data={"seniority_level": "mid", "workplace_type": "any"})
-    client.post("/start", data={"seniority_level": "staff", "workplace_type": "any"})
+    client.post(
+        "/start", data={"titles": ["Engineer"], "seniority_level": "mid", "workplace_type": "any"}
+    )
+    client.post(
+        "/start", data={"titles": ["Engineer"], "seniority_level": "staff", "workplace_type": "any"}
+    )
 
     assert _anon_user_count(app.config["_TEST_DSN"]) == 1
     row = _profile_row_for_anon(app.config["_TEST_DSN"])
@@ -192,7 +201,9 @@ def test_repeat_submit_reuses_the_same_anon_id(app):
 
 def test_target_locations_and_experience_summary_are_not_written(app):
     client = app.test_client()
-    client.post("/start", data={"seniority_level": "mid", "workplace_type": "any"})
+    client.post(
+        "/start", data={"titles": ["Engineer"], "seniority_level": "mid", "workplace_type": "any"}
+    )
 
     row = _profile_row_for_anon(app.config["_TEST_DSN"])
     assert row["target_locations"] is None
@@ -222,7 +233,10 @@ def test_failed_submit_leaves_no_orphan_anon_user_row(app, monkeypatch):
 
     client = app.test_client()
     with pytest.raises(RuntimeError, match="simulated failure between mint and upsert"):
-        client.post("/start", data={"seniority_level": "mid", "workplace_type": "any"})
+        client.post(
+            "/start",
+            data={"titles": ["Engineer"], "seniority_level": "mid", "workplace_type": "any"},
+        )
 
     assert _anon_user_count(app.config["_TEST_DSN"]) == 0
 
@@ -391,6 +405,122 @@ def test_non_string_company_is_rejected_by_type_check():
     assert error == "companies must be text values"
 
 
+def test_company_with_control_character_rerenders_without_writing(app):
+    """#169: companies now reach a durable jsonb column
+    (profiles.target_companies), so the same control-character rejection
+    _parse_titles already enforces for issue #54 applies here too — mirrors
+    test_title_with_control_character_rerenders_without_writing."""
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={
+            "companies": ["Acme\x07 Corp"],
+            "seniority_level": "mid",
+            "workplace_type": "any",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert "invalid (control) characters" in resp.get_data(as_text=True)
+    assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+    assert _profile_row_for_anon(app.config["_TEST_DSN"]) is None
+
+
+def test_empty_submission_rerenders_without_writing(app):
+    """#175: a picker submission with no title AND no company checked must
+    not succeed silently — no anon user row, no profiles row, and no
+    redirect to /preview, the same 200-re-render shape every other
+    validation failure on this route already uses."""
+    client = app.test_client()
+    resp = client.post("/start", data={"seniority_level": "mid", "workplace_type": "any"})
+
+    assert resp.status_code == 200
+    assert "pick at least one title or company" in resp.get_data(as_text=True)
+    assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+    assert _profile_row_for_anon(app.config["_TEST_DSN"]) is None
+
+
+def test_empty_submission_over_hx_returns_a_small_error_fragment(app):
+    """#175's HX-Request branch: an HTMX submission gets the small
+    _picker_error_fragment.html fragment (mirroring jobcannon/web/__init__.py's
+    CSRFError handler's own HX-vs-full-page split), not the whole picker
+    page re-rendered."""
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={"seniority_level": "mid", "workplace_type": "any"},
+        headers={"HX-Request": "true"},
+    )
+
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "pick at least one title or company" in html
+    assert "Tell us what you're looking for" not in html
+    assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+
+
+def test_title_only_submission_succeeds_without_a_company(app):
+    """The #175 empty-submission check requires ONE of titles/companies, not
+    both — a title-only submission (the pre-#175 common case) must still
+    succeed exactly as before."""
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={"titles": ["Engineer"], "seniority_level": "mid", "workplace_type": "any"},
+    )
+    assert resp.status_code in (302, 303)
+
+
+def test_company_only_submission_succeeds_without_a_title(app):
+    """Symmetric to the title-only case above: a company-only submission
+    must also succeed, and profiles.target_companies (#169) actually stores
+    it."""
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={"companies": ["Acme Corp"], "seniority_level": "mid", "workplace_type": "any"},
+    )
+    assert resp.status_code in (302, 303)
+
+    row = _profile_row_for_anon(app.config["_TEST_DSN"])
+    assert row["target_companies"] == ["Acme Corp"]
+
+
+def test_error_rerender_echoes_every_submitted_field(app):
+    """#175: before this fix, a validation-error re-render silently dropped
+    every field below titles/companies (skills/seniority_level/
+    years_of_experience/comp_floor_usd/workplace_type) — a genuine mistake
+    (e.g. a typo'd years_of_experience) cost the visitor their entire form.
+    Triggers the error path via the oversized-title-count rejection (a
+    field-level failure unrelated to the fields being asserted here) so the
+    echoed values are exercised independently of whichever check fires the
+    error."""
+    client = app.test_client()
+    oversized_titles = [f"Title {i}" for i in range(MAX_TITLES_PER_SELECTION + 1)]
+    resp = client.post(
+        "/start",
+        data={
+            "titles": oversized_titles,
+            "skills": ["python", "sql"],
+            "seniority_level": "staff",
+            "years_of_experience": "7.5",
+            "comp_floor_usd": "150000",
+            "workplace_type": "hybrid",
+        },
+    )
+
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert 'name="skills" value="python" checked' in html
+    assert 'name="skills" value="sql" checked' in html
+    assert '<option value="staff" selected>' in html
+    assert 'name="years_of_experience"' in html
+    assert 'value="7.5"' in html
+    assert 'name="comp_floor_usd"' in html
+    assert 'value="150000"' in html
+    assert '<option value="hybrid" selected>' in html
+
+
 def test_company_selections_at_the_cap_boundary_write_successfully(app):
     """Happy path at both boundaries inclusive: MAX_COMPANIES_PER_SELECTION
     companies, each exactly MAX_COMPANY_LENGTH characters, must still
@@ -460,6 +590,7 @@ def test_comp_floor_usd_written_to_profile(app):
     resp = client.post(
         "/start",
         data={
+            "titles": ["Engineer"],
             "seniority_level": "senior",
             "comp_floor_usd": "120000",
             "workplace_type": "any",
@@ -483,6 +614,7 @@ def test_comp_floor_usd_zero_writes_zero_not_null(app):
     resp = client.post(
         "/start",
         data={
+            "titles": ["Engineer"],
             "seniority_level": "mid",
             "comp_floor_usd": "0",
             "workplace_type": "any",
@@ -499,7 +631,9 @@ def test_comp_floor_usd_omitted_defaults_null(app):
     """Optional field: a submission with no comp_floor_usd must still
     succeed, storing NULL rather than rejecting the submission."""
     client = app.test_client()
-    resp = client.post("/start", data={"seniority_level": "mid", "workplace_type": "any"})
+    resp = client.post(
+        "/start", data={"titles": ["Engineer"], "seniority_level": "mid", "workplace_type": "any"}
+    )
     assert resp.status_code in (302, 303)
 
     row = _profile_row_for_anon(app.config["_TEST_DSN"])
@@ -516,6 +650,7 @@ def test_comp_floor_usd_never_reaches_the_session_cookie(app):
     client.post(
         "/start",
         data={
+            "titles": ["Engineer"],
             "seniority_level": "senior",
             "comp_floor_usd": "120000",
             "workplace_type": "any",
@@ -612,6 +747,7 @@ def test_comp_floor_usd_at_int4_max_boundary_writes_successfully(app):
     resp = client.post(
         "/start",
         data={
+            "titles": ["Engineer"],
             "seniority_level": "mid",
             "comp_floor_usd": str(MAX_COMP_FLOOR_USD),
             "workplace_type": "any",
@@ -628,7 +764,9 @@ def test_repeat_get_start_after_submit_shows_completion_state(app):
     a completed POST /start renders the "submitted" confirmation with a
     link to /preview, not a 401 or a 500."""
     client = app.test_client()
-    post_resp = client.post("/start", data={"seniority_level": "mid", "workplace_type": "any"})
+    post_resp = client.post(
+        "/start", data={"titles": ["Engineer"], "seniority_level": "mid", "workplace_type": "any"}
+    )
     assert post_resp.status_code in (302, 303)
 
     resp = client.get("/start")
