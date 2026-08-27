@@ -769,10 +769,22 @@ def preview():
     if request.headers.get("HX-Request") == "true":
         return render_template("_feed_page.html", entries=entries, load_more_url=load_more_url)
 
+    # #175: NOT `bool(selections)` — `selections` always carries `anon_id`
+    # once /start has been submitted even once, so that check is truthy
+    # even for a hollow selection. It also stayed truthy for a session
+    # cookie minted by the pre-#175 build, which let a fully-blank
+    # submission through and stored it verbatim; that cookie is still live
+    # in production today. Derive it from the same "at least one title or
+    # company" predicate _parse_submission now enforces on write, so a
+    # pre-existing hollow cookie shows the same honest banner a fresh
+    # blank submission is rejected before ever producing.
+    selection_kwargs = selection_filter_kwargs(selections)
+    has_selections = bool(selection_kwargs["titles"] or selection_kwargs["companies"])
+
     return render_template(
         "preview.html",
         entries=entries,
-        has_selections=bool(selections),
+        has_selections=has_selections,
         load_more_url=load_more_url,
         ordering=_ordering_label(rows),
         location_contains=location_contains or "",

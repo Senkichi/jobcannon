@@ -455,6 +455,36 @@ def test_preview_without_picker_selections_renders_the_designed_prompt_not_a_500
     assert "You haven't completed the picker yet" in html
 
 
+def test_preview_with_a_hollow_stored_selection_still_shows_the_prompt(app):
+    """#175's own mechanism note: `has_selections = bool(selections)` was
+    truthy any time a `pending_picker` dict existed at all, because that
+    dict always carries `anon_id` -- even with titles/companies both empty.
+    _parse_submission's new "pick at least one" gate stops a FRESH /start
+    submission from ever producing that shape, but it can't retroactively
+    fix a session cookie signed by the pre-#175 build, which let a fully
+    blank submission through and stored it verbatim -- jobcannon.dev is a
+    live product, so such a cookie is a real, currently-outstanding case,
+    not a hypothetical one. Sets the session directly (bypassing /start
+    entirely) to reproduce exactly that shape."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Hollow Selection Co")
+    _seed_posting(dsn, "preview-hollow-1", company_id, title="Hollow Selection Posting")
+
+    client = app.test_client()
+    # workplace_type=None, not the literal string "any": _WORKPLACE_FILTERS
+    # already normalizes "any" -> None before ANY real submission (pre- or
+    # post-#175) ever reaches set_pending_picker, so None is the only shape
+    # a genuine stored selection -- stale or fresh -- can carry.
+    _set_pending_picker(client, titles=[], companies=[], workplace_type=None)
+    html = client.get("/preview").get_data(as_text=True)
+
+    assert "You haven't completed the picker yet" in html
+    # Positive control: the seeded row must still render -- proves this is
+    # a real 200 render honoring the (empty) filter, not an empty-result
+    # page that would vacuously lack the banner's sibling content too.
+    assert "Hollow Selection Posting" in html
+
+
 def test_picker_submit_now_redirects_to_preview(app):
     client = app.test_client()
     resp = client.post(
