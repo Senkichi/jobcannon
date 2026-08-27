@@ -136,11 +136,27 @@
            WITHOUT htmx ever processing it, leaving the new Undo button's
            own hx-post inert until a reload — `htmx.process(newRow)` is what
            wires it up, the same activation a normal htmx-driven swap does
-           for free. #}
+           for free.
+
+           A double click captures the SAME row/parent twice before the
+           first fetch resolves — `row.dataset.applyPending` (set here,
+           cleared in `.finally`) makes the second click's handler return
+           immediately instead of firing a second POST; `row.parentNode ===
+           parent` guards the swap itself so a detached row (this guard, or
+           any other future cause) can never throw replaceChild's
+           NotFoundError into the outer `.catch` and surface a FALSE
+           "could not be recorded" toast for a write that actually
+           succeeded. When the response can't be turned into a usable row
+           (malformed/empty body, or that parentNode check failing) the
+           mutation has already committed server-side but the DOM never
+           reflects it — surfacing that via `jcSurfaceError` instead of
+           silently leaving the stale Apply control in place is what tells
+           the user to refresh rather than assuming their click did
+           nothing. #}
         <a href="{{ entry.apply_url }}"
            target="_blank"
            rel="noopener noreferrer"
-           hx-on:click="var row = this.closest('[data-posting-row]'); var parent = row.parentNode; fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true, headers: {'X-CSRFToken': document.querySelector('meta[name=csrf-token]').content}}).then(function(resp){ if (!resp.ok) { if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — refresh the page and try again.'); } return; } return resp.text().then(function(html){ var tmpl = document.createElement('template'); tmpl.innerHTML = html.trim(); var newRow = tmpl.content.firstElementChild; if (newRow && parent) { parent.replaceChild(newRow, row); if (window.htmx) { window.htmx.process(newRow); } } }); }).catch(function(){ if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — check your connection and try again.'); } })"
+           hx-on:click="var row = this.closest('[data-posting-row]'); if (row.dataset.applyPending === '1') { return; } row.dataset.applyPending = '1'; var parent = row.parentNode; fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true, headers: {'X-CSRFToken': document.querySelector('meta[name=csrf-token]').content}}).then(function(resp){ if (!resp.ok) { if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — refresh the page and try again.'); } return; } return resp.text().then(function(html){ var tmpl = document.createElement('template'); tmpl.innerHTML = html.trim(); var newRow = tmpl.content.firstElementChild; if (newRow && parent && row.parentNode === parent) { parent.replaceChild(newRow, row); if (window.htmx) { window.htmx.process(newRow); } } else if (window.jcSurfaceError) { window.jcSurfaceError('Apply recorded, but the row did not update — refresh'); } }); }).catch(function(){ if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — check your connection and try again.'); } }).finally(function(){ row.dataset.applyPending = ''; })"
            class="underline text-neutral-300"
            data-action-apply>
           Apply

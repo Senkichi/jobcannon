@@ -348,6 +348,33 @@ def test_apply_control_renders_the_seeded_outbound_link(app):
     assert f"fetch('{apply_path}'" in html
 
 
+def test_apply_control_handler_guards_double_click_and_stale_swap(app):
+    """LOW findings from review-1 (F4) and Devin (F3/F4): a rapid double
+    click on Apply must not fire the mutation twice, and a response the
+    handler can't turn into a usable row must never silently no-op. Both
+    fixes live entirely in the inline hx-on:click string _posting_row.html
+    renders (JS execution itself is out of reach for a server-side test —
+    see that template's own comment for why), so this pins the markers on
+    the ACTUAL rendered handler rather than a hand-copied JS literal."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Double Click Co")
+    _seed_posting(
+        dsn,
+        "double-click-1",
+        company_id,
+        title="Double Click Row",
+        source_urls=["https://boards.greenhouse.io/acme/jobs/1"],
+    )
+
+    html = client.get("/").get_data(as_text=True)
+
+    assert "data-action-apply" in html
+    assert "row.dataset.applyPending" in html  # pending guard
+    assert "row.parentNode === parent" in html  # stale-swap guard
+    assert "Apply recorded, but the row did not update" in html  # F4: no silent no-op
+
+
 # --- #177: applied state + undo -------------------------------------------
 
 
