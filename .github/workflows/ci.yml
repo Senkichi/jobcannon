@@ -66,14 +66,49 @@ jobs:
         env:
           JC_FORK_TESTS_UNAVAILABLE: "1"
 
+  migration-collision-guard:
+    name: Migration collision guard
+    # Issue #211: scripts/new_migration.py mints a version free against
+    # origin/main and every open PR it can see AT CREATION TIME, but that
+    # view goes stale the moment a sibling PR merges or a new one opens
+    # before this one does. This job re-checks at review/merge time, on
+    # every PR event, against origin/main's CURRENT head and every OTHER
+    # currently-open PR -- the race the minting script structurally cannot
+    # close on its own. Same self-hosted-only, same-repo-only gate as `test`
+    # above, for the same reason (pull_request reads the workflow file from
+    # the PR head, so a fork could otherwise smuggle in arbitrary steps).
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Windows, X64, jcpub]
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: false
+      # scripts/check_migration_collisions.py is stdlib-only (urllib, not
+      # `gh` -- nothing on this runner's PATH beyond what setup-uv provides
+      # is assumed). --no-project skips syncing the full project
+      # dependency set for a script that needs none of it.
+      - name: Check migration version collisions
+        run: uv run --no-project python scripts/check_migration_collisions.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
   tests-passed:
     name: Tests passed
     # Single check branch protection / merge automation should require: it
     # always reports (if: always()), so it can never be skipped-green the
     # way a conditional test job could satisfy a required check without
     # actually running. A fork PR (test skipped) therefore fails this check
-    # by construction.
-    needs: [test]
+    # by construction. migration-collision-guard is allowed to be "skipped"
+    # (it only runs on same-repo pull_request events -- a push to main has
+    # no PR to check) but never "failure"/"cancelled".
+    needs: [test, migration-collision-guard]
     if: always()
     runs-on: [self-hosted, Windows, X64, jcpub]
     steps:
@@ -82,5 +117,10 @@ jobs:
         run: |
           if [ "${{ needs.test.result }}" != "success" ]; then
             echo "test job result: ${{ needs.test.result }}"
+            exit 1
+          fi
+          guard="${{ needs.migration-collision-guard.result }}"
+          if [ "$guard" != "success" ] && [ "$guard" != "skipped" ]; then
+            echo "migration-collision-guard job result: $guard"
             exit 1
           fi
