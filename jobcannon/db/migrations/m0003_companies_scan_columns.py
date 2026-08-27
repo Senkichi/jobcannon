@@ -15,12 +15,13 @@ row and every write the previous (outgoing) release can produce during
 Render's zero-downtime deploy overlap window already satisfies the new,
 wider CHECK (a CHECK constraint only rejects INSERT/UPDATE, never SELECT,
 so the previous release's reads are unaffected either way). This is
-contract-shaped by DDL SHAPE (DROP+ADD CONSTRAINT touching a column
-m0001 created) but not by BEHAVIOR:
-tests/test_migration_deploy_safety.py's static scanner cannot distinguish
-a widen from a narrow by regex alone, so it conservatively flags any
-DROP+ADD CONSTRAINT on a pre-existing column and relies on this
-declaration + justification instead of trying to parse CHECK semantics.
+contract-shaped by DDL SHAPE (DROP CONSTRAINT + ADD CONSTRAINT, both
+touching a column m0001 created) but not by BEHAVIOR:
+tests/test_migration_deploy_safety.py parses this with a real SQL grammar
+(pglast) but deliberately doesn't attempt to parse CHECK boolean-expression
+semantics to tell a widen from a narrow, so it conservatively flags any
+DROP CONSTRAINT / ADD CONSTRAINT on a pre-existing column and relies on
+this declaration + justification instead.
 """
 
 from __future__ import annotations

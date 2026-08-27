@@ -56,6 +56,13 @@ The only consequence of the inverted order is the benign straggler case
 already documented above (old-format rows written by a not-yet-replaced
 writer in the gap between this migration committing and web's cutover),
 never an error or data-integrity issue.
+
+Stragglers: benign. A `user_signed_up` row an old (pre-rename) writer
+inserts after this migration commits keeps the old `referrer_url` key
+permanently (this migration only ever runs once, per the ledger) -- but the
+value under either key name is hostname-only, `has_signed_up_event` dedups
+on `event_type` not the payload key, and nothing else reads this payload
+key directly. No follow-up sweep needed.
 """
 
 from __future__ import annotations
