@@ -52,30 +52,123 @@ must stay identical on both.
 
 ## 3. First boot ordering
 
-`jobcannon/worker/__main__.py` is the **single migration authority** in this
-deploy: `create_app()` never runs migrations. On first boot the worker owns,
-in order: our schema ledger (`run_migrations`), then the four engine seams,
-then procrastinate's own queue schema (guarded apply, via a
-`to_regclass('public.procrastinate_jobs')` existence probe — see the
-Two-Schema-Authorities design in the worker's module docstring), then
-`run_worker()`.
+**Migration ordering guarantee (issue #196).** `jobcannon-web` and
+`jobcannon-worker` deploy independently on Render, with no guarantee about
+which one finishes first — a release that reads a table/column its own
+migration creates otherwise has a window where web serves against the old
+schema until the worker happens to reboot. `render.yaml`'s `jobcannon-web`
+service closes that window with a `preDeployCommand` that runs
+`python -m jobcannon.db.migrate` (Render docs: "Command that runs after the
+build command but before the start command"; on failure, "the entire deploy
+fails" — a broken migration blocks the new web code from ever going live
+against a schema it doesn't match, render.com/docs/deploys). That command
+resolves `DATABASE_URL` the exact same way the worker does
+(`load_host_config`) and calls the same `run_migrations()`.
+
+Because both web's pre-deploy step and the worker's boot-time call can now
+run against the same database — sequentially on a normal deploy, but
+possibly overlapping if a worker restarts mid-deploy — `run_migrations()`
+takes a session-level Postgres advisory lock (`jobcannon/db/migrate.py`'s
+`_ADVISORY_LOCK_KEY`) for its entire ledger DDL / read / apply sequence, so
+two concurrent callers serialize instead of racing the `schema_migrations`
+INSERT. The worker's boot-time call is no longer the single migration
+authority; it stays as an idempotent, lock-serialized belt-and-braces —
+still exercised on every worker boot in case a worker ever comes up before
+web's pre-deploy has run (e.g. first deploy of a brand-new environment,
+where nothing has applied any migration yet).
+
+On first boot the worker owns, in order: our schema ledger
+(`run_migrations`, a no-op if web's pre-deploy already applied everything),
+then the four engine seams, then procrastinate's own queue schema (guarded
+apply, via a `to_regclass('public.procrastinate_jobs')` existence probe —
+see the Two-Schema-Authorities design in the worker's module docstring),
+then `run_worker()`.
+
+**Verifying after a deploy.** Render's deploy logs for `jobcannon-web` show
+the pre-deploy step running before the start command — look for
+`schema_migrations: N applied, M pending` and, if any were newly applied,
+one `applied migration V (name)` line per migration
+(`jobcannon/db/migrate.py`). To confirm the ledger itself:
+`SELECT version, name, applied_at FROM schema_migrations ORDER BY version;`
+against the live database. After merging any render.yaml change, also
+confirm the Blueprint actually picked it up — a `render.yaml` edit only
+takes effect on the next Blueprint sync, so the person landing the change
+must confirm `serviceDetails.preDeployCommand` is non-null for
+`jobcannon-web` via the Render API (it was observed `null` before this
+change went in).
+
+**Rollback caveat.** A rollback of `jobcannon-web` (or `jobcannon-worker`)
+to a commit that predates a migration already recorded in the
+`schema_migrations` ledger **FAILS**, not serves benignly: pre-deploy
+re-runs `python -m jobcannon.db.migrate` on the rolled-back code, which
+doesn't know that ledger row, so the orphan guard (`orphans = applied -
+known` in `jobcannon/db/migrate.py`) raises `DatabaseNewerThanCodeError`
+and aborts the deploy. A rolled-back worker fails at boot for the exact
+same reason — that guard predates this PR; issue #196 only added the web
+pre-deploy path that now also hits it.
+
+The escape hatch is the `JC_MIGRATE_ALLOW_NEWER_DB` config setting
+(truthy values: `1` or `true`): set it on the rolling-back service's
+environment — Render dashboard → Environment, or the Render API — *before*
+triggering the rollback, and the orphan check logs a WARNING naming the
+unknown version(s) instead of raising, then continues normally. **Remove
+the var again once the rollback is resolved** — it's a per-incident
+override, not a standing config value. This is safe ONLY because every
+migration in this repo is expand-only (additive, backward-compatible with
+the previous release — the same discipline §10 documents for the general
+rollback case): the rolled-back code simply never reads the newer
+column/table it doesn't know about. A rollback across a genuinely
+contract-shaped migration (a hypothetical future `DROP COLUMN` / type
+narrowing / constraint tightening) is **not** safe to override this way —
+that needs a database restore, never `JC_MIGRATE_ALLOW_NEWER_DB`.
+
+**Migration/writer ordering also inverted, not just eliminated.** Pre-deploy
+runs migrations *before* the new web code goes live, which flips the
+ordering a data-backfill-shaped migration wants: one written to rewrite
+rows that only the *new* release's writer produces (e.g.
+`m0010_events_referrer_host.py`'s "Deploy order" docstring, which predates
+this guarantee) previously wanted migration-after-code, since only after
+web deployed would there be new-format rows to backfill. Now migrations
+always land before the new writer is live, so a backfill of that shape
+strands every row the outgoing release's writer produced in the gap
+between migration commit and web's cutover — pre-deploy closes the
+old race but opens this one for that migration *shape* specifically.
+A future migration that rewrites rows a not-yet-deployed writer will
+produce must either be order-independent (safe against running before its
+own writer exists) or ship with an explicit follow-up sweep; it can no
+longer rely on "the worker will boot after the writer's release lands."
+`m0010_events_referrer_host.py` itself is already applied on every existing
+deploy and is **not** affected by this — it's cited above only to
+illustrate the migration *shape* that needs the caution going forward.
 
 Expect these log lines on a fresh database's first worker boot (the ledger
 `name` column — and therefore the second `%s` migrate.py logs — is the
 migration file's stem, not its description):
 
 ```
+waiting for schema_migrations advisory lock
+schema_migrations: 0 applied, 9 pending (m0001_initial_schema, m0002_scan_health_log, m0003_companies_scan_columns, m0004_users_consent, m0005_postings_embedding, m0006_analytics_consent_version, m0008_profiles_comp_floor, m0009_postings_jd_content, m0010_events_referrer_host)
 applied migration 1 (m0001_initial_schema)
 applied migration 2 (m0002_scan_health_log)
 applied migration 3 (m0003_companies_scan_columns)
 applied migration 4 (m0004_users_consent)
 applied migration 5 (m0005_postings_embedding)
+applied migration 6 (m0006_analytics_consent_version)
+applied migration 8 (m0008_profiles_comp_floor)
+applied migration 9 (m0009_postings_jd_content)
+applied migration 10 (m0010_events_referrer_host)
 applying procrastinate schema (first boot)
 ```
 
-On every subsequent boot, `run_migrations` logs nothing new (already-applied
-migrations are skipped) and the procrastinate probe finds
-`procrastinate_jobs` already present, so neither schema step re-runs.
+`waiting for schema_migrations advisory lock` and
+`schema_migrations: N applied, M pending` are logged on **every** call to
+`run_migrations` — including every subsequent boot, not just the first —
+because the advisory-lock acquire and the ledger read always run; only the
+`applied migration V (name)` lines are conditional on there being pending
+work. So on every subsequent boot, expect those same two lines again with
+`M` at `0` and no `applied migration ...` lines (already-applied migrations
+are skipped), and the procrastinate probe finds `procrastinate_jobs`
+already present, so neither schema step re-runs its DDL.
 
 **The web service needs the database, but not the schema, to report
 healthy.** `/healthz` runs a bounded (2.5 s) pooled `SELECT 1` — schema-free
