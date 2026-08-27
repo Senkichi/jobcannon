@@ -266,7 +266,9 @@ def test_rewrite_with_identical_content_preserves_adjudicated_version(db_conn, p
         )
         is True
     )
-    db_conn.execute("UPDATE postings SET jd_adjudicated_version = 8 WHERE dedup_key = %s", (posting,))
+    db_conn.execute(
+        "UPDATE postings SET jd_adjudicated_version = 8 WHERE dedup_key = %s", (posting,)
+    )
 
     assert (
         set_jd_full(
@@ -295,7 +297,9 @@ def test_content_change_nulls_adjudicated_version_and_restamps_verdict(db_conn, 
         )
         is True
     )
-    db_conn.execute("UPDATE postings SET jd_adjudicated_version = 8 WHERE dedup_key = %s", (posting,))
+    db_conn.execute(
+        "UPDATE postings SET jd_adjudicated_version = 8 WHERE dedup_key = %s", (posting,)
+    )
 
     assert (
         set_jd_full(
