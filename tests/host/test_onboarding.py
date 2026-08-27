@@ -16,6 +16,7 @@ import pytest
 from psycopg.rows import dict_row
 
 from jobcannon.web.onboarding import (
+    MAX_COMP_FLOOR_USD,
     MAX_COMPANIES_PER_SELECTION,
     MAX_COMPANY_LENGTH,
     MAX_TITLE_LENGTH,
@@ -449,6 +450,176 @@ def test_company_selections_at_the_cap_boundary_write_successfully(app):
     with client.session_transaction() as sess:
         assert len(sess["pending_picker"]["companies"]) == MAX_COMPANIES_PER_SELECTION
         assert all(len(c) == MAX_COMPANY_LENGTH for c in sess["pending_picker"]["companies"])
+
+
+def test_comp_floor_usd_written_to_profile(app):
+    """#28 item 2: the optional numeric field reaches profiles.comp_floor_usd
+    (m0008) through upsert_profile, same as every other picker field."""
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={
+            "seniority_level": "senior",
+            "comp_floor_usd": "120000",
+            "workplace_type": "any",
+        },
+    )
+    assert resp.status_code in (302, 303)
+
+    row = _profile_row_for_anon(app.config["_TEST_DSN"])
+    assert row["comp_floor_usd"] == 120000
+
+
+def test_comp_floor_usd_zero_writes_zero_not_null(app):
+    """PR #164 review (devin lead, self-verified): 0 is a valid, distinct-
+    from-NULL comp_floor_usd (CHECK is `IS NULL OR >= 0`). No prior test in
+    this file submitted the literal HTTP value "0" and asserted it lands as
+    0 rather than NULL — closes that end-to-end coverage gap. (A future
+    regression that swapped `_parse_submission`'s `if comp_floor_raw:` guard
+    for a truthiness check on the parsed int, or added an `or None` on the
+    result, would coerce 0 into NULL and pass every other existing test.)"""
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={
+            "seniority_level": "mid",
+            "comp_floor_usd": "0",
+            "workplace_type": "any",
+        },
+    )
+    assert resp.status_code in (302, 303)
+
+    row = _profile_row_for_anon(app.config["_TEST_DSN"])
+    assert row["comp_floor_usd"] == 0
+    assert row["comp_floor_usd"] is not None
+
+
+def test_comp_floor_usd_omitted_defaults_null(app):
+    """Optional field: a submission with no comp_floor_usd must still
+    succeed, storing NULL rather than rejecting the submission."""
+    client = app.test_client()
+    resp = client.post("/start", data={"seniority_level": "mid", "workplace_type": "any"})
+    assert resp.status_code in (302, 303)
+
+    row = _profile_row_for_anon(app.config["_TEST_DSN"])
+    assert row["comp_floor_usd"] is None
+
+
+def test_comp_floor_usd_never_reaches_the_session_cookie(app):
+    """Deliberate exclusion (see onboarding.py's comment at the
+    comp_floor_usd validation site): unlike every other picker field, it has
+    no /preview reader, so it must never be spread into pending_picker —
+    protects the already-tight measured session-cookie budget
+    (MAX_COMPANY_LENGTH's module comment) from an unused key."""
+    client = app.test_client()
+    client.post(
+        "/start",
+        data={
+            "seniority_level": "senior",
+            "comp_floor_usd": "120000",
+            "workplace_type": "any",
+        },
+    )
+
+    with client.session_transaction() as sess:
+        assert "comp_floor_usd" not in sess["pending_picker"]
+
+
+def test_non_numeric_comp_floor_usd_rerenders_without_writing(app):
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={
+            "seniority_level": "mid",
+            "comp_floor_usd": "not-a-number",
+            "workplace_type": "any",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert "compensation floor must be a whole number" in resp.get_data(as_text=True)
+    assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+    assert _profile_row_for_anon(app.config["_TEST_DSN"]) is None
+
+
+def test_decimal_comp_floor_usd_rerenders_without_writing(app):
+    """comp_floor_usd is a whole-dollar `integer` column (m0008) — a
+    fractional submission must be rejected outright, never silently
+    truncated."""
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={
+            "seniority_level": "mid",
+            "comp_floor_usd": "120000.50",
+            "workplace_type": "any",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert "compensation floor must be a whole number" in resp.get_data(as_text=True)
+    assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+    assert _profile_row_for_anon(app.config["_TEST_DSN"]) is None
+
+
+def test_negative_comp_floor_usd_rerenders_without_writing(app):
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={
+            "seniority_level": "mid",
+            "comp_floor_usd": "-1",
+            "workplace_type": "any",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert f"compensation floor must be between 0 and {MAX_COMP_FLOOR_USD:,}" in resp.get_data(
+        as_text=True
+    )
+    assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+    assert _profile_row_for_anon(app.config["_TEST_DSN"]) is None
+
+
+def test_comp_floor_usd_above_int4_range_rerenders_without_writing(app):
+    """Above Postgres int4's max: must re-render with 200 (the same
+    boundary MAX_YEARS_OF_EXPERIENCE enforces for its own column), never
+    reach upsert_profile and raise psycopg.errors.NumericValueOutOfRange as
+    an unhandled 500."""
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={
+            "seniority_level": "mid",
+            "comp_floor_usd": str(MAX_COMP_FLOOR_USD + 1),
+            "workplace_type": "any",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert f"compensation floor must be between 0 and {MAX_COMP_FLOOR_USD:,}" in resp.get_data(
+        as_text=True
+    )
+    assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+    assert _profile_row_for_anon(app.config["_TEST_DSN"]) is None
+
+
+def test_comp_floor_usd_at_int4_max_boundary_writes_successfully(app):
+    """Happy path at the upper boundary inclusive: MAX_COMP_FLOOR_USD itself
+    must still succeed — the cap rejects strictly-over, not at-the-limit."""
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={
+            "seniority_level": "mid",
+            "comp_floor_usd": str(MAX_COMP_FLOOR_USD),
+            "workplace_type": "any",
+        },
+    )
+
+    assert resp.status_code in (302, 303)
+    row = _profile_row_for_anon(app.config["_TEST_DSN"])
+    assert row["comp_floor_usd"] == MAX_COMP_FLOOR_USD
 
 
 def test_repeat_get_start_after_submit_shows_completion_state(app):

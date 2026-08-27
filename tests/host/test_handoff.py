@@ -65,17 +65,17 @@ def _authed(app, user_id=CLERK_ID):
     )
 
 
-def _complete_picker(client):
-    return client.post(
-        "/start",
-        data={
-            "titles": ["Engineer"],
-            "skills": ["python"],
-            "seniority_level": "senior",
-            "years_of_experience": "5",
-            "workplace_type": "remote",
-        },
-    )
+def _complete_picker(client, comp_floor_usd=None):
+    data = {
+        "titles": ["Engineer"],
+        "skills": ["python"],
+        "seniority_level": "senior",
+        "years_of_experience": "5",
+        "workplace_type": "remote",
+    }
+    if comp_floor_usd is not None:
+        data["comp_floor_usd"] = comp_floor_usd
+    return client.post("/start", data=data)
 
 
 def _events_rows(dsn, user_id, event_type):
@@ -200,7 +200,7 @@ def test_signup_event_passes_consent_explicitly_not_from_stale_g(app, monkeypatc
     assert fake.captured == []
 
 
-def test_referrer_url_payload_is_hostname_only(app):
+def test_referrer_host_payload_is_hostname_only(app):
     dsn = app.config["_TEST_DSN"]
     client = app.test_client()
     _authed(app)
@@ -208,7 +208,7 @@ def test_referrer_url_payload_is_hostname_only(app):
     client.get("/", headers={"Referer": "https://example.com/path?x=1"})
 
     rows = _events_rows(dsn, CLERK_ID, "user_signed_up")
-    assert rows[0]["payload"]["referrer_url"] == "example.com"
+    assert rows[0]["payload"]["referrer_host"] == "example.com"
 
 
 def test_anon_profile_is_rekeyed_to_clerk_id_and_anon_user_row_is_deleted(app):
@@ -237,6 +237,26 @@ def test_anon_profile_is_rekeyed_to_clerk_id_and_anon_user_row_is_deleted(app):
             ]
             == 0
         )
+
+
+def test_comp_floor_usd_survives_the_anon_to_clerk_handoff(app):
+    """PR #164 review (refuter-1 HIGH, corroborated by devin): comp_floor_usd
+    is deliberately kept out of the session cookie (onboarding.py), so the
+    handoff's `upsert_profile` copy is the ONLY path a pre-signup floor can
+    take to the permanent Clerk profile before the anon row cascade-deletes.
+    Before the fix, the copy omitted comp_floor_usd and every signed-up
+    tenant's floor silently reset to NULL."""
+    dsn = app.config["_TEST_DSN"]
+    client = app.test_client()
+
+    _complete_picker(client, comp_floor_usd="120000")
+
+    _authed(app)
+    client.get("/")
+
+    clerk_profile = _profile_row(dsn, CLERK_ID)
+    assert clerk_profile is not None
+    assert clerk_profile["comp_floor_usd"] == 120000
 
 
 def test_handoff_writes_no_consent_row(app):

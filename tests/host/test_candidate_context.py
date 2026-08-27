@@ -211,9 +211,10 @@ def test_build_candidate_context_none_and_empty_values_render_placeholders():
             "target_locations": ["", "  "],
             "seniority_level": None,
             "years_of_experience": None,
+            "comp_floor_usd": None,
         }
     )
-    assert context.count("Not specified") == 6
+    assert context.count("Not specified") == 7
 
 
 def test_fmt_list_drops_json_null_items_instead_of_literal_none_string():
@@ -250,6 +251,34 @@ def test_fmt_list_drops_dict_items_within_a_list_shaped_column():
     assert "Data Engineer, Platform Engineer" in context
     assert "{" not in context
     assert "'level'" not in context
+
+
+def test_comp_floor_usd_renders_as_comma_formatted_dollar_amount():
+    """#28 item 2: comp_floor_usd is the 7th candidate-context line, rendered
+    as a thousands-separated dollar figure for comp_fit anchoring."""
+    from jobcannon.host.candidate_context import build_candidate_context
+
+    context = build_candidate_context({"comp_floor_usd": 120000})
+    assert "- Compensation floor: $120,000" in context
+
+
+def test_comp_floor_usd_zero_renders_as_dollar_zero_not_placeholder():
+    """0 is a real (if unusual) floor value, distinct from "unset" (None) —
+    must render as an anchor, not fall through to Not specified."""
+    from jobcannon.host.candidate_context import build_candidate_context
+
+    context = build_candidate_context({"comp_floor_usd": 0})
+    assert "- Compensation floor: $0" in context
+
+
+def test_comp_floor_usd_missing_renders_not_specified():
+    """A tenant who hasn't set a floor must never anchor comp_fit against a
+    fabricated number (m0008's migration docstring) — absent/None defers to
+    the same placeholder every other unset field gets."""
+    from jobcannon.host.candidate_context import build_candidate_context
+
+    context = build_candidate_context({})
+    assert "- Compensation floor: Not specified" in context
 
 
 def test_fmt_list_dict_as_whole_column_value_renders_not_specified():
