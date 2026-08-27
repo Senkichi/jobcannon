@@ -319,6 +319,48 @@ dependency is resolved by issue #196's web pre-deploy migration step
 (#197) — see `m0007_revoked_subjects.py`'s docstring for the current
 guarantee and the narrow self-healing window that remains.
 
+### Creating a new migration
+
+**Versions are minted, never chosen** (issue #211). Two open PRs once each
+independently took origin/main's max version-on-disk + 1 and landed on the
+same number (`m0011`) — correct in isolation, since neither branch could
+see the other. `jobcannon/db/migrations/__init__.py` fails closed on a
+duplicate version at import time, so that collision was only discovered
+when the second PR merged, red-lining the whole suite (and the pre-deploy
+`migrate` step above) until someone hand-renumbered it.
+
+Always create a new migration with:
+
+```
+python scripts/new_migration.py "<slug>"
+```
+
+This mints a version free against origin/main's on-disk migrations
+directory **and** every currently open PR's head (`gh pr list` +
+`refs/pull/<n>/head` + `git ls-tree`) — not just whatever this branch
+happened to fork from. If `gh` is unavailable or unauthenticated, or any
+PR ref fails to fetch, it falls back to origin/main alone and prints an
+unmissable "unverified against open PRs" warning; re-run it once `gh`
+works before pushing if you saw that warning.
+
+That view can still go stale between the moment a version is minted and
+the moment the PR merges (another PR opens or lands in between) — the
+`Migration collision guard` CI check (`scripts/
+check_migration_collisions.py`, `.github/workflows/ci.yml`, self-hosted
+`jcpub` runners) re-verifies on every PR event against origin/main's
+CURRENT head and every OTHER currently-open PR, and fails naming the
+colliding PR number(s) if the race actually lands. Never hand-pick a
+version to work around either check — renumber with the script instead.
+
+**A rebase never renumbers an already-applied migration.** The
+`schema_migrations` ledger (§3 above) keys on `version`, not on file
+position or migration count — once a version has been applied to any
+database, that number is permanently taken. Rebasing or reordering commits
+in a PR does not and must not change an existing migration's `version=`;
+only a not-yet-applied, not-yet-merged migration is safe to renumber (see
+the "Immediate" fix for #211's own `m0011` collision, which renumbered the
+not-yet-landed side to `m0012` before either had touched a database).
+
 ## 4. Webhook endpoint registration
 
 In the Clerk dashboard, add a webhook endpoint pointing at
