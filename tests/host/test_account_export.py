@@ -50,6 +50,12 @@ _PROFILE_EXPORT_COLUMNS = frozenset(
         "seniority_level",
         "years_of_experience",
         "comp_floor_usd",
+        # #169/#170 (m0011): the picker's company/workplace-type selections,
+        # same category as target_titles/seniority_level above — a user's
+        # own stated preferences, no different a data-minimization call than
+        # the columns already exported.
+        "target_companies",
+        "workplace_type",
         "updated_at",
     }
 )
@@ -291,6 +297,8 @@ def test_export_document_pins_expected_key_sets(app):
         "seniority_level",
         "years_of_experience",
         "comp_floor_usd",
+        "target_companies",
+        "workplace_type",
         "updated_at",
     }
 
