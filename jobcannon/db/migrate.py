@@ -58,11 +58,11 @@ _ADVISORY_LOCK_KEY = 5255127982483983144
 # only across expand-only migrations, never a contract-shaped one). Parsed
 # in exactly ONE place (allow_newer_db_from_env below) so the CLI and the
 # worker can never diverge on what counts as "truthy".
-_ALLOW_NEWER_DB_ENV = "JOBCANNON_MIGRATE_ALLOW_NEWER_DB"
+_ALLOW_NEWER_DB_ENV = "JC_MIGRATE_ALLOW_NEWER_DB"
 
 
 def allow_newer_db_from_env() -> bool:
-    """Single source of truth for parsing JOBCANNON_MIGRATE_ALLOW_NEWER_DB.
+    """Single source of truth for parsing JC_MIGRATE_ALLOW_NEWER_DB.
     Both jobcannon.db.migrate.main() (pre-deploy) and
     jobcannon.worker.__main__.main() (worker boot) call this — never read
     the env var directly — so the two paths can't drift on what "truthy"

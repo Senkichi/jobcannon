@@ -59,20 +59,20 @@ def test_unknown_applied_version_raises_newer_than_code():
     ],
 )
 def test_allow_newer_db_from_env_parses_truthy_values(monkeypatch, value, expected):
-    """Single-parse-site guard for the JOBCANNON_MIGRATE_ALLOW_NEWER_DB escape
+    """Single-parse-site guard for the JC_MIGRATE_ALLOW_NEWER_DB escape
     hatch (issue #196 H1) -- both the pre-deploy CLI and the worker boot path
     call this same helper, so its parsing rules are exactly what both paths
     honor."""
     from jobcannon.db.migrate import allow_newer_db_from_env
 
-    monkeypatch.setenv("JOBCANNON_MIGRATE_ALLOW_NEWER_DB", value)
+    monkeypatch.setenv("JC_MIGRATE_ALLOW_NEWER_DB", value)
     assert allow_newer_db_from_env() is expected
 
 
 def test_allow_newer_db_from_env_defaults_false_when_unset(monkeypatch):
     from jobcannon.db.migrate import allow_newer_db_from_env
 
-    monkeypatch.delenv("JOBCANNON_MIGRATE_ALLOW_NEWER_DB", raising=False)
+    monkeypatch.delenv("JC_MIGRATE_ALLOW_NEWER_DB", raising=False)
     assert allow_newer_db_from_env() is False
 
 
@@ -130,7 +130,7 @@ def test_migrate_subprocess_exits_nonzero_on_orphan_without_override():
 
         env = dict(os.environ)
         env["DATABASE_URL"] = dsn
-        env.pop("JOBCANNON_MIGRATE_ALLOW_NEWER_DB", None)
+        env.pop("JC_MIGRATE_ALLOW_NEWER_DB", None)
 
         result = subprocess.run(
             [sys.executable, "-m", "jobcannon.db.migrate"],
@@ -169,7 +169,7 @@ def test_migrate_subprocess_orphan_with_override_exits_zero_and_warns():
 
         env = dict(os.environ)
         env["DATABASE_URL"] = dsn
-        env["JOBCANNON_MIGRATE_ALLOW_NEWER_DB"] = "1"
+        env["JC_MIGRATE_ALLOW_NEWER_DB"] = "1"
 
         result = subprocess.run(
             [sys.executable, "-m", "jobcannon.db.migrate"],

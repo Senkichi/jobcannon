@@ -107,7 +107,7 @@ and aborts the deploy. A rolled-back worker fails at boot for the exact
 same reason — that guard predates this PR; issue #196 only added the web
 pre-deploy path that now also hits it.
 
-The escape hatch is the `JOBCANNON_MIGRATE_ALLOW_NEWER_DB` config setting
+The escape hatch is the `JC_MIGRATE_ALLOW_NEWER_DB` config setting
 (truthy values: `1` or `true`): set it on the rolling-back service's
 environment — Render dashboard → Environment, or the Render API — *before*
 triggering the rollback, and the orphan check logs a WARNING naming the
@@ -120,7 +120,7 @@ rollback case): the rolled-back code simply never reads the newer
 column/table it doesn't know about. A rollback across a genuinely
 contract-shaped migration (a hypothetical future `DROP COLUMN` / type
 narrowing / constraint tightening) is **not** safe to override this way —
-that needs a database restore, never `JOBCANNON_MIGRATE_ALLOW_NEWER_DB`.
+that needs a database restore, never `JC_MIGRATE_ALLOW_NEWER_DB`.
 
 **Migration/writer ordering also inverted, not just eliminated.** Pre-deploy
 runs migrations *before* the new web code goes live, which flips the

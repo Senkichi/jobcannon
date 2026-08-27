@@ -7,7 +7,7 @@ def test_worker_main_wires_in_order(monkeypatch):
 
     calls = []
     monkeypatch.setenv("DATABASE_URL", "postgresql://ignored/ignored")
-    monkeypatch.delenv("JOBCANNON_MIGRATE_ALLOW_NEWER_DB", raising=False)
+    monkeypatch.delenv("JC_MIGRATE_ALLOW_NEWER_DB", raising=False)
     monkeypatch.setattr(
         worker_main,
         "run_migrations",
@@ -37,7 +37,7 @@ def test_worker_main_wires_in_order(monkeypatch):
 
 
 def test_worker_main_passes_allow_newer_db_override_through(monkeypatch):
-    """The worker boot path must honor JOBCANNON_MIGRATE_ALLOW_NEWER_DB via
+    """The worker boot path must honor JC_MIGRATE_ALLOW_NEWER_DB via
     the SAME helper the pre-deploy CLI uses (jobcannon.db.migrate's
     allow_newer_db_from_env), not a re-parsed copy -- issue #196 H1. Only
     run_migrations is mocked (as in test_worker_main_wires_in_order above);
@@ -46,7 +46,7 @@ def test_worker_main_passes_allow_newer_db_override_through(monkeypatch):
     import jobcannon.worker.__main__ as worker_main
 
     monkeypatch.setenv("DATABASE_URL", "postgresql://ignored/ignored")
-    monkeypatch.setenv("JOBCANNON_MIGRATE_ALLOW_NEWER_DB", "1")
+    monkeypatch.setenv("JC_MIGRATE_ALLOW_NEWER_DB", "1")
 
     calls = []
     monkeypatch.setattr(
