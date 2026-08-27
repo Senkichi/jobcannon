@@ -13,6 +13,24 @@ CASCADE) — spec consequence C-1 ("deletion must erase per-user raw events")
 is implemented STRUCTURALLY at the FK layer rather than by a future runbook;
 anonymous (user_id IS NULL) events are unaffected. Do not weaken the events
 FK to SET NULL — that would re-open C-1.
+
+user.deleted ALSO writes a `revoked_subjects` tombstone (issue #159) on the
+same connection as `delete_user`, before it, in the same `with
+connection_factory()` block — this is the second of the two revocation
+writers (`jobcannon/web/account.py::post_delete` is the first, for
+in-app-triggered deletions; this branch is what covers a deletion started
+from Clerk's own Account Portal, which never touches account.py at all).
+NOTE: sharing a connection is NOT the same as sharing a transaction — both
+`revoke_subject` and `delete_user` call `commit_unless_nested` internally
+(jobcannon/db/pool.py), so each commits independently the moment it runs.
+A `delete_user` failure after a successful `revoke_subject` commit leaves
+the tombstone in place (harmless: the row is orphaned by design, see
+jobcannon/db/_revoked_subjects.py's module docstring) rather than rolling
+back with it. No try/except around either call: both are left to propagate
+to Flask's default 500 on failure, matching this handler's existing
+bare-call convention — Svix retries on a 5xx, and `revoke_subject` is an
+idempotent upsert (jobcannon/db/_revoked_subjects.py), so a retried
+delivery re-writes the same tombstone rather than erroring.
 """
 
 from __future__ import annotations
@@ -61,7 +79,7 @@ def clerk_webhook():
     if not user_id:
         return ("", 400)
 
-    from jobcannon.db import _users
+    from jobcannon.db import _revoked_subjects, _users
     from jobcannon.db.pool import connection_factory
 
     if event_type in ("user.created", "user.updated"):
@@ -69,6 +87,7 @@ def clerk_webhook():
             _users.ensure_user(conn, user_id, email=_primary_email(data))
     elif event_type == "user.deleted":
         with connection_factory() as conn:
+            _revoked_subjects.revoke_subject(conn, user_id)
             _users.delete_user(conn, user_id)
     # Unknown event types: acknowledged 200 so Clerk doesn't retry forever.
     return ("", 200)
