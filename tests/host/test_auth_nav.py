@@ -4,17 +4,28 @@ zero link to Clerk's hosted sign-up/sign-in pages, so a visitor who
 completed the /start -> /preview funnel had no discoverable path to create
 an account.
 
-The nav is gated on `not g.clerk_user` in base.html, not on request.path —
-the same auth-state signal the footer's existing export/delete links use
-(`{% if g.clerk_user %}`) — so it renders on every public page AND the 401
-page (both leave g.clerk_user unset/None) and hides itself on an authed
-page. Each of the two links (clerk_sign_up_url / clerk_sign_in_url) is
-independently optional: an unset URL renders nothing, never a bare href="".
+The nav (plus the My-postings link and the footer Export/Delete links) is
+gated in base.html on `visitor_is_authed` (issue #205 -- see
+jobcannon/web/__init__.py's `_inject_auth_links`), not on `g.clerk_user`
+directly and not on request.path. `visitor_is_authed` matches `g.clerk_user`
+exactly whenever `g.clerk_user` is actually resolved (every non-public
+route, and the 401 page), but on a PUBLIC_PATHS render -- where clerk_auth()
+force-sets `g.clerk_user = None` regardless of real identity, by design, so
+those page BODIES stay identity-independent (issue #193's Cache-Control
+reasoning) -- it resolves the visitor's real identity instead, closing the
+gap issue #205 found: a signed-in visitor on /demo, /privacy, or /terms
+used to see the anonymous nav. Each of the two sign-up/sign-in links
+(clerk_sign_up_url / clerk_sign_in_url) is independently optional: an unset
+URL renders nothing, never a bare href="".
 
 No Postgres needed: these hit either the errorhandler (no DB), the
 /privacy route (jobcannon.web.legal, no DB), or a custom throwaway route
 registered the same way test_auth.py's `/private` tests do — same shape as
-tests/host/test_clerk_loader_template.py."""
+tests/host/test_clerk_loader_template.py. The revoked-subject 401 edge case
+(a cryptographically valid but tombstoned JWT, which needs the real
+`revoked_subjects` table) is covered separately in
+tests/host/test_auth_revocation.py, which already carries the Postgres
+fixture this module deliberately avoids."""
 
 import logging
 
@@ -118,7 +129,10 @@ def test_401_page_content_block_omits_sign_in_link_when_sign_in_url_unset():
 def test_authed_page_hides_the_header_nav():
     """Negative control: a signed-in visitor doesn't need a sign-in/sign-up
     prompt — the nav must be absent even though both URLs are configured,
-    proving the gate is `not g.clerk_user`, not "URLs are set"."""
+    proving the gate is `visitor_is_authed`, not "URLs are set". This route
+    is not in PUBLIC_PATHS, so g.clerk_user itself is resolved directly and
+    visitor_is_authed's PUBLIC_PATHS fallback is never exercised here — see
+    the /privacy and /terms tests below for that."""
     app = _app(
         _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL),
         verify=lambda req: ClerkIdentity(user_id="user_123", claims={"sub": "user_123"}),
@@ -135,6 +149,57 @@ def test_authed_page_hides_the_header_nav():
     assert "data-auth-nav" not in html
     assert _SIGN_UP_URL not in html
     assert _SIGN_IN_URL not in html
+
+
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_public_page_shows_authed_nav_for_a_signed_in_visitor(path):
+    """Issue #205's core fix: /privacy and /terms are PUBLIC_PATHS, where
+    clerk_auth() force-sets g.clerk_user = None regardless of real identity
+    (issue #193's Cache-Control reasoning) — before this fix, base.html's
+    nav read g.clerk_user directly, so a signed-in visitor here saw the
+    anonymous sign-up/sign-in nav instead of My-postings and the footer's
+    Export/Delete links. visitor_is_authed resolves the real identity via
+    _visitor_is_anonymous()'s PUBLIC_PATHS fallback (onboarding.
+    _current_identity(), the same re-check /preview's own redirect uses)."""
+    app = _app(
+        _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL),
+        verify=lambda req: ClerkIdentity(user_id="user_authed_legal", claims={"sub": "user_authed_legal"}),
+    )
+    html = app.test_client().get(path).get_data(as_text=True)
+
+    assert "data-postings-history-nav-link" in html
+    assert 'href="/postings"' in html
+    assert ">My postings<" in html
+    assert 'href="/account/export"' in html
+    assert ">Export your data<" in html
+    assert 'href="/account/delete"' in html
+    assert ">Delete account<" in html
+    assert "data-auth-nav" not in html
+    assert _SIGN_UP_URL not in html
+    assert _SIGN_IN_URL not in html
+
+
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_public_page_still_hides_authed_nav_for_an_anonymous_visitor(path):
+    """Negative control for the test above, on the same two routes: an
+    anonymous visitor (VERIFY_REQUEST returning None, same as
+    onboarding._current_identity()'s fallback would see) must still get the
+    sign-up/sign-in nav and NOT the My-postings / Export / Delete links —
+    proving the PUBLIC_PATHS fallback resolves real identity rather than
+    defaulting every visitor to authed."""
+    app = _app(
+        _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL),
+        verify=lambda req: None,
+    )
+    html = app.test_client().get(path).get_data(as_text=True)
+
+    assert "data-auth-nav" in html
+    assert f'href="{_SIGN_UP_URL}"' in html
+    assert f'href="{_SIGN_IN_URL}"' in html
+    assert "data-postings-history-nav-link" not in html
+    assert ">My postings<" not in html
+    assert ">Export your data<" not in html
+    assert ">Delete account<" not in html
 
 
 def test_public_page_omits_sign_in_link_when_sign_in_url_unset():
