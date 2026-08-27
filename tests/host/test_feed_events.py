@@ -116,6 +116,21 @@ def _feed_client(app, user_id=CLERK_ID, *, consent=False, skills=("python",)):
     return client
 
 
+def _client_no_user_row(app, user_id):
+    """Same shape as `_feed_client` but WITHOUT seeding a `users` row --
+    #195 regression coverage for a request whose authed identity resolves
+    to a Clerk id with no corresponding `users` row at all (e.g. an account
+    deleted mid-session while an older tab / bypassed-handoff session is
+    still live). Consent can never be granted for this identity (see
+    test_undo_apply_on_a_missing_user_row_degrades_to_200_not_500's
+    docstring below), so there is no `consent=` parameter here."""
+    _authed(app, user_id)
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess[_HANDOFF_DONE_KEY] = True
+    return client
+
+
 def _seed_company(dsn, name):
     with psycopg.connect(dsn, autocommit=True) as conn:
         return conn.execute(
@@ -623,6 +638,38 @@ def test_dismissed_posting_disappears_from_the_dismissers_feed_but_not_anothers(
     assert "Dismiss Visibility Row" in html_b
 
 
+def test_save_after_dismiss_re_renders_the_row_not_an_empty_body(app):
+    """#200: save is a completely separate action from dismiss (it writes
+    `watchlists`, dismiss writes `pipeline_status`), so saving a posting the
+    SAME user already dismissed is a legitimate, independent action, not an
+    error. Before #200, `_fetch_entry`'s dismissed-excluding query meant
+    this save's own re-render came back empty (`200`, no body) --
+    indistinguishable from the save having silently failed, even though the
+    write to `watchlists` genuinely succeeded. Proves the fix: save's
+    fragment after a prior dismiss shows the row, not an empty swap
+    target."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Save After Dismiss Co")
+    posting_id = _seed_posting(
+        dsn, "save-after-dismiss-1", company_id, title="Save After Dismiss Row"
+    )
+    assert client.post(f"/postings/{posting_id}/dismiss").status_code == 200
+
+    resp = client.post(f"/postings/{posting_id}/save")
+
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert html != ""
+    assert "Save After Dismiss Row" in html
+    with psycopg.connect(dsn, row_factory=psycopg.rows.dict_row) as conn:
+        row = conn.execute(
+            "SELECT id FROM watchlists WHERE user_id = %s AND posting_id = %s",
+            (CLERK_ID, posting_id),
+        ).fetchone()
+    assert row is not None  # the save genuinely landed, not just the render
+
+
 def test_the_overlap_chip_survives_a_save_mutation_swap(app):
     """Regression for the actions.py / pages.py build_entry drift: a
     save/dismiss/apply swap must re-render the SAME entry shape the initial
@@ -676,6 +723,76 @@ def test_save_and_dismiss_on_nonexistent_posting_are_404_not_500(app):
     client = _feed_client(app, consent=True)
     assert client.post("/postings/999999999/save").status_code == 404
     assert client.post("/postings/999999999/dismiss").status_code == 404
+
+
+def test_save_dismiss_apply_on_missing_user_row_are_404_not_500(app):
+    """#195: reported that a stubbed identity with no `users` row hitting
+    POST /postings/999999/save returned 500 instead of 404. Reproduced
+    exhaustively against actions.py post-#202-merge (missing posting alone,
+    missing user alone against an EXISTING posting, and a virgin session
+    with no handoff bypass at all -- which redirects to /consent before the
+    view ever runs, per run_handoff_if_pending's unconditional ensure_user
+    call on session["attribution"]'s very first appearance) and could not
+    reproduce a 500 in any variant. save/dismiss/apply's
+    ForeignKeyViolation -> abort(404) catch (jobcannon/web/actions.py) fires
+    identically whether the FK violation comes from a missing posting_id or
+    a missing user_id, since both watchlists.user_id and
+    pipeline_status.user_id carry the same `REFERENCES users(id)` as their
+    posting_id sibling. This test locks in that already-correct behavior as
+    a regression guard rather than fixing anything -- there was nothing
+    broken to fix (see IMPLEMENTATION.md for the full repro log)."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Missing User Co")
+    posting_id = _seed_posting(dsn, "missing-user-1", company_id, title="Missing User Row")
+    client = _client_no_user_row(app, "user_missing_row_1")
+
+    # Missing user AND missing posting -- the literal #195 repro shape.
+    assert client.post("/postings/999999999/save").status_code == 404
+
+    # Missing user alone, against a posting that DOES exist -- isolates the
+    # user_id side of the FK from the posting_id side (the existing
+    # test_save_and_dismiss_on_nonexistent_posting_are_404_not_500 above
+    # only ever exercises the posting_id side, with a real seeded user).
+    assert client.post(f"/postings/{posting_id}/save").status_code == 404
+    assert client.post(f"/postings/{posting_id}/dismiss").status_code == 404
+    assert client.post(f"/postings/{posting_id}/apply").status_code == 404
+
+
+def test_undo_apply_on_a_missing_user_row_degrades_to_200_not_500(app):
+    """undo-apply has no ForeignKeyViolation catch (its DELETE never raises
+    one -- see the module docstring and
+    test_undo_apply_on_a_posting_that_does_not_exist_is_a_404 above). For a
+    missing user_id against an EXISTING posting, unmark_applied's DELETE
+    matches zero rows (there is no pipeline_status row for a user that
+    doesn't exist), falls through to its own `SELECT 1 FROM postings`
+    check, finds the posting, and returns True -- identical to a real user
+    who simply never applied
+    (test_undo_apply_on_a_never_applied_posting_is_a_no_op above). The
+    result is a 200, not a 404 and not a 500: a deliberate, already-
+    documented asymmetry with save/dismiss/apply (unmark_applied cannot
+    distinguish "never applied" from "user doesn't exist" by design), not a
+    gap #195 identified.
+
+    log_event('posting_apply_undone', ...) never reaches its INSERT for
+    this user either, which matters because that call
+    (jobcannon/web/actions.py's undo_apply) has no try/except of its own:
+    posting_apply_undone is outside log_event's _FIRST_PARTY_ALWAYS set, so
+    it requires g.consent_granted, and _resolve_consent
+    (jobcannon/web/__init__.py) can only return True by reading
+    analytics_consent off an EXISTING users row -- a missing user_id can
+    never carry a granted consent, so the write is silently skipped rather
+    than attempted. No events row is written for this user at all."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Missing User Undo Co")
+    posting_id = _seed_posting(
+        dsn, "missing-user-undo-1", company_id, title="Missing User Undo Row"
+    )
+    client = _client_no_user_row(app, "user_missing_row_2")
+
+    resp = client.post(f"/postings/{posting_id}/undo-apply")
+
+    assert resp.status_code == 200
+    assert _events(dsn, "posting_apply_undone") == []
 
 
 def test_save_is_idempotent_under_a_double_submit_via_the_route(app):
