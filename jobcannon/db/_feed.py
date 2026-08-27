@@ -72,6 +72,98 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _cursor_predicate(
+    rank_expr: str, after: tuple[float | None, datetime, int] | None
+) -> tuple[str, list[Any]]:
+    """The keyset "seek" WHERE fragment for `_SORTS["default"]`'s own three
+    columns (rank_score, last_seen, id) -- never a second, independently
+    invented cursor shape, so pagination can never drift out of sync with
+    that ORDER BY. `after` is (rank_score, last_seen, id) taken from a
+    previous page's last row (`cursor_from_row`), or None for a first page
+    (returns an empty fragment). `rank_expr` is the RAW SQL expression for
+    rank_score -- `fs.rank_score` on the authed branch, a literal
+    `NULL::double precision` on the anonymous one -- because WHERE cannot
+    reference the SELECT list's output alias the way ORDER BY can; the two
+    branches alias to the same output name but need their own raw
+    expression here.
+
+    `last_seen` is `timestamptz NOT NULL` (m0001), so only `rank_score`
+    needs NULLS-LAST handling: COALESCE to '-infinity' is exactly
+    equivalent to "NULLS LAST" in a DESC ordering (a real, storable
+    double-precision value that sorts behind every other value), which a
+    plain `<` seek predicate cannot express on a nullable column by
+    itself. Both sides of the row comparison are COALESCEd, not just the
+    column: `feed_state` has no writer anywhere in this codebase yet
+    (guarded by test_feed_state_not_written.py), so `after`'s rank_score
+    is NULL on every real page today -- a PostgreSQL row-constructor
+    comparison treats ANY NULL element pair as unknown and drops the row,
+    so COALESCEing only the column side would silently return zero rows
+    on every "load more" click. The explicit `::double precision` cast on
+    the parameter is required: an untyped NULL inside COALESCE raises
+    "could not determine data type"."""
+    if after is None:
+        return "", []
+    after_rank_score, after_last_seen, after_id = after
+    clause = (
+        f"(COALESCE({rank_expr}, '-infinity'::double precision), p.last_seen, p.id) "
+        "< (COALESCE(%s::double precision, '-infinity'::double precision), %s, %s)"
+    )
+    return clause, [after_rank_score, after_last_seen, after_id]
+
+
+def cursor_from_row(row: Any) -> dict[str, str]:
+    """The next page's keyset cursor as URL query params, derived from the
+    LAST row of the page just rendered -- never computed independently of
+    an actual returned row, so a cursor can never point somewhere the sort
+    key didn't actually visit. Consumed by `parse_cursor` (round-trips
+    through a plain query string, not a signed/opaque token: every value
+    here is one this same row already rendered to the viewer, so there is
+    nothing a tampered cursor could expose that page 1 didn't already
+    show -- at worst a malformed value degrades to `parse_cursor` treating
+    it as no cursor, never a 500)."""
+    rank_score = row["rank_score"]
+    last_seen = row["last_seen"]
+    return {
+        "cursor_rank_score": "" if rank_score is None else repr(float(rank_score)),
+        "cursor_last_seen": last_seen.isoformat(),
+        "cursor_id": str(row["id"]),
+    }
+
+
+def parse_cursor(args: Any) -> tuple[float | None, datetime, int] | None:
+    """Query params (a Flask `request.args`-shaped mapping) -> the `after`
+    tuple `list_feed_postings` accepts, or None for "no cursor" (render a
+    first page). A malformed or tampered cursor (non-numeric id, non-ISO
+    timestamp) degrades to None rather than raising -- the caller gets a
+    fresh first page instead of a 500, the same fail-open discipline
+    jobcannon/web/pages.py's other query-param parsing already uses."""
+    raw_id = (args.get("cursor_id") or "").strip()
+    if not raw_id:
+        return None
+    try:
+        cursor_id = int(raw_id)
+    except ValueError:
+        return None
+
+    raw_last_seen = (args.get("cursor_last_seen") or "").strip()
+    if not raw_last_seen:
+        return None
+    try:
+        last_seen = datetime.fromisoformat(raw_last_seen)
+    except ValueError:
+        return None
+
+    raw_rank = (args.get("cursor_rank_score") or "").strip()
+    rank_score: float | None = None
+    if raw_rank:
+        try:
+            rank_score = float(raw_rank)
+        except ValueError:
+            return None
+
+    return (rank_score, last_seen, cursor_id)
+
+
 def _build_filters(
     *,
     titles: list[str] | None,
