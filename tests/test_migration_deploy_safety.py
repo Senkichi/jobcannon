@@ -579,18 +579,50 @@ def test_no_undeclared_inverted_deploy_order():
     assert not failures, "\n".join(failures)
 
 
+def _py_hook_violation(migration: Migration) -> str | None:
+    """Pure classification, decoupled from real migration modules so it can
+    be sabotage-verified with a synthetic fixture (see
+    test_py_hook_without_contract_step_is_flagged below) -- no shipped
+    migration currently sets `py=`, so a check that only ever walked the
+    real MIGRATIONS registry would pass vacuously and could never prove this
+    rule fires."""
+    if migration.py is not None and not migration.contract_step:
+        return (
+            f"migration {migration.version} ({migration.name}) defines a `py` "
+            f"callable hook (unscannable) but doesn't declare contract_step = True"
+        )
+    return None
+
+
 def test_py_hook_migrations_are_contract_step():
     """migration.py callable hooks are unscannable (module docstring); the
     only way this guard can require review of one is the same contract_step
     escape hatch used for everything else it can't positively prove safe."""
-    failures = []
-    for migration in MIGRATIONS:
-        if migration.py is not None and not migration.contract_step:
-            failures.append(
-                f"migration {migration.version} ({migration.name}) defines a `py` "
-                f"callable hook (unscannable) but doesn't declare contract_step = True"
-            )
+    failures = [v for m in MIGRATIONS if (v := _py_hook_violation(m)) is not None]
     assert not failures, "\n".join(failures)
+
+
+def test_py_hook_without_contract_step_is_flagged():
+    """#218 review corroboration: zero shipped migrations set `py=` (grep
+    confirms it), so test_py_hook_migrations_are_contract_step above passes
+    with an empty loop against the real registry -- deleting the rule
+    entirely wouldn't fail it. This synthetic fixture pins the rule
+    directly, independent of whether any real migration ever uses `py=`."""
+    undeclared = Migration(
+        version=999998,
+        description="py hook probe",
+        py=lambda ctx: None,
+        name="m999998_py_hook_probe",
+        contract_step=False,
+    )
+    violation = _py_hook_violation(undeclared)
+    assert violation is not None, "py hook without contract_step should be flagged"
+    assert "py` callable hook" in violation
+
+    declared_safe = dataclasses.replace(undeclared, contract_step=True)
+    assert _py_hook_violation(declared_safe) is None, (
+        "py hook WITH contract_step = True should not be flagged"
+    )
 
 
 def test_contract_step_fold_neither_source_silently_overwrites_the_other():
@@ -615,64 +647,122 @@ def test_contract_step_fold_neither_source_silently_overwrites_the_other():
 # a hand-maintained production allow/deny-list.
 # ---------------------------------------------------------------------------
 
+## Each fixture pairs a known-bad statement with the substring its OWN rule
+## must emit. A bare `assert violations` would also pass if the statement
+## fell through to the fail-closed DEFAULT branch instead of the rule it's
+## meant to pin (every AlterTableType not in the allowlist ends up flagged
+## either way) -- so deleting a specific rule's branch would silently keep
+## these tests green via the default. Asserting the substring instead means
+## the fixture fails when its rule stops firing, even though `violations` is
+## still non-empty (#218 review corroboration: assertion-strength gap).
 _KNOWN_BAD_FIXTURES = [
-    pytest.param(["ALTER TABLE users DROP COLUMN email"], id="drop-column-preexisting"),
-    pytest.param(["DROP TABLE users"], id="drop-table-preexisting"),
-    pytest.param(["ALTER TABLE users ALTER COLUMN email TYPE varchar(50)"], id="alter-column-type"),
+    pytest.param(
+        ["ALTER TABLE users DROP COLUMN email"], "DROP COLUMN", id="drop-column-preexisting"
+    ),
+    pytest.param(["DROP TABLE users"], "DROP TABLE users", id="drop-table-preexisting"),
+    pytest.param(
+        ["ALTER TABLE users ALTER COLUMN email TYPE varchar(50)"],
+        "ALTER COLUMN ... TYPE",
+        id="alter-column-type",
+    ),
     pytest.param(
         ["ALTER TABLE users ADD COLUMN foo boolean NOT NULL"],
+        "ADD COLUMN ... NOT NULL",
         id="add-column-not-null-without-default",
     ),
     pytest.param(
         ["ALTER TABLE companies ADD CONSTRAINT foo_check CHECK (ats_probe_status IN ('a','b'))"],
+        "ADD CONSTRAINT CHECK",
         id="add-check-constraint-preexisting-column",
     ),
     pytest.param(
         ["ALTER TABLE companies ADD CONSTRAINT foo_uq UNIQUE (name)"],
+        "ADD CONSTRAINT UNIQUE",
         id="add-unique-constraint-preexisting-column",
     ),
     pytest.param(
         ["ALTER TABLE users ALTER COLUMN email SET NOT NULL"],
+        "SET NOT NULL",
         id="alter-column-set-not-null-preexisting",
     ),
-    pytest.param(["DROP TABLE never_created_by_any_migration"], id="drop-table-untracked"),
     pytest.param(
-        ["  ALTER TABLE users DROP COLUMN email"], id="drop-column-preexisting-leading-whitespace"
+        ["DROP TABLE never_created_by_any_migration"], "DROP TABLE", id="drop-table-untracked"
+    ),
+    pytest.param(
+        ["  ALTER TABLE users DROP COLUMN email"],
+        "DROP COLUMN",
+        id="drop-column-preexisting-leading-whitespace",
     ),
     # --- evasions the regex/tokenizer version (PR #218 v1) fell for ---
-    pytest.param(["ALTER TABLE ONLY users DROP COLUMN email"], id="alter-table-only-keyword"),
-    pytest.param(["ALTER TABLE IF EXISTS users DROP COLUMN email"], id="alter-table-if-exists"),
-    pytest.param(["ALTER TABLE public.users DROP COLUMN email"], id="schema-qualified-alter"),
-    pytest.param(['ALTER TABLE "users" DROP COLUMN email'], id="quoted-table-alter"),
-    pytest.param(['DROP TABLE "users"'], id="quoted-table-drop"),
-    pytest.param(["ALTER TABLE users DROP email"], id="drop-column-no-column-keyword"),
-    pytest.param(["ALTER TABLE users ADD foo boolean NOT NULL"], id="add-column-no-column-keyword"),
-    pytest.param(["ALTER TABLE users RENAME COLUMN email TO mail"], id="rename-column-preexisting"),
-    pytest.param(["ALTER TABLE users RENAME TO members"], id="rename-table-preexisting"),
+    pytest.param(
+        ["ALTER TABLE ONLY users DROP COLUMN email"], "DROP COLUMN", id="alter-table-only-keyword"
+    ),
+    pytest.param(
+        ["ALTER TABLE IF EXISTS users DROP COLUMN email"], "DROP COLUMN", id="alter-table-if-exists"
+    ),
+    pytest.param(
+        ["ALTER TABLE public.users DROP COLUMN email"], "DROP COLUMN", id="schema-qualified-alter"
+    ),
+    pytest.param(['ALTER TABLE "users" DROP COLUMN email'], "DROP COLUMN", id="quoted-table-alter"),
+    pytest.param(['DROP TABLE "users"'], "DROP TABLE", id="quoted-table-drop"),
+    pytest.param(
+        ["ALTER TABLE users DROP email"], "DROP COLUMN", id="drop-column-no-column-keyword"
+    ),
+    pytest.param(
+        ["ALTER TABLE users ADD foo boolean NOT NULL"],
+        "ADD COLUMN ... NOT NULL",
+        id="add-column-no-column-keyword",
+    ),
+    pytest.param(
+        ["ALTER TABLE users RENAME COLUMN email TO mail"],
+        "RENAME COLUMN",
+        id="rename-column-preexisting",
+    ),
+    pytest.param(
+        ["ALTER TABLE users RENAME TO members"], "RENAME TABLE", id="rename-table-preexisting"
+    ),
     pytest.param(
         ["ALTER TABLE companies DROP CONSTRAINT companies_ats_probe_status_check"],
+        "DROP CONSTRAINT",
         id="drop-constraint-preexisting",
     ),
-    pytest.param(["TRUNCATE users"], id="truncate-preexisting-table"),
-    pytest.param(["DROP INDEX some_untracked_idx"], id="drop-index-untracked"),
-    pytest.param(["ALTER TABLE users ADD UNIQUE (email)"], id="anonymous-add-unique"),
-    pytest.param(["ALTER TABLE users ADD CHECK (email IS NOT NULL)"], id="anonymous-add-check"),
+    pytest.param(["TRUNCATE users"], "TRUNCATE", id="truncate-preexisting-table"),
+    pytest.param(["DROP INDEX some_untracked_idx"], "DROP INDEX", id="drop-index-untracked"),
+    pytest.param(
+        ["ALTER TABLE users ADD UNIQUE (email)"], "ADD CONSTRAINT UNIQUE", id="anonymous-add-unique"
+    ),
+    pytest.param(
+        ["ALTER TABLE users ADD CHECK (email IS NOT NULL)"],
+        "ADD CONSTRAINT CHECK",
+        id="anonymous-add-check",
+    ),
     pytest.param(
         ["ALTER TABLE users ADD CONSTRAINT pk1 PRIMARY KEY (email)"],
+        "ADD CONSTRAINT PRIMARY KEY",
         id="add-primary-key-preexisting",
     ),
     pytest.param(
         ["ALTER TABLE users ADD CONSTRAINT fk1 FOREIGN KEY (email) REFERENCES companies(name)"],
+        "ADD CONSTRAINT FOREIGN KEY",
         id="add-foreign-key-preexisting-validated",
     ),
     pytest.param(
         ["ALTER TABLE users ADD CONSTRAINT ex1 EXCLUDE USING gist (email WITH =)"],
+        "not resolvable as expand-safe",
         id="add-exclude-constraint",
     ),
-    pytest.param(["-- comment\nALTER TABLE users DROP COLUMN email"], id="leading-comment-evasion"),
-    pytest.param(["ALTER TABLE users DROP /* x */ COLUMN email"], id="inline-comment-evasion"),
     pytest.param(
-        ["DO $$ BEGIN ALTER TABLE users DROP COLUMN email; END $$;"], id="do-block-hides-drop"
+        ["-- comment\nALTER TABLE users DROP COLUMN email"],
+        "DROP COLUMN",
+        id="leading-comment-evasion",
+    ),
+    pytest.param(
+        ["ALTER TABLE users DROP /* x */ COLUMN email"], "DROP COLUMN", id="inline-comment-evasion"
+    ),
+    pytest.param(
+        ["DO $$ BEGIN ALTER TABLE users DROP COLUMN email; END $$;"],
+        "opaque to this scanner",
+        id="do-block-hides-drop",
     ),
     pytest.param(
         # First statement is harmless on its own (a nullable ADD COLUMN);
@@ -681,10 +771,13 @@ _KNOWN_BAD_FIXTURES = [
         # the first statement rather than merely re-detecting a violation
         # that would have flagged anyway.
         ["ALTER TABLE users ADD COLUMN throwaway_zzz text; ALTER TABLE users DROP COLUMN email;"],
+        "DROP COLUMN",
         id="multi-statement-second-statement-caught",
     ),
     pytest.param(
-        ["CREATE UNIQUE INDEX ON companies(name)"], id="create-unique-index-preexisting-table"
+        ["CREATE UNIQUE INDEX ON companies(name)"],
+        "CREATE UNIQUE INDEX",
+        id="create-unique-index-preexisting-table",
     ),
     # Proves the fail-closed DEFAULT branch itself, not any specific rule:
     # AT_SetTableSpace has no dedicated handler and isn't in
@@ -692,13 +785,14 @@ _KNOWN_BAD_FIXTURES = [
     # "unreviewed ALTER TABLE sub-command" fallthrough.
     pytest.param(
         ["ALTER TABLE users SET TABLESPACE pg_default"],
+        "unreviewed ALTER TABLE sub-command",
         id="unrecognized-subtype-fail-closed-default",
     ),
 ]
 
 
-@pytest.mark.parametrize("sql_statements", _KNOWN_BAD_FIXTURES)
-def test_sabotage_fixtures_are_all_detected(sql_statements):
+@pytest.mark.parametrize("sql_statements,expected_substring", _KNOWN_BAD_FIXTURES)
+def test_sabotage_fixtures_are_all_detected(sql_statements, expected_substring):
     state = _SchemaState()
     for migration in MIGRATIONS:
         _scan_migration(migration, state)  # seed state with the real schema history
@@ -711,6 +805,13 @@ def test_sabotage_fixtures_are_all_detected(sql_statements):
     )
     violations = _scan_migration(probe, state)
     assert violations, f"scanner did not flag known-bad statement(s) {sql_statements!r}"
+    joined = "\n".join(violations)
+    assert expected_substring in joined, (
+        f"{sql_statements!r} was flagged, but not by its OWN rule -- expected "
+        f"{expected_substring!r} in {violations!r}. This usually means the specific "
+        f"rule branch is gone and the fail-closed default caught it instead, which "
+        f"would let this fixture stay green even with the rule deleted."
+    )
 
 
 # ---------------------------------------------------------------------------
