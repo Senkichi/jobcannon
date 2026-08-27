@@ -163,16 +163,29 @@ def test_collector_handles_quoted_arrow_fn_attrs_and_single_quotes():
     single-quoted `class`/`type` values must parse the same as
     double-quoted ones. Exercises the same `_iter_tags_in_text` /
     `_collect_cases_from_tags` collector the real scan uses, against a
-    scratch string instead of the real templates."""
+    scratch string instead of the real templates.
+
+    Also covers `<select>`/`<textarea>` positive-control: no `<textarea>`
+    exists in the real templates today, so without this fixture the
+    `textarea` arm of `_TAG_RE`'s alternation would be exercised by nothing
+    at all -- a broken `textarea` match and a correct one are otherwise
+    indistinguishable (both yield zero collected cases from the real scan)."""
     fixture = (
         '<a hx-on:click="e => f(e)" class="x">Link</a>\n'
         "<input type='checkbox' class='h-11 w-11'>\n"
+        '<select class="min-h-11"><option>a</option></select>\n'
+        '<textarea class="min-h-11"></textarea>\n'
     )
     tags = list(_iter_tags_in_text("fixture.html", fixture))
-    assert [tag for _filename, tag, _attrs in tags] == ["a", "input"]
+    assert [tag for _filename, tag, _attrs in tags] == [
+        "a",
+        "input",
+        "select",
+        "textarea",
+    ]
 
     cases = _collect_cases_from_tags(tags)
-    assert len(cases) == 2
+    assert len(cases) == 4
 
     filename, tag_name, input_type, attrs = cases[0]
     assert (filename, tag_name, input_type) == ("fixture.html", "a", None)
@@ -181,3 +194,11 @@ def test_collector_handles_quoted_arrow_fn_attrs_and_single_quotes():
     filename, tag_name, input_type, attrs = cases[1]
     assert (filename, tag_name, input_type) == ("fixture.html", "input", "checkbox")
     assert _class_tokens(attrs) == {"h-11", "w-11"}
+
+    filename, tag_name, input_type, attrs = cases[2]
+    assert (filename, tag_name, input_type) == ("fixture.html", "select", None)
+    assert _class_tokens(attrs) == {"min-h-11"}
+
+    filename, tag_name, input_type, attrs = cases[3]
+    assert (filename, tag_name, input_type) == ("fixture.html", "textarea", None)
+    assert _class_tokens(attrs) == {"min-h-11"}
