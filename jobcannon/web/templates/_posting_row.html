@@ -2,15 +2,20 @@
    _feed_list.html, which is itself shared by /preview, /, and /demo. The
    save/dismiss/apply controls below render only when the caller passes
    show_actions=True (the authenticated feed's own render, and the fragment
-   jobcannon/web/actions.py re-renders after a mutation) — /preview and
-   /demo entries carry no `saved` / `apply_url` keys and never set
-   show_actions, so this block is skipped there. Save and dismiss target
-   THIS row's own `data-posting-row` root with hx-swap="outerHTML" (never
+   jobcannon/web/actions.py re-renders after a mutation) — /preview never
+   sets show_actions (its entries are raw `{"row": ..., "chips": ...}`
+   dicts, jobcannon/web/onboarding.py, with no `saved`/`applied`/`apply_url`
+   keys at all) and neither does /demo (its entries DO carry those keys via
+   build_entry, but the route still withholds show_actions), so this block
+   is skipped for both. Save, dismiss, and undo-apply (#177) target THIS
+   row's own `data-posting-row` root with hx-swap="outerHTML" (never
    204 — jobcannon/web/actions.py's fragment routes always return 200),
    matching the accordion-row convention this codebase already uses
    elsewhere. Apply is the one control that does NOT use hx-post/hx-swap —
    see the comment at its markup below for why a real outbound <a href>
-   cannot also carry an htmx AJAX trigger on the same click.
+   cannot also carry an htmx AJAX trigger on the same click, and for how its
+   success path applies that same fragment as a manual (htmx-processed)
+   outerHTML swap instead.
 
    The "signals still computing" marker below is keyed on
    entry.row.structural_axes being NULL — a real, transient state (the
@@ -73,7 +78,25 @@
               data-action-dismiss>
         Dismiss
       </button>
-      {% if entry.apply_url %}
+      {% if entry.applied %}
+        {# #177: Applied state + Undo. Undo carries no outbound navigation of
+           its own, so — unlike Apply below — there is no htmx-interception
+           conflict here: a plain hx-post + hx-swap="outerHTML" on the row,
+           the exact same mechanism Save/Dismiss above already use, is
+           sufficient. Re-rendering via jobcannon/web/actions.py's
+           undo_apply -> _fetch_entry -> build_entry means this branch simply
+           stops being taken once the swap lands (entry.applied is False
+           again), returning the row to its normal Apply control below. #}
+        <span class="text-neutral-400" data-apply-applied>Applied</span>
+        <button type="button"
+                hx-post="{{ url_for('actions.undo_apply', posting_id=entry.row.id) }}"
+                hx-target="closest [data-posting-row]"
+                hx-swap="outerHTML"
+                class="underline text-neutral-300"
+                data-action-undo-apply>
+          Undo
+        </button>
+      {% elif entry.apply_url %}
         {# Deliberately NOT hx-post: htmx installs its own click handler on
            any element carrying hx-get/hx-post/etc and calls
            evt.preventDefault() on it (this is htmx's documented behavior
@@ -87,14 +110,11 @@
            (mark_applied + posting_apply_clicked, both server-side and
            unchanged) so applying is still recorded. keepalive keeps that
            request alive past the click even though the tab's focus moves
-           away immediately. There is no row swap for this control: nothing
-           in this entry's rendered shape (jobcannon/web/feed_entries.py)
-           depends on apply state, so there is nothing for a swap to
-           update. Being a plain fetch(), htmx never sees this request, so
-           base.html's `hx-headers` attribute (which puts the CSRF token on
-           every htmx-issued request) never reaches it either — the token
-           here comes from base.html's <meta name="csrf-token"> tag
-           instead, issue #146.
+           away immediately. Being a plain fetch(), htmx never sees this
+           request, so base.html's `hx-headers` attribute (which puts the
+           CSRF token on every htmx-issued request) never reaches it either —
+           the token here comes from base.html's <meta name="csrf-token">
+           tag instead, issue #146.
 
            `.then`/`.catch` below surface a failure via base.html's
            `window.jcSurfaceError` toast (MED-1 fix, same mechanism the
@@ -104,11 +124,39 @@
            with NO feedback at all: no swap target, no htmx event, nothing.
            `resp.ok` is checked explicitly because fetch() only REJECTS on a
            network failure, never on a 4xx/5xx HTTP status — a bare
-           `.catch` alone would miss the CSRF-400 case entirely. #}
+           `.catch` alone would miss the CSRF-400 case entirely.
+
+           On success (#177), the response body is the SAME
+           _posting_row.html fragment save/dismiss/undo already render (now
+           carrying entry.applied=True), manually swapped into this row's
+           own outerHTML — captured as `row`/`parent` BEFORE the request
+           fires, since `row` is detached once its outerHTML is replaced and
+           can no longer be used to locate the new node. A plain DOM
+           assignment (`row.outerHTML = html`) would insert that fragment
+           WITHOUT htmx ever processing it, leaving the new Undo button's
+           own hx-post inert until a reload — `htmx.process(newRow)` is what
+           wires it up, the same activation a normal htmx-driven swap does
+           for free.
+
+           A double click captures the SAME row/parent twice before the
+           first fetch resolves — `row.dataset.applyPending` (set here,
+           cleared in `.finally`) makes the second click's handler return
+           immediately instead of firing a second POST; `row.parentNode ===
+           parent` guards the swap itself so a detached row (this guard, or
+           any other future cause) can never throw replaceChild's
+           NotFoundError into the outer `.catch` and surface a FALSE
+           "could not be recorded" toast for a write that actually
+           succeeded. When the response can't be turned into a usable row
+           (malformed/empty body, or that parentNode check failing) the
+           mutation has already committed server-side but the DOM never
+           reflects it — surfacing that via `jcSurfaceError` instead of
+           silently leaving the stale Apply control in place is what tells
+           the user to refresh rather than assuming their click did
+           nothing. #}
         <a href="{{ entry.apply_url }}"
            target="_blank"
            rel="noopener noreferrer"
-           hx-on:click="fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true, headers: {'X-CSRFToken': document.querySelector('meta[name=csrf-token]').content}}).then(function(resp){ if (!resp.ok && window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — refresh the page and try again.'); } }).catch(function(){ if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — check your connection and try again.'); } })"
+           hx-on:click="var row = this.closest('[data-posting-row]'); if (row.dataset.applyPending === '1') { return; } row.dataset.applyPending = '1'; var parent = row.parentNode; fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true, headers: {'X-CSRFToken': document.querySelector('meta[name=csrf-token]').content}}).then(function(resp){ if (!resp.ok) { if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — refresh the page and try again.'); } return; } return resp.text().then(function(html){ var tmpl = document.createElement('template'); tmpl.innerHTML = html.trim(); var newRow = tmpl.content.firstElementChild; if (newRow && parent && row.parentNode === parent) { parent.replaceChild(newRow, row); if (window.htmx) { window.htmx.process(newRow); } } else if (window.jcSurfaceError) { window.jcSurfaceError('Apply recorded, but the row did not update — refresh'); } }); }).catch(function(){ if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — check your connection and try again.'); } }).finally(function(){ row.dataset.applyPending = ''; })"
            class="underline text-neutral-300"
            data-action-apply>
           Apply

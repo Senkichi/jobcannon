@@ -132,3 +132,37 @@ def test_empty_and_whitespace_posthog_var_is_absent(monkeypatch, var, value):
     cfg = load_host_config()
     assert cfg.posthog_api_key is None
     assert cfg.posthog_host is None
+
+
+@pytest.mark.parametrize("value", ["", " "])
+@pytest.mark.parametrize(
+    "var", ["POSTHOG_PERSONAL_API_KEY", "POSTHOG_PROJECT_ID", "POSTHOG_ADMIN_API_HOST"]
+)
+def test_empty_and_whitespace_posthog_admin_var_is_absent(monkeypatch, var, value):
+    """Issue #135's three new PostHog admin fields follow the identical
+    absent-not-empty contract as posthog_api_key/posthog_host above."""
+    from jobcannon.host.config import load_host_config
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x@localhost/db")
+    for other in ("POSTHOG_PERSONAL_API_KEY", "POSTHOG_PROJECT_ID", "POSTHOG_ADMIN_API_HOST"):
+        monkeypatch.delenv(other, raising=False)
+    monkeypatch.setenv(var, value)
+
+    cfg = load_host_config()
+    assert cfg.posthog_personal_api_key is None
+    assert cfg.posthog_project_id is None
+    assert cfg.posthog_admin_api_host is None
+
+
+def test_load_host_config_reads_posthog_admin_env(monkeypatch):
+    from jobcannon.host.config import load_host_config
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x@localhost/db")
+    monkeypatch.setenv("POSTHOG_PERSONAL_API_KEY", "pk_pers_abc")
+    monkeypatch.setenv("POSTHOG_PROJECT_ID", "42")
+    monkeypatch.setenv("POSTHOG_ADMIN_API_HOST", "https://eu.posthog.com")
+
+    cfg = load_host_config()
+    assert cfg.posthog_personal_api_key == "pk_pers_abc"
+    assert cfg.posthog_project_id == "42"
+    assert cfg.posthog_admin_api_host == "https://eu.posthog.com"

@@ -123,6 +123,33 @@ def test_anonymous_and_authed_shapes_return_identical_columns(db_conn):
     assert authed_rows[0]["ranker_version"] is None
 
 
+def test_applied_flag_reflects_pipeline_status_and_is_null_for_anonymous_reader(db_conn):
+    """#177: `applied` is a third per-user LEFT JOIN flag alongside `saved`
+    (test_anonymous_and_authed_shapes_return_identical_columns already pins
+    that both shapes carry the same column SET) -- this pins the actual
+    VALUES: True only for the (user, posting) pair `mark_applied` wrote,
+    False for an untouched row on the same authed read, and NULL (never
+    False) for an anonymous reader, matching `saved`'s own NULL contract on
+    that branch."""
+    from jobcannon.db._feed import list_feed_postings
+    from jobcannon.db._user_actions import mark_applied
+
+    _seed_user(db_conn, "u-applied")
+    company_id = _seed_company(db_conn, "Acme")
+    applied_id = _seed_posting(db_conn, "p-applied", company_id, last_seen=_BASE_TIME)
+    untouched_id = _seed_posting(
+        db_conn, "p-untouched", company_id, last_seen=_BASE_TIME + timedelta(hours=1)
+    )
+    mark_applied(db_conn, "u-applied", applied_id)
+
+    authed_rows = {r["id"]: r for r in list_feed_postings(db_conn, user_id="u-applied")}
+    assert authed_rows[applied_id]["applied"] is True
+    assert authed_rows[untouched_id]["applied"] is False
+
+    anon_rows = list_feed_postings(db_conn)
+    assert all(r["applied"] is None for r in anon_rows)
+
+
 def test_dismissed_posting_is_excluded_for_the_dismissing_user_but_not_others(db_conn):
     from jobcannon.db._feed import list_feed_postings
     from jobcannon.db._user_actions import dismiss_posting
@@ -180,6 +207,46 @@ def test_limit_is_capped_at_feed_page_max(db_conn):
     rows = list_feed_postings(db_conn, limit=1000)
 
     assert len(rows) == FEED_PAGE_MAX
+
+
+def test_list_postings_by_ids_caps_at_feed_page_max(db_conn):
+    """The backstop `list_postings_by_ids` itself keeps even though its
+    caller now pages before calling it (jobcannon/web/postings_history.py's
+    `_paginate_ids`) -- a caller that hands it more than FEED_PAGE_MAX ids
+    still gets capped, not a 500 or an unbounded query."""
+    from jobcannon.db._feed import FEED_PAGE_MAX, list_postings_by_ids
+
+    _seed_user(db_conn, "u-ids-cap")
+    company_id = _seed_company(db_conn, "Acme")
+    posting_ids = [
+        _seed_posting(
+            db_conn, f"p-ids-{i}", company_id, last_seen=_BASE_TIME + timedelta(minutes=i)
+        )
+        for i in range(FEED_PAGE_MAX + 5)
+    ]
+
+    rows = list_postings_by_ids(db_conn, posting_ids, user_id="u-ids-cap")
+
+    assert len(rows) == FEED_PAGE_MAX
+    assert [r["id"] for r in rows] == posting_ids[:FEED_PAGE_MAX]
+
+
+def test_list_postings_by_ids_silently_skips_an_id_absent_from_postings(db_conn):
+    """A caller-supplied id (e.g. a watchlist row whose posting was since
+    hard-deleted) that no longer exists in `postings` must be dropped, not
+    crash the caller-order sort -- `WHERE p.id = ANY(...)` naturally
+    excludes it from the result set, so `order[row["id"]]` never sees a key
+    that isn't there."""
+    from jobcannon.db._feed import list_postings_by_ids
+
+    _seed_user(db_conn, "u-ids-missing")
+    company_id = _seed_company(db_conn, "Acme")
+    real_id = _seed_posting(db_conn, "p-ids-real", company_id, last_seen=_BASE_TIME)
+    missing_id = real_id + 999999
+
+    rows = list_postings_by_ids(db_conn, [missing_id, real_id], user_id="u-ids-missing")
+
+    assert [r["id"] for r in rows] == [real_id]
 
 
 def test_null_structural_axes_row_is_returned_not_filtered_out(db_conn):

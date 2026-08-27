@@ -99,7 +99,7 @@ def test_post_consent_without_token_is_400():
     assert resp.status_code == 400
 
 
-@pytest.mark.parametrize("action", ["save", "dismiss", "apply"])
+@pytest.mark.parametrize("action", ["save", "dismiss", "apply", "undo-apply"])
 def test_post_posting_action_without_token_is_400(action):
     client = _stateless_app().test_client()
     resp = client.post(f"/postings/1/{action}")

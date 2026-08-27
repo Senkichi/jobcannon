@@ -1,6 +1,6 @@
-"""Spec §8 seam-wiring test: all three host-wiring surfaces are exercised,
-pinning the corrected three-seam architecture so 'silently running on
-hardcoded defaults' cannot ship."""
+"""Spec §8 seam-wiring test: every host-wiring surface is exercised, pinning
+the corrected four-seam architecture (jobcannon/host/wiring.py's own module
+docstring) so 'silently running on hardcoded defaults' cannot ship."""
 
 import pytest
 
@@ -165,3 +165,58 @@ def test_seam4_analytics_salt_cleared_on_teardown(postgres_test_dsn, monkeypatch
     teardown_engine_seams()
 
     assert posthog_client.pseudonymize("user_x") is None
+
+
+def test_seam4_posthog_admin_threaded_from_host_config(postgres_test_dsn, monkeypatch):
+    """init_engine_seams must actually thread HostConfig's three PostHog
+    admin fields through to posthog_admin (issue #135) — mirrors
+    test_seam4_analytics_salt_threaded_from_host_config's shape; asserted
+    via is_configured() (a pure predicate) rather than purge_person() so
+    this test makes no real HTTP call."""
+    from jobcannon.host import posthog_admin
+    from jobcannon.host.config import load_host_config
+    from jobcannon.host.wiring import init_engine_seams, teardown_engine_seams
+
+    monkeypatch.setenv("DATABASE_URL", postgres_test_dsn)
+    monkeypatch.setenv("POSTHOG_PERSONAL_API_KEY", "pk_pers_wiring_test")
+    monkeypatch.setenv("POSTHOG_PROJECT_ID", "999")
+    monkeypatch.setenv("POSTHOG_ADMIN_API_HOST", "https://eu.posthog.com")
+    init_engine_seams(load_host_config())
+    try:
+        assert posthog_admin.is_configured() is True
+    finally:
+        teardown_engine_seams()
+
+
+def test_seam4_posthog_admin_cleared_on_teardown(postgres_test_dsn, monkeypatch):
+    from jobcannon.host import posthog_admin
+    from jobcannon.host.config import load_host_config
+    from jobcannon.host.wiring import init_engine_seams, teardown_engine_seams
+
+    monkeypatch.setenv("DATABASE_URL", postgres_test_dsn)
+    monkeypatch.setenv("POSTHOG_PERSONAL_API_KEY", "pk_pers_wiring_test_2")
+    monkeypatch.setenv("POSTHOG_PROJECT_ID", "999")
+    monkeypatch.setenv("POSTHOG_ADMIN_API_HOST", "https://eu.posthog.com")
+    init_engine_seams(load_host_config())
+    teardown_engine_seams()
+
+    assert posthog_admin.is_configured() is False
+
+
+def test_seam4_posthog_admin_absent_when_unset(postgres_test_dsn, monkeypatch):
+    """The common case (no PostHog admin credentials set at all, e.g. the
+    web service today): init_engine_seams must not accidentally leave
+    posthog_admin "configured" from a leftover value."""
+    from jobcannon.host import posthog_admin
+    from jobcannon.host.config import load_host_config
+    from jobcannon.host.wiring import init_engine_seams, teardown_engine_seams
+
+    monkeypatch.setenv("DATABASE_URL", postgres_test_dsn)
+    monkeypatch.delenv("POSTHOG_PERSONAL_API_KEY", raising=False)
+    monkeypatch.delenv("POSTHOG_PROJECT_ID", raising=False)
+    monkeypatch.delenv("POSTHOG_ADMIN_API_HOST", raising=False)
+    init_engine_seams(load_host_config())
+    try:
+        assert posthog_admin.is_configured() is False
+    finally:
+        teardown_engine_seams()

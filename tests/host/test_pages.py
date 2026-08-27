@@ -81,6 +81,33 @@ def test_root_renders_no_profile_empty_state(app_client_authed, monkeypatch):
     assert "Your feed isn't wired up yet" in html
 
 
+def test_root_no_profile_state_shows_setup_cta_not_stale_release_copy(
+    app_client_authed, monkeypatch
+):
+    """Issue #176: the no-profile branch used to claim "Profiles and the
+    ranked feed arrive in the next release" to a visitor who simply hasn't
+    run the picker yet — already false the moment jobcannon/web/onboarding.py
+    started writing profiles. The replacement copy is state-derived
+    (`has_selections = profile is not None`, computed in jobcannon/web/pages.py)
+    and points the visitor at /start, the same CTA shape /preview already
+    uses for its own has_selections=False branch."""
+    from jobcannon.web import pages
+
+    _patch_connection_factory(monkeypatch)
+    monkeypatch.setattr(
+        pages,
+        "corpus_stats",
+        lambda conn: {"postings": 0, "companies": 0, "freshest_last_seen": None},
+    )
+    monkeypatch.setattr(pages, "get_profile", lambda conn, user_id: None)
+
+    html = app_client_authed.get("/").get_data(as_text=True)
+    assert "corpus-building phase" not in html
+    assert "arrive in the next release" not in html
+    assert 'href="/start"' in html
+    assert "data-no-selections" in html
+
+
 def test_demo_fail_closed_when_connection_open_fails(app_client_unauthed, monkeypatch):
     """Proves _read_page_data's except clause actually engages when
     connection_factory() itself raises (unopened pool / outage) — the
