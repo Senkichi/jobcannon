@@ -33,9 +33,12 @@ import logging
 import os
 
 from flask import Flask, abort, current_app, g, render_template, request
+from flask_wtf import CSRFProtect
+from flask_wtf.csrf import CSRFError
 
 from jobcannon.web.anon_session import capture_attribution, ensure_session_ids
 from jobcannon.web.handoff import run_handoff_if_pending
+from jobcannon.web.security_headers import register_security_headers
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +173,39 @@ def create_app(config: dict | None = None) -> Flask:
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = not (app.testing or app.debug)
 
+    # CSRF protection (issue #146) — Flask-WTF's session-embedded
+    # double-submit token, not a hand-rolled one: SECRET_KEY above is a
+    # stable, deployment-configured value (JC_SECRET_KEY), identical across
+    # every gunicorn --preload worker (never minted per-process), so a token
+    # issued by one worker validates against a request served by another —
+    # the one condition that would have forced the hand-rolled HMAC
+    # alternative instead. `WTF_CSRF_ENABLED` defaults to the SAME value
+    # production gets (True) even under TESTING, matching this app's real
+    # enforcement rather than silently exempting every test from it; the
+    # tests/host/*'s existing POST call sites that predate CSRF need it off
+    # to keep passing unmodified, so TESTING flips the default to False
+    # UNLESS the caller's own `config` dict already set
+    # WTF_CSRF_ENABLED explicitly (setdefault, checked against app.config as
+    # already updated from `config` at the top of this function) —
+    # tests/host/test_csrf.py is the one module that opts back in to
+    # exercise the real enforcement path end to end.
+    app.config.setdefault("WTF_CSRF_ENABLED", not app.config.get("TESTING"))
+    csrf = CSRFProtect(app)
+
+    @app.errorhandler(CSRFError)
+    def csrf_error(error):
+        # A clear, dedicated page for a same-origin browser navigation that
+        # fails CSRF (e.g. a stale tab's form re-submitted after a session
+        # rotated) — never the generic Werkzeug plain-text 400 body. HTMX's
+        # own mutation controls (save/dismiss/apply) get the small fragment
+        # instead: their target is a DOM node inside the page, not the whole
+        # document, so swapping in a full HTML page there would corrupt the
+        # layout the same way any other fragment route returning a full page
+        # would (jobcannon/CLAUDE.md's HTMX conventions).
+        if request.headers.get("HX-Request"):
+            return render_template("_csrf_error_fragment.html", reason=error.description), 400
+        return render_template("error_csrf.html", reason=error.description), 400
+
     # Clerk frontend (clerk-js) wiring — issue #149. A blank or malformed
     # publishable key must never silently reproduce #149 (clerk-js never
     # loads -> the hosted Account Portal sign-in never hands this host a
@@ -208,6 +244,13 @@ def create_app(config: dict | None = None) -> Flask:
             clerk_publishable_key = ""
             clerk_frontend_api_host = ""
 
+    # Stashed on app.config (not just the closure above) so
+    # jobcannon.web.security_headers can build the CSP's script-src/
+    # connect-src host allowances without re-deriving the FAPI host from the
+    # publishable key a second time at a second call site — one derivation,
+    # read by two consumers.
+    app.config["CLERK_FRONTEND_API_HOST"] = clerk_frontend_api_host
+
     @app.context_processor
     def inject_clerk_frontend():
         return {
@@ -230,6 +273,7 @@ def create_app(config: dict | None = None) -> Flask:
     app.config["CLERK_CLIENT"] = clerk_client
 
     @app.get("/healthz")
+    @csrf.exempt
     def healthz():
         """Instance health for the platform's health checks (render.yaml
         healthCheckPath). DB-aware by design — 2026-08-26 incident: the web
@@ -327,6 +371,12 @@ def create_app(config: dict | None = None) -> Flask:
     from jobcannon.web.webhooks import webhooks_bp
 
     app.register_blueprint(webhooks_bp)
+    # Svix already authenticates this route by HMAC signature over the raw
+    # body (jobcannon/web/webhooks.py's module docstring) — Clerk's webhook
+    # sender carries no browser session/cookie and can mint no CSRF token,
+    # so the double-submit check would only ever reject the legitimate
+    # sender, never a forged one.
+    csrf.exempt(webhooks_bp)
 
     from jobcannon.web.pages import pages_bp
 
@@ -353,4 +403,8 @@ def create_app(config: dict | None = None) -> Flask:
     from jobcannon.web.legal import legal_bp
 
     app.register_blueprint(legal_bp)
+
+    # Registered last, once every blueprint above is mounted and
+    # CLERK_FRONTEND_API_HOST/HOST_CONFIG are both final — issue #147.
+    register_security_headers(app)
     return app

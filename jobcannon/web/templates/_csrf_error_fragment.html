@@ -1,0 +1,8 @@
+{# Rendered ONLY for an HX-Request whose CSRF token failed validation
+   (jobcannon/web/__init__.py's CSRFError handler) — a small, swap-safe
+   fragment rather than a full HTML document, matching this codebase's
+   other fragment routes (jobcannon/CLAUDE.md's HTMX conventions: 200, not
+   204, and never a full page in an outerHTML swap target). #}
+<p class="text-sm text-red-400" data-csrf-error>
+  That action could not be verified — refresh the page and try again.
+</p>

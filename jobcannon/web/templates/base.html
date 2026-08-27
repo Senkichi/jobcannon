@@ -3,6 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  {# Flask-WTF's own global (jobcannon/web/__init__.py registers
+     CSRFProtect) — the one place _posting_row.html's plain fetch() (its
+     Apply control; NOT an htmx-triggered request, so the hx-headers
+     attribute on <body> below never reaches it) reads a token from. #}
+  {{ csrf_meta_tag() }}
   <title>{% block title %}Job Cannon{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
@@ -31,7 +36,13 @@
   </script>
   {% endif %}
 </head>
-<body class="bg-neutral-950 text-neutral-100 min-h-screen antialiased">
+{# hx-headers puts the token on every htmx-issued request app-wide (its
+   JSON value is merged into each htmx request's headers) — covers
+   _posting_row.html's save/dismiss hx-post controls. It does NOT cover a
+   plain fetch()/XMLHttpRequest call (htmx never sees those); Apply's own
+   fetch() call reads the <meta> tag above instead. #}
+<body class="bg-neutral-950 text-neutral-100 min-h-screen antialiased"
+      hx-headers='{"X-CSRFToken": "{{ csrf_token() }}"}'>
   <header class="border-b border-neutral-800 px-6 py-4 flex items-center gap-6">
     <span class="font-semibold text-lg tracking-tight">Job Cannon</span>
     <nav class="flex gap-4 text-sm text-neutral-400">

@@ -90,11 +90,15 @@
            away immediately. There is no row swap for this control: nothing
            in this entry's rendered shape (jobcannon/web/feed_entries.py)
            depends on apply state, so there is nothing for a swap to
-           update. #}
+           update. Being a plain fetch(), htmx never sees this request, so
+           base.html's `hx-headers` attribute (which puts the CSRF token on
+           every htmx-issued request) never reaches it either — the token
+           here comes from base.html's <meta name="csrf-token"> tag
+           instead, issue #146. #}
         <a href="{{ entry.apply_url }}"
            target="_blank"
            rel="noopener noreferrer"
-           hx-on:click="fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true})"
+           hx-on:click="fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true, headers: {'X-CSRFToken': document.querySelector('meta[name=csrf-token]').content}})"
            class="underline text-neutral-300"
            data-action-apply>
           Apply
