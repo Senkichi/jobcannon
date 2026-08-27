@@ -83,20 +83,30 @@
     <nav class="flex gap-4 text-sm text-neutral-400">
       <a href="/" class="hover:text-neutral-100 min-h-11 inline-flex items-center px-1">Feed</a>
       <a href="/demo" class="hover:text-neutral-100 min-h-11 inline-flex items-center px-1">Demo</a>
-      {% if g.clerk_user %}
+      {% if visitor_is_authed %}
       {# #180: the in-app saved/applied/dismissed review page
          (jobcannon/web/postings_history.py) -- gated on auth state the same
          way the footer's export/delete links already are, since the route
-         itself 401s an unauthenticated visitor (not in PUBLIC_PATHS). #}
+         itself 401s an unauthenticated visitor (not in PUBLIC_PATHS).
+         Gates on visitor_is_authed, NOT g.clerk_user (issue #205): g.clerk_user
+         is force-None on every PUBLIC_PATHS render regardless of real
+         identity, so a bare g.clerk_user check here would hide this link
+         from a signed-in visitor on /demo, /privacy, or /terms.
+         visitor_is_authed (jobcannon/web/__init__.py's _inject_auth_links)
+         resolves real identity there via _visitor_is_anonymous(). #}
       <a href="{{ url_for('postings_history.index') }}" class="hover:text-neutral-100 min-h-11 inline-flex items-center px-1"
          data-postings-history-nav-link>My postings</a>
       {% endif %}
     </nav>
-    {% if not g.clerk_user %}
+    {% if not visitor_is_authed %}
     {# Discoverable sign-in/sign-up entry point (issue #145) -- gated on
-       auth state, not on request.path, so it renders on every public page
-       AND the 401 page (both leave g.clerk_user unset/None) and hides
-       itself once a visitor is actually signed in. Each link is
+       visitor_is_authed, NOT g.clerk_user (issue #205), so it correctly
+       hides itself for a signed-in visitor on a PUBLIC_PATHS page too
+       (g.clerk_user is force-None there regardless of real identity; see
+       the My-postings comment above). Still renders on every genuinely
+       signed-out public page AND the 401 page, and still hides itself on
+       an authed non-public page -- visitor_is_authed matches g.clerk_user
+       exactly whenever g.clerk_user is actually set. Each link is
        independently optional (clerk_sign_up_url / clerk_sign_in_url come
        from the _inject_auth_links context processor in
        jobcannon/web/__init__.py) so an unset URL renders nothing rather
@@ -118,7 +128,11 @@
     <a href="/consent" class="hover:text-neutral-300 min-h-11 inline-flex items-center px-1">Analytics preferences</a>
     <a href="/privacy" class="hover:text-neutral-300 min-h-11 inline-flex items-center px-1">Privacy</a>
     <a href="/terms" class="hover:text-neutral-300 min-h-11 inline-flex items-center px-1">Terms</a>
-    {% if g.clerk_user %}
+    {# Gates on visitor_is_authed, NOT g.clerk_user (issue #205) -- see the
+       header nav's identical comment above /privacy and /terms are
+       PUBLIC_PATHS, where g.clerk_user is force-None regardless of real
+       identity. #}
+    {% if visitor_is_authed %}
     <a href="/account/export" class="hover:text-neutral-300 min-h-11 inline-flex items-center px-1">Export your data</a>
     <a href="/account/delete" class="hover:text-neutral-300 min-h-11 inline-flex items-center px-1">Delete account</a>
     {% endif %}
