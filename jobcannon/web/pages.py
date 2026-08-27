@@ -1,10 +1,16 @@
 """GET / (authed feed) and GET /demo (public guest demo).
 
 GET / now renders the authed user's profile plus a real, server-filtered
-posting list: title/company/workplace-type/location filters and a sort
-token, all read from the query string and validated against a fixed
-allowlist before any of it reaches SQL — an unrecognized token degrades to
-the unfiltered/default value rather than a 500. Each row carries its own
+posting list: a free-text title/company/location box and a sort token,
+read from the query string and validated against a fixed allowlist before
+any of it reaches SQL — an unrecognized token degrades to the
+unfiltered/default value rather than a 500. On top of those query-string
+filters (#170), the signed-in user's saved picker selections
+(profiles.target_titles/target_companies/workplace_type, written by
+jobcannon/web/onboarding.py's POST /start) ALSO filter this feed, through
+the exact same jobcannon.db._feed.selection_filter_kwargs predicate builder
+onboarding.py's pre-signup /preview calls (#169) — see `_read_feed_postings`
+below for the one collision (workplace_type) and how it resolves. Each row carries its own
 literal "why" chips (jobcannon.web.feed_entries.build_entry, which wraps
 jobcannon.web.why.why_chips); a row whose `structural_axes` is still NULL
 (the axes batch caps at 500 rows per scan tick, so a large pre-seed leaves
@@ -114,16 +120,27 @@ def _read_page_data(user_id: str) -> tuple[dict, Any]:
         return dict(_EMPTY_STATS), None
 
 
-def _parse_feed_filters(args: Any) -> dict[str, str]:
+def _parse_feed_filters(args: Any) -> dict[str, Any]:
     """GET query params -> display-safe filter values. Every value is a
     plain string, never None, so the template can always do
     `value="{{ filters.title }}"` with no `or ''` guard, and every value is
     ALREADY validated: an unrecognized workplace_type or sort token degrades
     to "any" / "default" here rather than raising — this is what keeps an
-    unknown sort token a graceful no-op instead of a 500."""
-    workplace_type = (args.get("workplace_type") or "any").strip().lower()
-    if workplace_type not in _WORKPLACE_TYPES:
-        workplace_type = "any"
+    unknown sort token a graceful no-op instead of a 500.
+
+    `workplace_type_explicit` (F1 fix): True only when the request itself
+    named a recognized `?workplace_type=` value — including an explicit
+    "any" — as opposed to the param being absent entirely (both cases
+    otherwise collapse to the same displayed "any"/None). `_read_feed_postings`
+    uses this to distinguish "the visitor asked to see every workplace type"
+    from "the visitor didn't say," so an explicit "any" can actually clear a
+    saved profile preference instead of silently falling back to it. Not a
+    real SQL-facing filter kwarg — `_feed_query_kwargs` deliberately never
+    reads this key, only `filters` consumers that need the absent/explicit
+    distinction do."""
+    raw_workplace_type = (args.get("workplace_type") or "").strip().lower()
+    workplace_type_explicit = raw_workplace_type in _WORKPLACE_TYPES
+    workplace_type = raw_workplace_type if workplace_type_explicit else "any"
     sort = (args.get("sort") or "default").strip()
     if sort not in _feed._SORTS:
         sort = "default"
@@ -132,11 +149,12 @@ def _parse_feed_filters(args: Any) -> dict[str, str]:
         "company": (args.get("company") or "").strip(),
         "location": (args.get("location") or "").strip(),
         "workplace_type": workplace_type,
+        "workplace_type_explicit": workplace_type_explicit,
         "sort": sort,
     }
 
 
-def _feed_query_kwargs(filters: dict[str, str]) -> dict[str, Any]:
+def _feed_query_kwargs(filters: dict[str, Any]) -> dict[str, Any]:
     """Display-safe `filters` (see `_parse_feed_filters`) -> the keyword
     arguments `list_feed_postings` accepts. `title` is matched via
     `title_contains` (a substring `LIKE`, jobcannon/db/_feed.py) — distinct
@@ -153,7 +171,11 @@ def _feed_query_kwargs(filters: dict[str, str]) -> dict[str, Any]:
 
 
 def _read_feed_postings(
-    *, user_id: str, filters: dict[str, str], after: tuple[float | None, Any, int] | None = None
+    *,
+    user_id: str,
+    filters: dict[str, Any],
+    profile: Any,
+    after: tuple[float | None, Any, int] | None = None,
 ) -> list[Any]:
     """Fail-closed feed read, the same discipline as `_read_page_data` /
     jobcannon/web/onboarding.py's `_read_preview_postings`: an unopened
@@ -164,11 +186,51 @@ def _read_feed_postings(
     feed read at all, so keeping this a separate call avoids querying
     postings when the page will not render them. `after` (#156) is the
     keyset cursor for "Load more" — see jobcannon/db/_feed.py's
-    list_feed_postings/_cursor_predicate."""
+    list_feed_postings/_cursor_predicate.
+
+    #170: `profile` (the caller's already-read `profiles` row) flows through
+    `jobcannon.db._feed.selection_filter_kwargs` — the SAME predicate
+    builder `jobcannon/web/onboarding.py`'s pre-signup /preview calls against
+    a session-held `pending_picker` dict (#169) — so titles/companies/
+    workplace_type filter identically on both surfaces by construction, not
+    by two independently-written call sites staying in sync by discipline.
+    `titles`/`companies` have no query-string equivalent on this route (the
+    feed's own title/company boxes are free-text `title_contains`/`company`,
+    a different filter — see `_feed_query_kwargs`), so they compose
+    additively with no collision. `workplace_type` is the one key both
+    sources can supply: an explicit `?workplace_type=` query-string value
+    (`_parse_feed_filters` already validated it against the same allowlist)
+    always wins, since it reflects what THIS request is asking for right
+    now; the profile's saved preference applies only as a fallback when the
+    visitor hasn't overridden it, mirroring `_feed_query_kwargs`'s existing
+    "any" -> None -> no filter mapping for the same field.
+
+    F1 fix: an absent `?workplace_type=` param and an EXPLICIT
+    `?workplace_type=any` both map to `query_kwargs["workplace_type"] is
+    None` (see `_feed_query_kwargs`), so `is None` alone can't tell "not
+    overridden, fall back to the profile" apart from "overridden to Any,
+    clear the profile's filter." `filters["workplace_type_explicit"]`
+    (`_parse_feed_filters`) carries that distinction: only fall back to the
+    profile's saved preference when the query string genuinely said
+    nothing."""
     try:
         with connection_factory() as conn:
+            query_kwargs = _feed_query_kwargs(filters)
+            selection_kwargs = _feed.selection_filter_kwargs(profile)
+            if query_kwargs["workplace_type"] is None and not filters.get(
+                "workplace_type_explicit"
+            ):
+                query_kwargs = {
+                    **query_kwargs,
+                    "workplace_type": selection_kwargs["workplace_type"],
+                }
             return list_feed_postings(
-                conn, user_id=user_id, after=after, **_feed_query_kwargs(filters)
+                conn,
+                user_id=user_id,
+                after=after,
+                titles=selection_kwargs["titles"],
+                companies=selection_kwargs["companies"],
+                **query_kwargs,
             )
     except Exception:
         logger.warning(
@@ -193,20 +255,43 @@ _FILTER_DEFAULTS = {
 }
 
 
-def _feed_load_more_url(filters: dict[str, str], rows: list[Any]) -> str | None:
+def _feed_load_more_url(filters: dict[str, Any], rows: list[Any]) -> str | None:
     """Next-page URL for the authed feed's "Load more" control, or None when
     this page came back short of FEED_PAGE_MAX — a keyset page shorter than
     the cap proves there is nothing left to seek past (#156's stable-cursor
     requirement: this is a seek, never an OFFSET, so there is no drift
     between the row a click was expecting and the row it gets even if the
     corpus changes between clicks). Carries forward every non-default filter
-    value already on this page (`_FILTER_DEFAULTS`) plus the cursor derived
-    from the LAST row actually rendered (`cursor_from_row`) — a "Load more"
-    click can never land on a different filter set than what the visitor is
-    currently looking at."""
+    value already on this page (`_FILTER_DEFAULTS`), PLUS any filter whose
+    matching `<key>_explicit` flag is set even when its value equals the
+    default — the only one today is `workplace_type_explicit` (F1 fix): an
+    explicit `?workplace_type=any` and an absent param render identically
+    ("any" == `_FILTER_DEFAULTS["workplace_type"]`), so without this the
+    override would silently vanish from page 2 and `_read_feed_postings`
+    would revert to the profile's saved filter there. `<key>_explicit` keys
+    themselves are excluded from the query string — they steer this
+    function, they are never a real `pages.feed` query param — plus the
+    cursor derived from the LAST row actually rendered (`cursor_from_row`).
+
+    Known limitation, not fixed here: the titles/companies filters embedded
+    via the profile are re-derived fresh from the DB on every request, not
+    carried in this URL or the keyset cursor. If the visitor's saved
+    selections change between this render and the click (e.g. a picker
+    resubmission in another tab mid-pagination), a row that newly matches
+    and sorts above the page-1 cursor can be skipped on both pages — so a
+    "Load more" click is NOT guaranteed to land on the same filter set the
+    visitor is currently looking at in that narrow window. Benign (no
+    duplication, self-corrects on a fresh page-1 load); a cursor that
+    encodes a hash of the filter set would close this but is out of scope
+    here."""
     if len(rows) < _feed.FEED_PAGE_MAX:
         return None
-    query = {k: v for k, v in filters.items() if v != _FILTER_DEFAULTS.get(k, "")}
+    query = {
+        k: v
+        for k, v in filters.items()
+        if not k.endswith("_explicit")
+        and (v != _FILTER_DEFAULTS.get(k, "") or filters.get(f"{k}_explicit"))
+    }
     return url_for("pages.feed", **query, **_feed.cursor_from_row(rows[-1]))
 
 
@@ -294,7 +379,7 @@ def feed():
     ordering = {"personalized": False, "ranker_version": UNRANKED_VERSION}
     load_more_url = None
     if profile is not None and stats.get("postings", 0) > 0:
-        rows = _read_feed_postings(user_id=user_id, filters=filters, after=after)
+        rows = _read_feed_postings(user_id=user_id, filters=filters, profile=profile, after=after)
         entries = [build_entry(row, profile) for row in rows]
         ordering = _ordering_label(rows)
         _log_impressions(user_id, rows)

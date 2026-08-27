@@ -100,7 +100,7 @@ def _seed_profile(dsn, user_id, *, skills=("python",)):
     from jobcannon.db._profiles import upsert_profile
 
     with psycopg.connect(dsn) as conn:
-        upsert_profile(conn, user_id, skills=list(skills))
+        upsert_profile(conn, user_id, skills=list(skills), workplace_type=None)
 
 
 def _feed_client(app, user_id=CLERK_ID, *, consent=False, skills=("python",)):
