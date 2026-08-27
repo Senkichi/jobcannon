@@ -670,6 +670,45 @@ def test_save_after_dismiss_re_renders_the_row_not_an_empty_body(app):
     assert row is not None  # the save genuinely landed, not just the render
 
 
+@pytest.mark.parametrize("action", ["save", "apply", "undo-apply"])
+def test_dismiss_then_mutate_re_renders_the_row_not_an_empty_body(app, action):
+    """#200 at the HTTP layer, for every `_fetch_entry` caller that passes
+    `include_dismissed=True` (save/apply/undo_apply), not just save's own
+    case `test_save_after_dismiss_re_renders_the_row_not_an_empty_body`
+    above already pins. Corroborated MED (review-1.md F1, review-3.md F1):
+    `undo_apply`'s flag is load-bearing -- `unmark_applied`'s DELETE is
+    scoped `AND status = 'applied'` (jobcannon/db/_user_actions.py), so it
+    never touches a dismissed posting's status; dropping the flag there
+    reproduces #200's exact empty-body bug and nothing in
+    `test_undo_apply_does_not_touch_a_dismissed_posting` (which asserts only
+    status code + DB state, never the response body) would catch it.
+
+    `apply`'s case is included too (Devin's ask, review-devin.md finding
+    #1): `mark_applied` upserts `pipeline_status.status = 'applied'` (ON
+    CONFLICT DO UPDATE) BEFORE the re-read runs, so apply's own
+    `include_dismissed=True` is inert on today's DAL ordering -- this
+    parametrization passes for `apply` on both pre-fix and fixed code, and
+    that is fine (see `_fetch_entry`'s own docstring, actions.py). It pins
+    the user-facing contract -- acting on a dismissed row always re-renders
+    a row, never an empty body indistinguishable from failure -- for all
+    three mutating routes at once, independent of which route the DAL
+    ordering happens to make it load-bearing for today."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, f"Dismiss Then {action} Co")
+    posting_id = _seed_posting(
+        dsn, f"dismiss-then-{action}-1", company_id, title=f"Dismiss Then {action} Row"
+    )
+    assert client.post(f"/postings/{posting_id}/dismiss").status_code == 200
+
+    resp = client.post(f"/postings/{posting_id}/{action}")
+
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert html != ""
+    assert f"Dismiss Then {action} Row" in html
+
+
 def test_the_overlap_chip_survives_a_save_mutation_swap(app):
     """Regression for the actions.py / pages.py build_entry drift: a
     save/dismiss/apply swap must re-render the SAME entry shape the initial
