@@ -34,7 +34,7 @@
           data-saved-selection-indicator>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <span>Filtering to your saved picks ({{ saved_selection.title_label }} &middot; {{ saved_selection.company_label }})</span>
-      <button type="submit" class="underline text-neutral-300 min-h-11 inline-flex items-center px-1"
+      <button type="submit" class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"
               data-clear-selection>Clear</button>
     </form>
   {% endif %}
