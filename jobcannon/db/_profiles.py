@@ -54,12 +54,13 @@ def upsert_profile(
     target_locations: list | None = None,
     seniority_level: str | None = None,
     years_of_experience: float | None = None,
+    comp_floor_usd: int | None = None,
 ) -> None:
     raw = conn.raw if hasattr(conn, "raw") else conn
     raw.execute(
         "INSERT INTO profiles (user_id, skills, experience_summary, target_titles, "
-        "target_locations, seniority_level, years_of_experience, updated_at) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, now()) "
+        "target_locations, seniority_level, years_of_experience, comp_floor_usd, updated_at) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now()) "
         "ON CONFLICT (user_id) DO UPDATE SET "
         "skills = COALESCE(EXCLUDED.skills, profiles.skills), "
         "experience_summary = COALESCE(EXCLUDED.experience_summary, profiles.experience_summary), "
@@ -67,6 +68,7 @@ def upsert_profile(
         "target_locations = COALESCE(EXCLUDED.target_locations, profiles.target_locations), "
         "seniority_level = COALESCE(EXCLUDED.seniority_level, profiles.seniority_level), "
         "years_of_experience = COALESCE(EXCLUDED.years_of_experience, profiles.years_of_experience), "
+        "comp_floor_usd = COALESCE(EXCLUDED.comp_floor_usd, profiles.comp_floor_usd), "
         "updated_at = now()",
         (
             user_id,
@@ -76,6 +78,7 @@ def upsert_profile(
             Jsonb(target_locations) if target_locations is not None else None,
             seniority_level,
             years_of_experience,
+            comp_floor_usd,
         ),
     )
     commit_unless_nested(raw)
@@ -93,6 +96,7 @@ def get_profile(conn: Any, user_id: str) -> Any:
     raw = conn.raw if hasattr(conn, "raw") else conn
     return raw.execute(
         "SELECT user_id, skills, experience_summary, target_titles, target_locations, "
-        "seniority_level, years_of_experience, updated_at FROM profiles WHERE user_id = %s",
+        "seniority_level, years_of_experience, comp_floor_usd, updated_at "
+        "FROM profiles WHERE user_id = %s",
         (user_id,),
     ).fetchone()
