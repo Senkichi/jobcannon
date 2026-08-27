@@ -448,6 +448,9 @@ def test_race_two_connections_never_observe_torn_jd_full_and_verdict(postgres_te
     conn_a = psycopg.connect(postgres_test_dsn, row_factory=dict_row)
     conn_b = psycopg.connect(postgres_test_dsn, row_factory=dict_row, autocommit=True)
     stop = threading.Event()
+    release = threading.Event()
+    poller: threading.Thread | None = None
+    writer: threading.Thread | None = None
     try:
         cid = conn_a.execute(
             "INSERT INTO companies (name) VALUES ('race-co') RETURNING id"
@@ -462,7 +465,6 @@ def test_race_two_connections_never_observe_torn_jd_full_and_verdict(postgres_te
 
         real_classify = jd_full_mod.classify_jd_content
         entered = threading.Event()
-        release = threading.Event()
 
         def _paused_classify(text, title, company, config):
             entered.set()
@@ -497,10 +499,12 @@ def test_race_two_connections_never_observe_torn_jd_full_and_verdict(postgres_te
             time.sleep(0.3)  # let the poller sample repeatedly during the pause
             release.set()
             writer.join(timeout=10)
+            assert not writer.is_alive(), "writer thread did not finish within timeout"
 
         time.sleep(0.3)  # let the poller catch the post-write committed state
         stop.set()
         poller.join(timeout=10)
+        assert not poller.is_alive(), "poller thread did not finish within timeout"
 
         assert writer_result.get("ok") is True
 
@@ -512,7 +516,17 @@ def test_race_two_connections_never_observe_torn_jd_full_and_verdict(postgres_te
         # vacuously against ANY code, fixed or not.
         assert post in samples, f"poller never observed the post-write state; samples={samples[:5]}"
     finally:
+        # Release any paused/looping worker threads BEFORE touching conn_a/conn_b
+        # from this thread -- psycopg connections aren't safe for concurrent use,
+        # and a thread still parked in release.wait()/still polling would race
+        # the cleanup below. Only after both threads are confirmed joined do we
+        # touch the connections they were using.
+        release.set()
         stop.set()
+        if writer is not None:
+            writer.join(timeout=10)
+        if poller is not None:
+            poller.join(timeout=10)
         conn_a.rollback()
         conn_a.execute("DELETE FROM postings WHERE dedup_key = %s", (dedup_key,))
         conn_a.execute("DELETE FROM companies WHERE name = 'race-co'")
