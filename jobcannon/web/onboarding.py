@@ -88,6 +88,15 @@ SENIORITY_LEVELS = ("entry", "mid", "senior", "staff", "principal")
 WORKPLACE_TYPES = ("any", "remote", "hybrid", "onsite")
 MAX_YEARS_OF_EXPERIENCE = 60
 
+# profiles.comp_floor_usd (m0008) is a Postgres `integer` (int4) column, so
+# this bound is the column's own domain boundary, not an arbitrary business
+# policy: a value above int4's max would reach upsert_profile and raise
+# psycopg.errors.NumericValueOutOfRange, an unhandled 500 rather than the
+# 200 re-render every other validation failure on this route gets — same
+# boundary-enforcement role MAX_YEARS_OF_EXPERIENCE plays for its own
+# column (issue #28 item 2).
+MAX_COMP_FLOOR_USD = 2_147_483_647
+
 # Title selections are corpus-derived but deliberately NOT membership-checked
 # against the rendered option window (a legitimate title outside the current
 # top-N window must remain selectable — see the module docstring). POST
@@ -332,6 +341,23 @@ def _parse_submission(form: Any) -> tuple[dict[str, Any] | None, str | None]:
         if not (0 <= years_of_experience <= MAX_YEARS_OF_EXPERIENCE):
             return None, f"years of experience must be between 0 and {MAX_YEARS_OF_EXPERIENCE}"
 
+    # #28 item 2: optional numeric input, same validation shape as
+    # years_of_experience above (try/except -> type error, then a range
+    # check -> range error, both re-rendering the form with 200). Parsed
+    # with int() rather than float(): comp_floor_usd is a whole-dollar
+    # `integer` column (m0008), not a fractional numeric one, so a
+    # decimal input (e.g. "120000.50") is rejected outright rather than
+    # silently truncated.
+    comp_floor_raw = (form.get("comp_floor_usd") or "").strip()
+    comp_floor_usd: int | None = None
+    if comp_floor_raw:
+        try:
+            comp_floor_usd = int(comp_floor_raw)
+        except ValueError:
+            return None, "compensation floor must be a whole number"
+        if not (0 <= comp_floor_usd <= MAX_COMP_FLOOR_USD):
+            return None, (f"compensation floor must be between 0 and {MAX_COMP_FLOOR_USD:,}")
+
     titles, error = _parse_titles(form)
     if error is not None:
         return None, error
@@ -354,6 +380,19 @@ def _parse_submission(form: Any) -> tuple[dict[str, Any] | None, str | None]:
         "skills": [s for s in form.getlist("skills") if s and s in SKILLS_OPTIONS],
         "seniority_level": seniority_level,
         "years_of_experience": years_of_experience,
+        # #28 item 2: validated here (not re-parsed at the upsert_profile
+        # call site) so every submission goes through exactly one
+        # validation path, same as every other field above. Deliberately
+        # NOT spread into pending_picker's session cookie by start_submit
+        # below — unlike titles/skills/seniority_level/years_of_experience/
+        # workplace_type, nothing on GET /preview reads a compensation
+        # floor (it exists purely for the host scoring path's comp_fit
+        # anchoring). Filtering the key out unconditionally means this
+        # field changes the session-cookie payload not at all — verified by
+        # rerunning test_company_selections_at_the_cap_boundary_write_
+        # successfully unmodified (MAX_COMPANY_LENGTH's module comment
+        # documents that boundary is already tight), not just reasoned about.
+        "comp_floor_usd": comp_floor_usd,
         "workplace_type": _WORKPLACE_FILTERS[workplace_type],
     }
     return selections, None
@@ -387,9 +426,13 @@ def start_submit():
                 target_titles=selections["titles"] or None,
                 seniority_level=selections["seniority_level"],
                 years_of_experience=selections["years_of_experience"],
+                comp_floor_usd=selections["comp_floor_usd"],
             )
 
-    set_pending_picker({"anon_id": anon_id, **selections})
+    # comp_floor_usd is deliberately excluded from the session payload — see
+    # the comment at its validation site in _parse_submission above.
+    pending_selections = {k: v for k, v in selections.items() if k != "comp_floor_usd"}
+    set_pending_picker({"anon_id": anon_id, **pending_selections})
     return redirect(url_for("onboarding.preview"))
 
 
