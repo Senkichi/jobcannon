@@ -1,0 +1,15 @@
+{# Shared body for the 404/405/400 errorhandlers in jobcannon/web/__init__.py
+   (issue #173) -- one template for all three status codes rather than three
+   near-identical ones, mirroring error_401.html's shape (extends base.html,
+   same header/footer/nav) but parameterized on status_code/title/message so
+   no route-specific or request-derived data ever needs to reach this file:
+   the three callers only ever pass static strings. #}
+{% extends "base.html" %}
+{% block title %}{{ title }} — Job Cannon{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-3">{{ title }}</h1>
+<p class="text-neutral-400 mb-4">{{ message }}</p>
+<p class="text-neutral-400">
+  <a href="/" class="underline">Back to the feed</a>
+</p>
+{% endblock %}
