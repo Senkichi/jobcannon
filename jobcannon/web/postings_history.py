@@ -30,17 +30,24 @@ why it is not `list_feed_postings` with an id filter), but always with
 same tolerance `_posting_row.html` already relies on for /preview and
 /demo): jobcannon/web/actions.py's `_fetch_entry` re-reads a mutated row
 through `list_feed_postings`, whose authed branch unconditionally excludes
-`status = 'dismissed'` — a Save/Dismiss/Apply/Undo control rendered on this
-page's own "dismissed" tab would 200 with an EMPTY re-render fragment on
-click (the row silently vanishing even on an otherwise-successful mutation,
-since `_fetch_entry`'s re-read of that same posting comes back with zero
-rows). Rather than adding a bypass to that exclusion — out of scope here,
-and `jobcannon/db/_feed.py`'s selection/filter predicate is a concurrent
-workstream's surface — or teaching `_fetch_entry` a second "still visible"
-rule, this page simply never renders a mutation control at all. Tracked as
-a follow-up (adding controls back once `_fetch_entry` can distinguish
-"dismissed, but the caller wants to see it anyway" from "not this user's
-row").
+`status = 'dismissed'` UNLESS the caller passes `include_dismissed=True` —
+a Save/Dismiss/Apply/Undo control rendered on this page's own "dismissed"
+tab would otherwise 200 with an EMPTY re-render fragment on click (the row
+silently vanishing even on an otherwise-successful mutation, since
+`_fetch_entry`'s re-read of that same posting comes back with zero rows).
+#200 has since added exactly that escape hatch — `include_dismissed` on
+`jobcannon/db/_feed.py`'s `_build_filters`/`list_feed_postings`, threaded
+through `_fetch_entry`'s own `include_dismissed` parameter for save/apply/
+undo_apply — so the hazard this docstring originally described is no
+longer structurally blocking a fix here. This page still renders every row
+read-only (no mutation control) for a DIFFERENT reason: `build_entry`/
+`_posting_row.html` carry no `dismissed` field or visual state at all (see
+`_fetch_entry`'s own docstring, actions.py), so wiring Save/Dismiss/Apply/
+Undo onto this tab today would let a user act on a row with no way to tell,
+after the click, whether it is still dismissed — a UX gap, not a
+data-safety one anymore. Tracked as a follow-up: add a dismissed visual
+state to `_posting_row.html` first, then wire mutation controls back in
+using the now-available `include_dismissed` escape hatch.
 
 Same HX-Request split every other route in this codebase uses, but note
 what actually reaches each branch: the tab links (`postings_history.html`)
