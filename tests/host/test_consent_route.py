@@ -101,7 +101,10 @@ def test_post_consent_grant_sets_column_and_writes_one_audit_row(app):
     client = _seeded_client(app, dsn)
 
     resp = client.post("/consent", data={"choice": "grant"})
-    assert resp.status_code == 302
+    # issue #182: no longer a 302-to-feed that silently discards the ack --
+    # the same route re-renders with an inline confirmation instead.
+    assert resp.status_code == 200
+    assert "Analytics enabled." in resp.get_data(as_text=True)
 
     user = _user_row(dsn, USER_ID)
     assert user["analytics_consent"] is True
@@ -116,7 +119,8 @@ def test_post_consent_decline_is_a_real_producible_path(app):
     client = _seeded_client(app, dsn)
 
     resp = client.post("/consent", data={"choice": "decline"})
-    assert resp.status_code == 302
+    assert resp.status_code == 200
+    assert "Analytics disabled." in resp.get_data(as_text=True)
 
     user = _user_row(dsn, USER_ID)
     assert user["analytics_consent"] is False
@@ -125,6 +129,37 @@ def test_post_consent_decline_is_a_real_producible_path(app):
     rows = _events_rows(dsn, USER_ID, "consent_recorded")
     assert len(rows) == 1
     assert rows[0]["payload"]["granted"] is False
+
+
+def test_post_consent_hx_request_gets_bare_panel_fragment_with_confirmation(app):
+    """issue #182 + issue #173's HX convention: an htmx-driven grant/decline
+    gets just the swappable #consent-panel fragment (never a full <html>
+    document swapped into that small target), carrying the SAME inline
+    confirmation banner the full-page response shows."""
+    dsn = app.config["_TEST_DSN"]
+    client = _seeded_client(app, dsn)
+
+    resp = client.post("/consent", data={"choice": "grant"}, headers={"HX-Request": "true"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "<html" not in html
+    assert 'id="consent-panel"' in html
+    assert "Analytics enabled." in html
+
+
+def test_post_consent_direct_request_gets_full_page_with_confirmation(app):
+    """Fragment-route convention (CLAUDE.md): a direct/no-JS POST gets the
+    full page back, not a bare fragment -- the ack must not be JS-only."""
+    dsn = app.config["_TEST_DSN"]
+    client = _seeded_client(app, dsn)
+
+    resp = client.post("/consent", data={"choice": "grant"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "<html" in html
+    assert "Analytics enabled." in html
 
 
 def test_consent_payload_carries_all_four_allowlisted_keys(app):

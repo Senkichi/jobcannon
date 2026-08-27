@@ -1,0 +1,48 @@
+{# jobcannon/web/consent.py's authed consent state + form, shared between
+   consent.html's full-page GET render and post_consent's response (issue
+   #182: an hx-post'd grant/decline swaps THIS panel back in with a
+   `confirmed` banner, rather than the previous silent redirect-to-feed
+   that discarded the ack). id="consent-panel" is both this partial's htmx
+   swap target and the form's own hx-target -- the same "swap yourself
+   back in with your own new content" shape
+   jobcannon/web/templates/_posting_row.html uses for save/dismiss.
+   method="post" action="/consent" stays on the <form> as a plain-HTML
+   fallback: consent.py's post_consent checks HX-Request itself and
+   returns the full page (not this bare partial) for a non-htmx request,
+   matching the fragment-route convention CLAUDE.md documents elsewhere in
+   this codebase. #}
+<div id="consent-panel">
+  {% if error %}
+    <p class="text-red-400 mb-4">{{ error }}</p>
+  {% endif %}
+  {% if confirmed %}
+    <p class="text-green-400 mb-4" data-consent-confirmation>
+      Analytics {{ "enabled" if consent_granted else "disabled" }}.
+    </p>
+  {% endif %}
+  <p class="text-neutral-400 mb-6">
+    {% if choice_made %}
+      Current choice: {{ "allowed" if consent_granted else "declined" }}.
+    {% else %}
+      You haven't made a choice yet.
+    {% endif %}
+  </p>
+  <p class="text-neutral-500 text-sm mb-6">
+    Analytics are off unless you allow them here. If you do, usage events are
+    sent to PostHog's EU endpoint under a pseudonymous identifier derived from
+    your account, not your raw account id. See our
+    <a href="/privacy" class="underline hover:text-neutral-300">privacy policy</a>
+    for the full detail.
+  </p>
+  <form hx-post="/consent" hx-target="#consent-panel" hx-swap="outerHTML"
+        method="post" action="/consent" class="flex gap-4">
+    <button type="submit" name="choice" value="grant"
+            class="bg-neutral-100 text-neutral-950 px-4 py-2 rounded font-medium">
+      Allow analytics
+    </button>
+    <button type="submit" name="choice" value="decline"
+            class="border border-neutral-700 px-4 py-2 rounded font-medium">
+      Decline
+    </button>
+  </form>
+</div>

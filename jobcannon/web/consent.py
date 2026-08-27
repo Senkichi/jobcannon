@@ -31,13 +31,26 @@ statement, and no preferences dashboard beyond this single grant/decline
 surface — a repeat visit simply records a new decision. consent.html
 links out to /privacy (jobcannon.web.legal, issue #94) for the ratified
 policy text; this route still carries no legal text of its own.
+
+`post_consent` no longer redirects on success (issue #182: the previous
+302 to the feed silently discarded the grant/decline ack -- the only way
+to see "Current choice: allowed/declined" was to navigate back to
+/consent). It re-renders the SAME panel with `confirmed=True` instead,
+via `_consent_response`, which also branches on HX-Request the same way
+every other fragment route in this codebase does (CLAUDE.md: "Fragment
+routes MUST check HX-Request header and return full page for direct
+browser access") -- an htmx-driven grant/decline gets just the
+`_consent_panel.html` fragment (hx-swap="outerHTML" on the form's own
+`#consent-panel` target, jobcannon/web/templates/_posting_row.html's
+save/dismiss shape); a plain/no-JS form POST gets the full consent.html
+page, confirmation and all, so the ack is never JS-only.
 """
 
 from __future__ import annotations
 
 import logging
 
-from flask import Blueprint, g, redirect, render_template, request, url_for
+from flask import Blueprint, g, render_template, request
 
 from jobcannon.db import _events
 from jobcannon.db.pool import commit_unless_nested, connection_factory
@@ -89,13 +102,27 @@ def get_consent():
     return render_template("consent.html", **_read_consent_context())
 
 
+def _consent_response(context: dict, status: int):
+    """Fragment-route convention (CLAUDE.md): HX-Request gets just the
+    swappable panel; a direct/no-JS request gets the full page, same
+    template context either way -- the panel partial is `{% include %}`d
+    by consent.html, so there is exactly one place that decides what the
+    confirmed/error/choice-made states look like."""
+    template = (
+        "_consent_panel.html"
+        if (request.headers.get("HX-Request") or "").lower() == "true"
+        else "consent.html"
+    )
+    return render_template(template, **context), status
+
+
 @consent_bp.post("/consent", strict_slashes=False)
 def post_consent():
     choice = request.form.get("choice")
     if choice not in _VALID_CHOICES:
         context = _read_consent_context()
         context["error"] = f"unrecognized choice: {choice!r}"
-        return render_template("consent.html", **context), 400
+        return _consent_response(context, 400)
 
     granted = choice == "grant"
     with connection_factory() as conn:
@@ -110,4 +137,6 @@ def post_consent():
         )
         commit_unless_nested(conn.raw)
 
-    return redirect(url_for("pages.feed"))
+    context = _read_consent_context()
+    context["confirmed"] = True
+    return _consent_response(context, 200)
