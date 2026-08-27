@@ -30,7 +30,7 @@ Render dashboard). None of them are committed anywhere in this repo.
 
 | Env var | Service(s) | Source |
 |---|---|---|
-| `CLERK_SECRET_KEY` | web | Clerk dashboard → API Keys → Secret key |
+| `CLERK_SECRET_KEY` | web, worker | Clerk dashboard → API Keys → Secret key. Also required on the worker for issue #136's reconciliation-sweep periodic (`jobcannon.host.tasks.reconcile_deleted_users`), which needs its own Clerk Backend API client. |
 | `CLERK_JWT_KEY` | web | Clerk dashboard → API Keys → Advanced → JWT public key (enables networkless RS256 verification — required, see `jobcannon/web/auth.py`) |
 | `CLERK_PUBLISHABLE_KEY` | web | Clerk dashboard → API Keys → Publishable key (`pk_live_...`). Loads clerk-js in the browser so it can complete Clerk's cross-domain sign-in handshake: clerk-js makes a credentialed call to the Frontend API host (`clerk.<domain>`), the browser attaches the `__client`/`__client_uat` cookies set on that host, and clerk-js writes the returned session token as `__session` on this host. Without it, the hosted Account Portal sign-in redirect never leaves this host a session and every signed-in human 401s forever (issue #149). Publishable keys are public by design (meant to ship to the browser); `sync: false` here only keeps every `CLERK_*` var's provenance in one place. The web service refuses to boot without it, or if it isn't a well-formed `pk_live_`/`pk_test_` key. **Two Clerk-side prerequisites this variable cannot express:** (1) Clerk dashboard → Sessions → Allowed origins must permit every origin listed in `CLERK_AUTHORIZED_PARTIES` (on a production instance the instance's own domain and subdomains are permitted by default; a custom-domain or satellite change re-opens this), otherwise clerk-js's credentialed FAPI call is refused and the symptom is exactly #149 again; (2) the session token's `azp` claim is stamped from the browser `Origin` of the page that loaded clerk-js, so it must match an entry in `CLERK_AUTHORIZED_PARTIES` — after any deploy that changes hosts, decode one live `__session` JWT (unverified, `azp` claim only) and confirm it. |
 | `CLERK_AUTHORIZED_PARTIES` | web | Comma-separated list of the origins allowed to present a session token for this deploy (e.g. the Render web service's public URL) — **bare origins, no trailing slash** (e.g. `https://jobcannon.dev`, not `https://jobcannon.dev/`; each configured value still has any trailing slashes trimmed). This is an operator-chosen value, not something copied verbatim from Clerk — it is Clerk's `azp` replay-defense check. |
@@ -39,6 +39,8 @@ Render dashboard). None of them are committed anywhere in this repo.
 | `CLERK_SIGN_UP_URL` | web | Operator-chosen value: the Clerk-hosted sign-up page URL for this deploy (Clerk dashboard → your application's hosted pages; typically `https://<your-clerk-subdomain>.accounts.dev/sign-up` or your custom domain equivalent). The 401 page's sign-up link renders from it. |
 | `POSTHOG_API_KEY` | web, worker | PostHog project settings → Project API Key |
 | `JC_ANALYTICS_PSEUDONYM_SALT` | web, worker | Operator-generated random secret, same shape as `JC_SECRET_KEY` — but a DIFFERENT value from it; this is the HMAC key `jobcannon/host/posthog_client.py` uses to derive the pseudonymous identifier sent to PostHog, so it must not double as session-signing material. Required on both services (each builds its own PostHog client). If left unset, PostHog fan-out disables itself silently — events still write to Postgres, and the raw Clerk user id is never sent as a fallback. |
+| `POSTHOG_PERSONAL_API_KEY` | worker | PostHog project settings → Personal API Keys (create one scoped to this project). Issue #135: enables the person-purge task (`jobcannon.host.tasks.purge_posthog_person`) to delete a user's PostHog person record on account deletion. Left unset, the purge fails soft (logs once, skips) — the published privacy policy keeps disclosing surviving PostHog copies until this AND `POSTHOG_PROJECT_ID` are both set, at which point a follow-up legal-text update is required (`scripts/import_legal_text.py`). |
+| `POSTHOG_PROJECT_ID` | worker | PostHog project settings → Project ID. Paired with `POSTHOG_PERSONAL_API_KEY` above — both must be set for the purge to run at all. |
 
 `DATABASE_URL` is wired automatically on both services via `render.yaml`'s
 `fromDatabase` reference — never set it manually.
@@ -50,32 +52,133 @@ doesn't need per-deploy filling in. Both services build their own PostHog
 client through the same seam (`jobcannon/host/wiring.py`), so the value
 must stay identical on both.
 
+`POSTHOG_ADMIN_API_HOST` is also committed in `render.yaml` (worker only,
+`https://eu.posthog.com`) — PostHog's private/admin REST API (used by the
+person-purge task above) lives on a different host than the ingestion
+endpoint `POSTHOG_HOST` names, so it is its own explicit value rather than
+derived from `POSTHOG_HOST`.
+
 ## 3. First boot ordering
 
-`jobcannon/worker/__main__.py` is the **single migration authority** in this
-deploy: `create_app()` never runs migrations. On first boot the worker owns,
-in order: our schema ledger (`run_migrations`), then the four engine seams,
-then procrastinate's own queue schema (guarded apply, via a
-`to_regclass('public.procrastinate_jobs')` existence probe — see the
-Two-Schema-Authorities design in the worker's module docstring), then
-`run_worker()`.
+**Migration ordering guarantee (issue #196).** `jobcannon-web` and
+`jobcannon-worker` deploy independently on Render, with no guarantee about
+which one finishes first — a release that reads a table/column its own
+migration creates otherwise has a window where web serves against the old
+schema until the worker happens to reboot. `render.yaml`'s `jobcannon-web`
+service closes that window with a `preDeployCommand` that runs
+`python -m jobcannon.db.migrate` (Render docs: "Command that runs after the
+build command but before the start command"; on failure, "the entire deploy
+fails" — a broken migration blocks the new web code from ever going live
+against a schema it doesn't match, render.com/docs/deploys). That command
+resolves `DATABASE_URL` the exact same way the worker does
+(`load_host_config`) and calls the same `run_migrations()`.
+
+Because both web's pre-deploy step and the worker's boot-time call can now
+run against the same database — sequentially on a normal deploy, but
+possibly overlapping if a worker restarts mid-deploy — `run_migrations()`
+takes a session-level Postgres advisory lock (`jobcannon/db/migrate.py`'s
+`_ADVISORY_LOCK_KEY`) for its entire ledger DDL / read / apply sequence, so
+two concurrent callers serialize instead of racing the `schema_migrations`
+INSERT. The worker's boot-time call is no longer the single migration
+authority; it stays as an idempotent, lock-serialized belt-and-braces —
+still exercised on every worker boot in case a worker ever comes up before
+web's pre-deploy has run (e.g. first deploy of a brand-new environment,
+where nothing has applied any migration yet).
+
+On first boot the worker owns, in order: our schema ledger
+(`run_migrations`, a no-op if web's pre-deploy already applied everything),
+then the four engine seams, then procrastinate's own queue schema (guarded
+apply, via a `to_regclass('public.procrastinate_jobs')` existence probe —
+see the Two-Schema-Authorities design in the worker's module docstring),
+then `run_worker()`.
+
+**Verifying after a deploy.** Render's deploy logs for `jobcannon-web` show
+the pre-deploy step running before the start command — look for
+`schema_migrations: N applied, M pending` and, if any were newly applied,
+one `applied migration V (name)` line per migration
+(`jobcannon/db/migrate.py`). To confirm the ledger itself:
+`SELECT version, name, applied_at FROM schema_migrations ORDER BY version;`
+against the live database. After merging any render.yaml change, also
+confirm the Blueprint actually picked it up — a `render.yaml` edit only
+takes effect on the next Blueprint sync, so the person landing the change
+must confirm `serviceDetails.envSpecificDetails.preDeployCommand` (NOT the
+top-level `serviceDetails.preDeployCommand`, which stays `null` even after
+a successful sync — a red herring observed during #188's landing) is
+non-null for `jobcannon-web` via the Render API (it was observed `null`
+before this change went in).
+
+**Rollback caveat.** A rollback of `jobcannon-web` (or `jobcannon-worker`)
+to a commit that predates a migration already recorded in the
+`schema_migrations` ledger **FAILS**, not serves benignly: pre-deploy
+re-runs `python -m jobcannon.db.migrate` on the rolled-back code, which
+doesn't know that ledger row, so the orphan guard (`orphans = applied -
+known` in `jobcannon/db/migrate.py`) raises `DatabaseNewerThanCodeError`
+and aborts the deploy. A rolled-back worker fails at boot for the exact
+same reason — that guard predates this PR; issue #196 only added the web
+pre-deploy path that now also hits it.
+
+The escape hatch is the `JC_MIGRATE_ALLOW_NEWER_DB` config setting
+(truthy values: `1` or `true`): set it on the rolling-back service's
+environment — Render dashboard → Environment, or the Render API — *before*
+triggering the rollback, and the orphan check logs a WARNING naming the
+unknown version(s) instead of raising, then continues normally. **Remove
+the var again once the rollback is resolved** — it's a per-incident
+override, not a standing config value. This is safe ONLY because every
+migration in this repo is expand-only (additive, backward-compatible with
+the previous release — the same discipline §10 documents for the general
+rollback case): the rolled-back code simply never reads the newer
+column/table it doesn't know about. A rollback across a genuinely
+contract-shaped migration (a hypothetical future `DROP COLUMN` / type
+narrowing / constraint tightening) is **not** safe to override this way —
+that needs a database restore, never `JC_MIGRATE_ALLOW_NEWER_DB`.
+
+**Migration/writer ordering also inverted, not just eliminated.** Pre-deploy
+runs migrations *before* the new web code goes live, which flips the
+ordering a data-backfill-shaped migration wants: one written to rewrite
+rows that only the *new* release's writer produces (e.g.
+`m0010_events_referrer_host.py`'s "Deploy order" docstring, which predates
+this guarantee) previously wanted migration-after-code, since only after
+web deployed would there be new-format rows to backfill. Now migrations
+always land before the new writer is live, so a backfill of that shape
+strands every row the outgoing release's writer produced in the gap
+between migration commit and web's cutover — pre-deploy closes the
+old race but opens this one for that migration *shape* specifically.
+A future migration that rewrites rows a not-yet-deployed writer will
+produce must either be order-independent (safe against running before its
+own writer exists) or ship with an explicit follow-up sweep; it can no
+longer rely on "the worker will boot after the writer's release lands."
+`m0010_events_referrer_host.py` itself is already applied on every existing
+deploy and is **not** affected by this — it's cited above only to
+illustrate the migration *shape* that needs the caution going forward.
 
 Expect these log lines on a fresh database's first worker boot (the ledger
 `name` column — and therefore the second `%s` migrate.py logs — is the
 migration file's stem, not its description):
 
 ```
+waiting for schema_migrations advisory lock
+schema_migrations: 0 applied, 9 pending (m0001_initial_schema, m0002_scan_health_log, m0003_companies_scan_columns, m0004_users_consent, m0005_postings_embedding, m0006_analytics_consent_version, m0008_profiles_comp_floor, m0009_postings_jd_content, m0010_events_referrer_host)
 applied migration 1 (m0001_initial_schema)
 applied migration 2 (m0002_scan_health_log)
 applied migration 3 (m0003_companies_scan_columns)
 applied migration 4 (m0004_users_consent)
 applied migration 5 (m0005_postings_embedding)
+applied migration 6 (m0006_analytics_consent_version)
+applied migration 8 (m0008_profiles_comp_floor)
+applied migration 9 (m0009_postings_jd_content)
+applied migration 10 (m0010_events_referrer_host)
 applying procrastinate schema (first boot)
 ```
 
-On every subsequent boot, `run_migrations` logs nothing new (already-applied
-migrations are skipped) and the procrastinate probe finds
-`procrastinate_jobs` already present, so neither schema step re-runs.
+`waiting for schema_migrations advisory lock` and
+`schema_migrations: N applied, M pending` are logged on **every** call to
+`run_migrations` — including every subsequent boot, not just the first —
+because the advisory-lock acquire and the ledger read always run; only the
+`applied migration V (name)` lines are conditional on there being pending
+work. So on every subsequent boot, expect those same two lines again with
+`M` at `0` and no `applied migration ...` lines (already-applied migrations
+are skipped), and the procrastinate probe finds `procrastinate_jobs`
+already present, so neither schema step re-runs its DDL.
 
 **The web service needs the database, but not the schema, to report
 healthy.** `/healthz` runs a bounded (2.5 s) pooled `SELECT 1` — schema-free
@@ -129,6 +232,15 @@ read/write `postings`, `companies`, etc. will error until the worker has
 applied both schemas; that window is normally seconds on a fresh deploy and
 is otherwise closed once the worker service reports healthy in the Render
 dashboard.
+
+**Migration 7 (`revoked_subjects`)** previously had a real, not-benign
+deploy-order dependency on this section's general worker-first case (a
+missing table would raise inside `jobcannon.db._revoked_subjects.
+revoke_subject`, called from `jobcannon/web/account.py`'s account-deletion
+route and `jobcannon/web/webhooks.py`'s `user.deleted` handler). That
+dependency is resolved by issue #196's web pre-deploy migration step
+(#197) — see `m0007_revoked_subjects.py`'s docstring for the current
+guarantee and the narrow self-healing window that remains.
 
 ## 4. Webhook endpoint registration
 

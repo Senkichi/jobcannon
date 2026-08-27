@@ -1,11 +1,16 @@
 """Procrastinate task-shape declarations for the hosted job taxonomy, plus the
 periodic enqueue tick, storage-check tick, orphaned-job reclaim tick,
-anon-user reap tick, and events-retention reap tick that fire on a schedule.
+anon-user reap tick, events-retention reap tick, deletion-reconciliation
+sweep tick, and revoked-subjects reap tick that fire on a schedule.
 
-Task shapes (`scan`, `expiry_check`, `stale_detect`) and the five periodics
+Task shapes (`scan`, `expiry_check`, `stale_detect`) and the seven periodics
 (`enqueue_due_scans`, `db_storage_check`, `reclaim_orphaned_jobs`,
-`reap_anon_users`, `reap_old_events`, each declared with `@app.periodic` +
-`@app.task` below) all live here. 'enrich' is intentionally not defined: no enrich hook exists
+`reap_anon_users`, `reap_old_events`, `reconcile_deleted_users`,
+`reap_revoked_subjects`, each declared with `@app.periodic` + `@app.task`
+below) all live here — this ONE
+`procrastinate.App` instance (constructed below) is the sole periodic-task
+scheduling mechanism in this codebase; a new periodic task is another peer
+registered on it, never a second scheduler. 'enrich' is intentionally not defined: no enrich hook exists
 to run. Defining a periodic task's SHAPE is not the same as RUNNING it: this
 module still never runs a worker or applies procrastinate's schema at import
 time — `jobcannon.worker.__main__` owns both (it applies procrastinate's
@@ -33,6 +38,14 @@ Registry note: `app.tasks` is keyed by each task's fully-qualified dotted name
 (``<module>.<function>``, e.g. ``jobcannon.host.tasks.scan``), NOT the bare
 function name — verified empirically against 3.9.0. Callers introspecting the
 registry (see tests/host/test_scan_tasks.py) must account for this.
+
+`app` itself is constructed in `jobcannon.host.task_app` (issue #135/#136),
+not here — this module's own top-level imports (`scan_tasks` -> the ATS-
+scanning/fastembed/onnxruntime stack) must never load in the web process,
+but the web process still needs to defer tasks declared here by name (see
+`jobcannon.host.user_deletion`). Importing the bare `app` object from the
+light module keeps that possible; see task_app.py's docstring for the full
+mechanism.
 """
 
 from __future__ import annotations
@@ -41,12 +54,12 @@ import datetime
 import logging
 import os
 
-import procrastinate
-
+from procrastinate import RetryStrategy
 from procrastinate import exceptions as procrastinate_exceptions
 from procrastinate import manager as procrastinate_manager
 
 from jobcannon.db._events import delete_expired_events
+from jobcannon.db._revoked_subjects import prune_expired_revocations
 from jobcannon.db._users import reap_unconverted_anon_users
 from jobcannon.host import scan_tasks as _scan_tasks
 from jobcannon.host.scan_tasks import (
@@ -55,10 +68,7 @@ from jobcannon.host.scan_tasks import (
     run_stale_detect_task,
 )
 from jobcannon.host.storage_check import check_db_storage
-
-app = procrastinate.App(
-    connector=procrastinate.PsycopgConnector(conninfo=os.environ.get("DATABASE_URL", ""))
-)
+from jobcannon.host.task_app import app
 
 logger = logging.getLogger(__name__)
 
@@ -258,3 +268,142 @@ def reap_old_events(timestamp: int) -> dict:
     with connection_factory() as conn:
         reaped_ids = delete_expired_events(conn, retention_days=retention_days)
     return {"reaped": len(reaped_ids), "retention_days": retention_days}
+
+
+@app.periodic(
+    cron=os.environ.get("JC_DELETION_RECONCILE_CRON", "24 7 * * *"),
+    periodic_id="reconcile_deleted_users",
+)
+@app.task(queue="maintenance", queueing_lock="reconcile_deleted_users")
+def reconcile_deleted_users(timestamp: int) -> dict:
+    """Periodic reconciliation sweep (#136): catches a `user.deleted`
+    webhook Clerk never delivered (or delivered while this app was down,
+    outside Svix's retry window) by directly asking Clerk's Backend API
+    about each old, still-present local `users` row. See
+    jobcannon.host.user_deletion.run_reconciliation_sweep for the
+    lookup/deletion contract (fail-closed on anything but a definitive
+    404); this tick only wires the Clerk client and the env-tunable knobs.
+
+    Requires CLERK_SECRET_KEY, now declared on BOTH services
+    (jobcannon.host.config's HostConfig.clerk_secret_key expanded from
+    web-only, issue #136) specifically so this worker-side task can reuse
+    jobcannon.web.auth.build_clerk_client — the repo's one Clerk SDK client
+    construction site — rather than building a second one. If the key is
+    unset (e.g. a local dev worker with no Clerk configured), this tick
+    logs and returns a `clerk_unreachable` status rather than raising or
+    crash-looping the worker; this sweep is a catch-net for a rare delivery
+    failure, not a hard dependency of every worker tick. Two more non-"ok"
+    statuses can come back from `run_reconciliation_sweep` itself (VERIFIED-4
+    / F6 / HIGH-3): `degraded` when every checked row's Clerk lookup errored
+    (a bare `status: "ok"` would otherwise mask a mid-run Clerk outage even
+    though a nonzero `errors` count is buried in the dict), and
+    `clerk_misconfigured` when the sweep's own circuit breaker refused to
+    delete anything because most/all checked rows came back a definitive 404
+    (HIGH-3: a valid key pointed at the wrong Clerk instance reads exactly
+    that way too, indistinguishable from a genuine mass deletion without the
+    breaker). `checked` is logged unconditionally (even when every count is
+    0) so a healthy "nothing to do" sweep is distinguishable in the logs
+    from a sweep that silently stopped running at all — this repo has no
+    nightly_monitor/deadman infra; the log line is the health signal. Every
+    non-"ok" status logs at WARNING or ERROR (see below) so it never reads
+    as a healthy tick.
+    """
+    from jobcannon.db import connection_factory
+    from jobcannon.host.config import load_host_config
+    from jobcannon.host.user_deletion import run_reconciliation_sweep
+
+    host_config = load_host_config()
+    if not host_config.clerk_secret_key:
+        logger.error(
+            "reconcile_deleted_users: CLERK_SECRET_KEY unset -- cannot "
+            "reach Clerk, sweep skipped entirely this tick"
+        )
+        return {"status": "clerk_unreachable", "checked": 0}
+
+    from jobcannon.web.auth import build_clerk_client
+
+    clerk_client = build_clerk_client(host_config)
+    settle_days = int(os.environ.get("JC_DELETION_RECONCILE_SETTLE_DAYS", "3"))
+    row_cap = int(os.environ.get("JC_DELETION_RECONCILE_ROW_CAP", "50"))
+    result = run_reconciliation_sweep(
+        connection_factory,
+        clerk_client.users,
+        settle_days=settle_days,
+        row_cap=row_cap,
+    )
+    if result.get("status") == "ok":
+        logger.info("reconcile_deleted_users: %s", result)
+    else:
+        # degraded / clerk_misconfigured -- run_reconciliation_sweep already
+        # logged the specific reason at WARNING/ERROR; this line is the
+        # summary a log-scanning monitor keys on.
+        logger.warning("reconcile_deleted_users: non-ok sweep result: %s", result)
+    return {"status": "ok", **result}
+
+
+# MEDIUM-4 (review-1/2/devin): a transient PostHog 5xx/network error must
+# not permanently lose a purge -- the local users row is already gone by
+# the time this task runs, so nothing ever re-enqueues it once the job
+# fails. Bounded (not indefinite): 5 attempts, linear backoff, matches
+# purge_person's ~10s per-call timeout budget (posthog_admin._REQUEST_
+# TIMEOUT_S) without risking an unbounded retry storm against a real outage.
+_PURGE_POSTHOG_PERSON_RETRY = RetryStrategy(max_attempts=5, linear_wait=30)
+
+
+@app.task(queue="maintenance", retry=_PURGE_POSTHOG_PERSON_RETRY)
+def purge_posthog_person(distinct_id: str) -> dict:
+    """#135: deletes the PostHog person for `distinct_id` -- already the
+    PSEUDONYMOUS id (jobcannon.host.user_deletion.cascade_delete_user is
+    this task's only enqueuer, and passes posthog_client.pseudonymize()'s
+    output, never a raw Clerk user id). Runs async on the worker's
+    `maintenance` queue, never inline in the webhook request thread, so a
+    PostHog outage cannot block or delay account deletion itself -- the
+    local deletion has already committed by the time this task even runs.
+    Fails soft (returns a "skipped" status, no exception) when the PostHog
+    admin API credentials aren't configured; see
+    jobcannon.host.posthog_admin.purge_person for the full contract.
+    Retries a bounded number of times (see _PURGE_POSTHOG_PERSON_RETRY
+    above) on a genuine HTTP failure -- purge_person raises on those, never
+    on "unconfigured" (which returns a status dict instead, so it is never
+    retried -- retrying a permanently-unconfigured purge forever would be
+    pure noise)."""
+    from jobcannon.host import posthog_admin
+
+    return posthog_admin.purge_person(distinct_id)
+
+
+@app.periodic(
+    cron=os.environ.get("JC_REVOKED_REAP_CRON", "*/15 * * * *"),
+    periodic_id="reap_revoked_subjects",
+)
+@app.task(queue="maintenance", queueing_lock="reap_revoked_subjects")
+def reap_revoked_subjects(timestamp: int) -> dict:
+    """Periodic reaper (issue #159): hard-deletes `revoked_subjects` rows
+    past their own `expires_at`. Unlike `reap_anon_users`/`reap_old_events`
+    above, there is no retention-window env var here — the window
+    (`jobcannon.db._revoked_subjects.REVOCATION_TTL_MINUTES`, 15 minutes) is
+    a code-level security constant sized against Clerk's own ~60s JWT
+    lifetime, not a privacy-policy-driven retention period, so it is not a
+    render.yaml-declared value the way JC_EVENTS_RETENTION_DAYS/
+    JC_ANON_RETENTION_DAYS are.
+
+    Cadence (issue #159 follow-up, privacy-disclosure gap): a Clerk user id
+    is a GDPR online identifier, and privacy.md §8 promises deletion is a
+    genuine hard delete, not a soft flag or archival copy. The row itself
+    (not just the 15-minute blocking window) must therefore track that
+    promise. This runs every 15 minutes (same cadence as the existing
+    `reclaim_orphaned_jobs` sibling in the scheduler, see
+    docs/deploy-runbook.md §8) so worst-case total retention of one id is
+    the 15-minute TTL plus up to one more tick before the next sweep finds
+    it — ~30 minutes, not 15. State that real bound, not the TTL alone, in
+    any disclosure text. An unpruned-but-not-yet-reaped expired row is
+    harmless to the auth check itself (`is_subject_revoked`'s
+    `expires_at > now()` predicate already excludes it from denying
+    access) — this tick's job is retention, not correctness. Returns a
+    count, not the reaped ids — procrastinate persists task results into
+    the same database being reaped, and a Clerk user id is PII-adjacent."""
+    from jobcannon.db import connection_factory
+
+    with connection_factory() as conn:
+        reaped_ids = prune_expired_revocations(conn)
+    return {"reaped": len(reaped_ids)}

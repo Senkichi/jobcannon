@@ -168,4 +168,26 @@
       {% endif %}
     </div>
   {% endif %}
+  {% if signup_cta_url %}
+    {# Anonymous per-row CTA (issue #174): /preview and /demo never pass
+       show_actions, so the save/dismiss/apply block above is skipped
+       entirely and an anonymous visitor previously had zero path from a
+       row to an account. This is a pure ADDITION after the show_actions
+       block (not an elif on it) so it never touches the lines the
+       feed-states workstream is editing inside that block. Gates on
+       signup_cta_url -- the single value the app-wide context processor
+       (jobcannon/web/__init__.py's _inject_auth_links) derives from real
+       identity, not on `show_actions` -- so a signed-in visitor never
+       sees this regardless of whether the route remembered to pass
+       show_actions=True, and every anonymous surface (row, /preview,
+       /demo) shares one gate instead of each re-deriving its own
+       fallback. #}
+    <div class="flex gap-3 text-xs pt-1" data-posting-signup>
+      <a href="{{ signup_cta_url }}"
+         class="underline text-neutral-300"
+         data-action-signup>
+        Sign up to apply
+      </a>
+    </div>
+  {% endif %}
 </article>

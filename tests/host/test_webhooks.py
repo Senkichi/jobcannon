@@ -222,6 +222,133 @@ def test_user_deleted_cascades_to_all_child_tables(app):
             assert n == 0, f"{table} row survived cascade delete for {user_id}"
 
 
+def test_user_deleted_enqueues_posthog_purge_with_pseudonym_when_salt_configured(app):
+    """#135: the user.deleted cascade (jobcannon.host.user_deletion.
+    cascade_delete_user) must defer purge_posthog_person with the user's
+    PSEUDONYM, never the raw Clerk id -- and only when analytics
+    pseudonymization is configured (posthog_client.pseudonymize's
+    fail-closed contract).
+
+    The salt-UNSET case is NOT covered for free by test_user_deleted_
+    removes_row/test_user_deleted_cascades_to_all_child_tables above
+    (review-3 finding 2/3: this docstring previously claimed it was, which
+    was wrong on two counts). First, cascade_delete_user returns right
+    after delete_user() when pseudonymize() comes back None -- salt-unset
+    never reaches configure_task/.defer() at all, so there is no "stray
+    real .defer() attempt" for those tests to incidentally catch. Second,
+    even a genuine defer failure wouldn't fail a test loudly any more:
+    cascade_delete_user's own except-Exception branch (issue #135/#136
+    HIGH-1 fix) logs and swallows it by design, precisely so a PostHog
+    outage can never turn a successful deletion into a request failure.
+    Salt-unset behavior has its own direct assertion instead --
+    test_user_deleted_skips_posthog_purge_when_salt_unset below."""
+    from procrastinate import testing
+
+    from jobcannon.host import posthog_client, task_app
+    from jobcannon.host.user_deletion import PURGE_POSTHOG_PERSON_TASK
+
+    posthog_client.set_analytics_salt("webhook-test-salt")
+    try:
+        user_id = "user_posthog_purge"
+        created = json.dumps(_user_created(user_id=user_id)).encode()
+        client = app.test_client()
+        assert (
+            client.post("/webhooks/clerk", data=created, headers=_sign(created)).status_code == 200
+        )
+        expected_pseudonym = posthog_client.pseudonymize(user_id)
+
+        deleted = json.dumps(_user_deleted(user_id)).encode()
+        with task_app.app.replace_connector(testing.InMemoryConnector()) as procrastinate_app:
+            resp = client.post(
+                "/webhooks/clerk", data=deleted, headers=_sign(deleted, msg_id="msg_purge_del")
+            )
+            assert resp.status_code == 200
+            jobs = list(procrastinate_app.connector.jobs.values())
+
+        purge_jobs = [j for j in jobs if j["task_name"] == PURGE_POSTHOG_PERSON_TASK]
+        assert len(purge_jobs) == 1
+        assert purge_jobs[0]["queue_name"] == "maintenance"
+        assert purge_jobs[0]["args"]["distinct_id"] == expected_pseudonym
+        assert purge_jobs[0]["args"]["distinct_id"] != user_id
+
+        with psycopg.connect(app.config["_TEST_DSN"]) as conn:
+            n = conn.execute("SELECT count(*) FROM users WHERE id = %s", (user_id,)).fetchone()[0]
+        assert n == 0
+    finally:
+        posthog_client.set_analytics_salt(None)
+
+
+def test_user_deleted_skips_posthog_purge_when_salt_unset(app):
+    """The direct counterpart to test_user_deleted_enqueues_posthog_purge_
+    with_pseudonym_when_salt_configured above -- and the test that docstring
+    used to (wrongly, per review-3 finding 2/3) claim was covered "for free"
+    by the plain delete tests. Explicitly unsets the salt (rather than
+    relying on it being unset by default) so this assertion can't silently
+    start passing for the wrong reason if some other test in the same
+    process left a salt configured. Swaps in InMemoryConnector purely so a
+    regression that DID start deferring here would be caught locally
+    instead of raising AppNotOpen against this fixture's throwaway DB (which
+    never applies procrastinate's own schema -- see the `app` fixture
+    above)."""
+    from procrastinate import testing
+
+    from jobcannon.host import posthog_client, task_app
+
+    posthog_client.set_analytics_salt(None)
+    user_id = "user_posthog_purge_no_salt"
+    created = json.dumps(_user_created(user_id=user_id)).encode()
+    client = app.test_client()
+    assert client.post("/webhooks/clerk", data=created, headers=_sign(created)).status_code == 200
+
+    deleted = json.dumps(_user_deleted(user_id)).encode()
+    with task_app.app.replace_connector(testing.InMemoryConnector()) as procrastinate_app:
+        resp = client.post(
+            "/webhooks/clerk", data=deleted, headers=_sign(deleted, msg_id="msg_purge_no_salt_del")
+        )
+        assert resp.status_code == 200
+        jobs = list(procrastinate_app.connector.jobs.values())
+
+    assert jobs == []
+    with psycopg.connect(app.config["_TEST_DSN"]) as conn:
+        n = conn.execute("SELECT count(*) FROM users WHERE id = %s", (user_id,)).fetchone()[0]
+    assert n == 0
+
+
+def test_user_deleted_writes_a_revocation_tombstone(app):
+    """Issue #159: this is the second of the two revocation writers -- it
+    covers a deletion started from Clerk's own Account Portal, which never
+    touches jobcannon/web/account.py::post_delete at all. The row must be
+    unexpired at the moment the webhook returns (a future expires_at),
+    proving the gate would actually reject this subject's next request --
+    not merely that SOME row landed in the table."""
+    user_id = "user_webhook_revoke"
+    created = json.dumps(_user_created(user_id=user_id)).encode()
+    client = app.test_client()
+    assert client.post("/webhooks/clerk", data=created, headers=_sign(created)).status_code == 200
+
+    deleted = json.dumps(_user_deleted(user_id)).encode()
+    resp = client.post(
+        "/webhooks/clerk", data=deleted, headers=_sign(deleted, msg_id="msg_webhook_revoke")
+    )
+    assert resp.status_code == 200
+
+    with psycopg.connect(app.config["_TEST_DSN"]) as conn:
+        user_row = conn.execute("SELECT 1 FROM users WHERE id = %s", (user_id,)).fetchone()
+        tombstone = conn.execute(
+            "SELECT expires_at > now() AS still_live "
+            "FROM revoked_subjects WHERE clerk_user_id = %s",
+            (user_id,),
+        ).fetchone()
+    # The users row is gone (cascade already covered by
+    # test_user_deleted_removes_row) -- the tombstone must survive that
+    # deletion regardless, since revoked_subjects deliberately carries no FK
+    # to users (module docstring): the whole point is to keep denying a
+    # still-valid JWT for a subject that no longer has a users row at all.
+    assert user_row is None
+    assert tombstone is not None
+    assert tombstone[0] is True  # still_live: unexpired at the moment we checked
+
+
 def test_stale_timestamp_replay_rejected_400(app):
     """A correctly-signed payload over a timestamp outside Svix's ~5-minute
     tolerance window must still be rejected — freshness, not just signature

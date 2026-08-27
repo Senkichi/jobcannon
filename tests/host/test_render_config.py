@@ -8,6 +8,8 @@ import re
 
 import yaml
 
+from tests.host.conftest import requires_postgres
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
@@ -133,8 +135,10 @@ def test_every_required_env_var_is_declared_on_both_services():
     for svc in bp["services"]:
         declared = {e["key"] for e in svc.get("envVars", [])}
         # Worker never verifies a Clerk request or a webhook — that's
-        # expressed once, as declare_on=("web",) on the four Clerk fields
-        # in HostConfig, not as a second exemption list here.
+        # expressed once, as declare_on=("web",) on three of the four Clerk
+        # fields in HostConfig (clerk_secret_key is the exception — issue
+        # #136's reconciliation sweep runs on the worker and needs its own
+        # Clerk Backend API client), not as a second exemption list here.
         required = {env for env, svcs in derived.items() if svc["type"] in svcs}
         missing = required - declared
         assert not missing, f"{svc['name']} missing env declarations: {missing}"
@@ -159,6 +163,33 @@ def test_posthog_env_declared_identically_on_both_services():
     assert hosts["jobcannon-web"] == hosts["jobcannon-worker"]
 
 
+def test_posthog_admin_env_declared_on_worker_only():
+    """Issue #135's PostHog admin/private-API credentials
+    (POSTHOG_PERSONAL_API_KEY, POSTHOG_PROJECT_ID, POSTHOG_ADMIN_API_HOST)
+    are declare_on=() in HostConfig (optional/fail-soft, like
+    POSTHOG_API_KEY/POSTHOG_HOST) so the generic derivation test above
+    doesn't cover them — this is their dedicated coverage. Unlike
+    POSTHOG_API_KEY/POSTHOG_HOST (declared identically on both services),
+    these are WORKER-ONLY: the purge only ever runs inside
+    jobcannon.host.tasks.purge_posthog_person, a worker-side procrastinate
+    task; jobcannon-web never calls posthog_admin.purge_person, so
+    declaring these on web would be dead config with no consumer."""
+    bp = _blueprint()
+    web = next(s for s in bp["services"] if s["type"] == "web")
+    worker = next(s for s in bp["services"] if s["type"] == "worker")
+    admin_keys = {"POSTHOG_PERSONAL_API_KEY", "POSTHOG_PROJECT_ID", "POSTHOG_ADMIN_API_HOST"}
+
+    worker_declared = {e["key"] for e in worker["envVars"]}
+    web_declared = {e["key"] for e in web["envVars"]}
+    assert admin_keys <= worker_declared
+    assert not (admin_keys & web_declared)
+
+    host_entry = next(e for e in worker["envVars"] if e["key"] == "POSTHOG_ADMIN_API_HOST")
+    # Distinct from POSTHOG_HOST's ingestion value (eu.i.posthog.com) —
+    # PostHog's private/admin REST API lives on a different host.
+    assert host_entry.get("value") == "https://eu.posthog.com"
+
+
 def test_web_graceful_timeout_covers_posthog_atexit_bound():
     """jobcannon#137: gunicorn's --graceful-timeout must leave real headroom
     over jobcannon.host.wiring's hard backstop on the PostHog client's
@@ -179,6 +210,109 @@ def test_web_graceful_timeout_covers_posthog_atexit_bound():
     # ELSE gunicorn's graceful shutdown also has to do besides this one
     # atexit handler (finishing an in-flight request, other cleanup).
     assert graceful_timeout_s - wiring._POSTHOG_ATEXIT_JOIN_TIMEOUT_S >= 10
+
+
+def test_web_predeploy_command_runs_migrations():
+    """jobcannon#196: web and worker deploy independently with no ordering
+    guarantee (docs/deploy-runbook.md §3), so web's preDeployCommand is THE
+    mechanism that makes schema migrations land before the new web code ever
+    serves a request against the old schema. Derives the assertion from the
+    parsed startCommand-shaped string rather than restating a literal command
+    copy, mirroring test_web_start_command_preloads_app's pattern."""
+    bp = _blueprint()
+    web = next(s for s in bp["services"] if s["type"] == "web")
+    predeploy = web.get("preDeployCommand", "")
+    assert predeploy, "jobcannon-web must declare preDeployCommand"
+    assert predeploy.split()[:2] == ["uv", "run"], predeploy
+    assert "--no-sync" in predeploy.split(), predeploy
+    m = re.search(r"-m\s+([\w.]+)", predeploy)
+    assert m and m.group(1) == "jobcannon.db.migrate", (
+        f"preDeployCommand must invoke `python -m jobcannon.db.migrate`, got: {predeploy!r}"
+    )
+
+
+@requires_postgres
+def test_migrate_module_runs_end_to_end_as_a_subprocess():
+    """L4-functional proof that `python -m jobcannon.db.migrate` (the command
+    render.yaml's preDeployCommand runs) actually works when invoked exactly
+    the way Render invokes it: as a subprocess reading DATABASE_URL from the
+    environment, not by calling run_migrations() in-process. Always
+    sys.executable (Windows App Execution Alias hazard — see
+    test_scan_block_report_help above)."""
+    import os
+    import subprocess
+    import sys
+
+    from tests.host.conftest import create_throwaway_db, drop_throwaway_db
+
+    dsn, db_name = create_throwaway_db("jobcannon_predeploy_e2e")
+    try:
+        env = dict(os.environ)
+        env["DATABASE_URL"] = dsn
+
+        first = subprocess.run(
+            [sys.executable, "-m", "jobcannon.db.migrate"],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert first.returncode == 0, (
+            f"first run must apply everything and exit 0; stderr:\n{first.stderr}"
+        )
+
+        second = subprocess.run(
+            [sys.executable, "-m", "jobcannon.db.migrate"],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert second.returncode == 0, (
+            f"second run must be a no-op and still exit 0; stderr:\n{second.stderr}"
+        )
+    finally:
+        drop_throwaway_db(db_name)
+
+
+def test_migrate_module_exits_nonzero_on_bogus_dsn():
+    """Negative counterpart: a broken DSN must abort (non-zero exit), never
+    silently succeed — this is what makes a Render pre-deploy failure actually
+    block promotion of the new web code (render.com/docs/deploys: "If any
+    command fails or times out, the entire deploy fails").
+
+    connect_timeout=3 is load-bearing, not decoration: an unreachable
+    127.0.0.1 port is silently dropped rather than RST on this Windows CI
+    box, so a bare psycopg connect() hangs on the OS-level TCP timeout
+    (tens of seconds) instead of failing fast — verified directly against
+    this port before adding the bound.
+
+    Asserting returncode != 0 alone would pass "vacuously" for the wrong
+    reason too (e.g. an ImportError or a typo'd module path also exits
+    non-zero) — this negative test is not @requires_postgres-gated, so on a
+    box without POSTGRES_ADMIN_DSN it is the ONLY one of the two subprocess
+    tests that runs, with no positive-control sibling to catch that. Also
+    assert main()'s own logged failure line is present, so this can only
+    pass on a genuine connect failure."""
+    import os
+    import subprocess
+    import sys
+
+    env = dict(os.environ)
+    env["DATABASE_URL"] = "postgresql://bogus:bogus@127.0.0.1:1/does_not_exist?connect_timeout=3"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "jobcannon.db.migrate"],
+        cwd=str(ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode != 0
+    assert "pre-deploy migration run failed" in result.stderr, result.stderr
 
 
 def test_scan_block_report_help():

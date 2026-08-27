@@ -322,6 +322,31 @@ def test_posting_with_no_usable_url_renders_degraded_apply_control(app):
     assert _events(dsn, "posting_apply_clicked") == []
 
 
+def test_authed_feed_never_shows_the_anonymous_signup_cta(app):
+    """Negative control for issue #174's anonymous per-row CTA
+    (_posting_row.html, gated on `signup_cta_url`): jobcannon.web's
+    _inject_auth_links context processor derives signup_cta_url as None
+    for any authed visitor (jobcannon.web._visitor_is_anonymous, via the
+    g.clerk_user this route's before_request already populated), and this
+    module's `app` fixture never overrides HOST_CONFIG, so TESTING's
+    default configures BOTH clerk_sign_up_url and clerk_sign_in_url
+    (jobcannon/web/__init__.py) -- if the gate keyed on the URLs alone
+    instead of real identity, this CTA would leak onto every signed-in
+    visitor's real feed. The row still renders (positive control) so the
+    CTA's absence isn't just an empty/error page."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "No Anon CTA Co")
+    _seed_posting(dsn, "no-anon-cta-1", company_id, title="No Anon CTA Row")
+
+    html = client.get("/").get_data(as_text=True)
+
+    assert "No Anon CTA Row" in html
+    assert "data-action-signup" not in html
+    assert "Sign up to apply" not in html
+    assert "data-posting-signup" not in html
+
+
 def test_apply_control_renders_the_seeded_outbound_link(app):
     dsn = app.config["_TEST_DSN"]
     client = _feed_client(app, consent=True)
@@ -605,7 +630,19 @@ def test_the_overlap_chip_survives_a_save_mutation_swap(app):
     one built with no profile. Skills must actually overlap the seeded
     title's tokens (default fixture skills=["python"] never overlaps a
     default "Engineer" title, which would make the divergence invisible on
-    both the page render AND the swap)."""
+    both the page render AND the swap).
+
+    Also the coverage gap review-1.md flagged (LOW 2): actions.py:92's
+    `_row_response` is the single `_posting_row.html` re-render shared by
+    Save/Dismiss/Apply (and feed-states' undo_apply via the same
+    `_fetch_entry` helper), and it already passes show_actions=True, but
+    had no negative test guarding that the anonymous CTA (issue #174)
+    never leaks onto it -- unlike the authed full page/fragment, which
+    test_authed_feed_never_shows_the_anonymous_signup_cta above already
+    covers. A future show_actions omission here would now leak
+    signup_cta_url's CTA onto an authenticated row, since #174's gate is
+    identity-derived, not show_actions-derived -- this locks in that the
+    save-mutation fragment stays clean."""
     dsn = app.config["_TEST_DSN"]
     client = _feed_client(app, consent=True, skills=("engineer",))
     company_id = _seed_company(dsn, "Overlap Chip Co")
@@ -620,6 +657,9 @@ def test_the_overlap_chip_survives_a_save_mutation_swap(app):
     assert "Engineer" in fragment_html
     assert "Saved" in fragment_html
     assert "title matches your selections: engineer" in fragment_html
+    assert "data-action-signup" not in fragment_html
+    assert "data-posting-signup" not in fragment_html
+    assert "Sign up to apply" not in fragment_html
 
 
 def test_apply_on_nonexistent_posting_is_404_not_500(app):
