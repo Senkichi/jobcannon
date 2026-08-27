@@ -13,31 +13,48 @@
   {% if error %}
     <p class="text-red-400 mb-4">{{ error }}</p>
   {% endif %}
+  {# #148: live-filters the Titles/Companies fieldsets below as you type.
+     Its own GET form + submit button is the no-JS fallback (a plain
+     GET /start?q=... full-page reload); with JS, hx-get on the input itself
+     hits the same route (jobcannon/web/onboarding.py's `start` view) on
+     every keystroke pause and swaps in just the filtered fieldsets
+     (_picker_options.html). hx-include carries the visitor's currently
+     checked boxes along so a selection made before narrowing the search
+     doesn't silently vanish from the merged result (see
+     jobcannon.web.onboarding._merge_checked). Deliberately its own <form>,
+     not nested inside the POST form below — HTML forms cannot nest, and the
+     checkboxes still need to submit through the POST form regardless of
+     which search term last filtered them into view.
+
+     `checked_titles`/`checked_companies` (the server's already-known
+     checked state — see jobcannon.web.onboarding._picker_context) are
+     echoed here as hidden inputs so a no-JS "Search" click, or pressing
+     Enter (which fires this form's native GET submit alongside — or
+     instead of, when the text didn't change — the hx-get above), carries
+     the visitor's selections into the reload via THIS form's own fields
+     rather than losing every checked box the moment it submits without
+     hx-include's help (PR #192 review finding L1). GET /start reads them
+     back with the same request.args.getlist("titles"/"companies") it
+     already used for the hx-include case. #}
+  <form method="get" action="/start" class="mb-4 flex gap-2" data-picker-search>
+    <input type="text" name="q" value="{{ q }}" placeholder="Search titles or companies&hellip;"
+           hx-get="/start"
+           hx-trigger="keyup changed delay:300ms"
+           hx-target="#picker-options"
+           hx-swap="outerHTML"
+           hx-include="[name='titles']:checked,[name='companies']:checked"
+           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-sm text-neutral-100 flex-1">
+    {% for title in checked_titles %}
+      <input type="hidden" name="titles" value="{{ title }}">
+    {% endfor %}
+    {% for company in checked_companies %}
+      <input type="hidden" name="companies" value="{{ company }}">
+    {% endfor %}
+    <button type="submit" class="text-sm underline text-neutral-300">Search</button>
+  </form>
   <form method="post" action="/start" class="space-y-8">
-    <fieldset>
-      <legend class="font-medium mb-2">Titles</legend>
-      {% if titles %}
-        {% for title in titles %}
-          <label class="block text-sm text-neutral-300">
-            <input type="checkbox" name="titles" value="{{ title }}"> {{ title }}
-          </label>
-        {% endfor %}
-      {% else %}
-        <p class="text-sm text-neutral-500">No titles in the corpus yet.</p>
-      {% endif %}
-    </fieldset>
-    <fieldset>
-      <legend class="font-medium mb-2">Companies</legend>
-      {% if companies %}
-        {% for company in companies %}
-          <label class="block text-sm text-neutral-300">
-            <input type="checkbox" name="companies" value="{{ company }}"> {{ company }}
-          </label>
-        {% endfor %}
-      {% else %}
-        <p class="text-sm text-neutral-500">No companies in the corpus yet.</p>
-      {% endif %}
-    </fieldset>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% include "_picker_options.html" %}
     <fieldset>
       <legend class="font-medium mb-2">Skills</legend>
       {% for skill in skills %}

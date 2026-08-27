@@ -54,3 +54,26 @@ def test_unpadded_base64_matches_clerk_js_forgiving_atob(unpadded_key, host):
 def test_malformed_key_raises_value_error(bad_key):
     with pytest.raises(ValueError):
         frontend_api_host(bad_key)
+
+
+@pytest.mark.parametrize(
+    "decoded_host",
+    [
+        # A semicolon/space/quote-bearing decoded "host" that would inject a
+        # second CSP directive if interpolated unsanitized (security_headers.py
+        # builds `f"https://{frontend_api_host}"` into script-src/connect-src).
+        "evil.test; script-src * 'unsafe-inline'",
+        "clerk.test/../",  # path-traversal-shaped
+        "clerk test",  # bare space
+        "clerk.test:1234",  # port suffix — not a bare hostname
+    ],
+)
+def test_decoded_host_with_csp_breaking_characters_raises_value_error(decoded_host):
+    import base64
+
+    # Build the key from the plaintext host + '$' sentinel here (rather than
+    # a hand-computed literal) so the *expected* decoded value is visibly
+    # tied to the assertion under test, not just asserted by a comment.
+    key = "pk_test_" + base64.b64encode((decoded_host + "$").encode()).decode()
+    with pytest.raises(ValueError):
+        frontend_api_host(key)
