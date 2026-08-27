@@ -348,6 +348,123 @@ def test_apply_control_renders_the_seeded_outbound_link(app):
     assert f"fetch('{apply_path}'" in html
 
 
+# --- #177: applied state + undo -------------------------------------------
+
+
+def test_apply_response_fragment_renders_applied_state_immediately(app):
+    """The apply route's OWN response fragment (not a second GET /) must
+    already reflect entry.applied=True: _fetch_entry re-reads the row AFTER
+    mark_applied commits, so the same request that records the apply also
+    returns the post-mutation row. This is the gap #177 closes -- previously
+    this fragment was rendered but never applied to the DOM at all."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Applied Fragment Co")
+    posting_id = _seed_posting(
+        dsn,
+        "applied-fragment-1",
+        company_id,
+        title="Applied Fragment Row",
+        source_urls=["https://boards.greenhouse.io/acme/jobs/1"],
+    )
+
+    resp = client.post(f"/postings/{posting_id}/apply")
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "data-apply-applied" in html
+    assert ">Applied<" in html
+    undo_path = f"/postings/{posting_id}/undo-apply"
+    assert f'hx-post="{undo_path}"' in html
+    assert "data-action-apply>" not in html  # the outbound Apply link is gone
+
+
+def test_undo_apply_reverts_the_row_to_its_normal_apply_control(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Undo Apply Co")
+    posting_id = _seed_posting(
+        dsn,
+        "undo-apply-1",
+        company_id,
+        title="Undo Apply Row",
+        source_urls=["https://boards.greenhouse.io/acme/jobs/2"],
+    )
+    assert client.post(f"/postings/{posting_id}/apply").status_code == 200
+
+    resp = client.post(f"/postings/{posting_id}/undo-apply")
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "data-apply-applied" not in html
+    apply_path = f"/postings/{posting_id}/apply"
+    assert f"fetch('{apply_path}'" in html  # back to the normal Apply anchor
+
+    with psycopg.connect(dsn, row_factory=psycopg.rows.dict_row) as conn:
+        row = conn.execute(
+            "SELECT status FROM pipeline_status WHERE user_id = %s AND posting_id = %s",
+            (CLERK_ID, posting_id),
+        ).fetchone()
+    assert row is None  # the row is deleted entirely, not set to a third status
+
+
+def test_undo_apply_emits_posting_apply_undone_event(app):
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Undo Event Co")
+    posting_id = _seed_posting(dsn, "undo-event-1", company_id, title="Undo Event Row")
+    assert client.post(f"/postings/{posting_id}/apply").status_code == 200
+
+    assert client.post(f"/postings/{posting_id}/undo-apply").status_code == 200
+
+    undone = _events(dsn, "posting_apply_undone")
+    assert len(undone) == 1
+    assert undone[0]["posting_id"] == posting_id
+    assert undone[0]["payload"] is None
+
+
+def test_undo_apply_on_a_never_applied_posting_is_a_no_op(app):
+    """Idempotent under a double-submit or a stray click, matching
+    unsave_posting's contract: no ForeignKeyViolation, no crash, and the
+    (still-nonexistent) pipeline_status row stays absent."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Never Applied Co")
+    posting_id = _seed_posting(dsn, "never-applied-1", company_id, title="Never Applied Row")
+
+    resp = client.post(f"/postings/{posting_id}/undo-apply")
+    assert resp.status_code == 200
+
+    with psycopg.connect(dsn, row_factory=psycopg.rows.dict_row) as conn:
+        row = conn.execute(
+            "SELECT status FROM pipeline_status WHERE user_id = %s AND posting_id = %s",
+            (CLERK_ID, posting_id),
+        ).fetchone()
+    assert row is None
+
+
+def test_undo_apply_does_not_touch_a_dismissed_posting(app):
+    """Scoped delete (status = 'applied' in the WHERE clause): undo-apply
+    against a posting this user separately dismissed must never clear that
+    dismissal -- proves the DELETE can't be broadened to "this user's
+    pipeline_status row for this posting" by accident."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(app, consent=True)
+    company_id = _seed_company(dsn, "Dismissed Untouched Co")
+    posting_id = _seed_posting(dsn, "dismissed-untouched-1", company_id, title="Dismissed Row")
+    assert client.post(f"/postings/{posting_id}/dismiss").status_code == 200
+
+    resp = client.post(f"/postings/{posting_id}/undo-apply")
+    assert resp.status_code == 200
+
+    with psycopg.connect(dsn, row_factory=psycopg.rows.dict_row) as conn:
+        row = conn.execute(
+            "SELECT status FROM pipeline_status WHERE user_id = %s AND posting_id = %s",
+            (CLERK_ID, posting_id),
+        ).fetchone()
+    assert row["status"] == "dismissed"
+
+
 def test_save_dismiss_apply_each_emit_their_allowlisted_event(app):
     dsn = app.config["_TEST_DSN"]
     client = _feed_client(app, consent=True)

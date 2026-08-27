@@ -9,7 +9,8 @@ other module under the scanned roots) never writing to `feed_state`.
 An authenticated reader (`user_id` not None) never sees a posting they have
 dismissed: `list_feed_postings` LEFT JOINs `pipeline_status` and excludes
 `status = 'dismissed'` rows. Every row also carries a `saved` flag (whether a
-`watchlists` row exists for that `(user_id, posting_id)` pair) so
+`watchlists` row exists for that `(user_id, posting_id)` pair) and an
+`applied` flag (`pipeline_status.status = 'applied'`, #177) so
 `jobcannon/web/feed_entries.py::build_entry` can render per-user state
 without a second query. Both tables are written exclusively by
 `jobcannon/db/_user_actions.py`; this module only reads them.
@@ -300,7 +301,7 @@ def list_feed_postings(
         sql = (
             f"SELECT {_SELECT_COLUMNS}, "
             "fs.rank_score AS rank_score, fs.ranker_version AS ranker_version, "
-            "(w.id IS NOT NULL) AS saved "
+            "(w.id IS NOT NULL) AS saved, COALESCE(ps.status = 'applied', false) AS applied "
             "FROM postings p "
             "LEFT JOIN feed_state fs ON fs.user_id = %s AND fs.posting_id = p.id "
             "LEFT JOIN pipeline_status ps ON ps.user_id = %s AND ps.posting_id = p.id "
@@ -317,7 +318,7 @@ def list_feed_postings(
         sql = (
             f"SELECT {_SELECT_COLUMNS}, "
             "NULL::double precision AS rank_score, NULL::text AS ranker_version, "
-            "NULL::boolean AS saved "
+            "NULL::boolean AS saved, NULL::boolean AS applied "
             "FROM postings p "
             f"{where_sql} "
             f"ORDER BY {order_by} "

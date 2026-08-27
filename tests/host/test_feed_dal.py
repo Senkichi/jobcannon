@@ -123,6 +123,33 @@ def test_anonymous_and_authed_shapes_return_identical_columns(db_conn):
     assert authed_rows[0]["ranker_version"] is None
 
 
+def test_applied_flag_reflects_pipeline_status_and_is_null_for_anonymous_reader(db_conn):
+    """#177: `applied` is a third per-user LEFT JOIN flag alongside `saved`
+    (test_anonymous_and_authed_shapes_return_identical_columns already pins
+    that both shapes carry the same column SET) -- this pins the actual
+    VALUES: True only for the (user, posting) pair `mark_applied` wrote,
+    False for an untouched row on the same authed read, and NULL (never
+    False) for an anonymous reader, matching `saved`'s own NULL contract on
+    that branch."""
+    from jobcannon.db._feed import list_feed_postings
+    from jobcannon.db._user_actions import mark_applied
+
+    _seed_user(db_conn, "u-applied")
+    company_id = _seed_company(db_conn, "Acme")
+    applied_id = _seed_posting(db_conn, "p-applied", company_id, last_seen=_BASE_TIME)
+    untouched_id = _seed_posting(
+        db_conn, "p-untouched", company_id, last_seen=_BASE_TIME + timedelta(hours=1)
+    )
+    mark_applied(db_conn, "u-applied", applied_id)
+
+    authed_rows = {r["id"]: r for r in list_feed_postings(db_conn, user_id="u-applied")}
+    assert authed_rows[applied_id]["applied"] is True
+    assert authed_rows[untouched_id]["applied"] is False
+
+    anon_rows = list_feed_postings(db_conn)
+    assert all(r["applied"] is None for r in anon_rows)
+
+
 def test_dismissed_posting_is_excluded_for_the_dismissing_user_but_not_others(db_conn):
     from jobcannon.db._feed import list_feed_postings
     from jobcannon.db._user_actions import dismiss_posting

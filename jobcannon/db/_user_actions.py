@@ -122,6 +122,25 @@ def mark_applied(conn: Any, user_id: str, posting_id: int) -> None:
     _set_pipeline_status(conn, user_id, posting_id, "applied", set_applied_at=True)
 
 
+def unmark_applied(conn: Any, user_id: str, posting_id: int) -> None:
+    """Issue #177's Undo: removes the `pipeline_status` row entirely rather
+    than flipping `status` to some third "neutral" value -- there is no
+    neutral status in `_PIPELINE_STATUSES`; a row's absence IS the neutral
+    state a posting starts in before any save/dismiss/apply. Scoped to
+    `status = 'applied'` so an Undo can never accidentally delete a
+    `'dismissed'` row it wasn't rendered against (the Undo control only ever
+    appears on a row whose `entry.applied` is True, but the WHERE clause
+    enforces that invariant at the write itself rather than trusting the
+    caller). Idempotent: a repeat call against an already-undone (or never-
+    applied) posting is a no-op, matching `unsave_posting`'s contract."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    raw.execute(
+        "DELETE FROM pipeline_status WHERE user_id = %s AND posting_id = %s AND status = 'applied'",
+        (user_id, posting_id),
+    )
+    commit_unless_nested(raw)
+
+
 def list_watchlist_entries(conn: Any, user_id: str) -> list[Any]:
     """Read-only: every `watchlists` row for this user (saved postings and/or
     saved companies), oldest first. Unlike `jobcannon.db._feed.list_feed_postings`'s

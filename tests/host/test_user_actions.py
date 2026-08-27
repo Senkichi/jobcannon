@@ -88,6 +88,63 @@ def test_dismiss_then_apply_overwrites_status_on_the_shared_row(db_conn):
     assert row["applied_at"] == applied_at
 
 
+def test_unmark_applied_deletes_the_row_not_a_third_status(db_conn):
+    """#177: there is no neutral value in _PIPELINE_STATUSES -- Undo removes
+    the row entirely rather than writing e.g. status='none', so the row's
+    absence is itself the neutral state a posting starts in."""
+    from jobcannon.db._user_actions import mark_applied, unmark_applied
+
+    _seed_user(db_conn, "u-unmark")
+    company_id = _seed_company(db_conn, "Unmark Co")
+    posting_id = _seed_posting(db_conn, "unmark-1", company_id)
+    mark_applied(db_conn, "u-unmark", posting_id)
+
+    unmark_applied(db_conn, "u-unmark", posting_id)
+
+    row = db_conn.execute(
+        "SELECT status FROM pipeline_status WHERE user_id = %s AND posting_id = %s",
+        ("u-unmark", posting_id),
+    ).fetchone()
+    assert row is None
+
+
+def test_unmark_applied_is_idempotent_on_a_never_applied_posting(db_conn):
+    from jobcannon.db._user_actions import unmark_applied
+
+    _seed_user(db_conn, "u-unmark-idempotent")
+    company_id = _seed_company(db_conn, "Unmark Idempotent Co")
+    posting_id = _seed_posting(db_conn, "unmark-idempotent-1", company_id)
+
+    unmark_applied(db_conn, "u-unmark-idempotent", posting_id)  # must not raise
+
+    row = db_conn.execute(
+        "SELECT status FROM pipeline_status WHERE user_id = %s AND posting_id = %s",
+        ("u-unmark-idempotent", posting_id),
+    ).fetchone()
+    assert row is None
+
+
+def test_unmark_applied_does_not_delete_a_dismissed_row(db_conn):
+    """The DELETE is scoped to status = 'applied' -- calling it against a
+    posting the same user has dismissed (never applied) must leave that
+    dismissal untouched, proving the WHERE clause enforces the invariant
+    rather than trusting callers never to invoke it against the wrong row."""
+    from jobcannon.db._user_actions import dismiss_posting, unmark_applied
+
+    _seed_user(db_conn, "u-unmark-dismissed")
+    company_id = _seed_company(db_conn, "Unmark Dismissed Co")
+    posting_id = _seed_posting(db_conn, "unmark-dismissed-1", company_id)
+    dismiss_posting(db_conn, "u-unmark-dismissed", posting_id)
+
+    unmark_applied(db_conn, "u-unmark-dismissed", posting_id)
+
+    row = db_conn.execute(
+        "SELECT status FROM pipeline_status WHERE user_id = %s AND posting_id = %s",
+        ("u-unmark-dismissed", posting_id),
+    ).fetchone()
+    assert row["status"] == "dismissed"
+
+
 def test_invalid_status_value_raises_at_the_write_boundary(db_conn):
     from jobcannon.db._user_actions import _set_pipeline_status
 

@@ -1,5 +1,6 @@
-"""actions_bp — POST /postings/<id>/save, /dismiss, /apply: the authed-only
-mutation surface for a posting's per-user watchlist/pipeline state.
+"""actions_bp — POST /postings/<id>/save, /dismiss, /apply, /undo-apply: the
+authed-only mutation surface for a posting's per-user watchlist/pipeline
+state.
 
 Not listed in `jobcannon.web.PUBLIC_PATHS`, so the `before_request` gate in
 jobcannon/web/__init__.py already 401s an unauthenticated request to any
@@ -9,13 +10,15 @@ Each route performs its `jobcannon.db._user_actions` mutation, logs the
 matching allowlisted event through `jobcannon.host.events.log_event`, and
 re-renders `jobcannon/web/templates/_posting_row.html`, always returning
 `200` (never `204`: HTMX requires `200` for an outerHTML swap, matching the
-rest of this codebase's fragment-route convention). Save and dismiss are
-driven by an `hx-post` + `hx-swap="outerHTML"` on the row's own control, so
-that fragment IS what replaces the row in the DOM. Apply is invoked from a
-plain `fetch()` instead (see `_posting_row.html`'s apply markup for why —
-an `<a href>` and an htmx AJAX trigger cannot coexist on one click), so its
-response fragment is returned for contract consistency with the other two
-routes but is not applied to the DOM by the caller. Dismiss is the one
+rest of this codebase's fragment-route convention). Save, dismiss, and
+undo-apply (#177) are driven by an `hx-post` + `hx-swap="outerHTML"` on the
+row's own control, so that fragment IS what replaces the row in the DOM.
+Apply is invoked from a plain `fetch()` instead (see `_posting_row.html`'s
+apply markup for why — an `<a href>` and an htmx AJAX trigger cannot coexist
+on one click); its own success handler applies the SAME fragment as a manual
+outerHTML swap (via `htmx.process` so the swapped-in row's own hx-post
+controls, including Undo, are live) rather than leaving the click's outbound
+navigation as the only observable effect. Dismiss is the one
 route whose "re-rendered fragment" is an empty body: `_fetch_entry` below
 re-runs the exact same query
 `jobcannon.db._feed.list_feed_postings` uses for a plain page render, which
@@ -54,7 +57,7 @@ from flask import Blueprint, abort, g, render_template
 
 from jobcannon.db._feed import list_feed_postings
 from jobcannon.db._profiles import get_profile
-from jobcannon.db._user_actions import dismiss_posting, mark_applied, save_posting
+from jobcannon.db._user_actions import dismiss_posting, mark_applied, save_posting, unmark_applied
 from jobcannon.db.pool import connection_factory
 from jobcannon.host.events import log_event
 from jobcannon.web.apply_url import apply_destination_for_row
@@ -135,4 +138,23 @@ def apply(posting_id: int):
             posting_id=posting_id,
             payload={"apply_destination": destination},
         )
+    return _row_response(entry)
+
+
+@actions_bp.post("/postings/<int:posting_id>/undo-apply")
+def undo_apply(posting_id: int):
+    """#177: the Undo control `_posting_row.html` renders only on a row whose
+    `entry.applied` is True. Same shape as save/dismiss (hx-post +
+    hx-swap="outerHTML" on the row itself, unlike Apply's plain fetch) —
+    `unmark_applied` deletes the `pipeline_status` row rather than writing a
+    third status value, so the re-fetched entry comes back with
+    `applied=False` and the row swaps back to its normal Apply control."""
+    user_id = g.clerk_user.user_id
+    try:
+        with connection_factory() as conn:
+            unmark_applied(conn, user_id, posting_id)
+            entry = _fetch_entry(conn, user_id, posting_id)
+    except psycopg.errors.ForeignKeyViolation:
+        abort(404)
+    log_event("posting_apply_undone", user_id=user_id, posting_id=posting_id)
     return _row_response(entry)
