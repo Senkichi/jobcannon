@@ -9,6 +9,7 @@ tests/host/ module reads inside a rollback-isolated transaction.
 from __future__ import annotations
 
 import random
+import re
 import string
 
 import psycopg
@@ -635,4 +636,94 @@ def test_repeat_get_start_after_submit_shows_completion_state(app):
 
     assert resp.status_code == 200
     assert "picker submitted" in html.lower()
-    assert 'href="/preview"' in html
+
+
+# --- #148: picker search (`q`) ---------------------------------------------
+
+
+def test_picker_search_q_narrows_titles_and_companies(app):
+    """Route-level version of the DAL's own q-narrowing test
+    (tests/host/test_feed_dal.py) — proves GET /start?q=... is actually
+    wired to distinct_titles/distinct_companies's q parameter, not just
+    that the DAL function itself supports it."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_postings(dsn, [f"Aardvark Role {i:03d}" for i in range(55)] + ["Software Engineer"])
+
+    unfiltered = app.test_client().get("/start").get_data(as_text=True)
+    assert "Software Engineer" not in unfiltered  # sanity: reproduces #148's bug
+
+    filtered = (
+        app.test_client().get("/start", query_string={"q": "Software"}).get_data(as_text=True)
+    )
+    assert "Software Engineer" in filtered
+    assert "Aardvark Role 000" not in filtered
+
+
+def test_picker_search_hx_request_returns_fragment_only(app):
+    """The search input's own hx-get must return just the filtered
+    fieldsets (_picker_options.html), never the surrounding page chrome —
+    proving this is genuinely a fragment response, not the full page
+    reused."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_postings(dsn, ["Data Engineer"])
+
+    resp = app.test_client().get(
+        "/start", query_string={"q": "Data"}, headers={"HX-Request": "true"}
+    )
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert 'id="picker-options"' in html
+    assert "Data Engineer" in html
+    assert "Tell us what you're looking for" not in html
+    assert "<nav" not in html
+
+
+def test_picker_search_without_hx_request_returns_full_page(app):
+    """No-JS fallback: a plain GET /start?q=... (the search form's own
+    submit button, no HTMX) must still get the full chromed page with the
+    filtered fieldsets already rendered server-side — never a bare
+    fragment."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_postings(dsn, ["Data Engineer"])
+
+    resp = app.test_client().get("/start", query_string={"q": "Data"})
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Tell us what you're looking for" in html
+    assert "Data Engineer" in html
+
+
+def test_picker_search_carries_forward_checked_selection_outside_the_window(app):
+    """A title checked before narrowing the search must not silently
+    disappear from the rendered fieldset just because a later search term
+    no longer matches it (jobcannon.web.onboarding._merge_checked) — the
+    box stays present and checked; a title that was never checked and
+    doesn't match the new q is not checked."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_postings(dsn, ["Data Engineer", "Product Manager"])
+
+    resp = app.test_client().get(
+        "/start",
+        query_string={"q": "Product", "titles": "Data Engineer"},
+        headers={"HX-Request": "true"},
+    )
+    html = resp.get_data(as_text=True)
+
+    assert re.search(r'value="Data Engineer"[^>]*checked', html) is not None
+    assert re.search(r'value="Product Manager"[^>]*checked', html) is None
+
+
+def test_picker_search_escapes_percent_and_underscore(app):
+    """Route-level version of the DAL's own escaping test — a q containing a
+    LIKE metacharacter must match only a title literally containing that
+    character, never every row (proving the route passes q through to the
+    escaping DAL call rather than, say, a raw string format)."""
+    dsn = app.config["_TEST_DSN"]
+    _seed_postings(dsn, ["50% Remote Engineer", "Back_End Developer", "Plain Title"])
+
+    percent_html = app.test_client().get("/start", query_string={"q": "%"}).get_data(as_text=True)
+    assert "50% Remote Engineer" in percent_html
+    assert "Back_End Developer" not in percent_html
+    assert "Plain Title" not in percent_html

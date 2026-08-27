@@ -6,6 +6,7 @@ durably committed postings on a different connection than db_conn.
 
 from __future__ import annotations
 
+import html as html_lib
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -20,7 +21,9 @@ pytestmark = requires_postgres
 
 CLERK_ID = "user_feed_pagination_test"
 _BASE_TIME = datetime(2026, 1, 1, tzinfo=timezone.utc)
-_LOAD_MORE_RE = re.compile(r'hx-get="([^"]+)"[^>]*data-load-more|data-load-more[^>]*hx-get="([^"]+)"')
+_LOAD_MORE_RE = re.compile(
+    r'hx-get="([^"]+)"[^>]*data-load-more|data-load-more[^>]*hx-get="([^"]+)"'
+)
 
 
 @pytest.fixture()
@@ -104,10 +107,19 @@ def _seed_pages_worth(dsn, company_id, count, *, title_prefix="Pagination Row"):
 
 
 def _extract_load_more_url(html: str) -> str | None:
+    """The hx-get URL is Jinja-autoescaped in the rendered attribute (a
+    literal `&` between query params is invalid HTML — Jinja renders
+    `&amp;`), the same way a real browser parses the DOM attribute back to
+    a decoded `&` before htmx ever issues the request. Un-escaping here
+    mirrors that decode step; skipping it produces a URL whose query
+    string splits on the stray `&` inside `&amp;` itself, silently
+    dropping `cursor_id`/`cursor_last_seen` and making every 'Load more'
+    click degrade to a first-page request."""
     match = _LOAD_MORE_RE.search(html)
     if match is None:
         return None
-    return match.group(1) or match.group(2)
+    raw = match.group(1) or match.group(2)
+    return html_lib.unescape(raw)
 
 
 def _row_count(html: str) -> int:
@@ -247,9 +259,7 @@ def test_load_more_appended_rows_carry_save_dismiss_controls(app):
 
     first_page = client.get("/").get_data(as_text=True)
     load_more_url = _extract_load_more_url(first_page)
-    fragment_html = client.get(load_more_url, headers={"HX-Request": "true"}).get_data(
-        as_text=True
-    )
+    fragment_html = client.get(load_more_url, headers={"HX-Request": "true"}).get_data(as_text=True)
 
     assert "data-action-save" in fragment_html
     assert "data-action-dismiss" in fragment_html
