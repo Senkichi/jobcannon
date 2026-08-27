@@ -47,16 +47,32 @@ def test_comp_floor_usd_defaults_null(db_conn):
 
 
 def test_comp_floor_usd_accepts_zero_and_positive_values(db_conn):
+    """PR #164 review (devin lead, self-verified): the CHECK is `IS NULL OR
+    >= 0`, so 0 is a valid, distinct-from-NULL anchor value — but the
+    original version of this test only ever inserted 120000, so a regression
+    that tightened the CHECK to `> 0` would have passed undetected. Assert
+    both boundaries explicitly, on separate rows, so neither COALESCEs or
+    defaults into masking the other."""
+    _seed_user(db_conn, "m0008_zero_user")
+    db_conn.execute(
+        "INSERT INTO profiles (user_id, comp_floor_usd) VALUES (%s, %s)",
+        ("m0008_zero_user", 0),
+    )
+    zero_row = db_conn.execute(
+        "SELECT comp_floor_usd FROM profiles WHERE user_id = 'm0008_zero_user'"
+    ).fetchone()
+    assert zero_row["comp_floor_usd"] == 0
+    assert zero_row["comp_floor_usd"] is not None
+
     _seed_user(db_conn, "m0008_positive_user")
     db_conn.execute(
         "INSERT INTO profiles (user_id, comp_floor_usd) VALUES (%s, %s)",
         ("m0008_positive_user", 120000),
     )
-
-    row = db_conn.execute(
+    positive_row = db_conn.execute(
         "SELECT comp_floor_usd FROM profiles WHERE user_id = 'm0008_positive_user'"
     ).fetchone()
-    assert row["comp_floor_usd"] == 120000
+    assert positive_row["comp_floor_usd"] == 120000
 
 
 def test_comp_floor_usd_check_constraint_rejects_negative_values(db_conn):

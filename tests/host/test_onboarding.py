@@ -470,6 +470,30 @@ def test_comp_floor_usd_written_to_profile(app):
     assert row["comp_floor_usd"] == 120000
 
 
+def test_comp_floor_usd_zero_writes_zero_not_null(app):
+    """PR #164 review (devin lead, self-verified): 0 is a valid, distinct-
+    from-NULL comp_floor_usd (CHECK is `IS NULL OR >= 0`). No prior test in
+    this file submitted the literal HTTP value "0" and asserted it lands as
+    0 rather than NULL — closes that end-to-end coverage gap. (A future
+    regression that swapped `_parse_submission`'s `if comp_floor_raw:` guard
+    for a truthiness check on the parsed int, or added an `or None` on the
+    result, would coerce 0 into NULL and pass every other existing test.)"""
+    client = app.test_client()
+    resp = client.post(
+        "/start",
+        data={
+            "seniority_level": "mid",
+            "comp_floor_usd": "0",
+            "workplace_type": "any",
+        },
+    )
+    assert resp.status_code in (302, 303)
+
+    row = _profile_row_for_anon(app.config["_TEST_DSN"])
+    assert row["comp_floor_usd"] == 0
+    assert row["comp_floor_usd"] is not None
+
+
 def test_comp_floor_usd_omitted_defaults_null(app):
     """Optional field: a submission with no comp_floor_usd must still
     succeed, storing NULL rather than rejecting the submission."""
