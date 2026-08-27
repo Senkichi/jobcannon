@@ -52,13 +52,60 @@ must stay identical on both.
 
 ## 3. First boot ordering
 
-`jobcannon/worker/__main__.py` is the **single migration authority** in this
-deploy: `create_app()` never runs migrations. On first boot the worker owns,
-in order: our schema ledger (`run_migrations`), then the four engine seams,
-then procrastinate's own queue schema (guarded apply, via a
-`to_regclass('public.procrastinate_jobs')` existence probe — see the
-Two-Schema-Authorities design in the worker's module docstring), then
-`run_worker()`.
+**Migration ordering guarantee (issue #196).** `jobcannon-web` and
+`jobcannon-worker` deploy independently on Render, with no guarantee about
+which one finishes first — a release that reads a table/column its own
+migration creates otherwise has a window where web serves against the old
+schema until the worker happens to reboot. `render.yaml`'s `jobcannon-web`
+service closes that window with a `preDeployCommand` that runs
+`python -m jobcannon.db.migrate` (Render docs: "Command that runs after the
+build command but before the start command"; on failure, "the entire deploy
+fails" — a broken migration blocks the new web code from ever going live
+against a schema it doesn't match, render.com/docs/deploys). That command
+resolves `DATABASE_URL` the exact same way the worker does
+(`load_host_config`) and calls the same `run_migrations()`.
+
+Because both web's pre-deploy step and the worker's boot-time call can now
+run against the same database — sequentially on a normal deploy, but
+possibly overlapping if a worker restarts mid-deploy — `run_migrations()`
+takes a session-level Postgres advisory lock (`jobcannon/db/migrate.py`'s
+`_ADVISORY_LOCK_KEY`) for its entire ledger DDL / read / apply sequence, so
+two concurrent callers serialize instead of racing the `schema_migrations`
+INSERT. The worker's boot-time call is no longer the single migration
+authority; it stays as an idempotent, lock-serialized belt-and-braces —
+still exercised on every worker boot in case a worker ever comes up before
+web's pre-deploy has run (e.g. first deploy of a brand-new environment,
+where nothing has applied any migration yet).
+
+On first boot the worker owns, in order: our schema ledger
+(`run_migrations`, a no-op if web's pre-deploy already applied everything),
+then the four engine seams, then procrastinate's own queue schema (guarded
+apply, via a `to_regclass('public.procrastinate_jobs')` existence probe —
+see the Two-Schema-Authorities design in the worker's module docstring),
+then `run_worker()`.
+
+**Verifying after a deploy.** Render's deploy logs for `jobcannon-web` show
+the pre-deploy step running before the start command — look for
+`schema_migrations: N applied, M pending` and, if any were newly applied,
+one `applied migration V (name)` line per migration
+(`jobcannon/db/migrate.py`). To confirm the ledger itself:
+`SELECT version, name, applied_at FROM schema_migrations ORDER BY version;`
+against the live database. After merging any render.yaml change, also
+confirm the Blueprint actually picked it up — a `render.yaml` edit only
+takes effect on the next Blueprint sync, so the person landing the change
+must confirm `serviceDetails.preDeployCommand` is non-null for
+`jobcannon-web` via the Render API (it was observed `null` before this
+change went in).
+
+**Rollback caveat.** A rolled-back web release still runs pre-deploy, which
+re-applies nothing (the ledger already has everything the newer code
+shipped) but does mean a rolled-back web serves against whatever schema
+version is newest in the ledger, not necessarily the schema its own code
+was written against. Keep migrations additive/backward-compatible for this
+reason (§10 already documents this for the general rollback case) — that
+practice no longer exists to cover "web deploys before worker" ordering
+(the pre-deploy command now guarantees that), only "a rollback can't
+un-apply a migration."
 
 Expect these log lines on a fresh database's first worker boot (the ledger
 `name` column — and therefore the second `%s` migrate.py logs — is the
