@@ -56,31 +56,43 @@ _LEGAL_DIR = pathlib.Path(__file__).parent / "legal"
 _MD_EXTENSIONS = ["tables", "sane_lists"]
 _H1_LINE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 
-# issue #182 item 4: `private`, not `public` — but NOT because the nav
-# varies with auth state on these two routes specifically; it doesn't.
+# issue #182 item 4, corrected by issue #205: `private`, not `public`.
 # /privacy and /terms are both in PUBLIC_PATHS, and clerk_auth's
 # before_request hook (jobcannon/web/__init__.py) unconditionally sets
-# `g.clerk_user = None` and returns before app.config["VERIFY_REQUEST"] is
-# ever called for any PUBLIC_PATHS request — so base.html's auth-gated nav
-# and footer links always render the signed-out variant here, regardless of
-# the requester's real session (verified: an authed VERIFY_REQUEST stub is
-# never invoked on these routes).
+# `g.clerk_user = None` before the view runs — so THIS FUNCTION's own
+# render (title, html, the document body) is identity-independent and
+# byte-identical for every visitor, verified by
+# tests/host/test_legal_pages.py's byte-identity test. That is still true
+# and still the reason the route itself needs no per-visitor branch.
 #
-# `private` matters for a different, real reason: `ensure_session_ids()`
-# (jobcannon/web/anon_session.py), called on every request including this
-# public-path branch, mints a per-visitor anon_session_id into a signed
-# Set-Cookie session cookie on first contact. A shared cache (Cloudflare in
-# front of jobcannon.dev, a corporate proxy) that stored and replayed one
-# visitor's response would hand a different, distinct first-time visitor
-# that same Set-Cookie (or its absence, on a later cache hit), silently
-# corrupting per-visitor session/attribution tracking. `private` gets the
-# intended win (a visitor's own browser skips refetching identical bytes on
-# repeat GETs within max-age) without authorizing that cross-visitor reuse.
-# No Vary header is needed alongside it: `private` already forbids a shared
-# cache from storing the response at all, and (per the paragraph above)
-# there is no auth-state variance here for a Vary header to key on. 300s
-# bounds how stale a re-publish (re-run the importer + restart) can look to
-# a browser that already cached the previous version.
+# What is NOT true anymore (issue #205): the FULL response base.html
+# produces — nav, "My postings", footer Export/Delete — is not identity-
+# independent. `_visitor_is_anonymous()`'s PUBLIC_PATHS fallback now calls
+# app.config["VERIFY_REQUEST"] for real (jobcannon/web/__init__.py), so a
+# signed-in visitor gets the authed nav on these routes while the document
+# body underneath stays the same. A future maintainer relaxing `private`
+# to `public` on the strength of the old "no auth variance" claim would
+# leak one visitor's authed nav into a shared cache's copy for another.
+#
+# `private` forecloses that: it forbids ANY shared cache (Cloudflare in
+# front of jobcannon.dev, a corporate proxy) from storing or replaying this
+# response across visitors at all, nav included. `Vary: Cookie` is
+# defense-in-depth on top of that for any cache that ignores `private` --
+# guaranteed explicitly by the shared after_request hook in
+# jobcannon/web/__init__.py (keyed off the same PUBLIC_PATHS membership via
+# `_is_public_request_path()`), though Flask's own session machinery
+# already emits it here too (ensure_session_ids() reads the session on
+# every request, which trips save_session()'s own `Vary: Cookie` add) --
+# the hook exists so that guarantee doesn't depend on that incidental
+# behavior continuing.
+# Together — not nav invariance — is what makes cross-visitor leakage here
+# impossible. `private` also still serves its original, unrelated reason:
+# `ensure_session_ids()` (jobcannon/web/anon_session.py) mints a per-visitor
+# anon_session_id Set-Cookie on first contact, and a shared cache replaying
+# one visitor's Set-Cookie to another would corrupt per-visitor
+# session/attribution tracking regardless of nav content. 300s bounds how
+# stale a re-publish (re-run the importer + restart) can look to a browser
+# that already cached the previous version.
 _LEGAL_CACHE_MAX_AGE_S = 300
 
 

@@ -20,16 +20,26 @@ Things this module pins:
       (issue #94 guard-hardening review), against a sabotaged temp file —
       never against jobcannon/web/legal/ itself
   (h) /privacy and /terms send Cache-Control: private, max-age=300 on both
-      GET and HEAD (issue #182 item 4) — private because ensure_session_ids()
-      mints a per-visitor session cookie on first contact, NOT because these
-      routes' body varies by auth state (it doesn't: both are PUBLIC_PATHS,
-      so g.clerk_user is unconditionally None here — see
-      jobcannon/web/legal.py's Cache-Control comment for the full reasoning)
+      GET and HEAD (issue #182 item 4), unchanged by auth state — private
+      because ensure_session_ids() mints a per-visitor session cookie on
+      first contact, AND (issue #205) because base.html's nav/footer now
+      varies by real visitor identity on these routes even though each
+      route's own BODY stays identity-independent — g.clerk_user is still
+      unconditionally None here (see jobcannon/web/legal.py's Cache-Control
+      comment for the full reasoning)
+  (i) every PUBLIC_PATHS response carries Vary: Cookie and a private
+      Cache-Control, via the shared after_request hook in
+      jobcannon/web/__init__.py (issue #205) — covered in
+      tests/host/test_public_cache_headers.py, not this file
+  (j) /privacy and /terms render byte-identical document bodies for an
+      anonymous vs. an authed visitor (issue #205's own claim, verified
+      directly — closes review-1's Lens A(4) gap)
 """
 
 from __future__ import annotations
 
 import pathlib
+import re
 
 import pytest
 
@@ -225,10 +235,14 @@ def test_legal_page_head_request_200(path):
 # jobcannon/web/legal.py's Cache-Control comment for the full reasoning, and
 # jobcannon/web/anon_session.py for the cookie itself). A `public` directive
 # would let a shared cache (CDN, corporate proxy) replay one visitor's
-# Set-Cookie response onto a different first-time visitor. This is NOT
-# because the auth nav varies per visitor on these two routes — it doesn't:
-# /privacy and /terms are both in PUBLIC_PATHS, so g.clerk_user is
-# unconditionally None here regardless of the requester's real session.
+# Set-Cookie response onto a different first-time visitor. Issue #205 adds a
+# second, independent reason `private` must hold here: base.html's nav/
+# footer now varies by real visitor identity on these two routes (the
+# document BODY does not — see test (j) below), so a `public` directive
+# would also let a shared cache replay one visitor's authed nav to another.
+# `Vary: Cookie` (the shared after_request hook, jobcannon/web/__init__.py)
+# is covered separately in tests/host/test_public_cache_headers.py, derived
+# from PUBLIC_PATHS rather than repeated per-route here.
 # Parametrized over GET and HEAD (issue #182 item 2 was HEAD-specific) and
 # asserts the raw header string, not just the parsed cache_control
 # attributes, so a stray extra directive would also be caught.
@@ -249,11 +263,13 @@ def test_legal_page_sets_private_cache_control_with_max_age(path, method):
 @pytest.mark.parametrize("method", ["get", "head"])
 @pytest.mark.parametrize("path", ["/privacy", "/terms"])
 def test_legal_page_cache_control_same_when_authed(path, method):
-    """The directive is a property of the route, not of the requester's auth
-    state — an authed VERIFY_REQUEST stub must not change it. (It also never
-    actually runs here: /privacy and /terms are PUBLIC_PATHS, so clerk_auth
-    short-circuits before VERIFY_REQUEST is called — this test still pins
-    that the header doesn't accidentally depend on it.)"""
+    """The directive is a property of the route (`_legal_response`), not of
+    the requester's auth state — an authed VERIFY_REQUEST stub must not
+    change it. Issue #205: VERIFY_REQUEST DOES now run here, via
+    `_visitor_is_anonymous()`'s PUBLIC_PATHS fallback (so base.html's nav
+    varies — see test (j) below) — but that fallback only feeds
+    `visitor_is_authed`, never `_legal_response`'s own header-setting code,
+    so the header value pinned below is unaffected either way."""
     from jobcannon.web.auth import ClerkIdentity
 
     app = _app(verify=lambda req: ClerkIdentity(user_id="user_1", claims={"sub": "user_1"}))
@@ -341,3 +357,58 @@ def test_render_passes_through_a_clean_file(tmp_path, monkeypatch):
     title, html = legal._render("good.md")
     assert title == "Good Title"
     assert "<h1>Good Title</h1>" in html
+
+
+# ---------------------------------------------------------------------------
+# (j) issue #205: the document BODY stays byte-identical across auth states
+# even though the surrounding nav now varies (closes review-1's Lens A(4)
+# gap — this claim was made in comments/docstrings but never actually
+# tested before this PR). Extracts the exact region legal_page.html wraps
+# body_html in (<div class="legal-prose">...</div>) — unambiguous because
+# jobcannon.web.legal_guard rejects any raw HTML tag in the source markdown
+# (test_guard_fires_on_raw_html_tag above), so body_html itself can never
+# contain a nested <div>, and the template emits exactly one such div.
+# ---------------------------------------------------------------------------
+
+_LEGAL_PROSE_RE = re.compile(r'<div class="legal-prose">(.*?)</div>', re.DOTALL)
+
+
+def _legal_body(html: str) -> str:
+    match = _LEGAL_PROSE_RE.search(html)
+    assert match, "legal-prose div not found in response body"
+    return match.group(1)
+
+
+@pytest.mark.parametrize(
+    "path,h1_text",
+    [
+        ("/privacy", "Job Cannon — Privacy Policy"),
+        ("/terms", "Job Cannon — Terms of Service"),
+    ],
+)
+def test_legal_page_body_is_byte_identical_regardless_of_auth_state(path, h1_text):
+    from jobcannon.web.auth import ClerkIdentity
+
+    anon_resp = _app(verify=lambda req: None).test_client().get(path)
+    authed_resp = (
+        _app(verify=lambda req: ClerkIdentity(user_id="user_1", claims={"sub": "user_1"}))
+        .test_client()
+        .get(path)
+    )
+    assert anon_resp.status_code == 200
+    assert authed_resp.status_code == 200
+
+    anon_html = anon_resp.data.decode("utf-8")
+    authed_html = authed_resp.data.decode("utf-8")
+    anon_body = _legal_body(anon_html)
+    authed_body = _legal_body(authed_html)
+
+    # Anchor: the extracted region must actually contain the document, not
+    # an empty/wrong match on both sides (which would make the equality
+    # assertion below trivially, uselessly true).
+    assert h1_text in anon_body
+    assert h1_text in authed_body
+    assert anon_body == authed_body
+    # And the full page did vary — proves issue #205's nav fix is actually
+    # live for this route, not that the whole response happens to be static.
+    assert anon_html != authed_html
