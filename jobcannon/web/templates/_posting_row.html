@@ -90,11 +90,25 @@
            away immediately. There is no row swap for this control: nothing
            in this entry's rendered shape (jobcannon/web/feed_entries.py)
            depends on apply state, so there is nothing for a swap to
-           update. #}
+           update. Being a plain fetch(), htmx never sees this request, so
+           base.html's `hx-headers` attribute (which puts the CSRF token on
+           every htmx-issued request) never reaches it either — the token
+           here comes from base.html's <meta name="csrf-token"> tag
+           instead, issue #146.
+
+           `.then`/`.catch` below surface a failure via base.html's
+           `window.jcSurfaceError` toast (MED-1 fix, same mechanism the
+           save/dismiss htmx:responseError listener uses) — an expired
+           render-time token (WTF_CSRF_TIME_LIMIT, default 3600s, same as
+           <meta name="csrf-token">'s own bake-in) previously 400ed here
+           with NO feedback at all: no swap target, no htmx event, nothing.
+           `resp.ok` is checked explicitly because fetch() only REJECTS on a
+           network failure, never on a 4xx/5xx HTTP status — a bare
+           `.catch` alone would miss the CSRF-400 case entirely. #}
         <a href="{{ entry.apply_url }}"
            target="_blank"
            rel="noopener noreferrer"
-           hx-on:click="fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true})"
+           hx-on:click="fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true, headers: {'X-CSRFToken': document.querySelector('meta[name=csrf-token]').content}}).then(function(resp){ if (!resp.ok && window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — refresh the page and try again.'); } }).catch(function(){ if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — check your connection and try again.'); } })"
            class="underline text-neutral-300"
            data-action-apply>
           Apply

@@ -11,8 +11,8 @@ Shared by jobcannon/web/pages.py (the authenticated feed's initial render)
 and jobcannon/web/actions.py (the save/dismiss/apply fragment re-render) so
 both consumers of `_posting_row.html` build the identical entry shape from
 one place instead of drifting — the same reasoning jobcannon/db/_feed.py's
-`_build_filters` gives for being shared between `list_feed_postings` and
-`count_feed_postings`.
+`_build_filters` gives for staying a single WHERE-clause builder rather than
+duplicating filter logic per caller.
 """
 
 from __future__ import annotations

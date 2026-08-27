@@ -56,9 +56,101 @@ _TRAILING_RULE_OR_BLANK = re.compile(r"^(-{3,})?\s*$")
 # write, so this fills every case variant of the same placeholder.
 _EFFECTIVE_DATE_PLACEHOLDER = re.compile(r"\[effective date\]", re.IGNORECASE)
 
+# issue #178: a Markdown table delimiter row is only ever valid immediately
+# after its header row, so a blank line sitting between the two always
+# indicates upstream corruption (here: an HTML comment that occupied that
+# line and left an empty line behind once _strip_html_comments removed its
+# text), never deliberate spacing.
+#
+# The fix is scoped to exactly this table-boundary shape rather than made
+# "a comment-only line never leaves a blank line" in general: the draft
+# carries an audit-citation comment after nearly every paragraph and list
+# item, each currently leaving one blank line that (combined with the
+# paragraph's own separator) produces the double-blank-line spacing already
+# baked into the committed .md files. A general fix was tried and measured
+# against both committed files — it also collapsed list items from "loose"
+# to "tight" Markdown (blank line between `- ` items removed), which changes
+# the rendered HTML (loose-list items are wrapped in `<p>`, tight-list items
+# are not), not just cosmetic .md whitespace. That is exactly the kind of
+# unreviewed drift the regeneration diff check below exists to catch, so the
+# fix stays narrow: only the shape that actually breaks something is
+# corrected, everywhere else in the document is untouched byte-for-byte.
+_TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+_TABLE_DELIMITER_ROW = re.compile(r"^\s*\|(\s*:?-+:?\s*\|)+\s*$")
+
+# issue #182 item 6: the first plain-text mention of the OTHER published
+# legal document's name becomes a link to it. Keyed by --target because each
+# document only cross-links to the other one.
+_CROSS_LINK_TARGETS: dict[str, tuple[str, str]] = {
+    "terms": ("Privacy Policy", "/privacy"),
+    "privacy": ("Terms of Service", "/terms"),
+}
+
 
 def _strip_html_comments(text: str) -> str:
     return _HTML_COMMENT.sub("", text)
+
+
+def _collapse_blank_before_table_delimiter(text: str) -> str:
+    """Drop every blank line sitting between a table header row and its
+    delimiter row (see _TABLE_ROW / _TABLE_DELIMITER_ROW above) — not just a
+    single blank line. Two adjacent HTML comments each leave their own blank
+    behind once _strip_html_comments removes their text, and
+    _collapse_blank_lines (which runs earlier in build_published_text) only
+    trims a run of 3+ blanks down to 2, never to 0, so a two-comment gap
+    still has to be handled here.
+
+    Coverage boundary: this only looks at the header-row -> delimiter-row
+    junction, the one shape that is never valid Markdown regardless of
+    cause. A whole-line comment left as a blank line between two BODY rows
+    of an already-open table, or after a table's last row, is not touched
+    here (mid-body/last-row blanks split or truncate a table without ever
+    producing this specific header/delimiter adjacency) — #190 tracks the
+    general HTML-comment-blank-line normalization that would also cover
+    those shapes."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i, n = 0, len(lines)
+    while i < n:
+        if _TABLE_ROW.match(lines[i]):
+            j = i + 1
+            while j < n and lines[j].strip() == "":
+                j += 1
+            if j > i + 1 and j < n and _TABLE_DELIMITER_ROW.match(lines[j]):
+                out.append(lines[i])
+                out.append(lines[j])
+                i = j + 1
+                continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
+def _link_first_cross_reference(text: str, target: str) -> str:
+    """Turn the first plain-text mention of the other legal document's name
+    into a Markdown link to it (issue #182 item 6) — e.g. terms.md's first
+    "Privacy Policy" becomes `[Privacy Policy](/privacy)`. First mention
+    only: repeating the link on every occurrence is noise, not navigation.
+
+    Truly idempotent: short-circuits as soon as ANY occurrence of the
+    already-linked form is present anywhere in the text, not merely at the
+    specific spot about to be linked. The real terms.md has 5 plain-text
+    "Privacy Policy" mentions; a narrower per-occurrence guard (skip only a
+    mention already wrapped right where the match sits) still finds and
+    links the next plain mention on a second pass, so f(f(x)) != f(x). The
+    whole-text check makes it safe to re-run this against a target already
+    published — once the first mention is linked, every later call is a
+    no-op. A target with no configured cross-link (or a draft that never
+    mentions the other document) passes text through unchanged."""
+    target_info = _CROSS_LINK_TARGETS.get(target)
+    if target_info is None:
+        return text
+    phrase, href = target_info
+    linked_form = f"[{phrase}]({href})"
+    if linked_form in text:
+        return text
+    pattern = re.compile(r"(?<!\[)" + re.escape(phrase) + r"(?!\]\()")
+    return pattern.sub(linked_form, text, count=1)
 
 
 def _strip_draft_banner(text: str) -> str:
@@ -142,6 +234,8 @@ def build_published_text(raw: str, target: str, effective_date: str) -> str:
     text = _strip_trailing_rule_and_blank_lines(text)
     text = _EFFECTIVE_DATE_PLACEHOLDER.sub(effective_date, text)
     text = _collapse_blank_lines(text)
+    text = _collapse_blank_before_table_delimiter(text)
+    text = _link_first_cross_reference(text, target)
     text = "\n".join(line.rstrip() for line in text.split("\n"))
     return text.strip("\n") + "\n"
 
