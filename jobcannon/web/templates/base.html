@@ -49,6 +49,24 @@
       <a href="/" class="hover:text-neutral-100">Feed</a>
       <a href="/demo" class="hover:text-neutral-100">Demo</a>
     </nav>
+    {% if not g.clerk_user %}
+    {# Discoverable sign-in/sign-up entry point (issue #145) -- gated on
+       auth state, not on request.path, so it renders on every public page
+       AND the 401 page (both leave g.clerk_user unset/None) and hides
+       itself once a visitor is actually signed in. Each link is
+       independently optional (clerk_sign_up_url / clerk_sign_in_url come
+       from the _inject_auth_links context processor in
+       jobcannon/web/__init__.py) so an unset URL renders nothing rather
+       than a bare href="". #}
+    <nav class="flex gap-4 text-sm text-neutral-400 ml-auto" data-auth-nav>
+      {% if clerk_sign_in_url %}
+      <a href="{{ clerk_sign_in_url }}" class="hover:text-neutral-100">Sign in</a>
+      {% endif %}
+      {% if clerk_sign_up_url %}
+      <a href="{{ clerk_sign_up_url }}" class="hover:text-neutral-100">Sign up</a>
+      {% endif %}
+    </nav>
+    {% endif %}
   </header>
   <main class="max-w-3xl mx-auto px-6 py-16">
     {% block content %}{% endblock %}
