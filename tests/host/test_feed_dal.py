@@ -464,6 +464,35 @@ def test_cursor_pagination_visits_every_row_across_the_neg_inf_null_boundary(db_
     assert visited[boundary_index + 1] == null_newer
 
 
+def test_cursor_round_trip_across_the_neg_inf_boundary_via_query_string(db_conn):
+    """#194's actual symptom is a "Load more" click, which never sees a
+    raw `after` tuple -- it goes through `cursor_from_row` -> a URL query
+    string -> `parse_cursor` (see `test_parse_cursor_round_trips_a_real_
+    rank_score` for that round trip in isolation). This proves the fix
+    survives that full path for a genuine -Infinity cursor, not just the
+    `_after_from_row` test-only shortcut every other test in this file
+    uses to reach `_cursor_predicate` directly."""
+    from jobcannon.db._feed import cursor_from_row, list_feed_postings, parse_cursor
+
+    _seed_user(db_conn, "u-neg-inf-roundtrip")
+    company_id = _seed_company(db_conn, "Acme")
+    neg_inf_row = _seed_posting(db_conn, "p-rt-neginf", company_id, last_seen=_BASE_TIME)
+    null_newer = _seed_posting(
+        db_conn, "p-rt-null-new", company_id, last_seen=_BASE_TIME + timedelta(hours=5)
+    )
+    _seed_feed_state(db_conn, "u-neg-inf-roundtrip", neg_inf_row, float("-inf"))
+    # null_newer gets no feed_state row -> rank_score NULL.
+
+    page1 = list_feed_postings(db_conn, user_id="u-neg-inf-roundtrip", limit=1)
+    assert [r["id"] for r in page1] == [neg_inf_row]
+
+    after = parse_cursor(cursor_from_row(page1[0]))
+    assert after == (float("-inf"), page1[0]["last_seen"], page1[0]["id"])
+
+    page2 = list_feed_postings(db_conn, user_id="u-neg-inf-roundtrip", limit=1, after=after)
+    assert [r["id"] for r in page2] == [null_newer]
+
+
 def test_cursor_with_unknown_sort_token_raises(db_conn):
     """An unknown sort token raises before the cursor is even considered
     (the `sort not in _SORTS` guard fires first) — this is the same code

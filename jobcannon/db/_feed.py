@@ -162,12 +162,18 @@ def parse_cursor(args: Any) -> tuple[float | None, datetime, int] | None:
     same fail-open discipline jobcannon/web/pages.py's other query-param
     parsing already uses. This function only guards parseability, not SQL
     validity: a value that parses but is out of range for the DB column
-    (e.g. an id wider than bigint) or is a float special value `float()`
-    accepts but SQL rejects (`nan`, `inf`) passes this function and is
-    instead caught by the caller's broad `except Exception` around the DB
-    call, which degrades to an *empty* batch rather than a fresh first
-    page -- still fail-closed (no 500, no data leak), just a different
-    empty state than "no cursor" produces."""
+    (e.g. an id wider than bigint) passes this function and is instead
+    caught by the caller's broad `except Exception` around the DB call,
+    which degrades to an *empty* batch rather than a fresh first page --
+    still fail-closed (no 500, no data leak), just a different empty
+    state than "no cursor" produces. Float special values `float()`
+    accepts (`nan`, `inf`, `-inf`) are NOT in that out-of-range bucket:
+    `_cursor_predicate` binds `after`'s rank_score through an explicit
+    `::double precision` cast, and PostgreSQL `double precision` natively
+    supports all three -- confirmed empirically (#194), they bind and
+    execute cleanly rather than raising. `-inf` in particular is a real,
+    valid `rank_score` value this predicate must handle correctly, not
+    just tolerate."""
     raw_id = (args.get("cursor_id") or "").strip()
     if not raw_id:
         return None
