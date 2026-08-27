@@ -473,7 +473,19 @@ def test_the_overlap_chip_survives_a_save_mutation_swap(app):
     one built with no profile. Skills must actually overlap the seeded
     title's tokens (default fixture skills=["python"] never overlaps a
     default "Engineer" title, which would make the divergence invisible on
-    both the page render AND the swap)."""
+    both the page render AND the swap).
+
+    Also the coverage gap review-1.md flagged (LOW 2): actions.py:92's
+    `_row_response` is the single `_posting_row.html` re-render shared by
+    Save/Dismiss/Apply (and feed-states' undo_apply via the same
+    `_fetch_entry` helper), and it already passes show_actions=True, but
+    had no negative test guarding that the anonymous CTA (issue #174)
+    never leaks onto it -- unlike the authed full page/fragment, which
+    test_authed_feed_never_shows_the_anonymous_signup_cta above already
+    covers. A future show_actions omission here would now leak
+    signup_cta_url's CTA onto an authenticated row, since #174's gate is
+    identity-derived, not show_actions-derived -- this locks in that the
+    save-mutation fragment stays clean."""
     dsn = app.config["_TEST_DSN"]
     client = _feed_client(app, consent=True, skills=("engineer",))
     company_id = _seed_company(dsn, "Overlap Chip Co")
@@ -488,6 +500,9 @@ def test_the_overlap_chip_survives_a_save_mutation_swap(app):
     assert "Engineer" in fragment_html
     assert "Saved" in fragment_html
     assert "title matches your selections: engineer" in fragment_html
+    assert "data-action-signup" not in fragment_html
+    assert "data-posting-signup" not in fragment_html
+    assert "Sign up to apply" not in fragment_html
 
 
 def test_apply_on_nonexistent_posting_is_404_not_500(app):
