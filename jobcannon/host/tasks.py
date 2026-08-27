@@ -261,3 +261,75 @@ def reap_old_events(timestamp: int) -> dict:
     with connection_factory() as conn:
         reaped_ids = delete_expired_events(conn, retention_days=retention_days)
     return {"reaped": len(reaped_ids), "retention_days": retention_days}
+
+
+@app.periodic(
+    cron=os.environ.get("JC_DELETION_RECONCILE_CRON", "24 7 * * *"),
+    periodic_id="reconcile_deleted_users",
+)
+@app.task(queue="maintenance", queueing_lock="reconcile_deleted_users")
+def reconcile_deleted_users(timestamp: int) -> dict:
+    """Periodic reconciliation sweep (#136): catches a `user.deleted`
+    webhook Clerk never delivered (or delivered while this app was down,
+    outside Svix's retry window) by directly asking Clerk's Backend API
+    about each old, still-present local `users` row. See
+    jobcannon.host.user_deletion.run_reconciliation_sweep for the
+    lookup/deletion contract (fail-closed on anything but a definitive
+    404); this tick only wires the Clerk client and the env-tunable knobs.
+
+    Requires CLERK_SECRET_KEY, now declared on BOTH services
+    (jobcannon.host.config's HostConfig.clerk_secret_key expanded from
+    web-only, issue #136) specifically so this worker-side task can reuse
+    jobcannon.web.auth.build_clerk_client — the repo's one Clerk SDK client
+    construction site — rather than building a second one. If the key is
+    unset (e.g. a local dev worker with no Clerk configured), this tick
+    logs and returns a `clerk_unreachable` status rather than raising or
+    crash-looping the worker; this sweep is a catch-net for a rare delivery
+    failure, not a hard dependency of every worker tick. `checked` is
+    logged at INFO unconditionally (even when every count is 0) so a
+    healthy "nothing to do" sweep is distinguishable in the logs from a
+    sweep that silently stopped running at all — this repo has no
+    nightly_monitor/deadman infra; the log line is the health signal.
+    """
+    from jobcannon.db import connection_factory
+    from jobcannon.host.config import load_host_config
+    from jobcannon.host.user_deletion import run_reconciliation_sweep
+
+    host_config = load_host_config()
+    if not host_config.clerk_secret_key:
+        logger.error(
+            "reconcile_deleted_users: CLERK_SECRET_KEY unset -- cannot "
+            "reach Clerk, sweep skipped entirely this tick"
+        )
+        return {"status": "clerk_unreachable", "checked": 0}
+
+    from jobcannon.web.auth import build_clerk_client
+
+    clerk_client = build_clerk_client(host_config)
+    settle_days = int(os.environ.get("JC_DELETION_RECONCILE_SETTLE_DAYS", "3"))
+    row_cap = int(os.environ.get("JC_DELETION_RECONCILE_ROW_CAP", "50"))
+    result = run_reconciliation_sweep(
+        connection_factory,
+        clerk_client.users,
+        settle_days=settle_days,
+        row_cap=row_cap,
+    )
+    logger.info("reconcile_deleted_users: %s", result)
+    return {"status": "ok", **result}
+
+
+@app.task(queue="maintenance")
+def purge_posthog_person(distinct_id: str) -> dict:
+    """#135: deletes the PostHog person for `distinct_id` -- already the
+    PSEUDONYMOUS id (jobcannon.host.user_deletion.cascade_delete_user is
+    this task's only enqueuer, and passes posthog_client.pseudonymize()'s
+    output, never a raw Clerk user id). Runs async on the worker's
+    `maintenance` queue, never inline in the webhook request thread, so a
+    PostHog outage cannot block or delay account deletion itself -- the
+    local deletion has already committed by the time this task even runs.
+    Fails soft (returns a "skipped" status, no exception) when the PostHog
+    admin API credentials aren't configured; see
+    jobcannon.host.posthog_admin.purge_person for the full contract."""
+    from jobcannon.host import posthog_admin
+
+    return posthog_admin.purge_person(distinct_id)
