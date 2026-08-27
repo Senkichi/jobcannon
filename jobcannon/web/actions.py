@@ -19,13 +19,17 @@ on one click); its own success handler applies the SAME fragment as a manual
 outerHTML swap (via `htmx.process` so the swapped-in row's own hx-post
 controls, including Undo, are live) rather than leaving the click's outbound
 navigation as the only observable effect. Dismiss is the one
-route whose "re-rendered fragment" is an empty body: `_fetch_entry` below
-re-runs the exact same query
-`jobcannon.db._feed.list_feed_postings` uses for a plain page render, which
-already excludes a `pipeline_status.status = 'dismissed'` row — so a
-dismissed posting's disappearance from the DOM falls out of the one query
-both places share, rather than a second, independently-maintained
-"is this row still visible" rule living here.
+route whose "re-rendered fragment" is an empty body: `_fetch_entry` below,
+called WITHOUT `include_dismissed` (the only one of the four call sites that
+doesn't — see `_fetch_entry`'s own docstring for why), re-runs the same
+dismissed-excluding query `jobcannon.db._feed.list_feed_postings` uses for a
+plain page render — so a dismissed posting's disappearance from the DOM
+falls out of that shared query, rather than a second, independently-
+maintained "is this row still visible" rule living here. Save, apply, and
+undo-apply (#200) instead pass `include_dismissed=True`, so a mutation that
+happens to act on a posting some EARLIER, unrelated action already
+dismissed still renders that row's real current state rather than an empty
+body indistinguishable from failure.
 
 A `posting_id` that does not exist is a `404`, not a `500`:
 `jobcannon.db._user_actions`'s save/dismiss/apply writes carry a
@@ -79,12 +83,40 @@ logger = logging.getLogger(__name__)
 actions_bp = Blueprint("actions", __name__)
 
 
-def _fetch_entry(conn, user_id: str, posting_id: int) -> dict | None:
+def _fetch_entry(
+    conn, user_id: str, posting_id: int, *, include_dismissed: bool = False
+) -> dict | None:
     """The one row `list_feed_postings` would render for this user today,
-    narrowed to a single posting id. Returns None both when the posting does
-    not exist and when it does but is excluded (dismissed) — routes that
-    need to 404 on the former rely on the ForeignKeyViolation the write
-    itself raises, not on this function's return value.
+    narrowed to a single posting id. `include_dismissed` (#200, default
+    `False` — the same default `list_feed_postings` itself has) is per-
+    caller, not hardcoded here, because this helper is shared by all four
+    routes below and they need opposite answers:
+
+    - `save`/`apply`/`undo_apply` pass `include_dismissed=True`. Before
+      #200, a mutation acting on a posting that was ALREADY dismissed by an
+      earlier, unrelated action (or, for undo_apply, IS dismissed rather
+      than applied — its own docstring already says it must not 404 that
+      case) hit this function's default exclude-dismissed query, got back
+      no row, and `_row_response` rendered an empty `200` body —
+      indistinguishable from the mutation having silently failed, even
+      though the write itself succeeded. Passing `True` here fixes that:
+      the fragment these three routes swap in now shows the row's actual
+      current state honestly, dismissed or not.
+    - `dismiss` deliberately does NOT pass it, keeping the default `False`
+      — seeing this file's `dismiss()` docstring and this module's own
+      docstring above for why an empty body is dismiss's own INTENDED
+      response (the row disappearing via an empty outerHTML swap), a
+      behavior `test_dismissed_posting_disappears_from_the_dismissers_feed_
+      but_not_anothers` already locks in and #200 must not regress.
+
+    A normal feed page render (`jobcannon/web/pages.py`) calls
+    `list_feed_postings` directly, never through this helper, and never
+    passes `include_dismissed` — so it is unaffected by any of the above.
+
+    `_fetch_entry` returns `None` only when the posting does not exist at
+    all (or, for `dismiss`, when it does but is now excluded): routes that
+    need to 404 on a nonexistent posting rely on the ForeignKeyViolation the
+    write itself raises, not on this function's return value.
 
     Loads the caller's profile and passes it to `build_entry` the same way
     `jobcannon/web/pages.py`'s route does — `build_entry`'s second argument
@@ -93,7 +125,13 @@ def _fetch_entry(conn, user_id: str, posting_id: int) -> dict | None:
     silently drop that chip from every mutation-response fragment, even
     though the page render right before it showed the chip for the same
     row."""
-    rows = list_feed_postings(conn, user_id=user_id, posting_id=posting_id, limit=1)
+    rows = list_feed_postings(
+        conn,
+        user_id=user_id,
+        posting_id=posting_id,
+        include_dismissed=include_dismissed,
+        limit=1,
+    )
     if not rows:
         return None
     profile = get_profile(conn, user_id)
@@ -112,7 +150,7 @@ def save(posting_id: int):
     try:
         with connection_factory() as conn:
             save_posting(conn, user_id, posting_id)
-            entry = _fetch_entry(conn, user_id, posting_id)
+            entry = _fetch_entry(conn, user_id, posting_id, include_dismissed=True)
     except psycopg.errors.ForeignKeyViolation:
         abort(404)
     log_event("posting_saved", user_id=user_id, posting_id=posting_id)
@@ -138,7 +176,7 @@ def apply(posting_id: int):
     try:
         with connection_factory() as conn:
             mark_applied(conn, user_id, posting_id)
-            entry = _fetch_entry(conn, user_id, posting_id)
+            entry = _fetch_entry(conn, user_id, posting_id, include_dismissed=True)
     except psycopg.errors.ForeignKeyViolation:
         abort(404)
     destination = apply_destination_for_row(entry["row"]) if entry is not None else None
@@ -171,6 +209,6 @@ def undo_apply(posting_id: int):
         posting_exists = unmark_applied(conn, user_id, posting_id)
         if not posting_exists:
             abort(404)
-        entry = _fetch_entry(conn, user_id, posting_id)
+        entry = _fetch_entry(conn, user_id, posting_id, include_dismissed=True)
     log_event("posting_apply_undone", user_id=user_id, posting_id=posting_id)
     return _row_response(entry)
