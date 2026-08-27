@@ -65,10 +65,12 @@ def test_401_page_shows_both_links_when_both_urls_configured():
 
     error_401.html's OWN inline paragraph (distinct from base.html's header
     nav) also gates each link on its own URL and independently emits the
-    matching text ("Sign in" / "sign up") — asserted by counting TWO
-    occurrences of each href (header + content block), not merely one,
+    matching text ("Sign in" / "sign up") — asserted by requiring AT LEAST
+    two occurrences of each href (header + content block), not merely one,
     so a broken content-block link can't hide behind the header nav's
-    identical href satisfying the same substring check."""
+    identical href satisfying the same substring check. The two
+    content-block-only tests below (sign-up-url-unset / sign-in-url-unset)
+    are the tolerant-default mirror pair for this block specifically."""
     app = _app(
         _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL),
         verify=lambda req: None,
@@ -77,10 +79,38 @@ def test_401_page_shows_both_links_when_both_urls_configured():
     html = resp.get_data(as_text=True)
 
     assert resp.status_code == 401
-    assert html.count(f'href="{_SIGN_UP_URL}"') == 2
-    assert html.count(f'href="{_SIGN_IN_URL}"') == 2
+    assert html.count(f'href="{_SIGN_UP_URL}"') >= 2
+    assert html.count(f'href="{_SIGN_IN_URL}"') >= 2
     assert ">Sign in</a>" in html
     assert ">sign up</a>" in html
+
+
+def test_401_page_content_block_omits_sign_up_link_when_sign_up_url_unset():
+    """Tolerant defaults on the 401 page's OWN content block (distinct from
+    the header nav, which test_public_page_omits_sign_up_link_when_sign_up_url_unset
+    already covers): clerk_sign_up_url unset must drop the lowercase 'sign up'
+    link and the 'or' separator, leaving a lone 'Sign in' link — never a bare
+    href=""."""
+    app = _app(_host_config(clerk_sign_in_url=_SIGN_IN_URL), verify=lambda req: None)
+    html = app.test_client().get("/").get_data(as_text=True)
+
+    assert f'href="{_SIGN_IN_URL}"' in html
+    assert ">Sign in</a>" in html
+    assert ">sign up</a>" not in html
+    assert 'href=""' not in html
+
+
+def test_401_page_content_block_omits_sign_in_link_when_sign_in_url_unset():
+    """Mirror of the test above: clerk_sign_in_url unset must drop the
+    'Sign in' link and the 'or' separator from the 401 page's own content
+    block, leaving a lone lowercase 'sign up' link."""
+    app = _app(_host_config(clerk_sign_up_url=_SIGN_UP_URL), verify=lambda req: None)
+    html = app.test_client().get("/").get_data(as_text=True)
+
+    assert f'href="{_SIGN_UP_URL}"' in html
+    assert ">sign up</a>" in html
+    assert ">Sign in</a>" not in html
+    assert 'href=""' not in html
 
 
 def test_authed_page_hides_the_header_nav():
