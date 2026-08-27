@@ -18,8 +18,10 @@ tests/host/test_clerk_loader_template.py."""
 
 import logging
 
+import pytest
+
 from jobcannon.host.config import HostConfig
-from jobcannon.web import _warn_if_auth_links_unset, create_app
+from jobcannon.web import _signup_cta_url, _warn_if_auth_links_unset, create_app
 from jobcannon.web.auth import ClerkIdentity
 
 _WEBHOOK_SECRET = "whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3Q="
@@ -191,6 +193,34 @@ def test_warn_if_auth_links_unset_silent_when_both_configured(caplog):
         )
 
     assert caplog.records == []
+
+
+@pytest.mark.parametrize(
+    ("case_id", "is_anonymous", "sign_up_url", "sign_in_url", "expected"),
+    [
+        ("anonymous, sign-up set", True, _SIGN_UP_URL, _SIGN_IN_URL, _SIGN_UP_URL),
+        ("anonymous, only sign-in set", True, "", _SIGN_IN_URL, _SIGN_IN_URL),
+        ("anonymous, neither set", True, "", "", None),
+        ("authed, sign-up set", False, _SIGN_UP_URL, _SIGN_IN_URL, None),
+    ],
+)
+def test_signup_cta_url_gates_purely_on_anonymity(
+    case_id, is_anonymous, sign_up_url, sign_in_url, expected
+):
+    """The pure derivation half of issue #174's fix (jobcannon/web/__init__.py's
+    _signup_cta_url): sign-up preferred, sign-in fallback, but ONLY when the
+    caller says the visitor is anonymous -- an authed visitor gets None
+    regardless of what's configured, never the fallback chain. This is the
+    same value _posting_row.html, preview.html, and demo.html all now gate
+    on, replacing each template's own `clerk_sign_up_url or
+    clerk_sign_in_url` fallback. Identity resolution itself (the
+    is_anonymous input) is covered separately by the authed/anonymous
+    request-level tests throughout this module and test_demo_feed.py /
+    test_preview.py / test_feed_events.py -- this test only proves the pure
+    function's four branches."""
+    host_config = _host_config(clerk_sign_up_url=sign_up_url, clerk_sign_in_url=sign_in_url)
+
+    assert _signup_cta_url(host_config, is_anonymous=is_anonymous) == expected, case_id
 
 
 def test_auth_link_context_tolerates_a_bare_host_config_double():
