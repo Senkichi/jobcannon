@@ -195,6 +195,55 @@ def test_dismissed_posting_is_excluded_for_the_dismissing_user_but_not_others(db
     assert posting_id in anon_ids
 
 
+def test_include_dismissed_defaults_false_but_the_escape_hatch_shows_it(db_conn):
+    """#200: `include_dismissed` defaults to False -- calling
+    `list_feed_postings` exactly the way every pre-#200 caller already does
+    (no such keyword at all) excludes a dismissed row identically to before
+    this parameter existed, matching
+    test_dismissed_posting_is_excluded_for_the_dismissing_user_but_not_others
+    above. Passing `include_dismissed=True` is the narrow, explicit opt-in
+    `jobcannon/web/actions.py::_fetch_entry` uses for save/apply/undo-apply
+    so those mutation routes can re-render a row they just acted on even
+    when that row is (or already was) dismissed, without a normal feed page
+    render ever seeing it (pages.py never passes the flag)."""
+    from jobcannon.db._feed import list_feed_postings
+    from jobcannon.db._user_actions import dismiss_posting
+
+    _seed_user(db_conn, "u-include-dismissed")
+    company_id = _seed_company(db_conn, "Acme")
+    posting_id = _seed_posting(db_conn, "p-include-dismissed", company_id, last_seen=_BASE_TIME)
+    dismiss_posting(db_conn, "u-include-dismissed", posting_id)
+
+    default_ids = [r["id"] for r in list_feed_postings(db_conn, user_id="u-include-dismissed")]
+    included_ids = [
+        r["id"]
+        for r in list_feed_postings(db_conn, user_id="u-include-dismissed", include_dismissed=True)
+    ]
+
+    assert posting_id not in default_ids
+    assert posting_id in included_ids
+
+
+def test_include_dismissed_is_forced_true_for_an_anonymous_reader(db_conn):
+    """The anonymous branch has no `pipeline_status` join to filter by, so
+    `list_feed_postings` must force `include_dismissed=True` for it
+    regardless of what a caller passes -- a literal `include_dismissed=False`
+    from an anonymous caller must not raise (referencing a `ps` alias that
+    branch's FROM clause never joins) and must not silently drop postings no
+    per-user dismissal state can even apply to."""
+    from jobcannon.db._feed import list_feed_postings
+    from jobcannon.db._user_actions import dismiss_posting
+
+    _seed_user(db_conn, "u-anon-dismissed")
+    company_id = _seed_company(db_conn, "Acme")
+    posting_id = _seed_posting(db_conn, "p-anon-dismissed", company_id, last_seen=_BASE_TIME)
+    dismiss_posting(db_conn, "u-anon-dismissed", posting_id)
+
+    anon_ids = [r["id"] for r in list_feed_postings(db_conn, include_dismissed=False)]
+
+    assert posting_id in anon_ids
+
+
 def test_unknown_sort_token_raises_valueerror(db_conn):
     from jobcannon.db._feed import list_feed_postings
 
