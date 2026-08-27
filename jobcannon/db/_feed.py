@@ -7,8 +7,17 @@ The default ordering is written for that state first, not as a fallback —
 other module under the scanned roots) never writing to `feed_state`.
 
 An authenticated reader (`user_id` not None) never sees a posting they have
-dismissed: `list_feed_postings` LEFT JOINs `pipeline_status` and excludes
-`status = 'dismissed'` rows. Every row also carries a `saved` flag (whether a
+dismissed by default: `list_feed_postings` LEFT JOINs `pipeline_status` and
+excludes `status = 'dismissed'` rows unless the caller passes
+`include_dismissed=True` (#200) — the narrow escape hatch
+`jobcannon/web/actions.py::_fetch_entry` uses, for save/apply/undo-apply
+only, to re-read a row one of those routes just acted on even when that row
+is (or already was) dismissed, so their own mutation re-render never comes
+back an empty body indistinguishable from failure. `dismiss` itself
+deliberately never passes the flag — its own empty re-render IS the row
+disappearing from the DOM, unrelated to #200 — and a normal feed page render
+never passes it either, so dismissed rows stay excluded there exactly as
+before this parameter existed. Every row also carries a `saved` flag (whether a
 `watchlists` row exists for that `(user_id, posting_id)` pair) and an
 `applied` flag (`pipeline_status.status = 'applied'`, #177) so
 `jobcannon/web/feed_entries.py::build_entry` can render per-user state
@@ -230,6 +239,7 @@ def _build_filters(
     company: str | None,
     companies: list[str] | None = None,
     posting_id: int | None = None,
+    include_dismissed: bool = False,
 ) -> tuple[list[str], list[Any]]:
     """Parameterized WHERE fragments + bound params for `list_feed_postings`,
     factored out as its own function so any future second caller of the same
@@ -264,10 +274,22 @@ def _build_filters(
 
     `posting_id` narrows to exactly one posting. It exists so
     `jobcannon/web/actions.py` can re-fetch the single row it just mutated
-    through this SAME query — dismissed-exclusion and the `saved` flag
-    (`list_feed_postings`'s authed branch) apply identically whether the
-    caller wants a full page or one row, rather than a second,
-    independently-maintained "what does this user see for posting X" query.
+    through this SAME query — the `saved` flag (`list_feed_postings`'s
+    authed branch) applies identically whether the caller wants a full page
+    or one row, rather than a second, independently-maintained "what does
+    this user see for posting X" query.
+
+    `include_dismissed` (#200) governs the one clause that is conditional on
+    something OTHER than "was a value passed": by default (False) a
+    dismissed posting is excluded via `ps.status`, matching every existing
+    caller's behavior before this parameter existed. `ps` (`pipeline_status`)
+    is only joined on `list_feed_postings`'s authed branch, so a caller with
+    no `user_id` — including `list_feed_postings`'s own anonymous branch —
+    must always pass `include_dismissed=True` here; the clause references an
+    alias that branch's FROM clause never joins, and would raise at execute
+    time otherwise. `list_feed_postings` enforces that for its own anonymous
+    branch itself (`include_dismissed=include_dismissed or user_id is None`)
+    so a future direct caller does not have to remember it independently.
     """
     clauses: list[str] = []
     params: list[Any] = []
@@ -292,6 +314,8 @@ def _build_filters(
     if posting_id is not None:
         clauses.append("p.id = %s")
         params.append(posting_id)
+    if not include_dismissed:
+        clauses.append("(ps.status IS DISTINCT FROM 'dismissed')")
     return clauses, params
 
 
@@ -345,6 +369,7 @@ def list_feed_postings(
     company: str | None = None,
     companies: list[str] | None = None,
     posting_id: int | None = None,
+    include_dismissed: bool = False,
     sort: str = "default",
     limit: int = FEED_PAGE_MAX,
     offset: int = 0,
@@ -357,10 +382,18 @@ def list_feed_postings(
     function does not filter it out.
 
     An authed reader (`user_id` not None) never sees a posting whose
-    `pipeline_status.status = 'dismissed'` — that exclusion clause is added
-    only on this branch (not folded into `_build_filters`) because it
-    depends on `user_id` and the anonymous branch has no per-user row to
-    exclude by.
+    `pipeline_status.status = 'dismissed'` unless `include_dismissed=True`
+    (#200) — see `_build_filters`'s docstring for why that clause lives
+    there and why the anonymous branch (no `user_id`, so no `ps` join to
+    reference) is forced to `include_dismissed=True` regardless of what this
+    function's own caller passed. `jobcannon/web/actions.py::_fetch_entry`
+    is the one caller that passes `include_dismissed=True` explicitly
+    today — for its save/apply/undo-apply callers only, so a row those
+    routes just acted on re-renders honestly even if dismissed, never for
+    its dismiss caller, whose own empty re-render is unrelated and
+    intentional. A normal feed page render never passes it either, so
+    dismissed rows stay excluded there exactly as before this parameter
+    existed.
 
     `after` (#156) is a keyset cursor — the `(rank_score, last_seen, id)`
     tuple `cursor_from_row` derived from a previous page's last row, or None
@@ -391,16 +424,23 @@ def list_feed_postings(
         company=company,
         companies=companies,
         posting_id=posting_id,
+        include_dismissed=include_dismissed or user_id is None,
     )
 
     raw = conn.raw if hasattr(conn, "raw") else conn
 
     if user_id is not None:
         cursor_sql, cursor_params = _cursor_predicate("fs.rank_score", after)
-        authed_where_clauses = [*where_clauses, "(ps.status IS DISTINCT FROM 'dismissed')"]
+        authed_where_clauses = list(where_clauses)
         if cursor_sql:
             authed_where_clauses.append(cursor_sql)
-        where_sql = f"WHERE {' AND '.join(authed_where_clauses)}"
+        # Before #200, this branch's WHERE list always carried at least the
+        # hardcoded dismissed-exclusion clause, so it was never empty. Now
+        # that include_dismissed=True can leave _build_filters with nothing
+        # to say (no other filters, no cursor), guard the same way the
+        # anonymous branch below already does -- an unconditional "WHERE " +
+        # "".join([]) is a syntax error, not an unfiltered query.
+        where_sql = f"WHERE {' AND '.join(authed_where_clauses)}" if authed_where_clauses else ""
         sql = (
             f"SELECT {_SELECT_COLUMNS}, "
             "fs.rank_score AS rank_score, fs.ranker_version AS ranker_version, "
