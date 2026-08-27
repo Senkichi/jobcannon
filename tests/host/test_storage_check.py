@@ -13,25 +13,34 @@ def test_storage_check_alerts_at_80pct_and_not_below(db_conn):
     from jobcannon.host.storage_check import check_db_storage
 
     # A fresh throwaway DB is ~8MB; a 10MB limit puts it over 80%, a 10GB limit under.
+    # Ground-truth anchors are taken immediately after each check_db_storage
+    # call (see the anchor assertions below for why these exist).
     over = check_db_storage(db_conn, limit_mb=10)
+    direct_over = db_conn.execute(
+        "SELECT pg_database_size(current_database()) AS used_bytes"
+    ).fetchone()["used_bytes"]
     under = check_db_storage(db_conn, limit_mb=10_240)
+    direct_under = db_conn.execute(
+        "SELECT pg_database_size(current_database()) AS used_bytes"
+    ).fetchone()["used_bytes"]
     assert over["alert"] is True and over["used_pct"] > 0.8
     assert under["alert"] is False and under["used_pct"] < 0.8
     assert over["limit_mb"] == 10
 
-    # `used_bytes` comes from two independent pg_database_size() reads taken
-    # a few milliseconds apart, not a single snapshot. It is NOT guaranteed to
-    # be byte-identical: autovacuum's autoanalyze can fire between the two
-    # calls and rewrite the catalog relcache-init file (an arbitrary-size
-    # blob, not page-aligned) or extend a stats catalog — empirically
-    # observed to shift pg_database_size() by up to ~160KB on this box, in
-    # complete isolation with no other suite activity (#201: the flake was
-    # NOT a full-suite-load artifact; a bare byte-equality assertion between
-    # two live reads was just brittle). What the alarm actually depends on is
-    # that used_bytes reflects the real, current database size regardless of
-    # which limit_mb was passed in — not that two reads are pixel-identical —
-    # so bound the two reads to within a generous multiple of the server's
-    # own block size (never hardcoded) rather than requiring exact equality.
+    # `used_bytes` comes from independent pg_database_size() reads taken a few
+    # milliseconds apart, not a single snapshot. It is NOT guaranteed to be
+    # byte-identical: autovacuum's autoanalyze can fire between calls and
+    # unlink+recreate the catalog relcache-init file (an arbitrary-size blob,
+    # not page-aligned) — empirically confirmed on this box: the file is
+    # exactly 160944 bytes, and 40 back-to-back reads taken in complete
+    # isolation (no other suite activity) produced only deltas of {0, 160944}
+    # (#201: the flake was NOT a full-suite-load artifact; a bare
+    # byte-equality assertion between two live reads was just brittle). What
+    # the alarm actually depends on is that used_bytes reflects the real,
+    # current database size regardless of which limit_mb was passed in — not
+    # that reads are pixel-identical — so bound reads to within a generous
+    # multiple of the server's own block size (never hardcoded) rather than
+    # requiring exact equality.
     block_size = db_conn.execute(
         "SELECT current_setting('block_size')::int AS block_size"
     ).fetchone()["block_size"]
@@ -40,6 +49,16 @@ def test_storage_check_alerts_at_80pct_and_not_below(db_conn):
     )  # ~1 MiB: many autoanalyze cycles of headroom, still << the ~9MB throwaway DB
     assert over["used_bytes"] > 0 and under["used_bytes"] > 0
     assert abs(over["used_bytes"] - under["used_bytes"]) <= tolerance
+
+    # Ground-truth anchor: the assertion above only proves the two
+    # check_db_storage reads AGREE with each other — a check that reads the
+    # wrong database, or a single relation instead of the whole database,
+    # would satisfy it too, as long as both calls hit the same wrong source.
+    # Anchor each read against an independent, direct pg_database_size()
+    # query so the assertion proves the check reports what Postgres itself
+    # reports, not merely that it's internally self-consistent.
+    assert abs(over["used_bytes"] - direct_over) <= tolerance
+    assert abs(under["used_bytes"] - direct_under) <= tolerance
 
 
 def test_db_storage_check_task_reports_through_the_recorder(monkeypatch):
