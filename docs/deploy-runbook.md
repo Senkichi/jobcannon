@@ -147,12 +147,16 @@ migration file's stem, not its description):
 
 ```
 waiting for schema_migrations advisory lock
-schema_migrations: 0 applied, 5 pending (m0001_initial_schema, m0002_scan_health_log, m0003_companies_scan_columns, m0004_users_consent, m0005_postings_embedding)
+schema_migrations: 0 applied, 9 pending (m0001_initial_schema, m0002_scan_health_log, m0003_companies_scan_columns, m0004_users_consent, m0005_postings_embedding, m0006_analytics_consent_version, m0008_profiles_comp_floor, m0009_postings_jd_content, m0010_events_referrer_host)
 applied migration 1 (m0001_initial_schema)
 applied migration 2 (m0002_scan_health_log)
 applied migration 3 (m0003_companies_scan_columns)
 applied migration 4 (m0004_users_consent)
 applied migration 5 (m0005_postings_embedding)
+applied migration 6 (m0006_analytics_consent_version)
+applied migration 8 (m0008_profiles_comp_floor)
+applied migration 9 (m0009_postings_jd_content)
+applied migration 10 (m0010_events_referrer_host)
 applying procrastinate schema (first boot)
 ```
 
