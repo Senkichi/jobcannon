@@ -18,11 +18,25 @@ host from the key instead of a second config var.
 
 The policy was verified empirically, not assembled from a plausible-looking
 template: a live local run of this app (TESTING config, a syntactically
-valid but non-resolving `pk_test_` key so the clerk-js script tag and its
-FAPI host allowance are both exercised) driven by Playwright against
-/start, /privacy, /terms, /demo, asserting zero
-`securitypolicyviolation`/console CSP errors — see the PR body (#147) for
-the exact script path and result. `script-src`/`style-src` need
+valid but non-resolving `pk_test_` key), driven by Playwright against
+/start, /privacy, /terms, /demo (all `PUBLIC_PATHS` — issue #158 blanks
+`clerk_publishable_key`/`CLERK_FRONTEND_API_HOST` on these, so clerk-js
+never loads there) plus `/` with `VERIFY_REQUEST` denying (renders
+`error_401.html`, the one page this check reaches where clerk-js's
+`<script>` tag DOES emit, exercising its own script-src/connect-src/
+img-src/frame-src host allowances), asserting zero
+`securitypolicyviolation`/console CSP errors and every required directive
+present on all five — see the PR body (#147) for the exact script paths
+and result. Because the FAPI host is deliberately non-resolving (so the
+check never depends on live Clerk infra or real credentials), clerk-js
+itself never actually downloads or runs — this proves the CSP header's
+directive strings are correct and don't self-conflict, not that clerk-js's
+runtime behavior (its Cloudflare bot-challenge iframe, its
+`*.protect.clerk.com` fraud-protection calls) is compatible with them;
+`frame-src`/`connect-src`/`img-src`'s exact Clerk hosts and ports below are
+sourced from Clerk's own CSP guidance
+(clerk.com/docs/guides/secure/best-practices/csp-headers), not from this
+local run, for exactly that reason. `script-src`/`style-src` need
 `'unsafe-inline'` (base.html's inline `<script>` blocks that call
 `Clerk.load()` / `error_401.html`'s `clerk_after_load` block have no nonce
 mechanism here; Tailwind's Play CDN injects a `<style>` tag with no nonce
@@ -92,11 +106,32 @@ def _accounts_host(clerk_sign_up_url: str) -> str | None:
 
 
 def _build_csp(*, frontend_api_host: str, accounts_host: str | None) -> str:
+    # Clerk's own CSP guidance (clerk.com/docs/guides/secure/best-practices/
+    # csp-headers) requires challenges.cloudflare.com and *.protect.clerk.com
+    # on script-src/frame-src (Cloudflare's bot challenge + Clerk's own
+    # fraud-protection iframe, both invoked from inside clerk-js at sign-in),
+    # *.protect.clerk.com:* on connect-src (their abuse/fraud endpoints are
+    # served off-443, and a CSP host with no port matches :443 only), and
+    # img.clerk.com on img-src (avatar/profile images). Gated on
+    # frontend_api_host, same as the FAPI host itself: these hosts only
+    # matter when Clerk is configured at all.
     script_hosts = ["https://cdn.tailwindcss.com", "https://unpkg.com"]
     connect_hosts = ["'self'"]
+    frame_hosts: list[str] = []
+    img_hosts: list[str] = []
     if frontend_api_host:
-        script_hosts.append(f"https://{frontend_api_host}")
-        connect_hosts.append(f"https://{frontend_api_host}")
+        script_hosts += [
+            f"https://{frontend_api_host}",
+            "https://challenges.cloudflare.com",
+            "https://*.protect.clerk.com",
+        ]
+        connect_hosts += [f"https://{frontend_api_host}", "https://*.protect.clerk.com:*"]
+        frame_hosts += [
+            "'self'",
+            "https://challenges.cloudflare.com",
+            "https://*.protect.clerk.com",
+        ]
+        img_hosts.append("https://img.clerk.com")
 
     form_action = ["'self'"]
     if accounts_host:
@@ -106,10 +141,11 @@ def _build_csp(*, frontend_api_host: str, accounts_host: str | None) -> str:
         "default-src": ["'self'"],
         "script-src": ["'self'", *script_hosts, "'unsafe-inline'", "'unsafe-eval'"],
         "style-src": ["'self'", "'unsafe-inline'"],
-        "img-src": ["'self'", "data:"],
+        "img-src": ["'self'", "data:", *img_hosts],
         "font-src": ["'self'"],
         "connect-src": connect_hosts,
-        "frame-src": ["'none'"],
+        "worker-src": ["'self'", "blob:"],
+        "frame-src": frame_hosts or ["'none'"],
         "frame-ancestors": ["'none'"],
         "base-uri": ["'self'"],
         "object-src": ["'none'"],

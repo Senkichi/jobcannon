@@ -259,16 +259,14 @@ def create_app(config: dict | None = None) -> Flask:
     # every gunicorn --preload worker (never minted per-process), so a token
     # issued by one worker validates against a request served by another —
     # the one condition that would have forced the hand-rolled HMAC
-    # alternative instead. `WTF_CSRF_ENABLED` defaults to the SAME value
-    # production gets (True) even under TESTING, matching this app's real
-    # enforcement rather than silently exempting every test from it; the
-    # tests/host/*'s existing POST call sites that predate CSRF need it off
-    # to keep passing unmodified, so TESTING flips the default to False
-    # UNLESS the caller's own `config` dict already set
-    # WTF_CSRF_ENABLED explicitly (setdefault, checked against app.config as
-    # already updated from `config` at the top of this function) —
-    # tests/host/test_csrf.py is the one module that opts back in to
-    # exercise the real enforcement path end to end.
+    # alternative instead. `WTF_CSRF_ENABLED` defaults to True in
+    # production and False under TESTING — every pre-existing
+    # tests/host/*'s POST call site predates CSRF and needs it off to keep
+    # passing unmodified — UNLESS the caller's own `config` dict already
+    # set WTF_CSRF_ENABLED explicitly (setdefault, checked against
+    # app.config as already updated from `config` at the top of this
+    # function) — tests/host/test_csrf.py is the one module that opts back
+    # in to exercise the real enforcement path end to end.
     app.config.setdefault("WTF_CSRF_ENABLED", not app.config.get("TESTING"))
     csrf = CSRFProtect(app)
 

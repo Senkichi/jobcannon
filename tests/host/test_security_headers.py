@@ -88,7 +88,6 @@ def _assert_csp(headers) -> str:
         "frame-ancestors 'none'",
         "base-uri 'self'",
         "object-src 'none'",
-        "frame-src 'none'",
     ):
         assert directive in csp, f"missing CSP directive {directive!r} in {csp!r}"
     # Derived from HOST_CONFIG, not hardcoded (issue #147's design
@@ -97,6 +96,16 @@ def _assert_csp(headers) -> str:
     assert "https://clerk.example.test" in csp
     assert f"https://{_ACCOUNTS_HOST}" in csp
     assert "form-action 'self'" in csp
+    # Clerk's own CSP guidance (clerk.com/docs/guides/secure/best-practices/
+    # csp-headers) requires these on frame-src/connect-src/img-src for its
+    # Cloudflare bot-challenge iframe and abuse/fraud-protection endpoints --
+    # 'none' would silently break that flow the moment a real key is
+    # configured, so this asserts the actual required hosts, not the absence
+    # of a frame-src.
+    assert "frame-src 'self' https://challenges.cloudflare.com https://*.protect.clerk.com" in csp
+    assert "https://*.protect.clerk.com:*" in csp
+    assert "img-src 'self' data: https://img.clerk.com" in csp
+    assert "worker-src 'self' blob:" in csp
     return csp
 
 
@@ -122,6 +131,21 @@ def test_public_page_has_no_hsts_over_plain_http():
     client = _app().test_client()
     resp = client.get("/privacy")
     assert "Strict-Transport-Security" not in resp.headers
+
+
+def test_build_csp_falls_back_to_frame_src_none_without_a_clerk_key():
+    """Without a configured Clerk key there is nothing that could load
+    clerk-js, so the Clerk-conditional hosts (frame-src, the extra
+    connect-src/script-src/img-src entries) must all fall back to their
+    narrowest form rather than unconditionally widening the policy."""
+    from jobcannon.web.security_headers import _build_csp
+
+    csp = _build_csp(frontend_api_host="", accounts_host=None)
+    assert "frame-src 'none'" in csp
+    assert "protect.clerk.com" not in csp
+    assert "challenges.cloudflare.com" not in csp
+    assert "img.clerk.com" not in csp
+    assert "worker-src 'self' blob:" in csp
 
 
 def test_public_page_has_hsts_behind_the_render_cloudflare_edge():
