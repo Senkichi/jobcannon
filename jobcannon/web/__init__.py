@@ -883,6 +883,10 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(account_bp)
     app.register_blueprint(export_bp)
 
+    from jobcannon.web.postings_history import postings_history_bp
+
+    app.register_blueprint(postings_history_bp)
+
     from jobcannon.web.legal import legal_bp
 
     app.register_blueprint(legal_bp)

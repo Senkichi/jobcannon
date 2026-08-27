@@ -30,7 +30,7 @@ Render dashboard). None of them are committed anywhere in this repo.
 
 | Env var | Service(s) | Source |
 |---|---|---|
-| `CLERK_SECRET_KEY` | web | Clerk dashboard → API Keys → Secret key |
+| `CLERK_SECRET_KEY` | web, worker | Clerk dashboard → API Keys → Secret key. Also required on the worker for issue #136's reconciliation-sweep periodic (`jobcannon.host.tasks.reconcile_deleted_users`), which needs its own Clerk Backend API client. |
 | `CLERK_JWT_KEY` | web | Clerk dashboard → API Keys → Advanced → JWT public key (enables networkless RS256 verification — required, see `jobcannon/web/auth.py`) |
 | `CLERK_PUBLISHABLE_KEY` | web | Clerk dashboard → API Keys → Publishable key (`pk_live_...`). Loads clerk-js in the browser so it can complete Clerk's cross-domain sign-in handshake: clerk-js makes a credentialed call to the Frontend API host (`clerk.<domain>`), the browser attaches the `__client`/`__client_uat` cookies set on that host, and clerk-js writes the returned session token as `__session` on this host. Without it, the hosted Account Portal sign-in redirect never leaves this host a session and every signed-in human 401s forever (issue #149). Publishable keys are public by design (meant to ship to the browser); `sync: false` here only keeps every `CLERK_*` var's provenance in one place. The web service refuses to boot without it, or if it isn't a well-formed `pk_live_`/`pk_test_` key. **Two Clerk-side prerequisites this variable cannot express:** (1) Clerk dashboard → Sessions → Allowed origins must permit every origin listed in `CLERK_AUTHORIZED_PARTIES` (on a production instance the instance's own domain and subdomains are permitted by default; a custom-domain or satellite change re-opens this), otherwise clerk-js's credentialed FAPI call is refused and the symptom is exactly #149 again; (2) the session token's `azp` claim is stamped from the browser `Origin` of the page that loaded clerk-js, so it must match an entry in `CLERK_AUTHORIZED_PARTIES` — after any deploy that changes hosts, decode one live `__session` JWT (unverified, `azp` claim only) and confirm it. |
 | `CLERK_AUTHORIZED_PARTIES` | web | Comma-separated list of the origins allowed to present a session token for this deploy (e.g. the Render web service's public URL) — **bare origins, no trailing slash** (e.g. `https://jobcannon.dev`, not `https://jobcannon.dev/`; each configured value still has any trailing slashes trimmed). This is an operator-chosen value, not something copied verbatim from Clerk — it is Clerk's `azp` replay-defense check. |
@@ -39,6 +39,8 @@ Render dashboard). None of them are committed anywhere in this repo.
 | `CLERK_SIGN_UP_URL` | web | Operator-chosen value: the Clerk-hosted sign-up page URL for this deploy (Clerk dashboard → your application's hosted pages; typically `https://<your-clerk-subdomain>.accounts.dev/sign-up` or your custom domain equivalent). The 401 page's sign-up link renders from it. |
 | `POSTHOG_API_KEY` | web, worker | PostHog project settings → Project API Key |
 | `JC_ANALYTICS_PSEUDONYM_SALT` | web, worker | Operator-generated random secret, same shape as `JC_SECRET_KEY` — but a DIFFERENT value from it; this is the HMAC key `jobcannon/host/posthog_client.py` uses to derive the pseudonymous identifier sent to PostHog, so it must not double as session-signing material. Required on both services (each builds its own PostHog client). If left unset, PostHog fan-out disables itself silently — events still write to Postgres, and the raw Clerk user id is never sent as a fallback. |
+| `POSTHOG_PERSONAL_API_KEY` | worker | PostHog project settings → Personal API Keys (create one scoped to this project). Issue #135: enables the person-purge task (`jobcannon.host.tasks.purge_posthog_person`) to delete a user's PostHog person record on account deletion. Left unset, the purge fails soft (logs once, skips) — the published privacy policy keeps disclosing surviving PostHog copies until this AND `POSTHOG_PROJECT_ID` are both set, at which point a follow-up legal-text update is required (`scripts/import_legal_text.py`). |
+| `POSTHOG_PROJECT_ID` | worker | PostHog project settings → Project ID. Paired with `POSTHOG_PERSONAL_API_KEY` above — both must be set for the purge to run at all. |
 
 `DATABASE_URL` is wired automatically on both services via `render.yaml`'s
 `fromDatabase` reference — never set it manually.
@@ -49,6 +51,12 @@ services, routing PostHog ingestion to the EU region
 doesn't need per-deploy filling in. Both services build their own PostHog
 client through the same seam (`jobcannon/host/wiring.py`), so the value
 must stay identical on both.
+
+`POSTHOG_ADMIN_API_HOST` is also committed in `render.yaml` (worker only,
+`https://eu.posthog.com`) — PostHog's private/admin REST API (used by the
+person-purge task above) lives on a different host than the ingestion
+endpoint `POSTHOG_HOST` names, so it is its own explicit value rather than
+derived from `POSTHOG_HOST`.
 
 ## 3. First boot ordering
 
