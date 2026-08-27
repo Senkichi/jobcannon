@@ -13,7 +13,29 @@
   .legal-prose p, .legal-prose li { color: #a3a3a3; line-height: 1.65; margin-bottom: 0.75rem; }
   .legal-prose ul, .legal-prose ol { margin-left: 1.25rem; margin-bottom: 0.75rem; }
   .legal-prose strong { color: #e5e5e5; }
-  .legal-prose a { color: #d4d4d4; text-decoration: underline; }
+  /* #222: an inline markdown link's rendered box (terms.md's
+     [Privacy Policy](/privacy), the only link any legal doc renders today
+     -- see tests/host/test_touch_targets.py's #222 tests) measured
+     94.3x21px, well under the 44px touch-target floor every OTHER
+     interactive element on the site carries via touch_target() (#207).
+     Vertical padding on an inline, non-replaced element (this stays the
+     default `display: inline` -- NOT inline-block, which WOULD reflow)
+     extends the element's own painted/hit-test box
+     (getBoundingClientRect) without affecting the surrounding paragraph's
+     line-box height or layout (CSS 2.1 10.6.1) -- verified empirically
+     with Playwright (see the PR body): the link's rect grows to clear
+     44px while the containing <p>'s own height and its next sibling's
+     position are byte-for-byte unchanged. Horizontal padding is
+     deliberately NOT added here -- unlike vertical, it DOES affect inline
+     flow/line-wrapping, which is the whole reason this fix is vertical-
+     only rather than a general padding bump. 14px top+bottom (not 12px)
+     leaves real margin above the 44px floor rather than landing within a
+     rounding error of it (21px content + 28px = 49px final height).
+     tests/host/test_touch_targets.py's
+     test_legal_prose_link_padding_clears_the_touch_target_floor requires
+     BOTH declarations present with a nonzero px value each -- a
+     `padding: 0` or a one-sided edit would fail it. */
+  .legal-prose a { color: #d4d4d4; text-decoration: underline; padding-top: 14px; padding-bottom: 14px; }
   .legal-prose a:hover { color: #f5f5f5; }
   .legal-prose table { width: 100%; border-collapse: collapse; margin: 1rem 0 1.5rem; font-size: 0.875rem; }
   .legal-prose th, .legal-prose td { border: 1px solid #404040; padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; }
