@@ -172,3 +172,21 @@ def test_no_email_addresses_at_all_is_fail_soft():
     result = fetch_primary_email(client, USER_ID)
 
     assert result.unavailable_reason == "no_primary_email_on_account"
+
+
+def test_non_iterable_email_addresses_is_fail_soft_not_raised():
+    """`getattr(user, "email_addresses", None) or []` only rescues a falsy
+    value (None, [], ...) -- a malformed/duck-typed response whose
+    `email_addresses` is truthy but not iterable (e.g. a bare object())
+    previously escaped the narrower try/except that wrapped only
+    `client.users.get()`, surfacing as a raw TypeError and contradicting
+    `ClerkEmailLookup`'s "never a raised exception" contract. The try/except
+    now spans the parsing loop too, so this must degrade the same as any
+    other Clerk failure."""
+    client = _FakeClerkClient(_FakeUsers(result=_user("addr_1", object())))
+
+    result = fetch_primary_email(client, USER_ID)
+
+    assert result.email is None
+    assert result.email_verified is None
+    assert result.unavailable_reason == "clerk_request_failed"

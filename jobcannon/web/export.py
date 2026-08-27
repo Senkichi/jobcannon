@@ -72,7 +72,9 @@ export_bp = Blueprint("export", __name__)
 # removed, or renamed) — NOT on every route change. Exported so a future
 # consumer of this document (or a test) can import the literal instead of
 # retyping it.
-SCHEMA_VERSION = "1"
+#
+# v2 (issue #181): added the top-level `identity` section.
+SCHEMA_VERSION = "2"
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
@@ -115,10 +117,14 @@ def _build_export_document(
             "email": email_lookup.email,
             "email_verified": email_lookup.email_verified,
             "source": "clerk",
-            # Same clock read as generated_at, not a second one: the Clerk
-            # lookup and the rest of this document are produced by the same
-            # request, so there is nothing for a separate wall-clock call to
-            # measure that generated_at doesn't already capture.
+            # Reuses the SAME clock read as generated_at rather than a
+            # second one -- NOT a precise timestamp of when the Clerk call
+            # itself returned. On the happy path those are close together;
+            # on a degraded path (timeout, 5xx, ...) the Clerk attempt can
+            # take up to fetch_primary_email's ~5s bound before this value
+            # is read, so it lags the actual fetch attempt by up to that
+            # bound. Read it as "this document's generation time" (same as
+            # generated_at), not as "when Clerk was queried."
             "fetched_at": generated_at,
             "email_unavailable_reason": email_lookup.unavailable_reason,
         },

@@ -171,18 +171,25 @@ def fetch_primary_email(client: Any, user_id: str, *, timeout_ms: int = 5000) ->
     if client is None:
         return ClerkEmailLookup(None, None, "clerk_client_unavailable")
 
+    # The try/except spans BOTH the network call and the response parsing
+    # below (not just client.users.get()): the fail-soft contract this
+    # function documents ("never raise") covers the whole function, and a
+    # malformed/duck-typed response (e.g. a non-list `email_addresses`) must
+    # degrade the same way a network failure does, not escape as a raw
+    # TypeError/AttributeError and 500 the caller's unrelated data export.
     try:
         user = client.users.get(user_id=user_id, timeout_ms=timeout_ms, retries=None)
+        primary_id = getattr(user, "primary_email_address_id", None)
+        for address in getattr(user, "email_addresses", None) or []:
+            if getattr(address, "id", None) != primary_id:
+                continue
+            verification = getattr(address, "verification", None)
+            verified = (
+                verification is not None and getattr(verification, "status", None) == "verified"
+            )
+            return ClerkEmailLookup(getattr(address, "email_address", None), verified, None)
+        return ClerkEmailLookup(None, None, "no_primary_email_on_account")
     except Exception as exc:
         reason = _clerk_failure_reason(exc)
         logger.warning("Clerk get-user lookup failed for user %s (%s)", user_id, reason)
         return ClerkEmailLookup(None, None, reason)
-
-    primary_id = getattr(user, "primary_email_address_id", None)
-    for address in getattr(user, "email_addresses", None) or []:
-        if getattr(address, "id", None) != primary_id:
-            continue
-        verification = getattr(address, "verification", None)
-        verified = verification is not None and getattr(verification, "status", None) == "verified"
-        return ClerkEmailLookup(getattr(address, "email_address", None), verified, None)
-    return ClerkEmailLookup(None, None, "no_primary_email_on_account")
