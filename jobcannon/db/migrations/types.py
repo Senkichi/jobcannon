@@ -32,3 +32,16 @@ class Migration:
     sql: list[str] = field(default_factory=list)
     py: Callable[[MigrationContext], None] | None = None
     name: str = ""
+    # True when this migration deliberately ships contract-shaped DDL (a
+    # DROP / narrowing / tightening that is NOT guaranteed backward-
+    # compatible with the previous release during Render's zero-downtime
+    # deploy overlap window -- docs/deploy-runbook.md Sec 3). Sourced from a
+    # bare `contract_step = True` module attribute (never a Migration(...)
+    # kwarg passed directly in the migration file itself) -- see
+    # jobcannon/db/migrations/__init__.py, the single place that reads the
+    # attribute via getattr() and folds it into this field. Requires a
+    # docstring "Contract justification:" section
+    # (tests/test_migration_deploy_safety.py, issue #199).
+    # jobcannon/db/migrate.py's _apply_migration logs a loud one-line notice
+    # when applying one.
+    contract_step: bool = False
