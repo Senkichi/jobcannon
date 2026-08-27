@@ -56,7 +56,7 @@ def test_reap_cascades_the_profile_of_a_reaped_row(db_conn):
     from jobcannon.db._users import mint_anon_user, reap_unconverted_anon_users
 
     anon_id = mint_anon_user(db_conn)
-    upsert_profile(db_conn, anon_id, skills=["sql"])
+    upsert_profile(db_conn, anon_id, skills=["sql"], workplace_type=None)
     _backdate(db_conn, anon_id, days=_RETENTION_DAYS + 10)
 
     reaped = reap_unconverted_anon_users(db_conn, retention_days=_RETENTION_DAYS)
