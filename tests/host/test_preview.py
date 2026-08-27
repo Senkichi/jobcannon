@@ -485,6 +485,60 @@ def test_preview_with_a_hollow_stored_selection_still_shows_the_prompt(app):
     assert "Hollow Selection Posting" in html
 
 
+def test_preview_stale_cookie_missing_companies_key_degrades_safely(app):
+    """A session cookie signed by the pre-#169 build never had a `companies`
+    key at all (that field didn't exist yet) -- `pending_picker` there is
+    `{"anon_id": ..., "titles": [...]}` with the key entirely absent, not
+    merely empty. `selection_filter_kwargs`'s dual-key `_select` helper
+    reads it via try/except KeyError specifically so this shape degrades to
+    "no company filter" instead of a 500 or a missing-key crash. Sets the
+    session directly (bypassing /start, which always writes the key today)
+    to reproduce that stale shape."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Stale Cookie Co")
+    _seed_posting(dsn, "preview-stale-match", company_id, title="Stale Cookie Match Title")
+    _seed_posting(dsn, "preview-stale-other", company_id, title="Unrelated Other Title")
+
+    client = app.test_client()
+    _set_pending_picker(client, titles=["Stale Cookie Match Title"])
+    resp = client.get("/preview")
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Stale Cookie Match Title" in html
+    assert "Unrelated Other Title" not in html
+
+
+def test_preview_legacy_workplace_only_cookie_shows_unfiltered_results_matching_the_banner(app):
+    """F4 (refuter-1 LOW): a session cookie predating #175 could carry a
+    workplace-only selection (no titles, no companies -- the old build had
+    no "pick at least one" gate). `has_selections` is False for that shape
+    (same predicate #175 enforces on write), so the "you haven't completed
+    the picker" banner renders -- but before this fix, the corpus read
+    still applied that stale workplace_type filter, silently narrowing
+    results under a banner claiming nothing had been selected. Now the read
+    drops workplace_type too whenever has_selections is False, so the
+    banner and the results agree."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Legacy WT Co")
+    _seed_posting(
+        dsn, "preview-legacy-remote", company_id, title="Legacy Remote Row", workplace_type="REMOTE"
+    )
+    _seed_posting(
+        dsn, "preview-legacy-onsite", company_id, title="Legacy Onsite Row", workplace_type="ONSITE"
+    )
+
+    client = app.test_client()
+    _set_pending_picker(client, titles=[], companies=[], workplace_type="REMOTE")
+    html = client.get("/preview").get_data(as_text=True)
+
+    assert "You haven't completed the picker yet" in html
+    # Positive control: both rows render unfiltered, proving the stale
+    # workplace_type value was actually dropped, not coincidentally absent.
+    assert "Legacy Remote Row" in html
+    assert "Legacy Onsite Row" in html
+
+
 def test_picker_submit_now_redirects_to_preview(app):
     client = app.test_client()
     resp = client.post(
