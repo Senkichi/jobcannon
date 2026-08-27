@@ -92,16 +92,35 @@ def _fetch_entry(
     caller, not hardcoded here, because this helper is shared by all four
     routes below and they need opposite answers:
 
-    - `save`/`apply`/`undo_apply` pass `include_dismissed=True`. Before
-      #200, a mutation acting on a posting that was ALREADY dismissed by an
-      earlier, unrelated action (or, for undo_apply, IS dismissed rather
-      than applied — its own docstring already says it must not 404 that
-      case) hit this function's default exclude-dismissed query, got back
-      no row, and `_row_response` rendered an empty `200` body —
-      indistinguishable from the mutation having silently failed, even
-      though the write itself succeeded. Passing `True` here fixes that:
-      the fragment these three routes swap in now shows the row's actual
-      current state honestly, dismissed or not.
+    - `save`/`undo_apply` pass `include_dismissed=True` and it is
+      LOAD-BEARING for both. Before #200, a mutation acting on a posting
+      that was ALREADY dismissed by an earlier, unrelated action — save
+      writes `watchlists` only, so a dismissed posting's `pipeline_status`
+      row is left untouched; undo_apply's own docstring already says it
+      must not 404 a posting that IS dismissed rather than applied, and
+      `unmark_applied`'s DELETE is scoped `AND status = 'applied'`
+      (jobcannon/db/_user_actions.py), so a dismissed row's status survives
+      that DELETE untouched too — hit this function's default
+      exclude-dismissed query, got back no row, and `_row_response`
+      rendered an empty `200` body — indistinguishable from the mutation
+      having silently failed, even though the write itself succeeded.
+      Passing `True` here fixes that: the fragment these two routes swap in
+      now shows the row's actual current state honestly, dismissed or not.
+    - `apply` also passes `include_dismissed=True`, but DEFENSIVELY, not
+      because it fixes an observed bug: `mark_applied` upserts
+      `pipeline_status.status = 'applied'` (`ON CONFLICT DO UPDATE`,
+      jobcannon/db/_user_actions.py) BEFORE this re-read runs, so the
+      default exclude-dismissed query could never have excluded apply's own
+      row in the first place — the flag is inert on today's DAL ordering.
+      It stays, at the same call shape as save/undo_apply, so it becomes
+      load-bearing automatically if `mark_applied`'s un-dismiss-on-apply
+      ordering ever changes, and
+      `test_dismiss_then_mutate_re_renders_the_row_not_an_empty_body`
+      (parametrized over save/apply/undo-apply,
+      tests/host/test_feed_events.py) now pins the user-facing contract —
+      acting on a dismissed row always re-renders a row, never an empty
+      body — for all three routes at once, independent of which route the
+      DAL ordering happens to make it load-bearing for today.
     - `dismiss` deliberately does NOT pass it, keeping the default `False`
       — seeing this file's `dismiss()` docstring and this module's own
       docstring above for why an empty body is dismiss's own INTENDED
