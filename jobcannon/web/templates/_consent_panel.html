@@ -7,10 +7,10 @@
    back in with your own new content" shape
    jobcannon/web/templates/_posting_row.html uses for save/dismiss.
    method="post" action="/consent" stays on the <form> as a plain-HTML
-   fallback: consent.py's post_consent checks HX-Request itself and
-   returns the full page (not this bare partial) for a non-htmx request,
-   matching the fragment-route convention CLAUDE.md documents elsewhere in
-   this codebase. #}
+   fallback: consent.py's post_consent checks HX-Request itself, and a
+   non-htmx POST instead 303-redirects back to this same GET /consent page
+   (Post/Redirect/Get -- see post_consent's docstring), which renders this
+   partial again showing "Current choice: ..." either way. #}
 <div id="consent-panel">
   {% if error %}
     <p class="text-red-400 mb-4">{{ error }}</p>

@@ -32,25 +32,30 @@ surface — a repeat visit simply records a new decision. consent.html
 links out to /privacy (jobcannon.web.legal, issue #94) for the ratified
 policy text; this route still carries no legal text of its own.
 
-`post_consent` no longer redirects on success (issue #182: the previous
-302 to the feed silently discarded the grant/decline ack -- the only way
+`post_consent` no longer redirects to the FEED on success (issue #182: the
+previous 302 there silently discarded the grant/decline ack -- the only way
 to see "Current choice: allowed/declined" was to navigate back to
-/consent). It re-renders the SAME panel with `confirmed=True` instead,
-via `_consent_response`, which also branches on HX-Request the same way
-every other fragment route in this codebase does (CLAUDE.md: "Fragment
-routes MUST check HX-Request header and return full page for direct
-browser access") -- an htmx-driven grant/decline gets just the
-`_consent_panel.html` fragment (hx-swap="outerHTML" on the form's own
-`#consent-panel` target, jobcannon/web/templates/_posting_row.html's
-save/dismiss shape); a plain/no-JS form POST gets the full consent.html
-page, confirmation and all, so the ack is never JS-only.
+/consent). An htmx-driven grant/decline (the norm -- the only form this
+route ever renders posts via hx-post) re-renders the SAME panel in place
+with `confirmed=True`, via `_consent_response`, showing the transient
+"Analytics enabled/disabled." banner immediately, no round trip.
+
+A plain/no-JS POST instead 303s back to GET /consent (Post/Redirect/Get) --
+NOT the pre-#182 302-to-feed regression, since GET /consent always renders
+"Current choice: allowed/declined." regardless of the transient banner, so
+the ack is still visible after the redirect, never silently discarded. This
+differs from the HX branch only in choosing PRG over an in-place re-render:
+re-rendering the full page directly (matching the HX branch) would leave a
+no-JS refresh/back resubmitting the POST -- a real, if minor, gap the HX
+branch doesn't have (an htmx POST is never subject to a browser's native
+refresh/back-resubmit prompt).
 """
 
 from __future__ import annotations
 
 import logging
 
-from flask import Blueprint, g, render_template, request
+from flask import Blueprint, g, redirect, render_template, request, url_for
 
 from jobcannon.db import _events
 from jobcannon.db.pool import commit_unless_nested, connection_factory
@@ -107,7 +112,13 @@ def _consent_response(context: dict, status: int):
     swappable panel; a direct/no-JS request gets the full page, same
     template context either way -- the panel partial is `{% include %}`d
     by consent.html, so there is exactly one place that decides what the
-    confirmed/error/choice-made states look like."""
+    confirmed/error/choice-made states look like.
+
+    Used for BOTH branches of the 400 (unrecognized choice) response --
+    nothing was written, so there's no PRG concern -- but only the HX
+    branch of a successful post_consent: the non-HX success path 303s
+    instead (see the module docstring), so this never renders a
+    `confirmed=True` FULL page itself."""
     template = (
         "_consent_panel.html"
         if (request.headers.get("HX-Request") or "").lower() == "true"
@@ -137,6 +148,19 @@ def post_consent():
         )
         commit_unless_nested(conn.raw)
 
-    context = _read_consent_context()
-    context["confirmed"] = True
+    if (request.headers.get("HX-Request") or "").lower() != "true":
+        # Post/Redirect/Get for the non-HX (no-JS) path only -- see the
+        # module docstring. The HX branch below is unaffected: an htmx POST
+        # is never subject to a browser refresh/back resubmit prompt, so it
+        # keeps the richer in-place "Analytics enabled/disabled." banner.
+        return redirect(url_for("consent.get_consent"), code=303)
+
+    # Carry the choice just written rather than re-reading it back from the
+    # DB via _read_consent_context(): that helper's fail-closed except
+    # branch defaults to consent_granted=False, so a DB hiccup in the
+    # narrow window right after this commit could render "Analytics
+    # disabled." after a successful grant. record_consent() above already
+    # raises on failure (never silently no-ops), so `granted` is ground
+    # truth and choice_made is trivially True -- a decision was JUST made.
+    context = {"consent_granted": granted, "choice_made": True, "confirmed": True}
     return _consent_response(context, 200)
