@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-27T10:46:00Z",
+  "generated_at": "2026-08-27T14:33:00Z",
   "roots": [
     "engine",
     "db",
@@ -52,31 +52,39 @@
           "text": "pre-fix hosted code and the private original): ``jd_full``,"
         },
         {
-          "line": 86,
+          "line": 92,
           "text": "Watermark invalidation (design decision, #152): the private original's"
         },
         {
-          "line": 111,
+          "line": 117,
           "text": "A second Wave-1 divergence, same shape: the private original also resets a"
         },
         {
-          "line": 181,
-          "text": "Content-contract side effects (parity with the private original's I-18"
+          "line": 164,
+          "text": "# common opening block tags. Ported verbatim from the private original"
         },
         {
-          "line": 194,
-          "text": "kind to the private original, not introduced by #184; tracked as #217."
-        },
-        {
-          "line": 195,
-          "text": "See this module's docstring for the ``enrichment_tier`` reset the private"
+          "line": 165,
+          "text": "# (job_finder/db/_jd_full.py's _HTML_SIGNAL_RE, READ-ONLY reference) --"
         },
         {
           "line": 196,
+          "text": "Content-contract side effects (parity with the private original's I-18"
+        },
+        {
+          "line": 210,
+          "text": "See this module's docstring for the ``enrichment_tier`` reset the private"
+        },
+        {
+          "line": 211,
           "text": "original also performs, which has no column to act on in the Wave-1"
         },
         {
-          "line": 301,
+          "line": 233,
+          "text": "# opening-tag-shaped bodies. Matches the private original's"
+        },
+        {
+          "line": 340,
           "text": "Mirrors the private original's ``_record_jd_content_reject``, minus the"
         }
       ]
