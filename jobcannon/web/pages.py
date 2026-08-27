@@ -280,6 +280,13 @@ def feed():
     as much a real impression as the first one."""
     user_id = g.clerk_user.user_id
     stats, profile = _read_page_data(user_id)
+    # #176: the no-profile branch's copy is derived from this, not hardcoded
+    # release-date prose — a profile row exists iff the visitor has completed
+    # the picker (jobcannon/db/_profiles.py's upsert_profile is the only
+    # writer), the same "has this visitor made selections yet" question
+    # jobcannon/web/onboarding.py's /preview route already answers with its
+    # own `has_selections` flag for the pre-signup feed.
+    has_selections = profile is not None
     filters = _parse_feed_filters(request.args)
     after = _feed.parse_cursor(request.args)
 
@@ -302,6 +309,7 @@ def feed():
         "feed.html",
         stats=stats,
         profile=profile,
+        has_selections=has_selections,
         entries=entries,
         filters=filters,
         ordering=ordering,
