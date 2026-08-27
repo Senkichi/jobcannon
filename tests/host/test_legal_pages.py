@@ -19,6 +19,8 @@ Things this module pins:
   (g) jobcannon.web.legal._render() calls the guard and raises at boot time
       (issue #94 guard-hardening review), against a sabotaged temp file —
       never against jobcannon/web/legal/ itself
+  (h) /privacy and /terms send Cache-Control: private, max-age=300 (issue
+      #182 item 4) — private because base.html varies per g.clerk_user
 """
 
 from __future__ import annotations
@@ -210,6 +212,45 @@ def test_legal_page_head_request_200(path):
     resp = client.head(path)
 
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# (h) Cache-Control (issue #182 item 4). `private`, not `public`: base.html
+# gates the header sign-in/sign-up nav and the footer "Export your
+# data"/"Delete account" links on g.clerk_user, so the full response is not
+# identical across visitors even though the legal markdown body is (see
+# jobcannon/web/legal.py's _legal_response docstring for the full reasoning).
+# A `public` directive would let a shared cache (CDN, corporate proxy) serve
+# one visitor's auth-state nav to a different visitor.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_legal_page_sets_private_cache_control_with_max_age(path):
+    app = _app(verify=lambda req: None)
+    client = app.test_client()
+
+    resp = client.get(path)
+
+    assert resp.cache_control.private is True
+    assert not resp.cache_control.public
+    assert resp.cache_control.max_age == 300
+
+
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_legal_page_cache_control_same_when_authed(path):
+    """The directive is a property of the route, not of the requester's auth
+    state — an authed visitor must not get a `public` response just because
+    their own request happened to be authenticated."""
+    from jobcannon.web.auth import ClerkIdentity
+
+    app = _app(verify=lambda req: ClerkIdentity(user_id="user_1", claims={"sub": "user_1"}))
+    client = app.test_client()
+
+    resp = client.get(path)
+
+    assert resp.cache_control.private is True
+    assert not resp.cache_control.public
 
 
 # ---------------------------------------------------------------------------

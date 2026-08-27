@@ -46,7 +46,7 @@ import pathlib
 import re
 
 import markdown
-from flask import Blueprint, render_template
+from flask import Blueprint, Response, make_response, render_template
 
 from jobcannon.web.legal_guard import check_published_text
 
@@ -55,6 +55,29 @@ legal_bp = Blueprint("legal", __name__)
 _LEGAL_DIR = pathlib.Path(__file__).parent / "legal"
 _MD_EXTENSIONS = ["tables", "sane_lists"]
 _H1_LINE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
+
+# issue #182 item 4: the *body* markdown is identical for every visitor (see
+# the module docstring — it's built once at import time, not per request),
+# but the page around it is not: base.html gates the header sign-in/sign-up
+# nav and the footer "Export your data"/"Delete account" links on
+# `g.clerk_user` (base.html, auth-nav block and footer block), so the full
+# response varies with request-time auth state. `public` would let a shared
+# cache (Cloudflare in front of jobcannon.dev, a corporate proxy) hand one
+# visitor's rendered nav to a different visitor for up to max-age — e.g. an
+# anonymous CDN-cached copy served to a just-signed-in visitor, dropping
+# their account links until the entry expires. `private` gets the intended
+# win (a visitor's own browser skips refetching identical bytes on repeat
+# GETs within max-age) without authorizing that cross-visitor reuse. 300s
+# bounds how stale a re-publish (re-run the importer + restart) can look to
+# a browser that already cached the previous version.
+_LEGAL_CACHE_MAX_AGE_S = 300
+
+
+def _legal_response(title: str, html: str) -> Response:
+    response = make_response(render_template("legal_page.html", title=title, body_html=html))
+    response.cache_control.private = True
+    response.cache_control.max_age = _LEGAL_CACHE_MAX_AGE_S
+    return response
 
 
 def _render(filename: str) -> tuple[str, str]:
@@ -87,9 +110,9 @@ _TERMS_TITLE, _TERMS_HTML = _render("terms.md")
 
 @legal_bp.get("/privacy", strict_slashes=False)
 def privacy():
-    return render_template("legal_page.html", title=_PRIVACY_TITLE, body_html=_PRIVACY_HTML)
+    return _legal_response(_PRIVACY_TITLE, _PRIVACY_HTML)
 
 
 @legal_bp.get("/terms", strict_slashes=False)
 def terms():
-    return render_template("legal_page.html", title=_TERMS_TITLE, body_html=_TERMS_HTML)
+    return _legal_response(_TERMS_TITLE, _TERMS_HTML)
