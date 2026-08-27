@@ -655,7 +655,7 @@ def _current_identity() -> Any:
 
 def _read_preview_postings(
     *,
-    selections: dict[str, Any],
+    selection_kwargs: dict[str, Any],
     location_contains: str | None,
     after: tuple[float | None, Any, int] | None,
 ) -> list[Any]:
@@ -666,14 +666,18 @@ def _read_preview_postings(
     "Load more" — see jobcannon/db/_feed.py's list_feed_postings/
     _cursor_predicate.
 
-    #169: `selections` (the session-held pending_picker dict) is passed
-    through jobcannon.db._feed.selection_filter_kwargs — the SAME predicate
-    builder jobcannon/web/pages.py's authed feed calls against a `profiles`
-    row (see that module's _read_feed_postings) — rather than this route
-    picking individual keys (titles, workplace_type) back out by hand. That
-    was the actual bug behind #169: the old hand-picked call above never
-    read `companies` at all, so a company-only picker selection was parsed,
-    shape-validated, and stored, then silently dropped on every read."""
+    #169: `selection_kwargs` is the SAME predicate — already derived by the
+    caller (`preview()`) from the session-held pending_picker dict via
+    jobcannon.db._feed.selection_filter_kwargs — that jobcannon/web/pages.py's
+    authed feed derives from a `profiles` row (see that module's
+    _read_feed_postings). Taking the already-built kwargs rather than the raw
+    `selections` dict avoids computing selection_filter_kwargs twice per
+    request (preview() also needs it for `has_selections`), and keeps this
+    function from picking individual keys (titles, workplace_type) back out
+    by hand — that was the actual bug behind #169: the old hand-picked call
+    here never read `companies` at all, so a company-only picker selection
+    was parsed, shape-validated, and stored, then silently dropped on every
+    read."""
     try:
         with connection_factory() as conn:
             return list_feed_postings(
@@ -681,7 +685,7 @@ def _read_preview_postings(
                 user_id=None,
                 location_contains=location_contains,
                 after=after,
-                **selection_filter_kwargs(selections),
+                **selection_kwargs,
             )
     except Exception:
         logger.warning("preview feed read failed (defaulting to empty result set)", exc_info=True)
@@ -758,8 +762,14 @@ def preview():
     location_contains = (request.args.get("location") or "").strip() or None
     after = parse_cursor(request.args)
 
+    # Computed once and reused below for `has_selections` — #169's shared
+    # predicate is a pure function of `selections`, so deriving it twice
+    # per request (once for the read, once for the banner) would just be
+    # duplicate work on the same in-memory dict.
+    selection_kwargs = selection_filter_kwargs(selections)
+
     rows = _read_preview_postings(
-        selections=selections,
+        selection_kwargs=selection_kwargs,
         location_contains=location_contains,
         after=after,
     )
@@ -778,7 +788,6 @@ def preview():
     # company" predicate _parse_submission now enforces on write, so a
     # pre-existing hollow cookie shows the same honest banner a fresh
     # blank submission is rejected before ever producing.
-    selection_kwargs = selection_filter_kwargs(selections)
     has_selections = bool(selection_kwargs["titles"] or selection_kwargs["companies"])
 
     return render_template(
