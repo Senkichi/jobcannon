@@ -691,15 +691,29 @@ def test_preview_shows_signup_cta_when_sign_up_url_configured(app):
     assert 'href="https://clerk.test/sign-up"' in html
 
 
-def test_preview_omits_signup_cta_when_sign_up_url_unset(app):
+def test_preview_omits_signup_cta_when_both_urls_unset(app):
+    """Both clerk_sign_up_url and clerk_sign_in_url unset (the bare
+    HostConfig default) -- issue #174 added a sign-in fallback to this CTA,
+    so the tolerant-default floor is now "both blank", not just sign-up
+    alone. A seeded row proves the page still renders content; the row's
+    own per-row CTA (issue #174) must degrade the same way as the
+    page-level one, never a bare href=""."""
     from jobcannon.host.config import HostConfig
+
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "No CTA Co")
+    _seed_posting(dsn, "preview-no-cta-1", company_id, title="No CTA Posting")
 
     app.config["HOST_CONFIG"] = HostConfig(database_url="", secret_key="testing-secret-key")
 
     html = app.test_client().get("/preview").get_data(as_text=True)
 
+    assert "No CTA Posting" in html
     assert "data-signup-cta" not in html
     assert "Sign up to keep this feed" not in html
+    assert "data-action-signup" not in html
+    assert "Sign up to apply" not in html
+    assert 'href=""' not in html
 
 
 @pytest.fixture()
@@ -756,7 +770,93 @@ def test_preview_omits_clerk_js_even_when_publishable_key_configured(app_with_cl
     assert "clerk.browser.js" not in html
     assert "Clerk.load" not in html
     # Positive control within the same response: the CTA (gated on
-    # clerk_sign_up_url alone via _auth_link_context, unaffected by #158's
-    # gate) IS present -- proves this is a real 200 render of the route,
-    # not an empty/error page that would vacuously lack clerk-js too.
+    # signup_cta_url via _inject_auth_links, unaffected by #158's gate) IS
+    # present -- proves this is a real 200 render of the route, not an
+    # empty/error page that would vacuously lack clerk-js too.
     assert "data-signup-cta" in html
+
+
+# ---------------------------------------------------------------------------
+# Per-row sign-up CTA (issue #174): _posting_row.html's save/dismiss/apply
+# block only renders when the caller passes show_actions=True (the authed
+# feed) -- /preview never does, so an anonymous visitor previously had a
+# fully actionless row: no apply link, no hint that signing up unlocks one.
+# The new block is a pure addition in _posting_row.html gated on
+# `signup_cta_url`, the single identity-derived value
+# jobcannon.web._inject_auth_links computes (sign-up preferred, sign-in
+# fallback, None for any authed visitor regardless of URL config) -- the
+# same value the page-level CTA above gates on.
+# ---------------------------------------------------------------------------
+
+
+def test_preview_row_shows_signup_cta_for_anonymous_visitor(app):
+    """Positive control: the `app` fixture's TESTING default configures
+    BOTH clerk_sign_up_url and clerk_sign_in_url
+    (jobcannon/web/__init__.py), so the row CTA must render with the
+    sign-up URL (sign-up wins the `or` fallback) and the page-level #145
+    CTA must ALSO still be present -- the >= 2 count proves both CTAs
+    rendered rather than one masking as the other via an identical href."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Row CTA Co")
+    _seed_posting(dsn, "preview-row-cta-1", company_id, title="Row CTA Posting")
+
+    html = app.test_client().get("/preview").get_data(as_text=True)
+
+    assert "Row CTA Posting" in html
+    assert "data-action-signup" in html
+    assert "Sign up to apply" in html
+    assert "data-posting-signup" in html
+    assert html.count('href="https://clerk.test/sign-up"') >= 2
+
+
+def test_preview_row_falls_back_to_sign_in_url_when_sign_up_unset(app):
+    """Mirror of the page-level fallback test pair in test_auth_nav.py:
+    clerk_sign_up_url unset, clerk_sign_in_url configured -- both the
+    page-level (#145) and per-row (#174) CTAs must fall back to the
+    sign-in URL rather than disappearing."""
+    from jobcannon.host.config import HostConfig
+
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Row CTA Fallback Co")
+    _seed_posting(dsn, "preview-row-cta-fallback-1", company_id, title="Row CTA Fallback Posting")
+
+    app.config["HOST_CONFIG"] = HostConfig(
+        database_url="",
+        secret_key="testing-secret-key",
+        clerk_sign_in_url="https://clerk.test/sign-in",
+    )
+
+    html = app.test_client().get("/preview").get_data(as_text=True)
+
+    assert "Row CTA Fallback Posting" in html
+    assert "data-signup-cta" in html
+    assert "data-action-signup" in html
+    assert html.count('href="https://clerk.test/sign-in"') >= 2
+    assert 'href="https://clerk.test/sign-up"' not in html
+    assert 'href=""' not in html
+
+
+def test_preview_load_more_fragment_includes_row_signup_cta(app):
+    """The Load-more HX fragment (#156/#192) re-renders _posting_row.html
+    through a bare render_template("_feed_page.html", ...) call
+    (jobcannon/web/onboarding.py), a different code path from the full
+    page -- the #165 context-processor globals this CTA depends on must
+    still reach it there. Every row in an anonymous fragment must carry
+    its own CTA (count equals row count), not just the first."""
+    dsn = app.config["_TEST_DSN"]
+    company_id = _seed_company(dsn, "Preview Fragment CTA Co")
+    _seed_preview_pages_worth(dsn, company_id, FEED_PAGE_MAX + 10, title_prefix="Fragment CTA Row")
+
+    client = app.test_client()
+    first_page_html = client.get("/preview").get_data(as_text=True)
+    load_more_url = _extract_load_more_url(first_page_html)
+    assert load_more_url is not None
+
+    resp = client.get(load_more_url, headers={"HX-Request": "true"})
+    fragment_html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    row_count = _row_count(fragment_html)
+    assert row_count == 10
+    assert fragment_html.count("data-action-signup") == row_count
+    assert 'href="https://clerk.test/sign-up"' in fragment_html
