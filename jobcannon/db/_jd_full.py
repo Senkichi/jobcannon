@@ -14,25 +14,74 @@ per-posting LLM score tuple yet (structural axes are Wave-2 work and are
 recomputed at ingest, not invalidated here). Revisit when owner-fit scoring
 lands (Phase 2).
 
-JD-content verdict persistence (D5 / #152, m0009): after a successful write,
-this stamps ``postings.jd_content_verdict`` / ``jd_content_signal`` by
-running ``jd_content_contract.classify_jd_content`` ONCE against the stored
-body — the single point where that cost is paid, mirroring the private
-original's ``set_jd_full`` (see ``job_finder/db/_jd_full.py``, read-only
-reference). ``jobcannon.engine.job_scorer.scoring_precheck`` then reads this
-persisted column instead of recomputing per row. Stamped whenever the text
-changed, or whenever no verdict is on record yet (self-healing a legacy row
-the moment it happens to be re-touched) -- but Wave 1 has exactly one
-caller, ``ats_scanner/_run.py``, and it only invokes this function when
-``jd_full IS NULL`` (see call site), so an already-populated legacy row is
-never re-touched by it: the self-heal-on-re-touch path described above has
-no live trigger until a future caller writes to a non-NULL jd_full. CAS-guarded on
-``WHERE dedup_key = %s AND jd_full = %s`` (mirroring the private original)
-because the jd_full write and the verdict stamp are two separate statements:
-a concurrent writer could interleave a second ``set_jd_full`` call between
-them and overwrite ``jd_full`` again before this UPDATE lands. A guard miss
-leaves the verdict untouched (fail-open, per ``scoring_precheck``'s existing
-semantics) rather than stamping a mismatched one.
+JD-content verdict persistence (D5 / #152, m0009): after the gates above
+pass, this stamps ``postings.jd_content_verdict`` / ``jd_content_signal`` by
+running ``jd_content_contract.classify_jd_content`` ONCE against the body
+about to be stored — the single point where that cost is paid, mirroring
+the private original's ``set_jd_full`` (see ``job_finder/db/_jd_full.py``,
+read-only reference) in spirit but NOT in statement shape (see the #184 note
+below). ``jobcannon.engine.job_scorer.scoring_precheck`` then reads this
+persisted column instead of recomputing per row.
+
+Atomic single-UPDATE write (#184, deliberate deviation from both the
+pre-fix hosted code and the private original): ``jd_full``,
+``unresolved_reasons``, ``jd_content_verdict``, ``jd_content_signal``, and
+``jd_adjudicated_version`` are all set by ONE UPDATE statement, in ONE
+transaction. The pre-#184 shape ran the ``jd_full`` write and the verdict
+stamp as two separately-committed UPDATEs, CAS-guarded on
+``WHERE dedup_key = %s AND jd_full = %s`` so a concurrent writer landing
+between them would make the stamp UPDATE's WHERE miss and leave the verdict
+untouched. That CAS guard protected the wrong thing: it stopped a
+mismatched verdict from being *written*, but a reader polling in the gap
+between the two commits could still observe the NEW ``jd_full`` sitting
+next to the OLD (already-committed) verdict for however long that gap
+lasted — and critically, ``scoring_precheck`` treats a persisted CLEAN
+verdict as "no adjudication needed" regardless of ``jd_adjudicated_version``
+(see ``job_scorer.py``), so a stale CLEAN reader observation silently
+bypassed the D5 gate entirely. Nulling ``jd_adjudicated_version`` in the
+FIRST statement alone (the "naive fix") does not close this: the window is
+about the ``jd_content_verdict`` column itself disagreeing with the stored
+text, not about ``jd_adjudicated_version``.
+
+Folding everything into one UPDATE makes that window unrepresentable rather
+than detecting it after the fact: ``classify_jd_content`` is pure Python
+(no DB/IO — verified by reading its full call chain), so its result for the
+NEW text can be computed BEFORE any write and handed to the same statement
+that writes the text. Whether the content actually changed, and therefore
+whether to apply the new verdict / null the watermark, is decided INSIDE
+the UPDATE via SQL ``CASE ... WHEN jd_full IS DISTINCT FROM %(text)s``,
+which Postgres evaluates against the row's live pre-update value at
+UPDATE-execution time — not against a value read earlier in a separate
+SELECT. That removes the specific TOCTOU the old CAS guard existed to
+catch (a stale Python-side ``content_changed`` decision), so there is
+nothing left for a WHERE-clause CAS to protect: with one statement, a
+reader on any other connection either sees the full pre-image or the full
+post-image, never a mix, by Postgres's normal row-visibility rules — no
+extra guard required. (Proven by a real two-connection race test —
+``tests/host/test_jd_full.py::test_race_two_connections_never_observe_torn_jd_full_and_verdict`` —
+which fails against the pre-#184 two-statement shape and passes against
+this one.) The write remains unconditional on ``WHERE dedup_key = %s``, same
+as the pre-#184 first statement, so under a genuine same-row concurrent
+write the later commit wins outright and is fully self-consistent (last-
+writer-wins) for ``jd_full`` / ``jd_content_verdict`` / ``jd_content_signal`` /
+``jd_adjudicated_version`` — the four columns whose new value is decided by
+the SET clause itself, against the live pre-update row. This is stricter
+than the old fail-open behavior, which on a CAS miss left the loser's
+verdict-stamp UPDATE matching 0 rows — the persisted verdict simply kept
+whatever value it already had (NULL for a fresh row; a STALE prior verdict
+once a future caller re-touches an already-populated one), rather than
+being nulled. ``unresolved_reasons`` is the one column this guarantee does
+NOT cover: its new value is still computed from an earlier SELECT (see
+below), so it does not get the same-statement self-consistency the other
+four columns do (tracked as #217, pre-existing, not introduced here).
+
+``classify_jd_content`` is called unconditionally (its result feeds the SQL
+CASE, which decides whether to apply it) rather than gated on a
+Python-side "did anything change" check — the classifier is a cheap
+deterministic regex/heuristic pass, and the earlier per-call skip existed
+to avoid recomputing this cost in *readers* (``scoring_precheck`` reads the
+persisted column instead of recomputing per row), not to avoid a second
+pure-Python call inside this already-paid write chokepoint.
 
 Watermark invalidation (design decision, #152): the private original's
 ``invalidate_job_score`` nulls ``jd_adjudicated_version`` on a content
@@ -40,8 +89,9 @@ change as one of several score-invalidation side effects; this hosted
 engine has no ``invalidate_job_score`` counterpart at all (no per-posting
 LLM score tuple — see the divergence above), so rather than build one just
 to hold this single field, ``jd_adjudicated_version`` is nulled inline here,
-in the same CAS-guarded UPDATE as the fresh verdict stamp, whenever the
-stored content actually changed. This re-arms the D5 gate on any
+in the same atomic UPDATE as the fresh verdict stamp (see the #184 note
+above), whenever the stored content actually changed. This re-arms the D5
+gate on any
 content-changing re-fetch without inventing score-invalidation machinery
 this Wave-1 schema has no other use for.
 
@@ -134,13 +184,23 @@ def set_jd_full(
     appended to ``unresolved_reasons`` so the row is flagged for review
     instead of silently staying ``jd_full IS NULL``. A successful write
     clears any stale I-18 reason codes from ``unresolved_reasons`` in the
-    same UPDATE as the ``jd_full`` write. See this module's docstring for the
-    ``enrichment_tier`` reset the private original also performs, which has
-    no column to act on in the Wave-1 hosted schema.
+    same UPDATE as the ``jd_full`` write, but unlike that UPDATE's other four
+    columns, the new ``unresolved_reasons`` value is still a plain Python
+    list computed from an earlier SELECT (not a SQL CASE against the live
+    row), so it does not share their same-statement self-consistency
+    guarantee -- a concurrent writer to that column (e.g.
+    ``_record_jd_content_reject`` below) between the SELECT and this UPDATE
+    can still have its change silently clobbered. Pre-existing, identical in
+    kind to the private original, not introduced by #184; tracked as #217.
+    See this module's docstring for the ``enrichment_tier`` reset the private
+    original also performs, which has no column to act on in the Wave-1
+    hosted schema.
 
     JD-content verdict persistence (D5 / #152) and jd_adjudicated_version
-    invalidation: see this module's docstring. Both happen after the
-    ``jd_full`` UPDATE has committed, in a second, CAS-guarded UPDATE.
+    invalidation: see this module's docstring (#184) -- all of it, including
+    the ``jd_full`` write itself, lands in ONE UPDATE so no reader can ever
+    observe the text and its verdict disagreeing about which body they
+    describe.
     """
     raw = conn.raw if hasattr(conn, "raw") else conn
     if not text:
@@ -163,57 +223,75 @@ def set_jd_full(
         _record_jd_content_reject(raw, dedup_key, reason)
         return False
     existing = raw.execute(
-        "SELECT jd_full, unresolved_reasons, company, jd_content_verdict "
-        "FROM postings WHERE dedup_key = %s",
+        "SELECT unresolved_reasons, company FROM postings WHERE dedup_key = %s",
         (dedup_key,),
     ).fetchone()
     if existing is None:
         # No posting row for this dedup_key -- nothing to write. Mirrors
         # _record_jd_content_reject's existing is None guard below. Without
-        # this, both UPDATEs below would silently affect 0 rows (Postgres
+        # this, the UPDATE below would silently affect 0 rows (Postgres
         # raises nothing) and this function would return True -- a false
         # "wrote" signal for a no-op, plus a wasted classify_jd_content call.
         return False
-    existing_jd = existing["jd_full"]
-    existing_company = existing["company"]
-    existing_verdict = existing["jd_content_verdict"]
-    content_changed = text != existing_jd
     new_reasons = remove_reasons(
         existing["unresolved_reasons"],
         list(JD_CONTENT_REASON_CODES),
     )
+    # Pure Python, no DB access (#184) -- computed for the NEW text before
+    # any write, using the row's `company` as read above. `company` is not a
+    # decision input for WHETHER this write is applied (the SQL CASE below
+    # ignores it entirely) but it IS a grounding input for WHAT verdict gets
+    # stamped: classify_jd_content uses it to score title/company overlap, so
+    # a concurrent writer changing `company` between this SELECT and the
+    # UPDATE below can make the stamped verdict reflect stale grounding.
+    # Bounded by the same #217 TOCTOU window as `unresolved_reasons` above
+    # (no live caller races `company` writes against this path today).
+    # Called unconditionally; the UPDATE's SQL CASE below decides whether the
+    # result is actually applied. See the module docstring for why an
+    # external CAS guard is unnecessary once the write is a single statement.
+    jd_result = classify_jd_content(text, title, existing["company"], config)
     with raw.transaction():
-        raw.execute(
-            "UPDATE postings SET jd_full = %s, unresolved_reasons = %s WHERE dedup_key = %s",
-            (text, Jsonb(new_reasons), dedup_key),
+        cur = raw.execute(
+            "UPDATE postings SET "
+            "jd_full = %(text)s, "
+            "unresolved_reasons = %(reasons)s, "
+            "jd_content_verdict = CASE WHEN jd_full IS DISTINCT FROM %(text)s "
+            "OR jd_content_verdict IS NULL THEN %(verdict)s ELSE jd_content_verdict END, "
+            "jd_content_signal = CASE WHEN jd_full IS DISTINCT FROM %(text)s "
+            "OR jd_content_verdict IS NULL THEN %(signal)s ELSE jd_content_signal END, "
+            # No `OR jd_content_verdict IS NULL` branch here, unlike the two
+            # CASEs above: this column tracks whether the CURRENT jd_full has
+            # been adjudicated, not whether a verdict string is present, so
+            # it must only reset on an actual content change. A NULL verdict
+            # with unchanged content is the self-heal branch (pinned by
+            # test_unchanged_content_with_no_verdict_stamps_without_nulling_adjudicated_version)
+            # and must NOT null an adjudication that already covers this
+            # exact text -- don't "normalize" this to match the other two.
+            "jd_adjudicated_version = CASE WHEN jd_full IS DISTINCT FROM %(text)s "
+            "THEN NULL ELSE jd_adjudicated_version END "
+            "WHERE dedup_key = %(dedup_key)s",
+            {
+                "text": text,
+                "reasons": Jsonb(new_reasons),
+                "verdict": jd_result.verdict.value,
+                "signal": jd_result.signal,
+                "dedup_key": dedup_key,
+            },
         )
     commit_unless_nested(raw)
-
-    # Persist the jd-content verdict at this single write chokepoint (D5 /
-    # #152) — see the module docstring. Must run AFTER the jd_full UPDATE
-    # above (never before): the verdict describes the body just written, not
-    # whatever was there before.
-    if content_changed or existing_verdict is None:
-        jd_result = classify_jd_content(text, title, existing_company, config)
-        if content_changed:
-            # A changed body invalidates any prior adjudication — re-arm the
-            # D5 gate so scoring_precheck cannot keep coasting on an
-            # adjudicated_version stamped against the OLD body.
-            stamp_sql = (
-                "UPDATE postings SET jd_content_verdict = %s, jd_content_signal = %s, "
-                "jd_adjudicated_version = NULL WHERE dedup_key = %s AND jd_full = %s"
-            )
-        else:
-            stamp_sql = (
-                "UPDATE postings SET jd_content_verdict = %s, jd_content_signal = %s "
-                "WHERE dedup_key = %s AND jd_full = %s"
-            )
-        with raw.transaction():
-            raw.execute(
-                stamp_sql,
-                (jd_result.verdict.value, jd_result.signal, dedup_key, text),
-            )
-        commit_unless_nested(raw)
+    if cur.rowcount == 0:
+        # The SELECT above found a row, but a concurrent DELETE / re-upsert
+        # removed it before this UPDATE ran -- the write matched nothing.
+        # Report the honest "did not write" signal instead of a false True.
+        # Defensive: no code path in this repo issues `DELETE FROM postings`
+        # today (grep-confirmed), so this branch is not known to be live.
+        logger.warning(
+            "set_jd_full: UPDATE matched 0 rows [source=%s dedup_key=%s] -- "
+            "row deleted between SELECT and UPDATE?",
+            source,
+            dedup_key,
+        )
+        return False
     return True
 
 
