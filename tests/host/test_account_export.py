@@ -49,6 +49,7 @@ _PROFILE_EXPORT_COLUMNS = frozenset(
         "target_locations",
         "seniority_level",
         "years_of_experience",
+        "comp_floor_usd",
         "updated_at",
     }
 )
@@ -129,9 +130,9 @@ def _seed_full_account(dsn, user_id, posting_id) -> None:
     with psycopg.connect(dsn) as conn:
         conn.execute("INSERT INTO users (id) VALUES (%s) ON CONFLICT (id) DO NOTHING", (user_id,))
         conn.execute(
-            "INSERT INTO profiles (user_id, experience_summary, years_of_experience) "
-            "VALUES (%s, %s, %s)",
-            (user_id, f"{user_id} summary", 4.5),
+            "INSERT INTO profiles (user_id, experience_summary, years_of_experience, comp_floor_usd) "
+            "VALUES (%s, %s, %s, %s)",
+            (user_id, f"{user_id} summary", 4.5, 120000),
         )
         conn.execute(
             "INSERT INTO watchlists (user_id, posting_id) VALUES (%s, %s)",
@@ -203,6 +204,7 @@ def test_export_contains_only_the_requesting_users_own_rows(app):
     assert doc["user_id"] == USER_A
     assert doc["profile"]["experience_summary"] == f"{USER_A} summary"
     assert doc["profile"]["years_of_experience"] == 4.5
+    assert doc["profile"]["comp_floor_usd"] == 120000
 
     assert len(doc["watchlist"]) == 1
     assert doc["watchlist"][0]["posting_id"] == posting_id
@@ -272,6 +274,7 @@ def test_export_document_pins_expected_key_sets(app):
         "target_locations",
         "seniority_level",
         "years_of_experience",
+        "comp_floor_usd",
         "updated_at",
     }
 

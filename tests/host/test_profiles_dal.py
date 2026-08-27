@@ -58,6 +58,43 @@ def test_upsert_profile_updates_in_place_and_preserves_unspecified_fields(db_con
     assert row["skills"] == ["sql", "python"]
 
 
+def test_upsert_profile_then_get_profile_roundtrips_comp_floor_usd(db_conn):
+    """#28 item 2: comp_floor_usd (m0008) roundtrips through the same
+    single-writer seam every other profiles column already does."""
+    from jobcannon.db._profiles import get_profile, upsert_profile
+
+    _seed_user(db_conn, "u3")
+    upsert_profile(db_conn, "u3", comp_floor_usd=120000)
+
+    row = get_profile(db_conn, "u3")
+    assert row["comp_floor_usd"] == 120000
+
+
+def test_upsert_profile_omitted_comp_floor_usd_defaults_null(db_conn):
+    from jobcannon.db._profiles import get_profile, upsert_profile
+
+    _seed_user(db_conn, "u4")
+    upsert_profile(db_conn, "u4", seniority_level="mid")
+
+    row = get_profile(db_conn, "u4")
+    assert row["comp_floor_usd"] is None
+
+
+def test_upsert_profile_second_call_without_comp_floor_usd_preserves_it(db_conn):
+    """Same COALESCE-preservation contract every other column gets: an
+    omitted comp_floor_usd on a later call must not clobber an
+    already-set floor with NULL."""
+    from jobcannon.db._profiles import get_profile, upsert_profile
+
+    _seed_user(db_conn, "u5")
+    upsert_profile(db_conn, "u5", comp_floor_usd=95000)
+    upsert_profile(db_conn, "u5", seniority_level="staff")
+
+    row = get_profile(db_conn, "u5")
+    assert row["seniority_level"] == "staff"
+    assert row["comp_floor_usd"] == 95000
+
+
 def test_seed_guest_demo_is_idempotent(db_conn):
     """scripts/seed_guest_demo.py's seed(conn): running it twice must leave
     exactly one users row and one current profile row, unchanged by
