@@ -49,6 +49,7 @@ import datetime
 import logging
 import os
 
+from procrastinate import RetryStrategy
 from procrastinate import exceptions as procrastinate_exceptions
 from procrastinate import manager as procrastinate_manager
 
@@ -285,11 +286,21 @@ def reconcile_deleted_users(timestamp: int) -> dict:
     unset (e.g. a local dev worker with no Clerk configured), this tick
     logs and returns a `clerk_unreachable` status rather than raising or
     crash-looping the worker; this sweep is a catch-net for a rare delivery
-    failure, not a hard dependency of every worker tick. `checked` is
-    logged at INFO unconditionally (even when every count is 0) so a
-    healthy "nothing to do" sweep is distinguishable in the logs from a
-    sweep that silently stopped running at all — this repo has no
-    nightly_monitor/deadman infra; the log line is the health signal.
+    failure, not a hard dependency of every worker tick. Two more non-"ok"
+    statuses can come back from `run_reconciliation_sweep` itself (VERIFIED-4
+    / F6 / HIGH-3): `degraded` when every checked row's Clerk lookup errored
+    (a bare `status: "ok"` would otherwise mask a mid-run Clerk outage even
+    though a nonzero `errors` count is buried in the dict), and
+    `clerk_misconfigured` when the sweep's own circuit breaker refused to
+    delete anything because most/all checked rows came back a definitive 404
+    (HIGH-3: a valid key pointed at the wrong Clerk instance reads exactly
+    that way too, indistinguishable from a genuine mass deletion without the
+    breaker). `checked` is logged unconditionally (even when every count is
+    0) so a healthy "nothing to do" sweep is distinguishable in the logs
+    from a sweep that silently stopped running at all — this repo has no
+    nightly_monitor/deadman infra; the log line is the health signal. Every
+    non-"ok" status logs at WARNING or ERROR (see below) so it never reads
+    as a healthy tick.
     """
     from jobcannon.db import connection_factory
     from jobcannon.host.config import load_host_config
@@ -314,11 +325,26 @@ def reconcile_deleted_users(timestamp: int) -> dict:
         settle_days=settle_days,
         row_cap=row_cap,
     )
-    logger.info("reconcile_deleted_users: %s", result)
+    if result.get("status") == "ok":
+        logger.info("reconcile_deleted_users: %s", result)
+    else:
+        # degraded / clerk_misconfigured -- run_reconciliation_sweep already
+        # logged the specific reason at WARNING/ERROR; this line is the
+        # summary a log-scanning monitor keys on.
+        logger.warning("reconcile_deleted_users: non-ok sweep result: %s", result)
     return {"status": "ok", **result}
 
 
-@app.task(queue="maintenance")
+# MEDIUM-4 (review-1/2/devin): a transient PostHog 5xx/network error must
+# not permanently lose a purge -- the local users row is already gone by
+# the time this task runs, so nothing ever re-enqueues it once the job
+# fails. Bounded (not indefinite): 5 attempts, linear backoff, matches
+# purge_person's ~10s per-call timeout budget (posthog_admin._REQUEST_
+# TIMEOUT_S) without risking an unbounded retry storm against a real outage.
+_PURGE_POSTHOG_PERSON_RETRY = RetryStrategy(max_attempts=5, linear_wait=30)
+
+
+@app.task(queue="maintenance", retry=_PURGE_POSTHOG_PERSON_RETRY)
 def purge_posthog_person(distinct_id: str) -> dict:
     """#135: deletes the PostHog person for `distinct_id` -- already the
     PSEUDONYMOUS id (jobcannon.host.user_deletion.cascade_delete_user is
@@ -329,7 +355,12 @@ def purge_posthog_person(distinct_id: str) -> dict:
     local deletion has already committed by the time this task even runs.
     Fails soft (returns a "skipped" status, no exception) when the PostHog
     admin API credentials aren't configured; see
-    jobcannon.host.posthog_admin.purge_person for the full contract."""
+    jobcannon.host.posthog_admin.purge_person for the full contract.
+    Retries a bounded number of times (see _PURGE_POSTHOG_PERSON_RETRY
+    above) on a genuine HTTP failure -- purge_person raises on those, never
+    on "unconfigured" (which returns a status dict instead, so it is never
+    retried -- retrying a permanently-unconfigured purge forever would be
+    pure noise)."""
     from jobcannon.host import posthog_admin
 
     return posthog_admin.purge_person(distinct_id)
