@@ -80,6 +80,22 @@ def applied_versions(conn: psycopg.Connection) -> set[int]:
 
 
 def _apply_migration(conn: psycopg.Connection, dsn: str, migration: Migration) -> None:
+    if migration.contract_step:
+        # Loud on purpose (WARNING, not INFO): this is the log line
+        # docs/deploy-runbook.md's "Migration deploy-safety guard" section
+        # points an operator at before deciding whether
+        # JC_MIGRATE_ALLOW_NEWER_DB is safe to use for a rollback across
+        # this migration -- it is NOT, for a contract-shaped one (see the
+        # Rollback caveat above that line).
+        logger.warning(
+            "CONTRACT-STEP migration %s (%s) applying -- not guaranteed "
+            "backward-compatible with the previous release during the "
+            "zero-downtime deploy overlap window; see the migration's own "
+            "'Contract justification:' docstring and "
+            "docs/deploy-runbook.md's Rollback caveat",
+            migration.version,
+            migration.name,
+        )
     with conn.transaction():
         for statement in migration.sql:
             conn.execute(statement)

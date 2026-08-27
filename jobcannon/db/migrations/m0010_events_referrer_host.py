@@ -40,11 +40,38 @@ wrong is benign either way — the value is hostname-only either key name,
 `has_signed_up_event` dedups on event_type not the payload key, and any
 straggler rows are a cosmetic naming leftover, not a data-integrity or
 privacy defect — but deploy-code-first avoids creating stragglers at all.
+
+Inverted-order safety (issue #199): Render's pre-deploy step now always
+runs this migration BEFORE jobcannon-web's renamed writer goes live,
+inverting the "Deploy order: ... AFTER" note above, which predates that
+guarantee (docs/deploy-runbook.md §3, "Migration/writer ordering also
+inverted"). This UPDATE is idempotent under that inverted ordering: its
+WHERE clause (`payload ? 'referrer_url'`) only ever matches rows that
+still carry the old key, so running it before the new writer exists
+simply processes whatever old-format rows already exist at that moment —
+it does not depend on the new writer's output existing yet, and re-running
+the same UPDATE (if the ledger's once-only guarantee were ever bypassed)
+would match and touch zero additional rows once the corpus is caught up.
+The only consequence of the inverted order is the benign straggler case
+already documented above (old-format rows written by a not-yet-replaced
+writer in the gap between this migration committing and web's cutover),
+never an error or data-integrity issue.
+
+Stragglers: benign. A `user_signed_up` row an old (pre-rename) writer
+inserts after this migration commits keeps the old `referrer_url` key
+permanently (this migration only ever runs once, per the ledger) -- but the
+value under either key name is hostname-only, `has_signed_up_event` dedups
+on `event_type` not the payload key, and nothing else reads this payload
+key directly. No follow-up sweep needed.
 """
 
 from __future__ import annotations
 
 from jobcannon.db.migrations.types import Migration
+
+# See "Inverted-order safety:" above -- required alongside this flag by
+# tests/test_migration_deploy_safety.py (issue #199).
+inverted_order_safe = True
 
 MIGRATION = Migration(
     version=10,
