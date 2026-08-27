@@ -155,27 +155,49 @@ def test_healthz_is_unaffected_by_the_routing_exception_check():
     assert resp.status_code == 200
 
 
+# Every (concrete path, method) request the gate is allowed to stand down
+# for, paired with the REAL status a signed-out visitor gets there -- an
+# explicit, dissent-able table (refuter-3 F1) rather than the previous
+# `!= 401` catch-all, which would have silently gone toothless (accepting
+# 404/500/302 alongside a real 200) the moment a second public_get view
+# existed. Keyed by (path, method) rather than (endpoint, method): /consent
+# registers TWO separate Rule objects (@consent_bp.get + @consent_bp.post),
+# both auto-declaring OPTIONS, but there is only ONE real "OPTIONS
+# /consent" request an actual client can send -- Werkzeug resolves it to a
+# single rule internally, so the table (and the loop below) has to key on
+# the request that's actually made, not on which Rule object happened to
+# declare it. Today this is exactly GET/HEAD/OPTIONS /consent (issue
+# #171); adding an entry here without ANY matching rule's view being
+# `@public_get`-marked fails the cross-check loop below, and marking a
+# view `@public_get` without adding its entries here fails the main loop
+# instead (the unmarked-request `== 401` branch catches the mismatch).
+_EXEMPT_STATUS = {
+    ("/consent", "GET"): 200,
+    ("/consent", "HEAD"): 200,
+    ("/consent", "OPTIONS"): 200,
+}
+
+
 def test_gate_covers_every_registered_route_for_every_declared_method():
     """The invariant #173's fix must not weaken: every REAL, matched,
     non-public route still 401s a signed-out visitor, for every method it
-    declares -- derived from app.url_map.iter_rules() itself (never a
-    hand-maintained path list), so a future route is automatically
-    covered by this test too. Three exemptions, all intentional and
-    pre-existing or from issue #171, none hand-picked by route name:
-    PUBLIC_PATHS members (clerk_auth's own public-path branch), the
-    `webhooks` blueprint (signature-verified instead of session-gated --
-    tests/host/test_auth.py already covers its own behavior in
-    isolation), and a method `_is_auth_optional_for_method` (public_get's
-    marker predicate, the SAME one clerk_auth itself consults) says is
-    exempt for that view -- e.g. GET/HEAD /consent, issue #171 --
-    verified with a `!= 401` assertion (proving the gate stood down)
-    rather than a hardcoded expected status, since a marked view's
-    signed-out response shape is that view's own choice, not this
-    gate-coverage test's concern."""
+    declares -- including OPTIONS, which used to be excluded from this
+    loop entirely (refuter-1 + refuter-3 F2: a probe confirms
+    OPTIONS /postings/1/save->401 same as any other method, so there was
+    no reason to skip it) -- derived from app.url_map.iter_rules() itself
+    (never a hand-maintained path list), so a future route is automatically
+    covered by this test too. Two exemptions, both intentional, none
+    hand-picked by route name: PUBLIC_PATHS members (clerk_auth's own
+    public-path branch) and _EXEMPT_STATUS above (issue #171's
+    public_get-marked GET/HEAD/OPTIONS /consent, asserting the real
+    status a signed-out visitor gets, not merely "not 401")."""
     app = _app()
     client = app.test_client()
 
-    checked = 0
+    # Group by (concrete path, method), collecting every endpoint that
+    # declares each one (a list, not a single winner -- see _EXEMPT_STATUS's
+    # comment on why /consent's OPTIONS is ambiguous across two Rules).
+    endpoints_by_request: dict[tuple[str, str], list[str]] = {}
     for rule in app.url_map.iter_rules():
         if rule.endpoint.startswith("webhooks."):
             continue
@@ -183,21 +205,83 @@ def test_gate_covers_every_registered_route_for_every_declared_method():
         normalized = path.rstrip("/") or "/"
         if normalized in PUBLIC_PATHS:
             continue
-        view_func = app.view_functions.get(rule.endpoint)
-        for method in sorted(rule.methods - {"OPTIONS"}):
-            resp = client.open(path, method=method)
-            if _is_auth_optional_for_method(view_func, method):
-                assert resp.status_code != 401, (
-                    f"{method} {path} (endpoint={rule.endpoint}) is public_get-marked "
-                    f"but still 401'd signed out"
-                )
-            else:
-                assert resp.status_code == 401, (
-                    f"{method} {path} (endpoint={rule.endpoint}) -> {resp.status_code}, expected 401"
-                )
-            checked += 1
+        for method in rule.methods:
+            endpoints_by_request.setdefault((path, method), []).append(rule.endpoint)
+
+    checked = 0
+    for (path, method), endpoints in sorted(endpoints_by_request.items()):
+        resp = client.open(path, method=method)
+        if (path, method) in _EXEMPT_STATUS:
+            assert resp.status_code == _EXEMPT_STATUS[(path, method)], (
+                f"{method} {path} (endpoints={endpoints}) -> {resp.status_code}, "
+                f"expected {_EXEMPT_STATUS[(path, method)]} (declared exemption)"
+            )
+        else:
+            assert resp.status_code == 401, (
+                f"{method} {path} (endpoints={endpoints}) -> {resp.status_code}, expected 401"
+            )
+        checked += 1
+
+    # _EXEMPT_STATUS can't silently drift out of sync with the real
+    # predicate the gate consults: every declared exemption must have AT
+    # LEAST ONE rule at that (path, method) whose view
+    # _is_auth_optional_for_method -- the SAME function clerk_auth
+    # consults -- agrees is exempt.
+    for path, method in _EXEMPT_STATUS:
+        endpoints = endpoints_by_request.get((path, method), [])
+        assert any(
+            _is_auth_optional_for_method(app.view_functions.get(ep), method) for ep in endpoints
+        ), (
+            f"{method} {path} is in _EXEMPT_STATUS but no matching rule's view "
+            f"agrees it's exempt -- table drifted from the gate"
+        )
 
     # Sanity floor so a future refactor that accidentally empties the
     # iteration (e.g. an app.url_map that failed to register blueprints)
     # can't silently pass with zero assertions actually run.
     assert checked >= 10
+
+
+def test_wrong_method_on_a_public_path_still_405s_not_silently_exempted():
+    """Load-bearing design point with no prior test (devin + refuter-3 F3):
+    clerk_auth's routing_exception re-raise runs BEFORE the PUBLIC_PATHS
+    check (__init__.py, deliberately unconditional per that function's own
+    comment), so a wrong-method request against a PUBLIC path must still
+    405, not silently pass through as "public" and fail deeper in the
+    stack or get treated as a 200. Two different PUBLIC_PATHS routes
+    (POST /privacy -- GET-only; PUT /healthz -- GET-only) so this isn't
+    pinned to one route's registration quirk."""
+    app = _app()
+    client = app.test_client()
+
+    resp = client.post("/privacy")
+    assert resp.status_code == 405
+    assert "Allow" in resp.headers
+
+    resp2 = client.put("/healthz")
+    assert resp2.status_code == 405
+    assert "Allow" in resp2.headers
+
+
+def test_signed_in_visitor_hitting_a_bogus_path_still_gets_a_404_page():
+    """devin MED + refuter-3 F4: the routing_exception re-raise fires
+    before g.clerk_user is ever assigned, so without an explicit `None`
+    set on this path, a template read of g.clerk_user (base.html's header
+    nav) would see it entirely unset for a SIGNED-IN visitor hitting an
+    unmatched path -- unlike the 401 path, which always sets it first.
+    Proves the page still renders (a crash would surface as 500, same
+    verification test_two_bogus_paths_return_404_not_401 relies on) and
+    documents the accepted trade-off explicitly: g.clerk_user is set to
+    None on this path (mirroring the public-path branch), so a signed-in
+    visitor sees the SIGNED-OUT header nav on this one page -- resolving
+    real identity here would mean running VERIFY_REQUEST speculatively on
+    every unmatched-path probe, and the 404 status must never depend on
+    it."""
+    from jobcannon.web.auth import ClerkIdentity
+
+    app = _app(verify=lambda req: ClerkIdentity(user_id="user_1", claims={"sub": "user_1"}))
+    resp = app.test_client().get("/does-not-exist")
+
+    assert resp.status_code == 404
+    html = resp.get_data(as_text=True)
+    assert "data-auth-nav" in html  # signed-out nav renders even though this visitor is signed in

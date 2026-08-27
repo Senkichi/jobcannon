@@ -97,10 +97,14 @@ def _user_row(dsn, user_id):
 
 
 def test_post_consent_grant_sets_column_and_writes_one_audit_row(app):
+    """HX-Request (the norm -- the form's own hx-post) so the write is
+    asserted through the in-place-confirmation response shape; the non-HX
+    PRG redirect shape is covered separately by
+    test_post_consent_direct_request_redirects_then_shows_the_choice."""
     dsn = app.config["_TEST_DSN"]
     client = _seeded_client(app, dsn)
 
-    resp = client.post("/consent", data={"choice": "grant"})
+    resp = client.post("/consent", data={"choice": "grant"}, headers={"HX-Request": "true"})
     # issue #182: no longer a 302-to-feed that silently discards the ack --
     # the same route re-renders with an inline confirmation instead.
     assert resp.status_code == 200
@@ -118,7 +122,7 @@ def test_post_consent_decline_is_a_real_producible_path(app):
     dsn = app.config["_TEST_DSN"]
     client = _seeded_client(app, dsn)
 
-    resp = client.post("/consent", data={"choice": "decline"})
+    resp = client.post("/consent", data={"choice": "decline"}, headers={"HX-Request": "true"})
     assert resp.status_code == 200
     assert "Analytics disabled." in resp.get_data(as_text=True)
 
@@ -148,18 +152,30 @@ def test_post_consent_hx_request_gets_bare_panel_fragment_with_confirmation(app)
     assert "Analytics enabled." in html
 
 
-def test_post_consent_direct_request_gets_full_page_with_confirmation(app):
-    """Fragment-route convention (CLAUDE.md): a direct/no-JS POST gets the
-    full page back, not a bare fragment -- the ack must not be JS-only."""
+def test_post_consent_direct_request_redirects_then_shows_the_choice(app):
+    """Post/Redirect/Get for the non-HX (no-JS) path (refuter-1): a direct
+    POST no longer re-renders the full page in place -- it 303s to GET
+    /consent so a refresh/back replays the safe GET instead of the browser
+    re-submitting the form (and writing a second consent_recorded event).
+    The choice is still visible after the round-trip -- never silently
+    discarded the way the pre-#182 redirect-to-feed was -- as "Current
+    choice: allowed.", the same line the HX path's confirmation banner sits
+    above."""
     dsn = app.config["_TEST_DSN"]
     client = _seeded_client(app, dsn)
 
     resp = client.post("/consent", data={"choice": "grant"})
-    html = resp.get_data(as_text=True)
+    assert resp.status_code == 303
+    assert resp.headers["Location"].rstrip("/").endswith("/consent")
 
-    assert resp.status_code == 200
+    follow = client.get("/consent")
+    html = follow.get_data(as_text=True)
     assert "<html" in html
-    assert "Analytics enabled." in html
+    assert "Current choice: allowed." in html
+
+    user = _user_row(dsn, USER_ID)
+    assert user["analytics_consent"] is True
+    assert len(_events_rows(dsn, USER_ID, "consent_recorded")) == 1
 
 
 def test_consent_payload_carries_all_four_allowlisted_keys(app):
@@ -251,6 +267,21 @@ def test_consent_get_renders_signed_out_variant_instead_of_401(app):
     assert "Analytics preferences" in html
     assert 'href="https://clerk.test/sign-in"' in html
     assert 'href="https://clerk.test/sign-up"' in html
+
+
+def test_consent_trailing_slash_behaves_the_same_as_get_consent_when_signed_out(app):
+    """devin lead: consent.py registers /consent with strict_slashes=False,
+    and public_get's marker is keyed to the view function (issue #171), not
+    the path string, so GET /consent/ must render the same signed-out
+    variant as GET /consent -- not a 401, not a redirect loop."""
+    app.config["VERIFY_REQUEST"] = lambda req: None
+    client = app.test_client()
+
+    resp = client.get("/consent/")
+    html = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "Analytics preferences" in html
 
 
 def test_consent_options_is_exempted_same_as_get_when_signed_out(app):
