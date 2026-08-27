@@ -12,6 +12,7 @@ unintended."""
 from __future__ import annotations
 
 import contextlib
+import logging
 
 import httpx
 from clerk_backend_api import models
@@ -110,6 +111,34 @@ def test_lookup_clerk_user_unexpected_exception_is_error():
 
     users = _ScriptedUsers({"u1": RuntimeError("network blip")})
     assert _lookup_clerk_user(users, "u1") == "error"
+
+
+def test_lookup_clerk_user_429_is_rate_limited():
+    """Issue #136 'rate-limit-aware': a 429 must be distinguishable from a
+    generic error so the sweep can back off/abort instead of continuing to
+    hammer an already-rate-limited Clerk row by row."""
+    from jobcannon.host.user_deletion import _lookup_clerk_user
+
+    users = _ScriptedUsers({"u1": _clerk_errors(429)})
+    assert _lookup_clerk_user(users, "u1") == "rate_limited"
+
+
+def test_lookup_clerk_user_never_logs_full_traceback(caplog):
+    """F4 / LEAD-6: mirrors jobcannon.web.auth._clerk_failure_reason's
+    documented invariant -- log only the status code / exception class
+    name, never `logger.exception` (full traceback), so nothing from the
+    request (a Clerk user id embedded in a request URL, in particular) can
+    surface in a log line."""
+    from jobcannon.host.user_deletion import _lookup_clerk_user
+
+    users = _ScriptedUsers({"u1": _sdk_error()})
+    with caplog.at_level(logging.WARNING, logger="jobcannon.host.user_deletion"):
+        _lookup_clerk_user(users, "u1")
+
+    assert caplog.records
+    for record in caplog.records:
+        assert record.levelno == logging.WARNING
+        assert record.exc_info is None  # logger.exception would set this
 
 
 # --- cascade_delete_user: single deletion path -----------------------------
@@ -216,6 +245,59 @@ def test_list_pending_reconciliation_respects_settle_days_and_anon_exclusion(db_
 
 
 @requires_postgres
+def test_list_pending_reconciliation_excludes_guest_demo_sentinel(db_conn):
+    """HIGH-2 / F1: `guest_demo` is a real, seeded, non-anon `users` row
+    (`jobcannon.db._profiles.GUEST_USER_ID`) that is NOT Clerk-issued. The
+    previous denylist (`NOT LIKE 'anon\\_%'`) let it reach the Clerk lookup
+    once aged past settle_days -- a definitive 404 there would hard-delete
+    it and break `/demo`. The fix is a positive allowlist (Clerk ids are
+    always `user_`-prefixed)."""
+    from jobcannon.db._profiles import GUEST_USER_ID
+    from jobcannon.db._users import ensure_user, list_users_pending_deletion_reconciliation
+
+    ensure_user(db_conn, GUEST_USER_ID, email=None)
+    _backdate_created(db_conn, GUEST_USER_ID, days=_SETTLE_DAYS + 1)
+
+    candidates = list_users_pending_deletion_reconciliation(
+        db_conn, settle_days=_SETTLE_DAYS, limit=50
+    )
+
+    assert GUEST_USER_ID not in candidates
+
+
+@requires_postgres
+def test_run_reconciliation_sweep_never_looks_up_guest_demo(db_conn):
+    """Stronger signal than the DAL-level exclusion test above: proves the
+    sweep never even REACHES the Clerk lookup for guest_demo, not just that
+    it isn't deleted. `_ScriptedUsers.get` raises `KeyError` on an id with
+    no scripted outcome, so if the allowlist regressed and guest_demo
+    reached the lookup, this test fails loudly with `KeyError` rather than
+    silently passing."""
+    from jobcannon.db._profiles import GUEST_USER_ID
+    from jobcannon.db._users import ensure_user
+    from jobcannon.host.user_deletion import run_reconciliation_sweep
+
+    ensure_user(db_conn, GUEST_USER_ID, email=None)
+    _backdate_created(db_conn, GUEST_USER_ID, days=_SETTLE_DAYS + 1)
+
+    real_user = "user_alongside_guest_demo"
+    ensure_user(db_conn, real_user, email="x@example.org")
+    _backdate_created(db_conn, real_user, days=_SETTLE_DAYS + 1)
+
+    fake_users = _ScriptedUsers({real_user: None})  # no scripted outcome for GUEST_USER_ID
+    result = run_reconciliation_sweep(
+        lambda: _factory_for(db_conn),
+        fake_users,
+        settle_days=_SETTLE_DAYS,
+        row_cap=50,
+        sleep_fn=lambda s: None,
+    )
+
+    assert GUEST_USER_ID not in fake_users.calls
+    assert result["confirmed_present"] == 1
+
+
+@requires_postgres
 def test_list_pending_reconciliation_rotates_never_checked_first_then_oldest_checked(db_conn):
     """The regression this pins: an ordering by created_at alone would
     return the SAME oldest `limit` rows forever, since rows only leave that
@@ -285,7 +367,13 @@ def test_run_reconciliation_sweep_deletes_stamps_and_counts_errors(db_conn):
         sleep_fn=sleeps.append,
     )
 
-    assert result == {"checked": 3, "deleted": 1, "confirmed_present": 1, "errors": 1}
+    assert result == {
+        "status": "ok",
+        "checked": 3,
+        "deleted": 1,
+        "confirmed_present": 1,
+        "errors": 1,
+    }
     # Paced between rows, never before the first lookup.
     assert len(sleeps) == 2
 
@@ -305,7 +393,10 @@ def test_run_reconciliation_sweep_deletes_stamps_and_counts_errors(db_conn):
     erroring_row = db_conn.execute(
         "SELECT deletion_checked_at FROM users WHERE id = %s", (erroring,)
     ).fetchone()
-    assert erroring_row["deletion_checked_at"] is None  # never stamped -> retried next sweep
+    # MEDIUM-5 / FINDING-4: now stamped even on error, so it rotates to the
+    # BACK of the next sweep's candidate window instead of parking itself at
+    # the front (NULLS FIRST) forever and starving out never-checked rows.
+    assert erroring_row["deletion_checked_at"] is not None
 
 
 @requires_postgres
@@ -415,3 +506,287 @@ def test_reconcile_deleted_users_wires_settle_days_and_row_cap_from_env(monkeypa
     assert captured == {"settle_days": 9, "row_cap": 7}
     assert result["status"] == "ok"
     assert result["checked"] == 0
+
+
+# --- circuit breaker (HIGH-3) ------------------------------------------
+
+
+@requires_postgres
+def test_run_reconciliation_sweep_circuit_breaker_trips_on_all_404(db_conn):
+    """HIGH-3: a valid CLERK_SECRET_KEY for the WRONG Clerk instance
+    authenticates fine (no 401) but 404s for every real user -- without
+    this guard, one sweep would hard-delete the whole checked cohort.
+    Seeds exactly `_CIRCUIT_BREAKER_MIN_CHECKED` rows (the breaker's floor)
+    all scripted 404."""
+    from jobcannon.db._users import ensure_user
+    from jobcannon.host.user_deletion import run_reconciliation_sweep
+
+    user_ids = [f"user_breaker_{i}" for i in range(5)]
+    for uid in user_ids:
+        ensure_user(db_conn, uid, email=f"{uid}@example.org")
+        _backdate_created(db_conn, uid, days=_SETTLE_DAYS + 1)
+
+    fake_users = _ScriptedUsers({uid: _clerk_errors(404) for uid in user_ids})
+
+    result = run_reconciliation_sweep(
+        lambda: _factory_for(db_conn),
+        fake_users,
+        settle_days=_SETTLE_DAYS,
+        row_cap=50,
+        sleep_fn=lambda s: None,
+    )
+
+    assert result == {
+        "status": "clerk_misconfigured",
+        "checked": 5,
+        "deleted": 0,
+        "confirmed_present": 0,
+        "errors": 0,
+    }
+    placeholders = ", ".join(["%s"] * len(user_ids))
+    remaining = {
+        row["id"]
+        for row in db_conn.execute(
+            f"SELECT id FROM users WHERE id IN ({placeholders})", tuple(user_ids)
+        ).fetchall()
+    }
+    assert remaining == set(user_ids)  # NOTHING deleted
+
+
+@requires_postgres
+def test_run_reconciliation_sweep_circuit_breaker_does_not_block_minority_404(db_conn):
+    """A genuine single deletion inside a healthy majority-present cohort
+    must NOT be blocked by the breaker -- only a majority/all-404 pattern
+    should trip it."""
+    from jobcannon.db._users import ensure_user
+    from jobcannon.host.user_deletion import run_reconciliation_sweep
+
+    gone = "user_breaker_gone"
+    present_ids = [f"user_breaker_present_{i}" for i in range(6)]
+    for uid in (gone, *present_ids):
+        ensure_user(db_conn, uid, email=f"{uid}@example.org")
+        _backdate_created(db_conn, uid, days=_SETTLE_DAYS + 1)
+
+    outcomes = {gone: _clerk_errors(404)}
+    outcomes.update({uid: None for uid in present_ids})
+    fake_users = _ScriptedUsers(outcomes)
+
+    result = run_reconciliation_sweep(
+        lambda: _factory_for(db_conn),
+        fake_users,
+        settle_days=_SETTLE_DAYS,
+        row_cap=50,
+        sleep_fn=lambda s: None,
+    )
+
+    assert result["status"] == "ok"
+    assert result["checked"] == 7
+    assert result["deleted"] == 1
+    assert result["confirmed_present"] == 6
+    row = db_conn.execute("SELECT id FROM users WHERE id = %s", (gone,)).fetchone()
+    assert row is None
+
+
+# --- rate-limit abort (issue #136 "rate-limit-aware") -------------------
+
+
+@requires_postgres
+def test_run_reconciliation_sweep_aborts_early_on_rate_limit(db_conn):
+    """A 429 mid-sweep must abort the remaining candidates rather than
+    hammering an already-rate-limited Clerk row by row, and the result must
+    be distinguishable from a healthy tick even though nothing outright
+    errored. Backdated `created_at` values are staggered (not all identical)
+    so `ORDER BY ... created_at ASC` gives a deterministic processing
+    order: first, then second (which rate-limits), then never_reached."""
+    from jobcannon.db._users import ensure_user
+    from jobcannon.host.user_deletion import run_reconciliation_sweep
+
+    first = "user_ratelimit_first"
+    second = "user_ratelimit_second"
+    never_reached = "user_ratelimit_never_reached"
+    ensure_user(db_conn, first, email="a@example.org")
+    _backdate_created(db_conn, first, days=_SETTLE_DAYS + 3)
+    ensure_user(db_conn, second, email="b@example.org")
+    _backdate_created(db_conn, second, days=_SETTLE_DAYS + 2)
+    ensure_user(db_conn, never_reached, email="c@example.org")
+    _backdate_created(db_conn, never_reached, days=_SETTLE_DAYS + 1)
+
+    # No scripted outcome for never_reached -- a lookup attempt on it raises
+    # KeyError, so this test fails loudly (not silently) if the abort ever
+    # regresses into continuing past the rate-limited row.
+    fake_users = _ScriptedUsers({first: None, second: _clerk_errors(429)})
+
+    result = run_reconciliation_sweep(
+        lambda: _factory_for(db_conn),
+        fake_users,
+        settle_days=_SETTLE_DAYS,
+        row_cap=50,
+        sleep_fn=lambda s: None,
+    )
+
+    assert fake_users.calls == [first, second]
+    assert result["checked"] == 2
+    assert result["status"] == "degraded"
+    assert result["confirmed_present"] == 1
+    assert result["errors"] == 1
+
+
+# --- HIGH-1: real PsycopgConnector / AppNotOpen self-heal -----------------
+
+
+@requires_postgres
+def test_cascade_delete_user_web_process_defer_lands_real_procrastinate_job(monkeypatch):
+    """FINDING 1/2 (review-3), HIGH-1 (review-1): the only test that
+    exercises the REAL PsycopgConnector, starting from the exact state the
+    web process is actually in (task_app.app never opened) -- every other
+    cascade test in this file deliberately swaps in InMemoryConnector (see
+    this module's own docstring), which cannot raise AppNotOpen and
+    therefore cannot prove this path at all. Empirically closes review-3's
+    reproduction (never-open -> AppNotOpen; task_app.ensure_open() -> a
+    real procrastinate_jobs row lands) end to end against a throwaway
+    Postgres DB standing in for the web process's own database."""
+    import procrastinate
+    import psycopg
+
+    import jobcannon.worker.__main__ as worker_main
+    from jobcannon.db._users import ensure_user
+    from jobcannon.db.migrate import run_migrations
+    from jobcannon.host import posthog_client, task_app
+    from jobcannon.host.user_deletion import PURGE_POSTHOG_PERSON_TASK, cascade_delete_user
+    from tests.host.conftest import create_throwaway_db, drop_throwaway_db
+
+    dsn, db_name = create_throwaway_db("jobcannon_cascade_real_defer")
+    monkeypatch.setenv("DATABASE_URL", dsn)
+    posthog_client.set_analytics_salt("real-defer-test-salt")
+    try:
+        run_migrations(dsn)
+        # Apply procrastinate's own schema scoped inside replace_connector,
+        # so task_app.app.connector reverts to its untouched (never-opened)
+        # default afterwards -- exactly the state a fresh web-process
+        # worker is in before its first webhook delivery.
+        with task_app.app.replace_connector(procrastinate.PsycopgConnector(conninfo=dsn)):
+            worker_main._ensure_procrastinate_schema()
+
+        # Mirrors wiring.init_engine_seams's seam 5 -- bookkeeping only, no
+        # I/O (see task_app.py's docstring for why the real open is lazy).
+        task_app.configure(dsn)
+        try:
+            user_id = "user_real_defer"
+            with psycopg.connect(dsn) as conn:
+                ensure_user(conn, user_id, email="x@example.org")
+                expected_pseudonym = posthog_client.pseudonymize(user_id)
+
+                cascade_delete_user(conn, user_id)  # the REAL path, no InMemoryConnector
+
+            with psycopg.connect(dsn) as conn:
+                row = conn.execute(
+                    "SELECT task_name, queue_name, args FROM procrastinate_jobs"
+                ).fetchone()
+            assert row is not None
+            assert row[0] == PURGE_POSTHOG_PERSON_TASK
+            assert row[1] == "maintenance"
+            assert row[2]["distinct_id"] == expected_pseudonym
+        finally:
+            task_app.close()
+            task_app.configure(None)
+    finally:
+        posthog_client.set_analytics_salt(None)
+        drop_throwaway_db(db_name)
+
+
+@requires_postgres
+def test_cascade_delete_user_defer_failure_is_fail_open_and_logged(db_conn, monkeypatch):
+    """VERIFIED-3 (devin): a genuine (non-AppNotOpen) failure enqueueing the
+    purge must not turn an already-committed local delete into a raised
+    exception -- the caller (the webhook handler) would otherwise turn a
+    successful deletion into a 500, making Clerk retry the whole webhook
+    delivery. Forces the failure via monkeypatch (not a real backend error)
+    so this test cannot pass for the wrong reason -- AppNotOpen now takes
+    an entirely different, self-healing branch, proven by
+    test_cascade_delete_user_web_process_defer_lands_real_procrastinate_job
+    above; this test is specifically the OTHER branch."""
+    import logging
+
+    from jobcannon.db._users import ensure_user
+    from jobcannon.host import posthog_client, task_app
+    from jobcannon.host.user_deletion import cascade_delete_user
+
+    posthog_client.set_analytics_salt("defer-failure-test-salt")
+    try:
+        user_id = "user_defer_failure"
+        ensure_user(db_conn, user_id, email="x@example.org")
+
+        class _BoomDeferrer:
+            def defer(self, **kwargs):
+                raise RuntimeError("simulated transient defer failure")
+
+        monkeypatch.setattr(task_app.app, "configure_task", lambda *a, **kw: _BoomDeferrer())
+
+        with caplog_ctx() as records:
+            cascade_delete_user(db_conn, user_id)  # must NOT raise
+
+        row = db_conn.execute("SELECT id FROM users WHERE id = %s", (user_id,)).fetchone()
+        assert row is None  # local delete already committed regardless
+        assert any(
+            "failed to enqueue PostHog purge" in r.getMessage() and r.levelno == logging.ERROR
+            for r in records
+        )
+    finally:
+        posthog_client.set_analytics_salt(None)
+
+
+@contextlib.contextmanager
+def caplog_ctx():
+    """A minimal log-capture helper, used instead of the `caplog` fixture
+    for the one test above that also needs `db_conn` + `monkeypatch` in a
+    specific order -- avoids any fixture-interaction surprise, captures
+    directly off jobcannon.host.user_deletion's own logger."""
+    import logging as _logging
+
+    target_logger = _logging.getLogger("jobcannon.host.user_deletion")
+    records: list[_logging.LogRecord] = []
+
+    class _Handler(_logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Handler()
+    target_logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        target_logger.removeHandler(handler)
+
+
+def test_purge_posthog_person_retry_strategy_bounded_and_gives_up_past_max():
+    """MEDIUM-4 (review-1/2/devin): purge_posthog_person must carry a
+    bounded RetryStrategy so a transient PostHog 5xx/network error doesn't
+    permanently lose the purge (nothing ever re-enqueues it once the local
+    users row is gone). Asserts the strategy's actual retry DECISIONS
+    (retries early, gives up past max_attempts) rather than just its
+    presence -- a RetryStrategy with max_attempts=0 would technically
+    "exist" while retrying nothing."""
+    from procrastinate.jobs import Job
+
+    from jobcannon.host import tasks
+    from jobcannon.host.user_deletion import PURGE_POSTHOG_PERSON_TASK
+
+    task = tasks.app.tasks[PURGE_POSTHOG_PERSON_TASK]
+    strategy = task.retry_strategy
+    assert strategy is not None
+    assert strategy.max_attempts is not None
+    assert strategy.max_attempts > 0
+
+    exc = RuntimeError("transient posthog 5xx")
+
+    def _job(attempts: int) -> Job:
+        return Job(
+            queue="maintenance",
+            lock=None,
+            queueing_lock=None,
+            task_name=PURGE_POSTHOG_PERSON_TASK,
+            attempts=attempts,
+        )
+
+    assert strategy.get_retry_decision(exception=exc, job=_job(0)) is not None
+    assert strategy.get_retry_decision(exception=exc, job=_job(strategy.max_attempts)) is None

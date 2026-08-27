@@ -227,12 +227,21 @@ def test_user_deleted_enqueues_posthog_purge_with_pseudonym_when_salt_configured
     cascade_delete_user) must defer purge_posthog_person with the user's
     PSEUDONYM, never the raw Clerk id -- and only when analytics
     pseudonymization is configured (posthog_client.pseudonymize's
-    fail-closed contract). The salt-UNSET case is already covered for free
-    by test_user_deleted_removes_row/test_user_deleted_cascades_to_all_
-    child_tables above: neither swaps in an InMemoryConnector, so a stray
-    real .defer() attempt reaching this test's throwaway Postgres (which
-    has no procrastinate schema applied) would raise and fail those tests
-    loudly rather than silently passing."""
+    fail-closed contract).
+
+    The salt-UNSET case is NOT covered for free by test_user_deleted_
+    removes_row/test_user_deleted_cascades_to_all_child_tables above
+    (review-3 finding 2/3: this docstring previously claimed it was, which
+    was wrong on two counts). First, cascade_delete_user returns right
+    after delete_user() when pseudonymize() comes back None -- salt-unset
+    never reaches configure_task/.defer() at all, so there is no "stray
+    real .defer() attempt" for those tests to incidentally catch. Second,
+    even a genuine defer failure wouldn't fail a test loudly any more:
+    cascade_delete_user's own except-Exception branch (issue #135/#136
+    HIGH-1 fix) logs and swallows it by design, precisely so a PostHog
+    outage can never turn a successful deletion into a request failure.
+    Salt-unset behavior has its own direct assertion instead --
+    test_user_deleted_skips_posthog_purge_when_salt_unset below."""
     from procrastinate import testing
 
     from jobcannon.host import posthog_client, task_app
@@ -267,6 +276,42 @@ def test_user_deleted_enqueues_posthog_purge_with_pseudonym_when_salt_configured
         assert n == 0
     finally:
         posthog_client.set_analytics_salt(None)
+
+
+def test_user_deleted_skips_posthog_purge_when_salt_unset(app):
+    """The direct counterpart to test_user_deleted_enqueues_posthog_purge_
+    with_pseudonym_when_salt_configured above -- and the test that docstring
+    used to (wrongly, per review-3 finding 2/3) claim was covered "for free"
+    by the plain delete tests. Explicitly unsets the salt (rather than
+    relying on it being unset by default) so this assertion can't silently
+    start passing for the wrong reason if some other test in the same
+    process left a salt configured. Swaps in InMemoryConnector purely so a
+    regression that DID start deferring here would be caught locally
+    instead of raising AppNotOpen against this fixture's throwaway DB (which
+    never applies procrastinate's own schema -- see the `app` fixture
+    above)."""
+    from procrastinate import testing
+
+    from jobcannon.host import posthog_client, task_app
+
+    posthog_client.set_analytics_salt(None)
+    user_id = "user_posthog_purge_no_salt"
+    created = json.dumps(_user_created(user_id=user_id)).encode()
+    client = app.test_client()
+    assert client.post("/webhooks/clerk", data=created, headers=_sign(created)).status_code == 200
+
+    deleted = json.dumps(_user_deleted(user_id)).encode()
+    with task_app.app.replace_connector(testing.InMemoryConnector()) as procrastinate_app:
+        resp = client.post(
+            "/webhooks/clerk", data=deleted, headers=_sign(deleted, msg_id="msg_purge_no_salt_del")
+        )
+        assert resp.status_code == 200
+        jobs = list(procrastinate_app.connector.jobs.values())
+
+    assert jobs == []
+    with psycopg.connect(app.config["_TEST_DSN"]) as conn:
+        n = conn.execute("SELECT count(*) FROM users WHERE id = %s", (user_id,)).fetchone()[0]
+    assert n == 0
 
 
 def test_stale_timestamp_replay_rejected_400(app):
