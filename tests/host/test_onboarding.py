@@ -459,6 +459,35 @@ def test_empty_submission_over_hx_returns_a_small_error_fragment(app):
     assert _anon_user_count(app.config["_TEST_DSN"]) == 0
 
 
+def test_whitespace_only_title_is_treated_as_empty_and_rejected(app):
+    """A crafted (non-checkbox-UI) submission of a whitespace-only title
+    must not slip past the #175 empty-submission gate: `_parse_titles`
+    filters on the STRIPPED value, so `titles=["   "]` collapses to an
+    empty selection, same 200 re-render, no anon user/profile row written."""
+    client = app.test_client()
+    resp = client.post(
+        "/start", data={"titles": ["   "], "seniority_level": "mid", "workplace_type": "any"}
+    )
+
+    assert resp.status_code == 200
+    assert "pick at least one title or company" in resp.get_data(as_text=True)
+    assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+    assert _profile_row_for_anon(app.config["_TEST_DSN"]) is None
+
+
+def test_whitespace_only_company_is_treated_as_empty_and_rejected(app):
+    """Same as the whitespace-only-title case, for `_parse_companies`."""
+    client = app.test_client()
+    resp = client.post(
+        "/start", data={"companies": ["   "], "seniority_level": "mid", "workplace_type": "any"}
+    )
+
+    assert resp.status_code == 200
+    assert "pick at least one title or company" in resp.get_data(as_text=True)
+    assert _anon_user_count(app.config["_TEST_DSN"]) == 0
+    assert _profile_row_for_anon(app.config["_TEST_DSN"]) is None
+
+
 def test_title_only_submission_succeeds_without_a_company(app):
     """The #175 empty-submission check requires ONE of titles/companies, not
     both — a title-only submission (the pre-#175 common case) must still
