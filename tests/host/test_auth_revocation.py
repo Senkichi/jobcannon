@@ -74,7 +74,7 @@ def _seed_user(dsn, user_id):
 
 def _seed_profile(dsn, user_id):
     with psycopg.connect(dsn) as conn:
-        upsert_profile(conn, user_id)
+        upsert_profile(conn, user_id, workplace_type=None)
 
 
 def _feed_client(app, user_id, *, iat=None):

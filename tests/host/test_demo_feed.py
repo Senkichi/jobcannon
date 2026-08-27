@@ -58,6 +58,7 @@ def app():
 
 
 def _seed_guest_profile(dsn: str, **kwargs) -> None:
+    kwargs.setdefault("workplace_type", None)
     with psycopg.connect(dsn, autocommit=True) as conn:
         conn.execute(
             "INSERT INTO users (id, plan_tier) VALUES (%s, 'free') ON CONFLICT (id) DO NOTHING",
