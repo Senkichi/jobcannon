@@ -1,0 +1,29 @@
+{# One page/batch of posting rows plus its own "Load more" control (#156).
+   Shared by three render paths so they can never drift apart: the initial
+   full-page render's first batch (included from _feed_list.html, itself
+   included by feed.html / preview.html / demo.html), and the "Load more"
+   button's own HX-Request fragment response (jobcannon/web/pages.py's
+   `feed` view, jobcannon/web/onboarding.py's `preview` view) — clicking
+   "Load more" replaces THIS SAME markup (hx-target="this"
+   hx-swap="outerHTML" on the button) with the next batch plus a new button,
+   which is what appends the next page directly after the one just
+   rendered. `load_more_url` is the keyset-cursor URL for the next page
+   (jobcannon.db._feed.cursor_from_row, built by the calling route) or None
+   when this batch came back short of FEED_PAGE_MAX — a keyset page shorter
+   than the cap proves there is nothing left to seek past, so the button
+   simply isn't rendered (removing itself when this fragment replaces a
+   prior "Load more" click that DID render one). demo.html never passes
+   load_more_url, so /demo renders no button at all — Jinja's default
+   Undefined is falsy in an `{% if %}`, the same tolerance `show_actions`
+   already relies on below. #}
+<div class="space-y-4" data-feed-list>
+  {% for entry in entries %}
+    {% include "_posting_row.html" %}
+  {% endfor %}
+</div>
+{% if load_more_url %}
+<button hx-get="{{ load_more_url }}" hx-target="this" hx-swap="outerHTML"
+        class="text-sm underline text-neutral-300 mt-4 block" data-load-more>
+  Load more
+</button>
+{% endif %}

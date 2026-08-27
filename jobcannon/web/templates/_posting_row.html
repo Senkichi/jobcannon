@@ -90,11 +90,25 @@
            away immediately. There is no row swap for this control: nothing
            in this entry's rendered shape (jobcannon/web/feed_entries.py)
            depends on apply state, so there is nothing for a swap to
-           update. #}
+           update. Being a plain fetch(), htmx never sees this request, so
+           base.html's `hx-headers` attribute (which puts the CSRF token on
+           every htmx-issued request) never reaches it either — the token
+           here comes from base.html's <meta name="csrf-token"> tag
+           instead, issue #146.
+
+           `.then`/`.catch` below surface a failure via base.html's
+           `window.jcSurfaceError` toast (MED-1 fix, same mechanism the
+           save/dismiss htmx:responseError listener uses) — an expired
+           render-time token (WTF_CSRF_TIME_LIMIT, default 3600s, same as
+           <meta name="csrf-token">'s own bake-in) previously 400ed here
+           with NO feedback at all: no swap target, no htmx event, nothing.
+           `resp.ok` is checked explicitly because fetch() only REJECTS on a
+           network failure, never on a 4xx/5xx HTTP status — a bare
+           `.catch` alone would miss the CSRF-400 case entirely. #}
         <a href="{{ entry.apply_url }}"
            target="_blank"
            rel="noopener noreferrer"
-           hx-on:click="fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true})"
+           hx-on:click="fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true, headers: {'X-CSRFToken': document.querySelector('meta[name=csrf-token]').content}}).then(function(resp){ if (!resp.ok && window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — refresh the page and try again.'); } }).catch(function(){ if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — check your connection and try again.'); } })"
            class="underline text-neutral-300"
            data-action-apply>
           Apply
@@ -104,6 +118,28 @@
           No application link available
         </span>
       {% endif %}
+    </div>
+  {% endif %}
+  {% if signup_cta_url %}
+    {# Anonymous per-row CTA (issue #174): /preview and /demo never pass
+       show_actions, so the save/dismiss/apply block above is skipped
+       entirely and an anonymous visitor previously had zero path from a
+       row to an account. This is a pure ADDITION after the show_actions
+       block (not an elif on it) so it never touches the lines the
+       feed-states workstream is editing inside that block. Gates on
+       signup_cta_url -- the single value the app-wide context processor
+       (jobcannon/web/__init__.py's _inject_auth_links) derives from real
+       identity, not on `show_actions` -- so a signed-in visitor never
+       sees this regardless of whether the route remembered to pass
+       show_actions=True, and every anonymous surface (row, /preview,
+       /demo) shares one gate instead of each re-deriving its own
+       fallback. #}
+    <div class="flex gap-3 text-xs pt-1" data-posting-signup>
+      <a href="{{ signup_cta_url }}"
+         class="underline text-neutral-300"
+         data-action-signup>
+        Sign up to apply
+      </a>
     </div>
   {% endif %}
 </article>
