@@ -68,6 +68,7 @@ def seed(conn: Any) -> None:
         target_locations=_GUEST_TARGET_LOCATIONS,
         seniority_level=_GUEST_SENIORITY_LEVEL,
         years_of_experience=_GUEST_YEARS_OF_EXPERIENCE,
+        workplace_type=None,
     )
     log.info(
         "seeded guest demo user %r: %d skills, target_titles=%s, seniority=%s",

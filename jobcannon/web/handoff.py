@@ -155,6 +155,19 @@ def run_handoff_if_pending() -> Any:
                                 # Omitting it here silently reset every
                                 # signed-up tenant's floor to NULL.
                                 comp_floor_usd=anon_profile["comp_floor_usd"],
+                                # #169/#170: target_companies/workplace_type ARE
+                                # in the session cookie (unlike comp_floor_usd
+                                # above), but that session copy is discarded
+                                # the moment this handoff completes — it is
+                                # never re-read after sign-up. Omitting them
+                                # here would silently reset every signed-up
+                                # tenant's saved company/workplace-type
+                                # selections to NULL/"any" the instant they
+                                # sign up, the same failure mode the
+                                # comp_floor_usd comment above documents for
+                                # its own field.
+                                target_companies=anon_profile["target_companies"],
+                                workplace_type=anon_profile["workplace_type"],
                             )
                         delete_user(conn, anon_id)
             # The `with conn.raw.transaction():` block above has already

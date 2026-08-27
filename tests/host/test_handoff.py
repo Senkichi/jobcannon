@@ -259,6 +259,37 @@ def test_comp_floor_usd_survives_the_anon_to_clerk_handoff(app):
     assert clerk_profile["comp_floor_usd"] == 120000
 
 
+def test_target_companies_and_workplace_type_survive_the_anon_to_clerk_handoff(app):
+    """#169/#170 regression guard, same shape as the comp_floor_usd test
+    above: unlike comp_floor_usd, target_companies/workplace_type ARE in the
+    session cookie (onboarding.py's pending_picker), but that session copy
+    is discarded once handoff completes — it is never read again after
+    sign-up. Before this fix, the handoff's upsert_profile copy omitted both
+    fields, so every signed-up tenant's saved company/workplace-type
+    selections silently reset to NULL/"any" the moment they signed up."""
+    dsn = app.config["_TEST_DSN"]
+    client = app.test_client()
+
+    resp = client.post(
+        "/start",
+        data={
+            "titles": ["Engineer"],
+            "companies": ["Acme Corp"],
+            "seniority_level": "senior",
+            "workplace_type": "remote",
+        },
+    )
+    assert resp.status_code in (302, 303)
+
+    _authed(app)
+    client.get("/")
+
+    clerk_profile = _profile_row(dsn, CLERK_ID)
+    assert clerk_profile is not None
+    assert clerk_profile["target_companies"] == ["Acme Corp"]
+    assert clerk_profile["workplace_type"] == "REMOTE"
+
+
 def test_handoff_writes_no_consent_row(app):
     dsn = app.config["_TEST_DSN"]
     client = app.test_client()
@@ -382,6 +413,57 @@ def test_picker_resubmission_after_signup_is_rekeyed_not_orphaned(app):
     # The emission phase stayed gated on the completion marker: no second
     # user_signed_up row for the resubmission.
     assert len(_events_rows(dsn, CLERK_ID, "user_signed_up")) == 1
+
+
+def test_returning_user_picker_resubmission_overwrites_saved_selections(app):
+    """Item 5 / Devin lead #7: the existing resubmission test above
+    (`test_picker_resubmission_after_signup_is_rekeyed_not_orphaned`) starts
+    from a CLERK_ID with no prior target_companies/workplace_type, so it
+    can't pin the overwrite behavior for a genuine RETURNING user who
+    already has both saved. Documents the intended semantics
+    (jobcannon/db/_profiles.py's docstring): the anon resubmission's
+    upsert_profile copy in handoff.py passes both fields LITERALLY from the
+    anon row, so a returning user's prior selections are overwritten by
+    whatever the resubmission carried, not merged with it — the same
+    complete-snapshot design /start already uses for titles/seniority."""
+    from jobcannon.db._profiles import upsert_profile
+
+    dsn = app.config["_TEST_DSN"]
+    client = app.test_client()
+    _authed(app)
+
+    # First authed request: no pending picker, completes the handoff and
+    # creates the CLERK_ID users row.
+    client.get("/")
+
+    # Seed this returning user's EXISTING saved selections directly, as if
+    # set on a prior visit (the picker's own POST /start is anon-only and
+    # cannot write to an already-signed-up CLERK_ID directly).
+    with psycopg.connect(dsn) as conn:
+        upsert_profile(conn, CLERK_ID, target_companies=["Old Co"], workplace_type="REMOTE")
+
+    # /start is public and cannot see the authed identity, so resubmitting
+    # the picker with DIFFERENT selections mints a fresh anon users+profiles
+    # pair, same as test_picker_resubmission_after_signup_is_rekeyed_not_orphaned.
+    resp = client.post(
+        "/start",
+        data={
+            "titles": ["Engineer"],
+            "companies": ["New Co"],
+            "seniority_level": "senior",
+            "workplace_type": "onsite",
+        },
+    )
+    assert resp.status_code in (302, 303)
+
+    # A later authed request still consumes the pending picker and re-keys
+    # it onto CLERK_ID, overwriting the previously-saved row.
+    client.get("/")
+
+    clerk_profile = _profile_row(dsn, CLERK_ID)
+    assert clerk_profile is not None
+    assert clerk_profile["target_companies"] == ["New Co"]
+    assert clerk_profile["workplace_type"] == "ONSITE"
 
 
 def test_signup_emission_failure_does_not_500_and_retries_next_request(app, monkeypatch):

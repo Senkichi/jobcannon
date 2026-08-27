@@ -23,7 +23,7 @@
 </div>
 {% if load_more_url %}
 <button hx-get="{{ load_more_url }}" hx-target="this" hx-swap="outerHTML"
-        class="text-sm underline text-neutral-300 mt-4 block" data-load-more>
+        class="text-sm underline text-neutral-300 mt-4 min-h-11 inline-flex items-center" data-load-more>
   Load more
 </button>
 {% endif %}
