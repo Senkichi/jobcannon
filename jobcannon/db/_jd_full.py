@@ -14,6 +14,46 @@ per-posting LLM score tuple yet (structural axes are Wave-2 work and are
 recomputed at ingest, not invalidated here). Revisit when owner-fit scoring
 lands (Phase 2).
 
+JD-content verdict persistence (D5 / #152, m0009): after a successful write,
+this stamps ``postings.jd_content_verdict`` / ``jd_content_signal`` by
+running ``jd_content_contract.classify_jd_content`` ONCE against the stored
+body — the single point where that cost is paid, mirroring the private
+original's ``set_jd_full`` (see ``job_finder/db/_jd_full.py``, read-only
+reference). ``jobcannon.engine.job_scorer.scoring_precheck`` then reads this
+persisted column instead of recomputing per row. Stamped whenever the text
+changed, or whenever no verdict is on record yet (self-healing a legacy row
+the moment it happens to be re-touched). CAS-guarded on
+``WHERE dedup_key = %s AND jd_full = %s`` (mirroring the private original)
+because the jd_full write and the verdict stamp are two separate statements:
+a concurrent writer could interleave a second ``set_jd_full`` call between
+them and overwrite ``jd_full`` again before this UPDATE lands. A guard miss
+leaves the verdict untouched (fail-open, per ``scoring_precheck``'s existing
+semantics) rather than stamping a mismatched one.
+
+Watermark invalidation (design decision, #152): the private original's
+``invalidate_job_score`` nulls ``jd_adjudicated_version`` on a content
+change as one of several score-invalidation side effects; this hosted
+engine has no ``invalidate_job_score`` counterpart at all (no per-posting
+LLM score tuple — see the divergence above), so rather than build one just
+to hold this single field, ``jd_adjudicated_version`` is nulled inline here,
+in the same CAS-guarded UPDATE as the fresh verdict stamp, whenever the
+stored content actually changed. This re-arms the D5 gate on any
+content-changing re-fetch without inventing score-invalidation machinery
+this Wave-1 schema has no other use for.
+
+Row-projection / SQL-mirror decision (#152): hosts call
+``jobcannon.engine.job_scorer.scoring_precheck`` directly against a full
+``SELECT * FROM postings ...`` row dict — this repo has no
+``JOBS_ALL_COLUMNS``-style explicit projection to update (grep confirms the
+only column-enumerated postings reads are single-purpose, e.g. this
+module's own ``unresolved_reasons`` lookups) and ships no
+``count_scorable``/``exclusion_filter``-style SQL mirror of the gate's
+conditions, matching the current documented position in
+``job_scorer.py``'s own docstring. Should a host later need a fast
+SQL-only "N unscored" count without loading full rows, mirror
+``scoring_precheck``'s exact conditions in one place, next to that host's
+own query, rather than duplicating the logic ad hoc.
+
 A second Wave-1 divergence, same shape: the private original also resets a
 terminal ``enrichment_tier`` to NULL when a truncated body is rejected, so
 the row re-enters its multi-tier resumable enrichment pipeline. The hosted
@@ -57,6 +97,7 @@ from jobcannon.engine.description_formatter import strip_html_to_text
 from jobcannon.engine.jd_content_contract import (
     JD_CONTENT_REASON_CODES,
     _is_jd_junk,
+    classify_jd_content,
     jd_content_reject,
 )
 
@@ -92,6 +133,10 @@ def set_jd_full(
     same UPDATE as the ``jd_full`` write. See this module's docstring for the
     ``enrichment_tier`` reset the private original also performs, which has
     no column to act on in the Wave-1 hosted schema.
+
+    JD-content verdict persistence (D5 / #152) and jd_adjudicated_version
+    invalidation: see this module's docstring. Both happen after the
+    ``jd_full`` UPDATE has committed, in a second, CAS-guarded UPDATE.
     """
     raw = conn.raw if hasattr(conn, "raw") else conn
     if not text:
@@ -114,8 +159,14 @@ def set_jd_full(
         _record_jd_content_reject(raw, dedup_key, reason)
         return False
     existing = raw.execute(
-        "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (dedup_key,)
+        "SELECT jd_full, unresolved_reasons, company, jd_content_verdict "
+        "FROM postings WHERE dedup_key = %s",
+        (dedup_key,),
     ).fetchone()
+    existing_jd = existing["jd_full"] if existing is not None else None
+    existing_company = existing["company"] if existing is not None else None
+    existing_verdict = existing["jd_content_verdict"] if existing is not None else None
+    content_changed = text != existing_jd
     new_reasons = remove_reasons(
         existing["unresolved_reasons"] if existing is not None else None,
         list(JD_CONTENT_REASON_CODES),
@@ -126,6 +177,32 @@ def set_jd_full(
             (text, Jsonb(new_reasons), dedup_key),
         )
     commit_unless_nested(raw)
+
+    # Persist the jd-content verdict at this single write chokepoint (D5 /
+    # #152) — see the module docstring. Must run AFTER the jd_full UPDATE
+    # above (never before): the verdict describes the body just written, not
+    # whatever was there before.
+    if content_changed or existing_verdict is None:
+        jd_result = classify_jd_content(text, title, existing_company, config)
+        if content_changed:
+            # A changed body invalidates any prior adjudication — re-arm the
+            # D5 gate so scoring_precheck cannot keep coasting on an
+            # adjudicated_version stamped against the OLD body.
+            stamp_sql = (
+                "UPDATE postings SET jd_content_verdict = %s, jd_content_signal = %s, "
+                "jd_adjudicated_version = NULL WHERE dedup_key = %s AND jd_full = %s"
+            )
+        else:
+            stamp_sql = (
+                "UPDATE postings SET jd_content_verdict = %s, jd_content_signal = %s "
+                "WHERE dedup_key = %s AND jd_full = %s"
+            )
+        with raw.transaction():
+            raw.execute(
+                stamp_sql,
+                (jd_result.verdict.value, jd_result.signal, dedup_key, text),
+            )
+        commit_unless_nested(raw)
     return True
 
 
