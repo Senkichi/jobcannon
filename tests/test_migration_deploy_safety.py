@@ -835,8 +835,19 @@ def _migrations_with_index_lock_signal() -> dict[int, list[str]]:
 # ---------------------------------------------------------------------------
 
 
-def _concurrently_index_statements(migration: Migration) -> list[pg_ast.IndexStmt]:
-    nodes: list[pg_ast.IndexStmt] = []
+def _concurrently_index_statements(
+    migration: Migration,
+) -> list[pg_ast.IndexStmt | pg_ast.DropStmt]:
+    """CREATE INDEX CONCURRENTLY and DROP INDEX CONCURRENTLY statements --
+    both are the reason rule (a) requires autocommit = True (CONCURRENTLY
+    cannot run inside the per-migration ledger transaction, whether it's a
+    build or a drop), so both satisfy it. Re-review LOW #1: a migration
+    whose sql is ONLY ['DROP INDEX CONCURRENTLY IF EXISTS x'] has no valid
+    non-autocommit representation either -- counting only IndexStmt here
+    made that shape unrepresentable, flagged as "declares autocommit = True
+    but has no CONCURRENTLY statement" even though it's the correct way to
+    write it."""
+    nodes: list[pg_ast.IndexStmt | pg_ast.DropStmt] = []
     for stmt_sql in migration.sql:
         try:
             raw_stmts = pglast.parse_sql(stmt_sql)
@@ -845,6 +856,12 @@ def _concurrently_index_statements(migration: Migration) -> list[pg_ast.IndexStm
         for raw in raw_stmts:
             node = raw.stmt
             if isinstance(node, pg_ast.IndexStmt) and node.concurrent:
+                nodes.append(node)
+            elif (
+                isinstance(node, pg_ast.DropStmt)
+                and node.removeType == enums.ObjectType.OBJECT_INDEX
+                and node.concurrent
+            ):
                 nodes.append(node)
     return nodes
 
@@ -922,8 +939,9 @@ def _autocommit_escape_hatch_violations(migration: Migration) -> list[str]:
     if concurrently_stmts and not migration.autocommit:
         violations.append(
             f"migration {migration.version} ({migration.name}) has a CONCURRENTLY "
-            f"CREATE INDEX statement but doesn't declare autocommit = True -- "
-            f"CONCURRENTLY cannot run inside the per-migration ledger transaction"
+            f"CREATE INDEX or DROP INDEX statement but doesn't declare "
+            f"autocommit = True -- CONCURRENTLY cannot run inside the "
+            f"per-migration ledger transaction"
         )
     if migration.autocommit and not concurrently_stmts:
         violations.append(
@@ -1666,6 +1684,28 @@ _AUTOCOMMIT_ESCAPE_HATCH_BAD_FIXTURES = [
         "no IF NOT EXISTS",
         id="autocommit-non-concurrent-create-without-if-not-exists",
     ),
+    # --- re-review LOW #1: a PURE DROP INDEX CONCURRENTLY migration (no
+    # CREATE INDEX CONCURRENTLY anywhere) still requires the IF EXISTS
+    # idempotency guard, same as every other index statement in an
+    # autocommit migration. ---
+    pytest.param(
+        ["DROP INDEX CONCURRENTLY a"],
+        True,
+        None,
+        "no IF EXISTS",
+        id="autocommit-drop-concurrently-only-without-if-exists",
+    ),
+    # --- re-review LOW #1 regression guard: the fix only teaches rule (a)
+    # that a CONCURRENT DropStmt counts -- a bare, NON-concurrent DROP INDEX
+    # alone (nothing CONCURRENTLY anywhere) must still trip "no CONCURRENTLY
+    # statement", since a bare DROP INDEX needs no autocommit at all. ---
+    pytest.param(
+        ["DROP INDEX idx_old"],
+        True,
+        None,
+        "no CONCURRENTLY statement",
+        id="autocommit-bare-drop-only-still-requires-concurrently",
+    ),
 ]
 
 
@@ -1704,6 +1744,15 @@ _AUTOCOMMIT_ESCAPE_HATCH_SAFE_FIXTURES = [
         ],
         True,
         id="drop-and-create-concurrently-index-only",
+    ),
+    # --- re-review LOW #1: a PURE concurrent index drop, with no CREATE
+    # INDEX CONCURRENTLY anywhere in the migration, is the only valid way to
+    # express a standalone concurrent index drop (DROP INDEX CONCURRENTLY
+    # can't run inside a transaction either) -- must be representable. ---
+    pytest.param(
+        ["DROP INDEX CONCURRENTLY IF EXISTS a"],
+        True,
+        id="drop-index-concurrently-only-no-create",
     ),
     pytest.param(
         ["ALTER TABLE t ADD COLUMN y text"],

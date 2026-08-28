@@ -268,7 +268,9 @@ module docstring's "Parser" section for the specific list).
    `run_migrations` already holds the cross-process advisory lock on, so
    that lock still covers the autocommit statements — and writes the ledger
    row only after every statement succeeds. The guard keeps this escape
-   hatch narrow: a `CONCURRENTLY` statement always requires
+   hatch narrow: a `CONCURRENTLY` statement — `CREATE INDEX CONCURRENTLY` or
+   `DROP INDEX CONCURRENTLY` (both are equally forbidden inside a
+   transaction, so both equally satisfy this requirement) — always requires
    `autocommit = True` and vice versa, an autocommit migration's `sql` may
    contain nothing but `CREATE`/`DROP INDEX` statements (no `py` hook, no
    other DDL), and EVERY index statement in an autocommit migration must be
