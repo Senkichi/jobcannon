@@ -217,8 +217,8 @@ module docstring's "Parser" section for the specific list).
    creates *after* this migration commits — that's the actual hazard
    (completeness of the backfill), not whether the `UPDATE` happens to be
    idempotent.
-3. **Non-CONCURRENT `CREATE INDEX` lock duration against a pre-existing
-   table fails by default (issue #219).** `CREATE INDEX` (unique or not,
+3. **Non-CONCURRENT index-lock-duration hazards against a pre-existing
+   table fail by default (issue #219).** `CREATE INDEX` (unique or not,
    without `CONCURRENTLY`) takes a SHARE lock for its entire build, blocking
    writes to that table — while the previous release keeps serving them
    during the deploy overlap window — regardless of whether the index is
@@ -227,14 +227,36 @@ module docstring's "Parser" section for the specific list).
    still break the previous release's duplicate inserts (contract hazard),
    and a slow non-unique build can hold a lock for hours without breaking
    anything about the previous release's queries (lock-duration hazard) — a
-   migration doing both declares both flags. An index against a table THIS
-   SAME migration creates is exempt (the table is empty at that point in the
-   deploy, so the build is instant regardless of lock kind). A migration
-   that genuinely needs to accept the risk (e.g. m0005's HNSW index, built
-   against `postings` while it still holds zero rows, so the lock is held
-   for a negligible duration) declares `lock_step = True` plus a docstring
-   paragraph starting `Lock justification:` naming the expected row count /
-   build time.
+   migration doing both declares both flags. Coverage extends past a bare
+   `CREATE INDEX` statement to shapes that build the same kind of index
+   without looking like one: `ALTER TABLE ... ADD CONSTRAINT`
+   (`UNIQUE`/`PRIMARY KEY`/`EXCLUDE`, exempt only when attached via
+   `USING INDEX <name>` to an index already built CONCURRENTLY beforehand)
+   and inline `ADD COLUMN ... UNIQUE`/`PRIMARY KEY` are flagged the same as
+   a standalone `CREATE UNIQUE INDEX`; a top-level `REINDEX` (any object
+   kind, unless it names `CONCURRENTLY`) and `CLUSTER` (no `CONCURRENTLY`
+   variant exists at all — its ACCESS EXCLUSIVE lock is stronger than a
+   plain `CREATE INDEX`'s SHARE lock) are flagged unconditionally when they
+   target a pre-existing table (or, for `REINDEX SCHEMA`/`DATABASE`/an
+   unresolvable index name, unconditionally regardless of target). An
+   opaque `DO $$ ... $$` block is fail-closed here too, same posture as
+   rule 1's contract-shape check — a DO block author now needs BOTH
+   `contract_step = True` (rule 1) and `lock_step = True` (rule 3), each
+   with its own justification paragraph, since the hidden body could hide
+   either hazard. An index (in any of the above forms) against a table THIS
+   SAME migration creates is exempt — including `CREATE TABLE IF NOT
+   EXISTS`, but only when that table is genuinely new this migration: if
+   `IF NOT EXISTS` names a table an EARLIER migration already created, it
+   is NOT treated as new, so later statements against it stay covered by
+   rules 1 and 3 (an `IF NOT EXISTS` guard is a retry safety net, not a
+   claim that the table holds no rows). A migration that genuinely needs to
+   accept the lock-duration risk (e.g. m0005's HNSW index, built against
+   `postings` while its brand-new `embedding` column — added by that same
+   migration — holds no vectors yet; see the migration's own docstring for
+   why that makes the index BUILD trivial without making the SHARE lock's
+   HOLD TIME zero) declares `lock_step = True` plus a docstring paragraph
+   starting `Lock justification:` naming the expected row count / build
+   time.
 
    The alternative to accepting that risk is `CREATE INDEX CONCURRENTLY`,
    which never takes that lock but also can't run inside the per-migration
@@ -249,39 +271,56 @@ module docstring's "Parser" section for the specific list).
    hatch narrow: a `CONCURRENTLY` statement always requires
    `autocommit = True` and vice versa, an autocommit migration's `sql` may
    contain nothing but `CREATE`/`DROP INDEX` statements (no `py` hook, no
-   other DDL), and every `CREATE INDEX CONCURRENTLY` in one must use
-   `IF NOT EXISTS`.
+   other DDL), and EVERY index statement in an autocommit migration must be
+   retry-idempotent — every `CREATE INDEX` (`CONCURRENTLY` or not) needs
+   `IF NOT EXISTS`, and every `DROP INDEX` needs `IF EXISTS` — not just the
+   `CONCURRENTLY` ones. That widened requirement matters because a prior
+   statement in the same autocommit migration can already have committed,
+   outside any transaction, before a later statement in that same migration
+   fails; a retry re-executes the whole migration from its first statement,
+   so a bare (non-idempotent) `DROP INDEX` or non-`CONCURRENTLY` `CREATE
+   INDEX` earlier in the list would raise permanently on retry instead of
+   safely no-opping past what already succeeded.
 
    `CREATE INDEX CONCURRENTLY` has one hazard `CONCURRENTLY` migrations must
    survive: Postgres does not roll back a failed build — it leaves a real,
    unusable (`pg_index.indisvalid = false`) catalog entry behind, which
    `IF NOT EXISTS` would otherwise silently skip on retry instead of
    finishing the build. `_apply_autocommit_migration` handles this by
-   sweeping for `NOT indisvalid` and dropping every hit (`DROP INDEX
-   CONCURRENTLY IF EXISTS`) before running an autocommit migration's
-   statements — unscoped to any particular index name, which is safe
-   because an invalid index is already unusable for anything, and because
-   the ledger guarantees any migration that could have left one behind was
-   never recorded as applied, so it's always retried before whatever comes
-   after it. This sweep only ever runs from an autocommit migration, so a
-   database with none pending never issues the query at all. An alternative
-   considered and rejected: parsing each migration's own SQL (via pglast,
-   already a dev dependency for this guard) to scope the sweep to only the
-   index names that migration's statements declare — rejected because it
-   would make `python -m jobcannon.db.migrate`, the `preDeployCommand` that
-   gates every deploy, import pglast at runtime for the first time; a
-   wheel/resolution hiccup on Render would then fail every deploy at import,
-   not just the rare failed-`CONCURRENTLY`-build case this exists to recover
-   from.
+   sweeping for `NOT indisvalid` and dropping every hit (schema-qualified:
+   `DROP INDEX CONCURRENTLY IF EXISTS "<schema>"."<index>"`, resolved via
+   `psycopg.sql.Identifier` against `pg_namespace`/`pg_class`, not a bare
+   unqualified name resolved against `search_path`) before running an
+   autocommit migration's statements — unscoped to any particular index
+   name (though scoped to the exact schema-qualified catalog entry each
+   hit names), which is safe because an invalid index is already unusable
+   for anything, and because the ledger guarantees any migration that could
+   have left one behind was never recorded as applied, so it's always
+   retried before whatever comes after it. This sweep only ever runs from
+   an autocommit migration, so a database with none pending never issues
+   the query at all. An alternative considered and rejected: parsing each
+   migration's own SQL (via pglast, already a dev dependency for this
+   guard) to scope the sweep to only the index names that migration's
+   statements declare — rejected because it would make `python -m
+   jobcannon.db.migrate`, the `preDeployCommand` that gates every deploy,
+   import pglast at runtime for the first time; a wheel/resolution hiccup
+   on Render would then fail every deploy at import, not just the rare
+   failed-`CONCURRENTLY`-build case this exists to recover from.
 
 **Documented coverage gaps** (fail-closed by declaration, not by scanning):
-a `DO $$ ... $$` procedural block (the body is opaque to libpg_query) and a
-`migration.py` callable hook (arbitrary Python) are both always treated as
-contract-shaped — they require `contract_step = True` even when the hidden
-DDL/Python is actually expand-safe, because this guard has no way to prove
-that. `DROP` of an object type other than `TABLE`/`INDEX` (sequences, views,
-types, ...) isn't scanned. `ALTER COLUMN ... TYPE` doesn't distinguish widen
-from narrow (deliberate over-flag).
+a `DO $$ ... $$` procedural block (the body is opaque to libpg_query) is
+always treated as BOTH contract-shaped and lock-duration-risky — it
+requires `contract_step = True` (rule 1) AND `lock_step = True` (rule 3),
+each with its own justification, even when the hidden DDL is actually safe
+on both axes, because this guard has no way to prove that. A `migration.py`
+callable hook (arbitrary Python) is always treated as contract-shaped —
+`contract_step = True` required — for the same reason; it never needs
+`lock_step` on its own, since rule 3 only scans `migration.sql`'s parsed
+SQL and `_apply_autocommit_migration` already refuses a migration that sets
+both `autocommit = True` and a `py` hook. `DROP` of an object type other
+than `TABLE`/`INDEX` (sequences, views, types, ...) isn't scanned. `ALTER
+COLUMN ... TYPE` doesn't distinguish widen from narrow (deliberate
+over-flag).
 
 Expect these log lines on a fresh database's first worker boot (the ledger
 `name` column — and therefore the second `%s` migrate.py logs — is the

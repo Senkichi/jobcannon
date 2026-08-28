@@ -38,24 +38,32 @@ registry) and classifies the resulting AST nodes directly: comments,
 quoting, schema-qualification, `ONLY`/`IF EXISTS`, and `;`-splitting are all
 handled by the parser itself and simply cannot desync from the real syntax.
 
-Conservative by construction, now actually enforced end-to-end: every
-`AlterTableCmd.subtype` this scanner recognizes as unconditionally
-expand-safe is in the small `_ALWAYS_EXPAND_SAFE_SUBTYPES` allowlist below;
-every OTHER subtype -- known-dangerous, or one this scanner has no specific
-rule for at all, including any future libpg_query AlterTableType this file
-has never seen -- is treated as contract-shaped by default. The old
-tokenizer's silent `continue`-past-anything-unmatched is gone; there is no
-code path left that falls through an unrecognized DDL shape without flagging
-it. The cost of a false positive is one `contract_step = True` annotation;
-the cost of a false negative is a broken zero-downtime deploy.
+Conservative by construction, now actually enforced end-to-end for Rule 1's
+contract-shape hazard: every `AlterTableCmd.subtype` this scanner recognizes
+as unconditionally expand-safe is in the small `_ALWAYS_EXPAND_SAFE_SUBTYPES`
+allowlist below; every OTHER subtype -- known-dangerous, or one this scanner
+has no specific rule for at all, including any future libpg_query
+AlterTableType this file has never seen -- is treated as contract-shaped by
+default. The old tokenizer's silent `continue`-past-anything-unmatched is
+gone; there is no code path left that falls through an unrecognized
+**`ALTER TABLE` sub-command** without flagging it (this guarantee is scoped
+to `AlterTableCmd.subtype` specifically -- a top-level statement kind Rule 1
+has no rule for at all, e.g. `REINDEX`/`CLUSTER`, still falls through
+`_scan_statement`'s final `return []` for the CONTRACT-shape check, because
+they change no schema/data compatibility; their lock-DURATION hazard is a
+separate, narrower concern Rule 3 covers explicitly below -- see A4 in the
+Rule 3 section). The cost of a false positive is one `contract_step = True`
+annotation; the cost of a false negative is a broken zero-downtime deploy.
 
 ## Documented, deliberate coverage gaps
 
 - **`DO $$ ... $$` procedural blocks**: libpg_query treats the body as an
   opaque string (the PL/pgSQL parser is a separate, much heavier
-  dependency this guard doesn't take on) -- always treated as
-  contract-shaped; requires `contract_step = True` even if the DO block is
-  actually expand-safe.
+  dependency this guard doesn't take on) -- always treated as BOTH
+  contract-shaped (Rule 1, requires `contract_step = True`) AND
+  lock-duration-risky (Rule 3, requires `lock_step = True`) even if the DO
+  block is actually safe on both counts -- this guard has no way to prove
+  that from an opaque body.
 - **`migration.py` callable hooks**: arbitrary Python, not SQL text --
   never scanned; always treated as contract-shaped.
 - **`DROP <object>` for object types other than TABLE and INDEX** (SEQUENCE,
@@ -82,15 +90,38 @@ the cost of a false negative is a broken zero-downtime deploy.
   window. Gated on `lock_step` (same fold-pattern/docstring-marker shape as
   `contract_step`). An index on a table THIS SAME migration creates is
   exempt -- the table is empty at that point in the deploy, so the build is
-  instant regardless of lock kind.
+  instant regardless of lock kind. Also covers every OTHER shape that
+  implicitly builds or rebuilds an index under a full-table lock, so the
+  hazard can't be routed around the `IndexStmt` check by using a different
+  statement shape: `ALTER TABLE ... ADD CONSTRAINT UNIQUE`/`PRIMARY
+  KEY`/`EXCLUDE` and an inline `ADD COLUMN ... UNIQUE`/`PRIMARY KEY` (exempt
+  when the constraint attaches an already-built index via
+  `USING INDEX <name>` instead of building a new one -- the standard
+  zero-downtime pattern), `DO $$ ... $$` blocks (opaque, always flagged),
+  and top-level `REINDEX`/`CLUSTER` without `CONCURRENTLY` (`REINDEX` SCHEMA/
+  DATABASE/SYSTEM forms and `REINDEX INDEX`, which names an index rather
+  than a table this scanner can resolve, are flagged unconditionally;
+  `CLUSTER` has no `CONCURRENTLY` option at all and a bare `CLUSTER` with no
+  table name is flagged unconditionally too, since it re-clusters every
+  previously-clustered table in the database). `CREATE TABLE IF NOT EXISTS`
+  of a table an EARLIER migration already created does NOT earn the
+  same-migration exemption for anything after it -- only a genuinely new
+  table (one `pre_existing_tables` doesn't already contain) does.
 - **Rule 4 (autocommit escape hatch, #219)**: keeps the alternative --
   `CREATE INDEX CONCURRENTLY` on an `autocommit = True` migration, run
   outside the ledger transaction (jobcannon/db/migrate.py) -- narrow.
   Enforced as a biconditional (a CONCURRENTLY statement always requires
   `autocommit = True` and vice versa), plus: an autocommit migration's `sql`
   may contain ONLY CREATE/DROP INDEX statements (no `py` hook, no other
-  DDL), and every CONCURRENTLY `CREATE INDEX` in one must use
-  `IF NOT EXISTS` (migrate.py's `_apply_autocommit_migration` drops any
+  DDL), and retry-idempotency is required on EVERY index statement in an
+  autocommit migration, not just the CONCURRENTLY ones: every
+  `CREATE INDEX ... CONCURRENTLY` must use `IF NOT EXISTS`, every plain
+  `CREATE INDEX` (no `CONCURRENTLY`) must ALSO use `IF NOT EXISTS`, and every
+  `DROP INDEX` must use `IF EXISTS` -- a statement earlier in the same
+  autocommit migration can already have committed (autocommit runs each
+  statement outside a transaction) before a LATER statement fails, so a
+  retry must re-run every one of them as a safe no-op, not just the
+  CONCURRENTLY build (migrate.py's `_apply_autocommit_migration` drops any
   INVALID leftover index from a previously failed CONCURRENTLY build before
   retrying, which is what makes a bare `IF NOT EXISTS` retry a safe no-op
   instead of the silent-skip-of-an-unusable-index hazard #219 raised).
@@ -362,8 +393,16 @@ def _scan_alter_table(
 def _scan_statement(node, version: int, state: _SchemaState, new_tables: set[str]) -> list[str]:
     if isinstance(node, pg_ast.CreateStmt):
         table = node.relation.relname
+        # A2: an IF NOT EXISTS create of a table an EARLIER migration already
+        # created (state.table_created_at already has it) must NOT earn the
+        # same-migration exemption -- only a genuinely new table does. Before
+        # this fix, new_tables.add(table) ran unconditionally, so `CREATE
+        # TABLE IF NOT EXISTS <pre-existing>` shielded every later statement
+        # in the same migration from this function's checks below.
+        is_new_table = table not in state.table_created_at
         state.table_created_at.setdefault(table, version)
-        new_tables.add(table)
+        if is_new_table:
+            new_tables.add(table)
         for elt in node.tableElts or ():
             if isinstance(elt, pg_ast.ColumnDef):
                 state.column_created_at.setdefault((table, elt.colname), version)
@@ -567,7 +606,142 @@ def _all_migration_modules():
 # it's ever accepted). Same walk-in-registry-order shape as Rule 2's
 # _migrations_with_backfill_signal so "pre-existing" tracks the real schema
 # history exactly.
+#
+# Review-filed follow-ups (#219 wave-4 fix, three-refuter HIGH-tier review):
+#   A1: an implicit index build hides inside ALTER TABLE too -- ADD
+#       CONSTRAINT UNIQUE/PRIMARY KEY/EXCLUDE, and an inline ADD COLUMN ...
+#       UNIQUE/PRIMARY KEY, each build a non-CONCURRENT index under a full
+#       table lock exactly like a bare CREATE INDEX. `ADD CONSTRAINT ...
+#       UNIQUE USING INDEX <name>` is the one exempt shape -- it attaches an
+#       already-built (presumably CONCURRENTLY-built) index instead of
+#       building a new one, so it's the standard zero-downtime pattern, not
+#       a hazard.
+#   A2: `CREATE TABLE IF NOT EXISTS <name-that-already-exists>` must NOT
+#       register `<name>` as "new this migration" -- only a genuinely new
+#       table (not already in `pre_existing_tables`) earns the same-
+#       migration exemption. Before this fix an IF-NOT-EXISTS create of a
+#       pre-existing table name shielded every later statement in the same
+#       migration from this rule.
+#   A3: a `DO $$ ... $$` block is opaque to libpg_query -- mirrors Rule 1's
+#       treatment (module docstring, "Documented, deliberate coverage
+#       gaps"): always flagged, fail-closed, since this scanner has no way
+#       to prove the hidden body doesn't build an index.
+#   A4: top-level `REINDEX`/`CLUSTER` (without CONCURRENTLY) take the same
+#       kind of full-table lock as a non-CONCURRENT CREATE INDEX and
+#       previously fell through _scan_statement's final `return []`
+#       unflagged by either rule -- covered here as lock hazards.
 # ---------------------------------------------------------------------------
+
+# Human-readable label per hazardous contype, doubling as the membership set
+# (its keys) -- AT_AddConstraint can carry any of the three (a table-level
+# ADD CONSTRAINT), AT_AddColumn only the two an inline column definition can
+# actually spell (`col type UNIQUE` / `col type PRIMARY KEY` -- EXCLUDE has
+# no inline column-constraint syntax in Postgres, only table-level).
+_CONSTRAINT_LOCK_HAZARD_LABELS = {
+    enums.ConstrType.CONSTR_UNIQUE: "UNIQUE",
+    enums.ConstrType.CONSTR_PRIMARY: "PRIMARY KEY",
+    enums.ConstrType.CONSTR_EXCLUSION: "EXCLUDE",
+}
+
+
+def _alter_table_index_lock_violations(
+    node: pg_ast.AlterTableStmt,
+    pre_existing_tables: set[str],
+    new_tables_this_migration: set[str],
+) -> list[str]:
+    """A1: ALTER TABLE shapes that implicitly build a non-CONCURRENT index
+    (ADD CONSTRAINT UNIQUE/PRIMARY KEY/EXCLUDE, inline ADD COLUMN ...
+    UNIQUE/PRIMARY KEY) on a table an EARLIER migration created."""
+    table = node.relation.relname
+    if table not in pre_existing_tables or table in new_tables_this_migration:
+        return []  # same-migration table: empty, build is instant regardless of lock kind
+    violations: list[str] = []
+    for cmd in node.cmds:
+        if cmd.subtype == enums.AlterTableType.AT_AddConstraint:
+            constraint = cmd.def_
+            label = _CONSTRAINT_LOCK_HAZARD_LABELS.get(constraint.contype) if constraint else None
+            if label and not constraint.indexname:  # USING INDEX: attaches a pre-built
+                # index, builds nothing new -- the standard zero-downtime pattern.
+                violations.append(
+                    f"{table}: ADD CONSTRAINT {label} implicitly builds a non-CONCURRENT "
+                    f"index on a pre-existing table -- holds an ACCESS EXCLUSIVE lock for "
+                    f"the whole build (issue #219); build the index CONCURRENTLY first and "
+                    f"use ADD CONSTRAINT ... USING INDEX, or declare lock_step"
+                )
+        elif cmd.subtype == enums.AlterTableType.AT_AddColumn:
+            coldef = cmd.def_
+            for c in coldef.constraints or ():
+                # EXCLUDE has no inline column-constraint syntax in Postgres
+                # (only a table-level ADD CONSTRAINT), so only UNIQUE/PRIMARY
+                # KEY are reachable here -- look those two up directly rather
+                # than reusing the AddConstraint map's EXCLUDE entry.
+                if c.contype not in (
+                    enums.ConstrType.CONSTR_UNIQUE,
+                    enums.ConstrType.CONSTR_PRIMARY,
+                ):
+                    continue
+                label = _CONSTRAINT_LOCK_HAZARD_LABELS[c.contype]
+                violations.append(
+                    f"{table}.{coldef.colname}: ADD COLUMN ... {label} implicitly "
+                    f"builds a non-CONCURRENT index on a pre-existing table -- holds "
+                    f"an ACCESS EXCLUSIVE lock for the whole build (issue #219)"
+                )
+    return violations
+
+
+def _reindex_lock_violations(
+    node: pg_ast.ReindexStmt,
+    pre_existing_tables: set[str],
+    new_tables_this_migration: set[str],
+) -> list[str]:
+    """A4: REINDEX rebuilds the index (and its ACCESS EXCLUSIVE lock on the
+    underlying table) unless CONCURRENTLY is given. SCHEMA/DATABASE/SYSTEM
+    forms have no single table to resolve "pre-existing" against -- flagged
+    unconditionally, same fail-closed posture as an unresolvable ALTER TABLE
+    sub-command. REINDEX INDEX names an index, not a table -- this scanner
+    has no catalog to resolve which table it belongs to, so it's flagged
+    unconditionally too."""
+    if any(
+        isinstance(p, pg_ast.DefElem) and p.defname == "concurrently" for p in (node.params or ())
+    ):
+        return []
+    if node.kind == enums.ReindexObjectType.REINDEX_OBJECT_TABLE:
+        table = node.relation.relname
+        if table in pre_existing_tables and table not in new_tables_this_migration:
+            return [
+                f"{table}: REINDEX TABLE without CONCURRENTLY on a pre-existing table -- "
+                f"holds an ACCESS EXCLUSIVE lock for the whole rebuild (issue #219)"
+            ]
+        return []
+    return [
+        f"REINDEX {node.kind.name} without CONCURRENTLY -- holds an ACCESS EXCLUSIVE "
+        f"lock per index rebuilt, and this scanner cannot resolve which table(s) that "
+        f"means (issue #219)"
+    ]
+
+
+def _cluster_lock_violations(
+    node: pg_ast.ClusterStmt,
+    pre_existing_tables: set[str],
+    new_tables_this_migration: set[str],
+) -> list[str]:
+    """A4: CLUSTER has no CONCURRENTLY option at all -- it always takes
+    ACCESS EXCLUSIVE for the whole table rewrite. A bare `CLUSTER` with no
+    table name re-clusters every previously-clustered table in the database,
+    an even wider hazard than a single table -- flagged unconditionally."""
+    if node.relation is None:
+        return [
+            "CLUSTER (no table given): rewrites every previously-clustered table in the "
+            "database under ACCESS EXCLUSIVE, one at a time -- issue #219 lock-duration "
+            "hazard, no CONCURRENTLY equivalent exists"
+        ]
+    table = node.relation.relname
+    if table in pre_existing_tables and table not in new_tables_this_migration:
+        return [
+            f"{table}: CLUSTER on a pre-existing table -- holds an ACCESS EXCLUSIVE lock "
+            f"for the whole rewrite (issue #219), no CONCURRENTLY equivalent exists"
+        ]
+    return []
 
 
 def _index_lock_violations(migration: Migration, pre_existing_tables: set[str]) -> list[str]:
@@ -581,7 +755,38 @@ def _index_lock_violations(migration: Migration, pre_existing_tables: set[str]) 
         for raw in raw_stmts:
             node = raw.stmt
             if isinstance(node, pg_ast.CreateStmt):
-                new_tables_this_migration.add(node.relation.relname)
+                # A2: only a genuinely new table (not already pre-existing under
+                # an IF NOT EXISTS create of a name an earlier migration owns)
+                # earns the same-migration exemption below.
+                if node.relation.relname not in pre_existing_tables:
+                    new_tables_this_migration.add(node.relation.relname)
+                continue
+            if isinstance(node, pg_ast.DoStmt):
+                # A3: opaque to this scanner -- mirror Rule 1's fail-closed
+                # DoStmt handling instead of silently skipping it.
+                violations.append(
+                    "DO $$ ... $$ block: opaque to this scanner (libpg_query does not "
+                    "parse the procedural-language body) -- may build a non-CONCURRENT "
+                    "index under a full table lock, so always treated as "
+                    "lock-duration-risky (issue #219)"
+                )
+                continue
+            if isinstance(node, pg_ast.ReindexStmt):
+                violations.extend(
+                    _reindex_lock_violations(node, pre_existing_tables, new_tables_this_migration)
+                )
+                continue
+            if isinstance(node, pg_ast.ClusterStmt):
+                violations.extend(
+                    _cluster_lock_violations(node, pre_existing_tables, new_tables_this_migration)
+                )
+                continue
+            if isinstance(node, pg_ast.AlterTableStmt):
+                violations.extend(
+                    _alter_table_index_lock_violations(
+                        node, pre_existing_tables, new_tables_this_migration
+                    )
+                )
                 continue
             if not isinstance(node, pg_ast.IndexStmt) or node.concurrent:
                 continue
@@ -616,12 +821,17 @@ def _migrations_with_index_lock_signal() -> dict[int, list[str]]:
 #   (a) CONCURRENTLY <=> autocommit = True, both directions.
 #   (b) an autocommit migration's `sql` may contain ONLY CREATE/DROP INDEX
 #       statements, and no `py` hook.
-#   (c) a CONCURRENTLY CREATE INDEX in an autocommit migration must use
-#       IF NOT EXISTS -- jobcannon/db/migrate.py's
+#   (c) EVERY index statement in an autocommit migration must be
+#       retry-idempotent, not just the CONCURRENTLY one(s): every
+#       CREATE INDEX (CONCURRENTLY or not) must use IF NOT EXISTS, and every
+#       DROP INDEX must use IF EXISTS -- jobcannon/db/migrate.py's
 #       _apply_autocommit_migration drops any INVALID leftover index before
 #       re-running an autocommit migration's statements, which is what turns
 #       a bare retry into a safe no-op instead of the silent-skip hazard
-#       #219 raised.
+#       #219 raised, but ONLY if every statement in the migration is itself
+#       a safe no-op on a second run -- autocommit runs each statement
+#       outside a transaction, so a statement before a later failure has
+#       already committed by the time a retry starts.
 # ---------------------------------------------------------------------------
 
 
@@ -639,10 +849,47 @@ def _concurrently_index_statements(migration: Migration) -> list[pg_ast.IndexStm
     return nodes
 
 
+def _all_index_and_drop_index_statements(
+    migration: Migration,
+) -> list[pg_ast.IndexStmt | pg_ast.DropStmt]:
+    """Every CREATE INDEX (concurrent or not) and DROP INDEX statement in
+    this migration's `sql`, in source order -- used to enforce (c) above
+    across the WHOLE autocommit migration, not just its CONCURRENTLY
+    statement(s) (exec-safety review LOW #1: a bare DROP INDEX or a
+    non-CONCURRENT CREATE INDEX earlier in an autocommit migration can
+    already have committed, outside a transaction, before a later statement
+    fails -- the retry must re-run it as a safe no-op too)."""
+    nodes: list[pg_ast.IndexStmt | pg_ast.DropStmt] = []
+    for stmt_sql in migration.sql:
+        try:
+            raw_stmts = pglast.parse_sql(stmt_sql)
+        except pglast.parser.ParseError:
+            continue
+        for raw in raw_stmts:
+            node = raw.stmt
+            if isinstance(node, pg_ast.IndexStmt):
+                nodes.append(node)
+            elif (
+                isinstance(node, pg_ast.DropStmt)
+                and node.removeType == enums.ObjectType.OBJECT_INDEX
+            ):
+                nodes.append(node)
+    return nodes
+
+
 def _non_index_ddl_statements(migration: Migration) -> list[str]:
     """Every statement in this migration's `sql` that is NOT a CREATE INDEX
-    or DROP INDEX -- used to enforce (b) above. An unparseable statement
-    counts too (fail closed, same posture as _scan_migration)."""
+    or DROP INDEX -- used to enforce (b) above: is this migration's `sql`
+    made up of ONLY index statements at all. This exemption stays
+    unconditional (it does not itself check IF EXISTS/IF NOT EXISTS) --
+    _all_index_and_drop_index_statements above is the dedicated, separate
+    check for (c)'s idempotency requirement, so a DROP INDEX without
+    IF EXISTS is correctly classified as "an index statement missing the
+    required guard" (a (c) violation) rather than "not an index statement at
+    all" (a (b) violation) -- the two failure messages point an author at
+    different fixes and conflating them would be confusing. An unparseable
+    statement counts as a (b) offender too (fail closed, same posture as
+    _scan_migration)."""
     offenders: list[str] = []
     for stmt_sql in migration.sql:
         try:
@@ -699,13 +946,23 @@ def _autocommit_escape_hatch_violations(migration: Migration) -> list[str]:
                 f"but has non-index statement(s) {non_index!r} -- autocommit "
                 f"migrations may contain only CREATE/DROP INDEX statements"
             )
-        for node in concurrently_stmts:
-            if not node.if_not_exists:
+        for node in _all_index_and_drop_index_statements(migration):
+            if isinstance(node, pg_ast.IndexStmt):
+                if not node.if_not_exists:
+                    concurrently_label = "CONCURRENTLY " if node.concurrent else ""
+                    violations.append(
+                        f"migration {migration.version} ({migration.name}): CREATE INDEX "
+                        f"{concurrently_label}{node.idxname or '(unnamed)'} has no "
+                        f"IF NOT EXISTS -- required for autocommit migrations so a retry "
+                        f"after an earlier statement already committed is a safe no-op"
+                    )
+            elif not node.missing_ok:
+                idx_names = ", ".join(names[-1].sval for names in node.objects)
                 violations.append(
-                    f"migration {migration.version} ({migration.name}): CREATE INDEX "
-                    f"CONCURRENTLY {node.idxname or '(unnamed)'} has no IF NOT EXISTS "
-                    f"-- required for autocommit migrations so a retry after a "
-                    f"dropped INVALID leftover index is a safe no-op"
+                    f"migration {migration.version} ({migration.name}): DROP INDEX "
+                    f"{idx_names} has no IF EXISTS -- required for autocommit "
+                    f"migrations so a retry after this statement already committed "
+                    f"doesn't raise on an already-dropped index"
                 )
     return violations
 
@@ -1180,20 +1437,87 @@ def test_known_safe_shapes_are_not_flagged(sql_statements):
 # ---------------------------------------------------------------------------
 
 _INDEX_LOCK_BAD_FIXTURES = [
-    pytest.param(["CREATE INDEX ON companies(name)"], id="plain-create-index-preexisting-table"),
+    pytest.param(
+        ["CREATE INDEX ON companies(name)"],
+        "CONCURRENTLY",
+        id="plain-create-index-preexisting-table",
+    ),
     pytest.param(
         ["CREATE INDEX idx_users_email ON users(email)"],
+        "CONCURRENTLY",
         id="named-create-index-preexisting-table",
     ),
     pytest.param(
         ["CREATE UNIQUE INDEX ON companies(name)"],
+        "CONCURRENTLY",
         id="unique-index-preexisting-table-also-lock-flagged",
     ),
+    # --- A1: ALTER TABLE shapes that implicitly build a non-CONCURRENT
+    # index bypassed this rule entirely before (scanner review MED #1). ---
+    pytest.param(
+        ["ALTER TABLE companies ADD CONSTRAINT companies_name_uq UNIQUE (name)"],
+        "ADD CONSTRAINT UNIQUE",
+        id="add-unique-constraint-preexisting-table-lock-flagged",
+    ),
+    pytest.param(
+        ["ALTER TABLE companies ADD CONSTRAINT companies_name_pk PRIMARY KEY (name)"],
+        "ADD CONSTRAINT PRIMARY KEY",
+        id="add-primary-key-constraint-preexisting-table-lock-flagged",
+    ),
+    pytest.param(
+        ["ALTER TABLE companies ADD CONSTRAINT companies_name_ex EXCLUDE USING gist (name WITH =)"],
+        "ADD CONSTRAINT EXCLUDE",
+        id="add-exclude-constraint-preexisting-table-lock-flagged",
+    ),
+    pytest.param(
+        ["ALTER TABLE companies ADD COLUMN newcol text UNIQUE"],
+        "ADD COLUMN ... UNIQUE",
+        id="add-column-inline-unique-preexisting-table-lock-flagged",
+    ),
+    pytest.param(
+        ["ALTER TABLE companies ADD COLUMN newcol text PRIMARY KEY"],
+        "ADD COLUMN ... PRIMARY KEY",
+        id="add-column-inline-primary-key-preexisting-table-lock-flagged",
+    ),
+    # --- A2: CREATE TABLE IF NOT EXISTS of a table an earlier migration
+    # already owns must not shield a later statement in the same migration
+    # (scanner review MED #2). ---
+    pytest.param(
+        [
+            "CREATE TABLE IF NOT EXISTS companies (id bigserial PRIMARY KEY)",
+            "CREATE INDEX ON companies(name)",
+        ],
+        "CONCURRENTLY",
+        id="create-table-if-not-exists-preexisting-does-not-shield",
+    ),
+    # --- A3: DO $$ ... $$ blocks are opaque -- mirror Rule 1's fail-closed
+    # DoStmt handling instead of silently skipping past this rule too
+    # (Devin lead 2). ---
+    pytest.param(
+        ["DO $$ BEGIN CREATE INDEX ON companies(name); END $$;"],
+        "opaque to this scanner",
+        id="do-block-hides-index-build-lock-flagged",
+    ),
+    # --- A4: top-level REINDEX/CLUSTER without CONCURRENTLY fell through
+    # unflagged before (scanner review LOW). ---
+    pytest.param(
+        ["REINDEX TABLE companies"], "REINDEX TABLE", id="reindex-table-preexisting-lock-flagged"
+    ),
+    pytest.param(
+        ["REINDEX INDEX some_idx"], "REINDEX", id="reindex-index-unresolvable-lock-flagged"
+    ),
+    pytest.param(["REINDEX SCHEMA public"], "REINDEX", id="reindex-schema-lock-flagged"),
+    pytest.param(
+        ["CLUSTER companies USING companies_pkey"],
+        "CLUSTER",
+        id="cluster-preexisting-table-lock-flagged",
+    ),
+    pytest.param(["CLUSTER"], "CLUSTER", id="cluster-no-table-lock-flagged"),
 ]
 
 
-@pytest.mark.parametrize("sql_statements", _INDEX_LOCK_BAD_FIXTURES)
-def test_index_lock_sabotage_fixtures_are_all_detected(sql_statements):
+@pytest.mark.parametrize("sql_statements,expected_substring", _INDEX_LOCK_BAD_FIXTURES)
+def test_index_lock_sabotage_fixtures_are_all_detected(sql_statements, expected_substring):
     state = _SchemaState()
     for migration in MIGRATIONS:
         _scan_migration(migration, state)  # seed state with the real schema history
@@ -1206,7 +1530,11 @@ def test_index_lock_sabotage_fixtures_are_all_detected(sql_statements):
     )
     violations = _index_lock_violations(probe, pre_existing)
     assert violations, f"scanner did not flag known-bad index statement(s) {sql_statements!r}"
-    assert any("CONCURRENTLY" in v for v in violations)
+    joined = "\n".join(violations)
+    assert expected_substring in joined, (
+        f"{sql_statements!r} was flagged, but not by its OWN rule -- expected "
+        f"{expected_substring!r} in {violations!r}"
+    )
 
 
 _INDEX_LOCK_SAFE_FIXTURES = [
@@ -1217,6 +1545,35 @@ _INDEX_LOCK_SAFE_FIXTURES = [
     pytest.param(
         ["CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_companies_name ON companies(name)"],
         id="concurrently-on-preexisting-table-not-lock-flagged",
+    ),
+    # --- A1 safe shape: ADD CONSTRAINT ... UNIQUE USING INDEX attaches an
+    # already-built index instead of building a new one -- the standard
+    # zero-downtime pattern (build CONCURRENTLY, then attach). ---
+    pytest.param(
+        ["ALTER TABLE companies ADD CONSTRAINT companies_name_uq UNIQUE USING INDEX my_idx"],
+        id="add-constraint-using-index-not-lock-flagged",
+    ),
+    # --- A1 safe shape: the SAME exemption applies on a table THIS
+    # migration creates -- empty, so the build is instant either way. ---
+    pytest.param(
+        [
+            "CREATE TABLE t_new2 (id bigserial PRIMARY KEY)",
+            "ALTER TABLE t_new2 ADD CONSTRAINT t_new2_x_uq UNIQUE (id)",
+        ],
+        id="add-unique-constraint-on-same-migration-table-not-lock-flagged",
+    ),
+    # --- A2 safe shape: CREATE TABLE IF NOT EXISTS of a GENUINELY new name
+    # (not already pre-existing) still earns the same-migration exemption. ---
+    pytest.param(
+        [
+            "CREATE TABLE IF NOT EXISTS t_new3 (id bigserial PRIMARY KEY)",
+            "CREATE INDEX ON t_new3(id)",
+        ],
+        id="create-table-if-not-exists-genuinely-new-still-exempt",
+    ),
+    # --- A4 safe shapes: CONCURRENTLY forms take no lock. ---
+    pytest.param(
+        ["REINDEX TABLE CONCURRENTLY companies"], id="reindex-table-concurrently-not-lock-flagged"
     ),
 ]
 
@@ -1283,6 +1640,32 @@ _AUTOCOMMIT_ESCAPE_HATCH_BAD_FIXTURES = [
         "no IF NOT EXISTS",
         id="autocommit-without-if-not-exists",
     ),
+    # --- exec-safety review LOW #1: idempotency enforcement widened to
+    # every index statement in an autocommit migration, not just the
+    # CONCURRENTLY one(s) -- a bare DROP INDEX (no IF EXISTS) or a plain
+    # CREATE INDEX (no IF NOT EXISTS) earlier in the same migration can
+    # already have committed, outside a transaction, before a later
+    # statement fails; retry must re-run it as a safe no-op too. ---
+    pytest.param(
+        [
+            "DROP INDEX idx_old",
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_x ON t(x)",
+        ],
+        True,
+        None,
+        "no IF EXISTS",
+        id="autocommit-drop-index-without-if-exists",
+    ),
+    pytest.param(
+        [
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_a ON t(x)",
+            "CREATE INDEX idx_b ON t(y)",
+        ],
+        True,
+        None,
+        "no IF NOT EXISTS",
+        id="autocommit-non-concurrent-create-without-if-not-exists",
+    ),
 ]
 
 
@@ -1326,6 +1709,23 @@ _AUTOCOMMIT_ESCAPE_HATCH_SAFE_FIXTURES = [
         ["ALTER TABLE t ADD COLUMN y text"],
         False,
         id="ordinary-migration-no-concurrently-no-autocommit",
+    ),
+    # Non-concurrent CREATE INDEX / bare DROP INDEX are still structurally
+    # allowed content in an autocommit migration's `sql` (b) -- as long as
+    # they carry the idempotency guard (c). (This particular non-concurrent
+    # CREATE INDEX is ALSO a Rule 3 lock-duration violation on a
+    # pre-existing table -- out of scope for this Rule 4 fixture, which
+    # only exercises the escape-hatch/idempotency rules against a bare
+    # table name with no registry schema-state behind it.)
+    pytest.param(
+        [
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_x ON t(x)",
+            "CREATE INDEX IF NOT EXISTS idx_y ON t(y)",
+            "DROP INDEX CONCURRENTLY IF EXISTS idx_old",
+            "DROP INDEX IF EXISTS idx_older",
+        ],
+        True,
+        id="mixed-concurrent-and-non-concurrent-index-statements-all-idempotent",
     ),
 ]
 

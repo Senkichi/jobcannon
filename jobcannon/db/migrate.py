@@ -113,16 +113,24 @@ def _drop_invalid_indexes(conn: psycopg.Connection) -> None:
     static parser stays dev-only and this sweep stays a blunt, dependency-
     free SQL query."""
     rows = conn.execute(
-        "SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+        "SELECT n.nspname, c.relname FROM pg_index i "
+        "JOIN pg_class c ON c.oid = i.indexrelid "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
         "WHERE NOT i.indisvalid"
     ).fetchall()
-    for (index_name,) in rows:
+    for schema_name, index_name in rows:
         logger.warning(
-            "dropping INVALID index %r -- leftover from a previously failed "
-            "CREATE INDEX CONCURRENTLY build -- before retrying",
+            "dropping INVALID index %r in schema %r -- leftover from a "
+            "previously failed CREATE INDEX CONCURRENTLY build -- before "
+            "retrying",
             index_name,
+            schema_name,
         )
-        conn.execute(f'DROP INDEX CONCURRENTLY IF EXISTS "{index_name}"')
+        conn.execute(
+            psycopg.sql.SQL("DROP INDEX CONCURRENTLY IF EXISTS {}").format(
+                psycopg.sql.Identifier(schema_name, index_name)
+            )
+        )
 
 
 def _apply_autocommit_migration(conn: psycopg.Connection, migration: Migration) -> None:

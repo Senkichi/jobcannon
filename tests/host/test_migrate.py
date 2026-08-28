@@ -697,3 +697,139 @@ def test_main_import_time_failure_still_logs_the_failure_line(monkeypatch, caplo
         assert migrate_mod.main() == 1
 
     assert "pre-deploy migration run failed" in caplog.text
+
+
+def test_drop_invalid_indexes_is_schema_qualified_and_leaves_same_named_valid_index_alone():
+    """Issue #219 hardening (tests-and-deploy refuter finding, migrate.py
+    _drop_invalid_indexes): the original sweep SELECTed only bare relname
+    (no pg_namespace join) and DROPped by an unqualified, double-quoted
+    identifier resolved against search_path -- not the schema the SELECT
+    actually found. A same-named VALID index living in a DIFFERENT schema
+    than the one genuinely INVALID index was at risk: enumerated but not
+    dropped (if search_path didn't include the invalid one's schema), or
+    the wrong catalog entry targeted. Proves the fixed, pg_namespace-joined
+    + psycopg.sql.Identifier-quoted version is schema-exact in both
+    directions: builds a real INVALID index (actual UniqueViolation from a
+    failed CONCURRENTLY build over duplicate data, not a synthetic catalog
+    edit) in a second schema, alongside a same-named, ordinary VALID index
+    in public, and asserts the sweep drops exactly the invalid one."""
+    from jobcannon.db.migrate import _drop_invalid_indexes
+
+    dsn, db_name = create_throwaway_db("jobcannon_mig_drop_schema")
+    try:
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute("CREATE SCHEMA sch_c219")
+            conn.execute("CREATE TABLE t_pub_c219 (id bigserial PRIMARY KEY, val int)")
+            conn.execute("CREATE UNIQUE INDEX idx_c219_dup ON t_pub_c219 (val)")
+
+            conn.execute("CREATE TABLE sch_c219.t_sch_c219 (id bigserial PRIMARY KEY, val int)")
+            conn.execute("INSERT INTO sch_c219.t_sch_c219 (val) VALUES (1), (1)")
+            with pytest.raises(psycopg.errors.UniqueViolation):
+                conn.execute(
+                    "CREATE UNIQUE INDEX CONCURRENTLY idx_c219_dup ON sch_c219.t_sch_c219 (val)"
+                )
+
+            def _index_state(schema: str, name: str):
+                return conn.execute(
+                    "SELECT i.indisvalid FROM pg_index i "
+                    "JOIN pg_class c ON c.oid = i.indexrelid "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = %s AND c.relname = %s",
+                    (schema, name),
+                ).fetchone()
+
+            assert _index_state("public", "idx_c219_dup") == (True,)
+            assert _index_state("sch_c219", "idx_c219_dup") == (False,)
+
+            _drop_invalid_indexes(conn)
+
+            assert _index_state("public", "idx_c219_dup") == (True,), (
+                "the sweep dropped (or otherwise disturbed) the VALID same-named "
+                "index living in a different schema"
+            )
+            assert _index_state("sch_c219", "idx_c219_dup") is None, (
+                "the sweep left the INVALID index in place"
+            )
+    finally:
+        drop_throwaway_db(db_name)
+
+
+def test_autocommit_migration_then_failing_ordinary_migration_resets_autocommit_and_rolls_back(
+    monkeypatch,
+):
+    """Execution-safety refuter finding: every existing autocommit exercise
+    places the autocommit migration LAST in `pending`, so nothing previously
+    verified migrate.py:167-170's `finally: conn.autocommit = False` reset.
+    If that reset were ever lost, the NEXT (ordinary) migration would run its
+    `with conn.transaction():` on a connection still in autocommit mode --
+    psycopg silently no-ops the `with conn.transaction()` block's rollback
+    semantics there, so a failing statement would leave the migration's
+    earlier statements PERMANENTLY committed instead of rolled back, and the
+    migration itself unledgered: a silent partial-apply, not a clean retry.
+    pending = [autocommit CONCURRENTLY build, then an ordinary two-statement
+    migration whose LAST statement fails] -- asserts the ordinary migration
+    is neither ledgered nor partially applied (its first statement's table
+    must NOT exist), while the autocommit one before it IS ledgered."""
+    import jobcannon.db.migrate as migrate_mod
+    from jobcannon.db.migrations.types import Migration
+
+    fake_migrations = [
+        Migration(
+            version=900601,
+            description="table for the autocommit index",
+            sql=["CREATE TABLE t_ac_then_ord (id bigserial PRIMARY KEY, val int)"],
+            name="m900601_ac_table",
+        ),
+        Migration(
+            version=900602,
+            description="concurrent index build",
+            sql=[
+                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_t_ac_then_ord_val "
+                "ON t_ac_then_ord(val)"
+            ],
+            name="m900602_ac_index",
+            autocommit=True,
+        ),
+        Migration(
+            version=900603,
+            description="ordinary migration whose last statement fails",
+            sql=[
+                "CREATE TABLE t_after_ac (id bigserial PRIMARY KEY)",
+                "SELECT 1 / 0",
+            ],
+            name="m900603_ordinary_fails",
+        ),
+    ]
+    monkeypatch.setattr(migrate_mod, "MIGRATIONS", fake_migrations)
+
+    dsn, db_name = create_throwaway_db("jobcannon_mig_ac_then_ord")
+    try:
+        with pytest.raises(psycopg.errors.DivisionByZero):
+            migrate_mod.run_migrations(dsn)
+
+        with psycopg.connect(dsn) as conn:
+            versions = {
+                r[0] for r in conn.execute("SELECT version FROM schema_migrations").fetchall()
+            }
+            assert {900601, 900602} <= versions, (
+                "the autocommit migration (and the plain one before it) should "
+                "still be ledgered even though a LATER migration failed"
+            )
+            assert 900603 not in versions, "the failing ordinary migration was ledgered anyway"
+
+            exists = conn.execute("SELECT to_regclass('t_after_ac')").fetchone()[0]
+            assert exists is None, (
+                "the ordinary migration's first statement survived the failure of "
+                "its second -- conn.autocommit likely leaked True from the prior "
+                "autocommit migration instead of being reset in migrate.py's "
+                "finally block, so 'with conn.transaction()' silently no-opped "
+                "the rollback"
+            )
+
+            valid = conn.execute(
+                "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                "WHERE c.relname = 'idx_t_ac_then_ord_val'"
+            ).fetchone()
+            assert valid == (True,), "the autocommit migration's own index should be valid"
+    finally:
+        drop_throwaway_db(db_name)

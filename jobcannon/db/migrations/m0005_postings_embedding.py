@@ -18,16 +18,30 @@ retrieve-then-rank stage measures cosine distance (<=>).
 Lock justification: `idx_postings_embedding_hnsw` builds against `postings`,
 a table m0001 (an EARLIER migration) created, so
 tests/test_migration_deploy_safety.py's Rule 3 (issue #219) flags it by
-default — but at the time this migration runs, `postings` holds zero rows:
-this is a brand-new, not-yet-deployed pgvector feature, so nothing has ever
-written an `embedding` value, and the table's row count at deploy time is
-whatever earlier migrations/ingestion put there, which for this specific
-column is always zero on first apply. A `CREATE INDEX` build against an
-empty table is instant regardless of CONCURRENTLY vs. not, so the SHARE lock
-Rule 3 warns about is held for a negligible duration here — CONCURRENTLY
-(and the autocommit=True it would require) buys nothing this migration
-needs. Retroactively annotated when Rule 3 landed (#219), same shape as
-m0003's contract_step annotation for #199/#218.
+default. An earlier version of this note justified that on the premise that
+`postings` holds zero rows at migration time — factually wrong: this
+migration runs whenever the pending-migration queue reaches it, which for a
+live app is not guaranteed to be before any postings exist, and nothing here
+constrains `postings`' row count. The real basis is narrower: `embedding` is
+a column THIS SAME migration adds, via a bare `ADD COLUMN` with no DEFAULT,
+so Postgres leaves it NULL for every row that already exists at the instant
+the column comes into being — nothing could have written a value into it
+before that ALTER TABLE statement runs, because the column did not exist
+yet. pgvector's HNSW build skips NULL vector values entirely, so the graph
+the immediately-following `CREATE INDEX` produces has zero nodes no matter
+how large `postings` is — the actual indexing work is nil. That does NOT
+make the SHARE lock's hold time zero: a non-CONCURRENT `CREATE INDEX` still
+heap-scans every row in `postings` to see that each one's `embedding` is
+NULL, so the lock is held for that scan, which scales with `postings`'
+total row count at deploy time — not with the (zero) count of vectors
+actually indexed. The accepted trade is a heap-scan-only SHARE lock over a
+column nothing yet reads or writes (no application code queries or sets
+`embedding` before this migration ships it), which is materially cheaper
+than a real HNSW build over populated vectors — not that it is instant.
+CONCURRENTLY (and the autocommit=True it would require) was judged not
+worth the added complexity for a scan against a column with no existing
+readers to contend with. Retroactively annotated when Rule 3 landed (#219),
+same shape as m0003's contract_step annotation for #199/#218.
 """
 
 from __future__ import annotations
