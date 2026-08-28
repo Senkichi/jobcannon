@@ -216,7 +216,11 @@ module docstring's "Parser" section for the specific list).
    describing what happens to rows the OLD (not-yet-replaced) writer
    creates *after* this migration commits — that's the actual hazard
    (completeness of the backfill), not whether the `UPDATE` happens to be
-   idempotent.
+   idempotent. Same shielding rule as rule 3 below: `CREATE TABLE IF NOT
+   EXISTS <name>` only earns the same-migration exemption when `<name>` is
+   genuinely new — naming a table an EARLIER migration already created does
+   NOT shield a later `UPDATE`/`INSERT ... SELECT` against it from this
+   rule (issue #236).
 3. **Non-CONCURRENT index-lock-duration hazards against a pre-existing
    table fail by default (issue #219).** `CREATE INDEX` (unique or not,
    without `CONCURRENTLY`) takes a SHARE lock for its entire build, blocking

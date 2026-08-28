@@ -172,6 +172,40 @@ def _is_new_this_migration(
     return state.column_created_at.get((table, col)) == version
 
 
+def _register_created_table(
+    node: pg_ast.CreateStmt, pre_existing: dict[str, int] | set[str], new_tables: set[str]
+) -> str:
+    """The single CreateStmt-shielding rule, shared by every rule below that
+    tracks "which tables did THIS migration create": a CreateStmt earns the
+    same-migration exemption only for a genuinely new name. `CREATE TABLE IF
+    NOT EXISTS <name>` where `<name>` is already in `pre_existing` is a
+    retry-safe no-op against a table that may already hold rows -- NOT a
+    fresh table this migration owns -- so registering it into `new_tables`
+    unconditionally would wrongly shield every later statement in the same
+    migration from whichever rule calls this. #233 (A2) fixed this for
+    `_scan_statement` (rules 1) and `_index_lock_violations` (rule 3);
+    #236 closes the same gap in `_has_backfill_against_preexisting` (rule 2)
+    by routing all three through this one helper instead of re-deriving the
+    condition at each call site (where it had drifted once already).
+
+    `pre_existing` is whatever container the caller already tracks
+    "pre-existing" against -- `_SchemaState.table_created_at` (a dict, keyed
+    by every table any migration up to and including this scan has created)
+    for `_scan_statement`, or a `pre_existing_tables` set (tables strictly
+    EARLIER migrations created, snapshotted before this migration runs) for
+    the other two -- both support `in`, which is all this needs.
+
+    Returns the table name so a caller that also needs to advance its own
+    bookkeeping (`_scan_statement` still does `state.table_created_at.
+    setdefault(table, version)` itself, after calling this) doesn't have to
+    re-read `node.relation.relname` a second time.
+    """
+    table = node.relation.relname
+    if table not in pre_existing:
+        new_tables.add(table)
+    return table
+
+
 class _ColumnRefCollector(visitors.Visitor):
     """Collects only genuine column references from a CHECK expression's AST
     -- a function name (`char_length(bio)`), a cast target (`::int`), or a
@@ -392,17 +426,13 @@ def _scan_alter_table(
 
 def _scan_statement(node, version: int, state: _SchemaState, new_tables: set[str]) -> list[str]:
     if isinstance(node, pg_ast.CreateStmt):
-        table = node.relation.relname
-        # A2: an IF NOT EXISTS create of a table an EARLIER migration already
-        # created (state.table_created_at already has it) must NOT earn the
-        # same-migration exemption -- only a genuinely new table does. Before
-        # this fix, new_tables.add(table) ran unconditionally, so `CREATE
-        # TABLE IF NOT EXISTS <pre-existing>` shielded every later statement
-        # in the same migration from this function's checks below.
-        is_new_table = table not in state.table_created_at
+        # A2 / _register_created_table: an IF NOT EXISTS create of a table an
+        # EARLIER migration already created (state.table_created_at already
+        # has it) must NOT earn the same-migration exemption -- only a
+        # genuinely new table does. Read membership BEFORE the setdefault
+        # below advances state, same ordering the pre-extraction code used.
+        table = _register_created_table(node, state.table_created_at, new_tables)
         state.table_created_at.setdefault(table, version)
-        if is_new_table:
-            new_tables.add(table)
         for elt in node.tableElts or ():
             if isinstance(elt, pg_ast.ColumnDef):
                 state.column_created_at.setdefault((table, elt.colname), version)
@@ -525,7 +555,13 @@ def _has_backfill_against_preexisting(migration: Migration, pre_existing_tables:
         for raw in raw_stmts:
             node = raw.stmt
             if isinstance(node, pg_ast.CreateStmt):
-                new_tables_this_migration.add(node.relation.relname)
+                # #236 / _register_created_table: only a genuinely new table
+                # (not already in pre_existing_tables) earns the
+                # same-migration exemption -- an unconditional add here let
+                # `CREATE TABLE IF NOT EXISTS <pre-existing>` shield every
+                # backfill statement after it, the same shielding bug #233
+                # (A2) already fixed for rules 1 and 3.
+                _register_created_table(node, pre_existing_tables, new_tables_this_migration)
                 continue
             if isinstance(node, pg_ast.UpdateStmt) and node.relation is not None:
                 table = node.relation.relname
@@ -755,11 +791,11 @@ def _index_lock_violations(migration: Migration, pre_existing_tables: set[str]) 
         for raw in raw_stmts:
             node = raw.stmt
             if isinstance(node, pg_ast.CreateStmt):
-                # A2: only a genuinely new table (not already pre-existing under
-                # an IF NOT EXISTS create of a name an earlier migration owns)
-                # earns the same-migration exemption below.
-                if node.relation.relname not in pre_existing_tables:
-                    new_tables_this_migration.add(node.relation.relname)
+                # A2 / _register_created_table: only a genuinely new table
+                # (not already pre-existing under an IF NOT EXISTS create of
+                # a name an earlier migration owns) earns the same-migration
+                # exemption below.
+                _register_created_table(node, pre_existing_tables, new_tables_this_migration)
                 continue
             if isinstance(node, pg_ast.DoStmt):
                 # A3: opaque to this scanner -- mirror Rule 1's fail-closed
@@ -1876,6 +1912,79 @@ def test_backfill_structural_signal_ignores_values_insert_and_same_migration_tab
         name="m999996_structural_safe",
     )
     assert not _has_backfill_against_preexisting(safe_probe, pre_existing)
+
+
+# --- #236: CREATE TABLE IF NOT EXISTS of a table an earlier migration
+# already owns must not shield a later backfill statement in the same
+# migration -- the parallel gap #233 (A2) already closed for rules 1 and 3.
+# One flagged/control pair per structural arm (UPDATE, INSERT ... SELECT). ---
+
+
+def test_backfill_structural_signal_not_shielded_by_create_table_if_not_exists():
+    """Before the #236 fix, `_has_backfill_against_preexisting` added every
+    CreateStmt's table to `new_tables_this_migration` unconditionally, so
+    this IF NOT EXISTS create of a table `postings` an EARLIER migration
+    already owns wrongly shielded the UPDATE right after it from Rule 2."""
+    pre_existing = {"postings"}
+    probe = Migration(
+        version=999991,
+        description="rule2 shield probe",
+        sql=[
+            "CREATE TABLE IF NOT EXISTS postings (id bigserial PRIMARY KEY)",
+            "UPDATE postings SET embedding = NULL WHERE embedding IS NULL",
+        ],
+        name="m999991_rule2_shield_probe",
+    )
+    assert _has_backfill_against_preexisting(probe, pre_existing)
+
+
+def test_backfill_structural_signal_create_table_if_not_exists_genuinely_new_still_exempt():
+    """Control for the fixture above: an IF NOT EXISTS create of a name NOT
+    already in pre_existing_tables is genuinely new this migration, so the
+    UPDATE right after it is the ordinary, safe same-migration shape and
+    must stay unflagged -- proves the fix doesn't just flag every IF NOT
+    EXISTS create unconditionally in the other direction."""
+    pre_existing = {"events"}
+    probe = Migration(
+        version=999990,
+        description="rule2 shield control probe",
+        sql=[
+            "CREATE TABLE IF NOT EXISTS brand_new (id bigserial PRIMARY KEY)",
+            "UPDATE brand_new SET id = id",
+        ],
+        name="m999990_rule2_shield_control_probe",
+    )
+    assert not _has_backfill_against_preexisting(probe, pre_existing)
+
+
+def test_backfill_structural_signal_insert_select_not_shielded_by_if_not_exists():
+    """Same shielding bug, the INSERT ... SELECT arm."""
+    pre_existing = {"postings"}
+    probe = Migration(
+        version=999989,
+        description="rule2 shield probe (insert-select)",
+        sql=[
+            "CREATE TABLE IF NOT EXISTS postings (id bigserial PRIMARY KEY)",
+            "INSERT INTO postings (id) SELECT id FROM companies",
+        ],
+        name="m999989_rule2_shield_insert_select_probe",
+    )
+    assert _has_backfill_against_preexisting(probe, pre_existing)
+
+
+def test_backfill_structural_signal_insert_select_if_not_exists_new_table_exempt():
+    """Control for the INSERT ... SELECT arm."""
+    pre_existing = {"events"}
+    probe = Migration(
+        version=999988,
+        description="rule2 shield control probe (insert-select)",
+        sql=[
+            "CREATE TABLE IF NOT EXISTS brand_new (id bigserial PRIMARY KEY)",
+            "INSERT INTO brand_new (id) SELECT id FROM companies",
+        ],
+        name="m999988_rule2_shield_insert_select_control_probe",
+    )
+    assert not _has_backfill_against_preexisting(probe, pre_existing)
 
 
 def _contract_step_ok(contract_step: bool, doc: str) -> bool:
