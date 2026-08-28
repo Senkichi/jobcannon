@@ -40,6 +40,45 @@ re-raises, leaving the connection usable for the caller's next statement
 instead of stuck in Postgres's aborted-transaction state. This does NOT
 replace the durable commit: pool.commit_unless_nested() still runs
 immediately after the block on every success path, exactly as before.
+
+``unresolved_reasons`` ownership partition (#235, UPDATE branch only):
+this column has exactly two production writers — this module and
+``_jd_full.py``'s ``set_jd_full`` / ``_record_jd_content_reject`` (grep
+confirms no third; ``_unresolved_reasons.py`` is a Python reference no
+production path calls, per its own docstring). ``_jd_full.py`` owns
+``JD_CONTENT_REASON_CODES`` (``jd_full_offsite`` / ``jd_full_expired`` /
+``jd_full_truncated``, defined in ``jd_content_contract.py``) and writes
+them via atomic SQL expressions evaluated against the row's LIVE value
+(#217/#232) — the authoritative verdict about the row's CURRENTLY STORED
+``jd_full``. ``parsed.unresolved_reasons`` can independently re-derive
+those SAME codes (I-18 in ``ParsedJob.from_job``) by running
+``jd_content_reject`` a second time against THIS ingestion's own
+(possibly different, possibly stale-by-the-time-this-UPDATE-runs)
+``jd_full`` snippet — a verdict about a different observation of the
+row's content, not the live one. Writing that verdict as part of this
+module's wholesale ``unresolved_reasons`` replacement could silently
+erase a live, still-true ``_jd_full.py`` quarantine flag (the #235 bug).
+
+The fix: this module never asserts an opinion on ``JD_CONTENT_REASON_CODES``.
+Before the UPDATE, ``parsed.unresolved_reasons`` is filtered to strip any
+``JD_CONTENT_REASON_CODES`` entries (this module's owned codes only —
+title/salary/junk-density reasons). The UPDATE's SQL CASE expression (only
+evaluated when ``canonical_changed``, same gate as before) then computes
+the new value as ``(the row's LIVE ``JD_CONTENT_REASON_CODES``-tagged
+entries, whatever they are at UPDATE-execution time) || (this module's
+filtered, parser-owned reasons)`` — a live-row read merged with a
+Python-known-safe value, both by the SAME statement that writes it, so a
+concurrent ``_jd_full.py`` writer's already-committed change can never be
+clobbered by this one landing after it (and vice versa: mirrors the
+#217/#232 atomic-SQL-expression shape exactly, one ownership partition
+instead of one set-difference). Because the two inputs are constructed to
+be disjoint by construction (the Python side is pre-filtered to exclude
+the codes the SQL side already owns), no de-dup step is needed at
+concatenation. The UPDATE additionally gains ``RETURNING unresolved_reasons``
+so ``UpsertResult.unresolved_reasons`` reports what this statement actually
+persisted rather than the raw (possibly since-filtered) ``parsed`` value —
+without this, the returned value would drift from the DB the same way the
+bug this fix closes did.
 """
 
 from __future__ import annotations
@@ -51,6 +90,7 @@ from typing import Any, Literal
 from psycopg.types.json import Jsonb
 
 from jobcannon.db.pool import commit_unless_nested
+from jobcannon.engine.jd_content_contract import JD_CONTENT_REASON_CODES
 from jobcannon.engine.parsed_job import ParsedJob, UnresolvedParsedJob
 
 _PRECISION_RANK = {"exact": 3, "approximate": 2, "proxy": 1}
@@ -295,15 +335,17 @@ def upsert_job(
     # Preserve unresolved_reasons unless a canonical field changed. A touch
     # / re-sighting (or a no-op re-ingest) must not clobber an /admin/review
     # triage decision — only a genuine canonical update re-applies the
-    # parser contract's reason codes.
-    new_unresolved_reasons = (
-        list(parsed.unresolved_reasons)
-        if canonical_changed
-        else (existing["unresolved_reasons"] or [])
-    )
+    # parser contract's reason codes. #235: this module owns every reason
+    # code EXCEPT JD_CONTENT_REASON_CODES (_jd_full.py's vocabulary) — strip
+    # those from the parser's list here so the write below never carries an
+    # opinion on them; the SQL CASE preserves _jd_full.py's live-row value
+    # for those codes untouched instead. See the module docstring.
+    parser_reasons = [
+        reason for reason in parsed.unresolved_reasons if reason not in JD_CONTENT_REASON_CODES
+    ]
 
     with raw.transaction():
-        raw.execute(
+        cur = raw.execute(
             """
             UPDATE postings SET
                 sources = %s, source_urls = %s, sightings = %s,
@@ -313,9 +355,21 @@ def upsert_job(
                 salary_period = %s, salary_observations = %s,
                 location = %s, locations_raw = %s, locations_structured = %s,
                 workplace_type = %s, primary_country_code = %s,
-                ats_platform = %s, source_id = %s, unresolved_reasons = %s,
+                ats_platform = %s, source_id = %s,
+                unresolved_reasons = CASE WHEN %s::boolean THEN
+                    COALESCE(
+                        (SELECT jsonb_agg(elem ORDER BY ord)
+                         FROM jsonb_array_elements_text(
+                             CASE WHEN jsonb_typeof(unresolved_reasons) = 'array'
+                             THEN unresolved_reasons ELSE '[]'::jsonb END
+                         ) WITH ORDINALITY AS t(elem, ord)
+                         WHERE elem = ANY(%s)
+                        ), '[]'::jsonb
+                    ) || %s
+                ELSE unresolved_reasons END,
                 last_seen = now()
             WHERE dedup_key = %s
+            RETURNING unresolved_reasons
             """,
             (
                 Jsonb(sources),
@@ -338,11 +392,18 @@ def upsert_job(
                 primary_country_code,
                 ats_platform_col,
                 source_id_col,
-                Jsonb(new_unresolved_reasons),
+                canonical_changed,
+                list(JD_CONTENT_REASON_CODES),
+                Jsonb(parser_reasons),
                 matched_dedup_key,
             ),
         )
     commit_unless_nested(raw)
+    # RETURNING captures what THIS statement actually persisted — honest
+    # even under the #235 race, unlike re-using the (possibly by-now-stale)
+    # `existing` SELECT or the raw `parsed.unresolved_reasons` value.
+    returned = cur.fetchone()
+    persisted_unresolved_reasons = list(returned["unresolved_reasons"]) if returned else []
 
     if canonical_changed:
         kind = "updated"
@@ -350,7 +411,7 @@ def upsert_job(
         kind = "touched"
     else:
         kind = "unchanged"
-    return UpsertResult(kind, matched_dedup_key, list(parsed.unresolved_reasons))
+    return UpsertResult(kind, matched_dedup_key, persisted_unresolved_reasons)
 
 
 def _loc_dict(loc: Any) -> dict:
