@@ -38,7 +38,13 @@ from typing import Any, Callable
 
 _API_ROOT = "https://api.github.com"
 _MIGRATIONS_PATH = "jobcannon/db/migrations"
-_FILENAME_RE = re.compile(r"^m(\d+)_")
+# Anchored to `.py` on both ends: `jobcannon/db/migrations/__init__.py`
+# discovers migrations via `pkgutil.iter_modules`, which only ever yields
+# real .py modules. A non-.py sibling that happens to share the `m<digits>_`
+# prefix (a stray `.orig` backup, an unrelated `.md`) must never be treated
+# as a colliding/duplicate migration file -- it will never actually be
+# imported, so flagging it produces a false "will fail to import" verdict.
+_FILENAME_RE = re.compile(r"^m(\d+)_.*\.py$")
 
 # (method, url) -> parsed JSON body. Swappable in tests; defaults to a real
 # urllib call.

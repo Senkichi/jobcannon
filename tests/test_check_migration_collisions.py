@@ -53,6 +53,26 @@ def test_duplicate_versions_empty_when_all_unique():
     assert cmc.duplicate_versions(["m0001_x.py", "m0002_y.py"]) == {}
 
 
+def test_duplicate_versions_ignores_non_python_siblings():
+    """The guard's notion of "a migration file" must match what
+    jobcannon/db/migrations/__init__.py actually imports -- pkgutil.iter_modules
+    only ever yields real .py modules, never a stray non-.py file. A
+    committed sibling that happens to share the `m<digits>_` prefix (a
+    leftover .orig backup, or an unrelated .md) must NOT be flagged as a
+    colliding version just because an extension-blind regex would match it
+    -- it will never actually be imported. Two genuine .py files sharing a
+    version number are still flagged."""
+    assert cmc.duplicate_versions(["m0013_a.py", "m0013_a.py.orig"]) == {}
+    assert cmc.duplicate_versions(["m0013_a.py", "m0013_notes.md"]) == {}
+    assert cmc.duplicate_versions(["m0013_a.py", "m0013_b.py"]) == {
+        13: ["m0013_a.py", "m0013_b.py"]
+    }
+
+
+def test_parse_versions_ignores_non_python_extension():
+    assert cmc.parse_versions(["m0013_a.py.orig", "m0013_notes.md"]) == {}
+
+
 def test_added_versions_is_head_minus_merge_base():
     head = {1: "m0001_x.py", 12: "m0012_y.py", 13: "m0013_new.py"}
     merge_base = {1: "m0001_x.py", 12: "m0012_y.py"}
@@ -307,6 +327,30 @@ def test_run_fails_on_intra_head_duplicate_after_rebase():
     assert "version 13" in messages[0]
     assert "m0013_a.py" in messages[0]
     assert "m0013_b.py" in messages[0]
+
+
+def test_run_does_not_flag_non_python_sibling_as_duplicate():
+    """End-to-end companion to test_duplicate_versions_ignores_non_python_siblings:
+    a PR head carrying a real m0013_a.py plus a stray non-.py file sharing
+    its prefix (a leftover .orig backup, an unrelated .md) must not trip the
+    intra-head duplicate check -- only files pkgutil.iter_modules would
+    actually import count as a collision."""
+    responses = _base_responses(
+        head_files=["m0001_x.py", "m0013_a.py", "m0013_a.py.orig", "m0013_notes.md"],
+        base_files=["m0001_x.py"],
+        main_files=["m0001_x.py"],
+    )
+    responses["pulls?state=open"] = []
+    rc = cmc.run(
+        event_name="pull_request",
+        repo="Senkichi/jobcannon",
+        token="tok",
+        pr_number=5,
+        pr_head_sha="abc123",
+        base_ref="main",
+        transport=_fake_transport(responses),
+    )
+    assert rc == 0
 
 
 def test_run_labels_collision_with_actual_base_ref_not_hardcoded_main():

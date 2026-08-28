@@ -98,23 +98,30 @@ def _local_versions(migrations_dir: Path) -> set[int]:
 
 def _fetch_pr_head_versions(repo_root: Path, number: int) -> set[int] | None:
     """Versions in `number`'s head migrations directory, or None on any
-    failure (unreachable PR ref, git error, timeout)."""
-    fetch = subprocess.run(
-        ["git", "fetch", "-q", "origin", f"refs/pull/{number}/head"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    if fetch.returncode != 0:
+    failure (unreachable PR ref, git error, timeout, or git itself missing
+    from PATH -- FileNotFoundError/OSError and TimeoutExpired are caught
+    here the same way the sibling _open_pr_versions already catches them
+    around its own subprocess call, so a missing git binary can never
+    escape main() as a bare traceback)."""
+    try:
+        fetch = subprocess.run(
+            ["git", "fetch", "-q", "origin", f"refs/pull/{number}/head"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if fetch.returncode != 0:
+            return None
+        ls = subprocess.run(
+            ["git", "ls-tree", "--name-only", "FETCH_HEAD", "--", _MIGRATIONS_SUBPATH],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
         return None
-    ls = subprocess.run(
-        ["git", "ls-tree", "--name-only", "FETCH_HEAD", "--", _MIGRATIONS_SUBPATH],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
     if ls.returncode != 0:
         return None
     names = [Path(line).name for line in ls.stdout.splitlines() if line.strip()]
@@ -128,23 +135,31 @@ def _fetch_origin_main_versions(repo_root: Path) -> set[int] | None:
     silently mint against an outdated view -- this is what makes "free
     against origin/main" (this module's docstring, the PR body,
     docs/deploy-runbook.md Sec 3, CONTRIBUTING.md) actually true, rather
-    than only checking whatever this branch happened to fork from."""
-    fetch = subprocess.run(
-        ["git", "fetch", "-q", "origin", "main"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    if fetch.returncode != 0:
+    than only checking whatever this branch happened to fork from. A
+    missing git binary or a timeout (OSError / TimeoutExpired) is caught
+    here rather than left to propagate out of main() as a bare traceback --
+    matching this function's own "None on any failure" contract and the
+    sibling _open_pr_versions, which already catches the same conditions
+    around its own subprocess call."""
+    try:
+        fetch = subprocess.run(
+            ["git", "fetch", "-q", "origin", "main"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if fetch.returncode != 0:
+            return None
+        ls = subprocess.run(
+            ["git", "ls-tree", "--name-only", "origin/main", "--", _MIGRATIONS_SUBPATH],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
         return None
-    ls = subprocess.run(
-        ["git", "ls-tree", "--name-only", "origin/main", "--", _MIGRATIONS_SUBPATH],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
     if ls.returncode != 0:
         return None
     names = [Path(line).name for line in ls.stdout.splitlines() if line.strip()]

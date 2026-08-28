@@ -251,6 +251,47 @@ def test_fetch_origin_main_versions_none_on_ls_tree_failure(monkeypatch, tmp_pat
     assert nm._fetch_origin_main_versions(tmp_path) is None
 
 
+def test_fetch_origin_main_versions_none_when_git_binary_missing(monkeypatch, tmp_path):
+    """Re-review LOW finding: a missing git binary must be caught here the
+    same way _open_pr_versions already catches it around its own subprocess
+    call -- not left to propagate out of main() as a bare traceback."""
+
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError("git not found")
+
+    monkeypatch.setattr(nm.subprocess, "run", fake_run)
+    assert nm._fetch_origin_main_versions(tmp_path) is None
+
+
+def test_fetch_origin_main_versions_none_on_timeout(monkeypatch, tmp_path):
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, 60)
+
+    monkeypatch.setattr(nm.subprocess, "run", fake_run)
+    assert nm._fetch_origin_main_versions(tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# _fetch_pr_head_versions -- git is faked; direct unit coverage
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_pr_head_versions_none_when_git_binary_missing(monkeypatch, tmp_path):
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError("git not found")
+
+    monkeypatch.setattr(nm.subprocess, "run", fake_run)
+    assert nm._fetch_pr_head_versions(tmp_path, 7) is None
+
+
+def test_fetch_pr_head_versions_none_on_timeout(monkeypatch, tmp_path):
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, 60)
+
+    monkeypatch.setattr(nm.subprocess, "run", fake_run)
+    assert nm._fetch_pr_head_versions(tmp_path, 7) is None
+
+
 # ---------------------------------------------------------------------------
 # main() -- end-to-end against a tmp_path migrations dir
 # ---------------------------------------------------------------------------
@@ -386,6 +427,35 @@ def test_main_accounts_for_origin_main_version_beyond_local_max(fake_repo, monke
     assert rc == 0
     dest = fake_repo / "m0014_yet_another_change.py"
     assert dest.exists()
+
+
+def test_main_survives_missing_git_binary_without_traceback(fake_repo, monkeypatch, capsys):
+    """Regression for the re-review LOW finding: previously a missing git
+    binary (FileNotFoundError) or a timeout (TimeoutExpired) raised inside
+    _fetch_origin_main_versions/_fetch_pr_head_versions propagated straight
+    out of main() as an unhandled traceback, contradicting both those
+    functions' own "None on any failure" docstrings and the sibling
+    _open_pr_versions, which already caught the same conditions. main()
+    must still mint, reporting verified=False with the warning -- no
+    traceback."""
+    monkeypatch.setattr(nm.shutil, "which", lambda name: "/usr/bin/gh")
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["gh", "pr"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
+        raise FileNotFoundError("git: command not found")
+
+    monkeypatch.setattr(nm.subprocess, "run", fake_run)
+
+    rc = nm.main(["some change"])
+
+    assert rc == 0
+    dest = fake_repo / "m0013_some_change.py"
+    assert dest.exists()
+    out = capsys.readouterr().out
+    assert "WARNING: unverified" in out
+    assert "origin/main's migrations directory could not be fetched/listed" in out
+    assert "gh was unavailable" not in out
 
 
 def test_main_rejects_slug_that_collapses_to_empty(fake_repo, monkeypatch):
