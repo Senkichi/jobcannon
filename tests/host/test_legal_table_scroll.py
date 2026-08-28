@@ -1,5 +1,5 @@
-"""jobcannon/web/templates/legal_page.html -- narrow-viewport table scroll
-(issue #229).
+"""jobcannon/web/templates/legal_page.html + jobcannon/web/legal.py --
+narrow-viewport table scroll (issue #229).
 
 At 390px, /privacy's section-4 legal-basis table (3 columns: Purpose /
 Data / Legal basis) doesn't fit even with `.legal-prose table`'s existing
@@ -9,35 +9,55 @@ the table past it when a cell's content can't wrap enough. The result was
 the whole DOCUMENT overflowing horizontally (clientWidth 390 vs
 scrollWidth 421), not just that one table looking cramped.
 
-The fix is ONE CSS rule in legal_page.html's `<style>` block: at
-`max-width: 640px`, `.legal-prose table { display: block; overflow-x:
-auto; }` turns each table element itself into its own horizontal-scroll
-container. `display: block` (not a wrapping `<div>`) was chosen
-specifically so `jobcannon/web/legal.py`'s rendered `body_html` gains no
-new HTML at all -- a `<div class="table-scroll">` wrapper would put a
-second, nested `<div>` inside `.legal-prose`, breaking the "body_html
-contains exactly one <div>" invariant
-tests/host/test_legal_pages.py's `test_legal_page_body_is_byte_identical_regardless_of_auth_state`
-documents and relies on (its own `_LEGAL_PROSE_RE` regex stops at the
-FIRST `</div>` it finds). A CSS-only rule touches zero HTML, so that
-invariant -- and every other test reading legal.py's output -- holds by
-construction.
+The fix has two parts:
+  1. `jobcannon/web/legal.py`'s `_wrap_tables_for_scroll` (called from
+     `_render`, the single render chokepoint both /privacy and /terms go
+     through) wraps every rendered `<table>...</table>` in
+     `<div class="table-scroll">...</div>`.
+  2. `jobcannon/web/templates/legal_page.html` declares ONE CSS rule, with
+     NO media query: `.legal-prose .table-scroll { overflow-x: auto;
+     max-width: 100%; }`.
 
-Because the rule is keyed off the existing `.legal-prose table` selector
-(not a per-file or per-table class), it automatically covers every table
-any committed jobcannon/web/legal/*.md file's markdown renders, on both
+This replaces PR #231's first draft, `@media (max-width: 640px) {
+.legal-prose table { display: block; overflow-x: auto; } }`. Adversarial
+review found that rule changed the table's own box-sizing algorithm
+(`display: table` -> `display: block`) for every table below the
+breakpoint at every viewport from ~400px up to 640px, including tables
+that never overflowed -- an undisclosed visual-change surface that exists
+purely because the mechanism was keyed to a breakpoint at all. The wrapper
+has no such surface: `.legal-prose table`'s `width: 100%` and
+`display: table` are never touched, at any viewport width, so a table
+that already fit cannot change. Only a table whose content genuinely
+can't fit triggers the wrapper's own internal scrollbar.
+
+The wrapper was rejected in PR #231's first draft specifically because
+`tests/host/test_legal_pages.py`'s byte-identity test used to extract
+`.legal-prose`'s contents with a non-greedy regex
+(`<div class="legal-prose">(.*?)</div>`) that stopped at the FIRST
+`</div>` -- a wrapper div would have silently truncated what that test
+verified. That extraction was rewritten to use a real HTML parser
+(BeautifulSoup), which finds `.legal-prose`'s true closing tag regardless
+of nesting, so the wrapper is now safe to adopt; see that test file's
+`_legal_body()` docstring.
+
+Because `_wrap_tables_for_scroll` operates on ALL rendered HTML (not a
+per-file or per-table opt-in) and the CSS rule is keyed off the existing
+`.legal-prose` selector, both automatically cover every table any
+committed jobcannon/web/legal/*.md file's markdown renders, on both
 /privacy (5 tables today) and /terms (0 today, gains coverage for free if
 one is ever added) -- there is nothing to hand-maintain. This module pins
-that single point structurally (positive) and sabotage-proves the pin
-actually catches a regression (negative) rather than trusting a `search()`
-that could vacuously match anything.
+that single point structurally (positive), sabotage-proves the pin
+actually catches a regression (negative), and verifies the mechanism
+behaviorally end-to-end through a real Flask test client and a real HTML
+parser -- not just as a regex over template/rendered source.
 
 Before/after DOM measurement (Playwright, local server, both a plain
 390x844 viewport and full iPhone-13 emulation, walking every
-`.legal-prose table` on the page rather than just the first -- see the PR
-body for the numbers and the script) is the empirical proof this actually
-fixes the reported overflow; this module is the standing regression guard
-for the CSS itself.
+`.legal-prose table` on the page at 390/500/641/1280px, before vs. after)
+is the empirical proof this fixes the reported overflow with zero change
+to any table's width above ~400px; see the PR body for the numbers and
+script. This module is the standing regression guard for the mechanism
+itself.
 """
 
 from __future__ import annotations
@@ -45,139 +65,210 @@ from __future__ import annotations
 import pathlib
 import re
 
+from bs4 import BeautifulSoup
+
 from jobcannon.web import legal
 
 _LEGAL_PAGE_TEMPLATE = pathlib.Path("jobcannon/web/templates/legal_page.html")
 _LEGAL_MD_DIR = pathlib.Path("jobcannon/web/legal")
 
-# Matches the WHOLE `@media (max-width: 640px) { .legal-prose table { ... } }`
-# block and captures just the inner declarations, so a check on their
-# CONTENT (display/overflow-x) is independent of exact whitespace/formatting.
-_NARROW_TABLE_RULE_RE = re.compile(
-    r"@media\s*\(\s*max-width\s*:\s*640px\s*\)\s*\{\s*"
-    r"\.legal-prose\s+table\s*\{([^}]*)\}\s*\}",
-    re.DOTALL,
-)
 
+def _app():
+    from jobcannon.web import create_app
 
-def _narrow_table_scroll_declarations(css: str) -> str | None:
-    """Return the declaration block of the `@media (max-width: 640px)
-    .legal-prose table { ... }` rule, or None if no such rule is present
-    at all (wrong selector, missing media query, rule dropped entirely)."""
-    match = _NARROW_TABLE_RULE_RE.search(css)
-    return match.group(1) if match else None
-
-
-# ---------------------------------------------------------------------------
-# Positive: the rule exists and declares the mechanism the PR body's
-# measurement actually exercised.
-# ---------------------------------------------------------------------------
-
-
-def test_narrow_viewport_table_scroll_rule_is_present():
-    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
-    decls = _narrow_table_scroll_declarations(css)
-    assert decls is not None, (
-        "legal_page.html has no `@media (max-width: 640px) .legal-prose "
-        "table { ... }` rule -- issue #229's narrow-viewport table "
-        "overflow fix is missing"
+    return create_app(
+        config={
+            "TESTING": True,
+            "VERIFY_REQUEST": lambda req: None,
+            "WEBHOOK_SECRET": "whsec_dGVzdHRlc3R0ZXN0dGVzdHRlc3Q=",
+        }
     )
 
 
-def test_narrow_viewport_table_scroll_rule_declares_display_block():
-    """`display: block` is what makes the table element itself become the
-    scroll container -- without it, `overflow-x: auto` on a still-`table`-
-    display element does not reliably clip/scroll (this is why the fix
-    isn't just adding `overflow-x: auto` alone)."""
-    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
-    decls = _narrow_table_scroll_declarations(css)
-    assert decls is not None
-    assert re.search(r"display\s*:\s*block", decls), decls
+# ---------------------------------------------------------------------------
+# CSS rule: `.legal-prose .table-scroll { ... }`, parsed into real
+# declarations (property -> value), not compared as a literal string --
+# reformatting (whitespace, declaration order, extra declarations added
+# later) can't make these checks miss a semantic regression.
+# ---------------------------------------------------------------------------
+
+_TABLE_SCROLL_RULE_RE = re.compile(
+    r"\.legal-prose\s+\.table-scroll\s*\{([^}]*)\}",
+    re.DOTALL,
+)
+_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 
-def test_narrow_viewport_table_scroll_rule_declares_overflow_x_auto_or_scroll():
-    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
-    decls = _narrow_table_scroll_declarations(css)
-    assert decls is not None
-    assert re.search(r"overflow-x\s*:\s*(auto|scroll)\b", decls), decls
-
-
-def test_narrow_viewport_table_scroll_rule_does_not_use_white_space_nowrap():
-    """`white-space: nowrap` is a common ingredient in the naive version of
-    this CSS recipe, but it INFLATES every cell's min-content width and
-    makes the scroll region wider, not narrower -- it must not be present
-    on this rule."""
-    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
-    decls = _narrow_table_scroll_declarations(css)
-    assert decls is not None
-    assert "nowrap" not in decls, decls
+def _table_scroll_declarations(css: str) -> dict[str, str] | None:
+    """Return the `.legal-prose .table-scroll { ... }` rule's declarations
+    as a {property: value} dict, or None if no such (LIVE) rule is present
+    at all (wrong selector, rule dropped entirely, or the only match is
+    inside a /* ... */ comment -- CSS comments are stripped first, so a
+    rule that's present as text but disabled by commenting it out is
+    correctly treated the same as a rule that was deleted outright; a
+    browser applies neither)."""
+    match = _TABLE_SCROLL_RULE_RE.search(_CSS_COMMENT_RE.sub("", css))
+    if match is None:
+        return None
+    decls: dict[str, str] = {}
+    for decl in match.group(1).split(";"):
+        decl = decl.strip()
+        if not decl:
+            continue
+        prop, _, value = decl.partition(":")
+        decls[prop.strip().lower()] = value.strip()
+    return decls
 
 
 # ---------------------------------------------------------------------------
-# Negative / sabotage: prove the structural check above actually catches a
+# Positive: the rule exists, declares the mechanism the PR body's
+# measurement actually exercised, and is not gated behind a media query.
+# ---------------------------------------------------------------------------
+
+
+def test_table_scroll_rule_is_present():
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    decls = _table_scroll_declarations(css)
+    assert decls is not None, (
+        "legal_page.html has no `.legal-prose .table-scroll { ... }` rule "
+        "-- issue #229's narrow-viewport table overflow fix is missing"
+    )
+
+
+def test_table_scroll_rule_declares_overflow_x_auto_or_scroll():
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    decls = _table_scroll_declarations(css)
+    assert decls is not None
+    assert re.fullmatch(r"auto|scroll", decls.get("overflow-x", ""), re.IGNORECASE), decls
+
+
+def test_table_scroll_rule_is_not_gated_by_a_media_query():
+    """Unlike PR #231's rejected first draft, this rule must apply at every
+    viewport width -- there is no breakpoint at which a table's sizing
+    should differ. Scoped to the whole file (not just this one rule)
+    because legal_page.html's <style> block has never had a legitimate
+    reason to carry a media query other than the one this fix replaces;
+    a future maintainer adding an unrelated one here should look twice.
+    CSS comments are stripped first -- this file's own comments document
+    the rejected @media-gated approach by name, which would otherwise be a
+    false positive."""
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    live_css = _CSS_COMMENT_RE.sub("", css)
+    assert "@media" not in live_css, (
+        "legal_page.html declares a live @media rule -- the table-scroll "
+        "fix must not be viewport-width-conditional (see this module's "
+        "docstring for why the previous @media-gated display:block "
+        "approach was replaced)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Negative / sabotage: prove the structural checks above actually catch a
 # regression, not just that `.search()` happens to return something.
 # ---------------------------------------------------------------------------
 
 
-def test_narrow_viewport_table_scroll_rule_detects_a_dropped_selector():
+def test_table_scroll_rule_detects_a_dropped_selector():
     css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
-    original_selector = ".legal-prose table { display: block; overflow-x: auto; }"
+    original_selector = ".legal-prose .table-scroll"
     assert original_selector in css, (
-        "legal_page.html's narrow-viewport table rule text changed -- update this sabotage fixture"
+        "legal_page.html's table-scroll rule selector changed -- update this sabotage fixture"
     )
-    sabotaged = css.replace(
-        original_selector, ".legal-prose nope { display: block; overflow-x: auto; }", 1
-    )
+    sabotaged = css.replace(original_selector, ".legal-prose .nope", 1)
     assert sabotaged != css
-    assert _narrow_table_scroll_declarations(sabotaged) is None, (
+    assert _table_scroll_declarations(sabotaged) is None, (
         "sabotaging the selector must make the structural check fail -- "
         "if this assertion fails, the guard above would silently pass a "
-        "rule that no longer targets .legal-prose table at all"
+        "rule that no longer targets .legal-prose .table-scroll at all"
     )
 
 
-def test_narrow_viewport_table_scroll_rule_detects_a_dropped_overflow_declaration():
+def test_table_scroll_rule_detects_a_dropped_overflow_declaration():
     css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
-    original_rule_body = "display: block; overflow-x: auto;"
-    assert original_rule_body in css, (
-        "legal_page.html's narrow-viewport table rule text changed -- update this sabotage fixture"
+    match = _TABLE_SCROLL_RULE_RE.search(css)
+    assert match, "legal_page.html's table-scroll rule is missing -- update this sabotage fixture"
+    original_block = match.group(0)
+    sabotaged_block = original_block.replace("overflow-x: auto;", "", 1)
+    assert sabotaged_block != original_block, (
+        "legal_page.html's table-scroll rule text changed -- update this sabotage fixture"
     )
-    sabotaged = css.replace(original_rule_body, "display: block;", 1)
-    assert sabotaged != css
-    decls = _narrow_table_scroll_declarations(sabotaged)
+    sabotaged = css.replace(original_block, sabotaged_block, 1)
+    decls = _table_scroll_declarations(sabotaged)
     assert decls is not None  # selector still there
-    assert not re.search(r"overflow-x\s*:\s*(auto|scroll)\b", decls), (
+    assert "overflow-x" not in decls or not re.fullmatch(
+        r"auto|scroll", decls["overflow-x"], re.IGNORECASE
+    ), (
         "sabotaging away the overflow-x declaration must make the "
         "overflow-x check fail -- see "
-        "test_narrow_viewport_table_scroll_rule_declares_overflow_x_auto_or_scroll"
+        "test_table_scroll_rule_declares_overflow_x_auto_or_scroll"
     )
 
 
-def test_narrow_viewport_table_scroll_rule_detects_a_reintroduced_nowrap():
+def test_table_scroll_rule_detects_a_reintroduced_media_query():
+    """Exercises the SAME comment-stripping logic
+    test_table_scroll_rule_is_not_gated_by_a_media_query uses (not a bare
+    substring check) -- proves the guard actually fires on a live @media
+    rule wrapped around the real selector, not merely that the literal
+    string "@media" appears somewhere (this file's own comments already
+    contain that word, describing the rejected approach by name)."""
     css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
-    original_rule_body = "display: block; overflow-x: auto;"
-    assert original_rule_body in css, (
-        "legal_page.html's narrow-viewport table rule text changed -- update this sabotage fixture"
-    )
-    sabotaged = css.replace(
-        original_rule_body, "display: block; overflow-x: auto; white-space: nowrap;", 1
-    )
+    match = _TABLE_SCROLL_RULE_RE.search(css)
+    assert match, "legal_page.html's table-scroll rule is missing -- update this sabotage fixture"
+    original_block = match.group(0)
+    sabotaged_block = f"@media (max-width: 640px) {{ {original_block} }}"
+    sabotaged = css.replace(original_block, sabotaged_block, 1)
     assert sabotaged != css
-    decls = _narrow_table_scroll_declarations(sabotaged)
-    assert decls is not None
-    assert "nowrap" in decls, (
-        "sabotage fixture didn't actually reintroduce nowrap into the "
-        "captured declarations -- fix the fixture"
+    live_sabotaged = _CSS_COMMENT_RE.sub("", sabotaged)
+    assert "@media" in live_sabotaged, (
+        "sabotage fixture didn't actually reintroduce a live @media block -- fix the fixture"
     )
+    # And the rule is still individually well-formed inside it -- proves
+    # the media-query check above is the ONLY thing catching this, not an
+    # incidental side effect of a now-broken selector.
+    assert _table_scroll_declarations(sabotaged) is not None
+
+
+# ---------------------------------------------------------------------------
+# `_wrap_tables_for_scroll` itself: a pure function on HTML strings, tested
+# directly rather than through legal._RENDERED (which is built once at
+# import time -- monkeypatching the wrapper function after import would
+# not affect the already-rendered dict every route serves from).
+# ---------------------------------------------------------------------------
+
+
+def test_wrap_tables_for_scroll_wraps_a_bare_table_exactly():
+    html = "<h1>X</h1>\n<table>\n<tbody><tr><td>a</td></tr></tbody>\n</table>\n<p>after</p>"
+    wrapped = legal._wrap_tables_for_scroll(html)
+    assert wrapped == (
+        '<h1>X</h1>\n<div class="table-scroll"><table>\n'
+        "<tbody><tr><td>a</td></tr></tbody>\n</table></div>\n<p>after</p>"
+    )
+
+
+def test_wrap_tables_for_scroll_is_a_no_op_when_there_are_no_tables():
+    html = "<h1>X</h1>\n<p>no tables here</p>"
+    assert legal._wrap_tables_for_scroll(html) == html
+
+
+def test_wrap_tables_for_scroll_wraps_every_table_independently():
+    html = (
+        "<table>\n<tbody><tr><td>a</td></tr></tbody>\n</table>"
+        "<p>mid</p>"
+        "<table>\n<tbody><tr><td>b</td></tr></tbody>\n</table>"
+    )
+    wrapped = legal._wrap_tables_for_scroll(html)
+    assert wrapped.count('<div class="table-scroll">') == 2
+    assert wrapped.count("<table>") == 2
+    assert wrapped.count("</table>") == 2
 
 
 # ---------------------------------------------------------------------------
 # Single point of enforcement: no per-table markup in the ratified .md
-# files themselves -- the CSS rule above is the ONLY place this is
-# expressed. jobcannon.web.legal_guard already rejects any raw HTML tag in
-# the source markdown (tests/host/test_legal_pages.py's
-# test_guard_fires_on_raw_html_tag), so this is a second, independent
-# angle on the same invariant rather than the sole guard for it.
+# files themselves -- the mechanism above (Python post-processing + one CSS
+# rule) is the ONLY place table-scroll wrapping is expressed.
+# jobcannon.web.legal_guard already rejects any raw HTML tag in the source
+# markdown (tests/host/test_legal_pages.py's test_guard_fires_on_raw_html_tag),
+# so this is a second, independent angle on the same invariant.
 # ---------------------------------------------------------------------------
 
 
@@ -190,41 +281,74 @@ def test_no_per_table_markup_in_ratified_legal_markdown():
         assert "class=" not in text, (filename, "raw class= markup found in ratified .md")
         assert "table-scroll" not in text, (
             filename,
-            "per-file scroll-wrapper markup found -- the CSS rule in "
-            "legal_page.html is supposed to be the ONLY place this lives",
+            "per-file scroll-wrapper markup found -- wrapping is supposed to "
+            "happen ONLY in jobcannon/web/legal.py's _wrap_tables_for_scroll",
         )
 
 
-def test_every_legal_page_table_renders_under_the_shared_legal_prose_selector():
-    """Derives the page set from `legal._LEGAL_PAGES` (no hardcoded
-    "/privacy"/"/terms" list) and counts `<table>` occurrences in each
-    page's OWN rendered HTML dynamically (no hardcoded literal count) --
-    every table found must be reachable by the single `.legal-prose table`
-    selector the rule above targets, i.e. must render inside the
-    `.legal-prose` container. Cross-checks against
-    tests/host/test_touch_targets.py's
-    test_every_served_legal_route_renders_inside_the_legal_prose_container,
-    which proves the container itself is present; this test additionally
-    confirms it actually contains the table markup when a file has any."""
-    served_files = sorted(set(legal._LEGAL_PAGES.values()))
-    assert served_files, "legal._LEGAL_PAGES is empty -- nothing to cover"
+# ---------------------------------------------------------------------------
+# Behavioral: fetch every route in `legal._LEGAL_PAGES` (no hardcoded path
+# list -- mirrors tests/host/test_touch_targets.py's
+# test_every_served_legal_route_renders_inside_the_legal_prose_container)
+# through a real Flask test client and parse the actual response body with
+# a real HTML parser -- not a regex on template source or on
+# legal._render()'s isolated return value. Proves the production
+# request/response path, end to end.
+# ---------------------------------------------------------------------------
+
+
+def test_every_table_on_every_served_legal_route_is_wrapped_inside_legal_prose():
+    client = _app().test_client()
+    assert legal._LEGAL_PAGES, "legal._LEGAL_PAGES is empty -- nothing to cover"
 
     saw_at_least_one_table = False
-    for filename in served_files:
-        _title, html = legal._render(filename)
-        table_count = html.count("<table>")
-        if table_count == 0:
-            continue
-        saw_at_least_one_table = True
-        # legal._render()'s return value is the exact string
-        # legal_page.html wraps in `<div class="legal-prose">...</div>`
-        # (test_legal_page_wraps_body_html_in_the_padded_prose_container
-        # pins that wrapping structurally) -- so every `<table>` this
-        # produces is, by construction, a `.legal-prose table`.
-        assert table_count == html.count("</table>"), (filename, "unbalanced <table> tags")
+    for path in legal._LEGAL_PAGES:
+        resp = client.get(path)
+        assert resp.status_code == 200, path
+        soup = BeautifulSoup(resp.data.decode("utf-8"), "html.parser")
+
+        for table in soup.find_all("table"):
+            saw_at_least_one_table = True
+
+            wrapper = table.parent
+            assert (
+                wrapper is not None
+                and wrapper.name == "div"
+                and "table-scroll" in (wrapper.get("class") or [])
+            ), (path, 'a <table> is not a direct child of <div class="table-scroll">')
+
+            assert wrapper.find_parent("div", class_="legal-prose") is not None, (
+                path,
+                "a table-scroll wrapper is not inside .legal-prose",
+            )
 
     assert saw_at_least_one_table, (
         "no committed legal markdown file rendered any <table> at all -- "
         "this test would otherwise pass vacuously with nothing to cover "
         "(privacy.md is expected to contribute at least one)"
     )
+
+
+def test_served_legal_page_stylesheet_declares_table_scroll_overflow_x():
+    """Checks the actual HTML each route serves (the <style> block
+    legal_page.html emits inline), not the template file on disk --
+    proving the rule that ships is the one a browser actually receives."""
+    client = _app().test_client()
+    assert legal._LEGAL_PAGES, "legal._LEGAL_PAGES is empty -- nothing to cover"
+
+    for path in legal._LEGAL_PAGES:
+        resp = client.get(path)
+        assert resp.status_code == 200, path
+        soup = BeautifulSoup(resp.data.decode("utf-8"), "html.parser")
+        style_tag = soup.find("style")
+        assert style_tag, (path, "no <style> tag in the served page")
+
+        decls = _table_scroll_declarations(style_tag.get_text())
+        assert decls is not None, (
+            path,
+            "no .legal-prose .table-scroll rule in the served stylesheet",
+        )
+        assert re.fullmatch(r"auto|scroll", decls.get("overflow-x", ""), re.IGNORECASE), (
+            path,
+            decls,
+        )

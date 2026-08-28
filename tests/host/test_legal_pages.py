@@ -39,9 +39,9 @@ Things this module pins:
 from __future__ import annotations
 
 import pathlib
-import re
 
 import pytest
+from bs4 import BeautifulSoup
 
 from jobcannon.web.legal_guard import FORBIDDEN_PHRASES, check_published_text
 
@@ -364,19 +364,27 @@ def test_render_passes_through_a_clean_file(tmp_path, monkeypatch):
 # even though the surrounding nav now varies (closes review-1's Lens A(4)
 # gap — this claim was made in comments/docstrings but never actually
 # tested before this PR). Extracts the exact region legal_page.html wraps
-# body_html in (<div class="legal-prose">...</div>) — unambiguous because
-# jobcannon.web.legal_guard rejects any raw HTML tag in the source markdown
-# (test_guard_fires_on_raw_html_tag above), so body_html itself can never
-# contain a nested <div>, and the template emits exactly one such div.
+# body_html in (<div class="legal-prose">...</div>).
+#
+# Parsed with BeautifulSoup, not a regex, since issue #229's fix
+# (jobcannon/web/legal.py's `_wrap_tables_for_scroll`) wraps every rendered
+# <table> in its own <div class="table-scroll">, so body_html now DOES
+# contain nested <div>s. A prior version of this helper used a non-greedy
+# regex (`<div class="legal-prose">(.*?)</div>`) that relied on body_html
+# never nesting a <div> — true before #229, false now — and would have
+# silently truncated at the FIRST </div> (the wrapper's own close tag)
+# instead of .legal-prose's true close tag, weakening this test to only
+# compare the prefix up to the first table rather than the whole body. A
+# real parser finds the true matching close tag regardless of nesting
+# depth, so this now checks the ENTIRE body, not a truncated prefix.
 # ---------------------------------------------------------------------------
-
-_LEGAL_PROSE_RE = re.compile(r'<div class="legal-prose">(.*?)</div>', re.DOTALL)
 
 
 def _legal_body(html: str) -> str:
-    match = _LEGAL_PROSE_RE.search(html)
-    assert match, "legal-prose div not found in response body"
-    return match.group(1)
+    soup = BeautifulSoup(html, "html.parser")
+    div = soup.find("div", class_="legal-prose")
+    assert div, "legal-prose div not found in response body"
+    return div.decode_contents()
 
 
 @pytest.mark.parametrize(

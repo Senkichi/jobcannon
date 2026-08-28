@@ -103,6 +103,44 @@ def _legal_response(title: str, html: str) -> Response:
     return response
 
 
+_TABLE_RE = re.compile(r"<table>.*?</table>", re.DOTALL)
+
+
+def _wrap_tables_for_scroll(html: str) -> str:
+    """Wrap every rendered `<table>...</table>` in `<div class="table-scroll">
+    ...</div>` (issue #229): at narrow viewports some legal-page tables (e.g.
+    /privacy §4's Purpose/Data/Legal-basis columns) don't fit even with
+    `.legal-prose table`'s `width: 100%` — `table-layout: auto` (the
+    default) treats a percentage width as a MINIMUM, not a cap, so a browser
+    still grows the table past it when a cell's content can't wrap enough
+    (CSS2.1 17.5.2.2). Without a wrapper, that growth pushes the whole
+    *document* past the viewport (clientWidth 390 vs scrollWidth 421 —
+    issue #229's own numbers), not just the table looking cramped. The
+    wrapper gives the table its own scroll container instead, so overflow is
+    contained to the table and the table's own sizing (`display: table`,
+    `width: 100%`) is completely untouched at every viewport width — unlike
+    a `display: block` media-query rule (the fix this replaces), which
+    changes the table's box-sizing algorithm for every table below the
+    breakpoint, including ones that never overflowed.
+
+    Single point of enforcement: this is the ONLY place any table in any
+    committed legal .md file gets wrapped — `.legal-prose table {
+    width: 100%; ... }` in legal_page.html is untouched, and there is no
+    per-table markup in privacy.md/terms.md to add or maintain. A future
+    legal page gains this for free the moment its markdown renders a
+    table.
+
+    Plain string substitution, not an HTML parser: `markdown.markdown()`'s
+    `tables` extension always emits a bare `<table>` (no attributes; see
+    tests/host/test_legal_table_scroll.py's own `html.count("<table>")`
+    checks) and never nests one table inside another, so a non-greedy
+    regex match is unambiguous and leaves every other byte of the rendered
+    HTML byte-for-byte untouched — no re-serialization risk to the rest of
+    the document (headings, links, blockquotes) a full parse/round-trip
+    would carry."""
+    return _TABLE_RE.sub(lambda m: f'<div class="table-scroll">{m.group(0)}</div>', html)
+
+
 def _render(filename: str) -> tuple[str, str]:
     """Return (title, html) for one committed markdown file. `title` is the
     document's own H1 text, used for the browser-tab <title> — the H1 that
@@ -116,7 +154,15 @@ def _render(filename: str) -> tuple[str, str]:
     the committed file — enforcement previously lived only in those two
     places, so a hand-edited .md that reintroduced drafting/review matter
     (or a corrupted commit) would boot the app and serve it. Raising here
-    instead means a bad file fails app boot rather than serving."""
+    instead means a bad file fails app boot rather than serving.
+
+    `html` is post-processed by `_wrap_tables_for_scroll` before being
+    returned — see that function's docstring for #229's narrow-viewport
+    table-scroll fix. This means `body_html` (and therefore the rendered
+    page) is no longer guaranteed to contain exactly one `<div>`; see
+    tests/host/test_legal_pages.py's `_legal_body()` for how the
+    byte-identity test now extracts the `.legal-prose` region correctly in
+    the presence of a nested `<div class="table-scroll">`."""
     raw = (_LEGAL_DIR / filename).read_text(encoding="utf-8")
     violations = check_published_text(raw)
     if violations:
@@ -124,6 +170,7 @@ def _render(filename: str) -> tuple[str, str]:
     match = _H1_LINE.search(raw)
     title = match.group(1) if match else filename
     html = markdown.markdown(raw, extensions=_MD_EXTENSIONS)
+    html = _wrap_tables_for_scroll(html)
     return title, html
 
 
