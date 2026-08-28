@@ -85,10 +85,15 @@ jobs:
     # either way), and runs tests/host/test_posthog_fork_atexit.py WITHOUT
     # JC_FORK_TESTS_UNAVAILABLE set, so its two fork-gated tests actually
     # execute (PASS, not SKIP -- see that file's `_require_fork_or_fail_loud`
-    # gate). `light` label: this job is short (~15s warm) and must never
-    # consume a `suite` runner slot. Same same-repo-only gate as `test`
-    # above, for the same reason (no code execution on this box for a fork
-    # PR).
+    # gate). Same runner labels as `test`/`migration-collision-guard`:
+    # verified via `gh api repos/Senkichi/jobcannon/actions/runners` that
+    # this repo's registered runners (jcpub-9800x3d-1/-2) carry only
+    # [self-hosted, Windows, X64, jcpub] -- no `light`/`suite` split exists
+    # here (that distinction is the PRIVATE job-cannon repo's runner
+    # topology; do not carry it over). This job is short (~15-17s warm), so
+    # it's cheap to share the same 2-runner `jcpub` pool as `test`. Same
+    # same-repo-only gate as `test` above, for the same reason (no code
+    # execution on this box for a fork PR).
     #
     # Known open risk (surfaced during review, not yet resolved as of this
     # PR): the runner service that will actually execute this job logs on
@@ -102,7 +107,7 @@ jobs:
     # real; this PR's own CI run is the empirical test of whether it's
     # real at all.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Windows, X64, jcpub, light]
+    runs-on: [self-hosted, Windows, X64, jcpub]
     steps:
       - uses: actions/checkout@v7
       - name: Run fork/atexit proof under WSL (real os.fork())
@@ -136,14 +141,16 @@ jobs:
           # the test module's own docstring), so POSTGRES_ADMIN_DSN is
           # deliberately not threaded through to WSL here.
           #
-          # The venv is keyed by RUNNER_NAME, not a fixed path: jc-3/4/5
-          # are three `light`-labeled runner processes sharing one WSL
-          # instance and one $HOME on this box, so two fork-proof jobs
-          # (e.g. two open PRs) can run concurrently. A shared fixed venv
-          # path would let a `uv sync` from one PR's checkout silently
-          # repoint site-packages at whichever tree synced last, the same
-          # corruption class the `enable-cache: false` comment on the
-          # `test` job above guards against for the local disk cache.
+          # The venv is keyed by RUNNER_NAME, not a fixed path: this repo's
+          # registered runners (jcpub-9800x3d-1/-2, verified via
+          # `gh api .../actions/runners`) can both come online and share one
+          # WSL instance and one $HOME on this box, so two fork-proof jobs
+          # (e.g. two open PRs, or a PR run overlapping a push-to-main run)
+          # can run concurrently. A shared fixed venv path would let a
+          # `uv sync` from one checkout silently repoint site-packages at
+          # whichever tree synced last, the same corruption class the
+          # `enable-cache: false` comment on the `test` job above guards
+          # against for the local disk cache.
           $runnerKey = if ($env:RUNNER_NAME) { $env:RUNNER_NAME -replace '[^A-Za-z0-9_.-]', '_' } else { 'local' }
           # PATH is exported before the `command -v uv` check, not after --
           # an unqualified check in a bare `bash -lc` login shell cannot
