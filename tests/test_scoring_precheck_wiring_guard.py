@@ -442,33 +442,76 @@ def _segment_sets_non_null(segment: str) -> bool:
     return _is_positive_write_evidence(seg)
 
 
-def _top_level_segment_stop(rest: str) -> int | None:
-    """Index in *rest* where a (non-CASE) SET-clause segment ends: the
-    first paren-DEPTH-ZERO comma/semicolon/WHERE -- never one nested inside
-    a function call's own argument list (e.g. the comma inside
-    `COALESCE(%s, jd_adjudicated_version)`, which a plain
-    `,|;|\\bwhere\\b` search would wrongly treat as the next SET-clause
-    separator and truncate the segment before its closing paren -- PR #238
-    re-review, LOW finding surfaced this via the COALESCE widening)."""
+def _top_level_positions(text: str) -> set[int]:
+    """Indices in *text* that sit at paren-DEPTH-ZERO and OUTSIDE a
+    single-quoted SQL string literal (a `''`-doubled quote escapes without
+    ending the literal). The only positions where a comma/semicolon/WHERE
+    keyword may legitimately act as a clause or statement boundary -- one
+    nested inside a function call's own argument list (e.g. the comma
+    inside `COALESCE(%s, jd_adjudicated_version)`) or inside a quoted
+    string literal (e.g. the `;` inside `'note: a;b'`) must never count
+    (PR #238 re-review round 2: the original per-consumer scans tracked
+    paren depth but not quote state, and only bounded a SET-clause
+    segment's END, never a whole STATEMENT's end at the next `;` -- see
+    _first_top_level_semicolon)."""
+    positions: set[int] = set()
     depth = 0
-    n = len(rest)
+    in_quote = False
+    n = len(text)
     i = 0
     while i < n:
-        ch = rest[i]
-        if ch == "(":
+        ch = text[i]
+        if in_quote:
+            if ch == "'":
+                if i + 1 < n and text[i + 1] == "'":
+                    i += 2
+                    continue
+                in_quote = False
+            i += 1
+            continue
+        if ch == "'":
+            in_quote = True
+        elif ch == "(":
             depth += 1
         elif ch == ")":
             depth -= 1
         elif depth <= 0:
-            if ch in ",;":
-                return i
-            if (
-                rest[i : i + 5].lower() == "where"
-                and (i == 0 or not rest[i - 1].isalnum())
-                and (i + 5 == n or not rest[i + 5].isalnum())
-            ):
-                return i
+            positions.add(i)
         i += 1
+    return positions
+
+
+def _top_level_segment_stop(rest: str) -> int | None:
+    """Index in *rest* where a (non-CASE) SET-clause segment ends: the
+    first paren-DEPTH-ZERO, outside-quotes comma/semicolon/WHERE."""
+    top_level = _top_level_positions(rest)
+    n = len(rest)
+    for i in range(n):
+        if i not in top_level:
+            continue
+        ch = rest[i]
+        if ch in ",;":
+            return i
+        if (
+            rest[i : i + 5].lower() == "where"
+            and (i == 0 or not rest[i - 1].isalnum())
+            and (i + 5 == n or not rest[i + 5].isalnum())
+        ):
+            return i
+    return None
+
+
+def _first_top_level_semicolon(text: str) -> int | None:
+    """Index of the first `;` in *text* that sits at paren-DEPTH-ZERO and
+    outside a quoted string literal -- the boundary between one SQL
+    statement and the next. A `;` inside a string literal or nested inside
+    parentheses never counts (PR #238 re-review round 2: the
+    semicolon-batched multi-statement fail-open the refuter's diagnostic
+    probe surfaced -- see _sql_writes_jd_adjudicated_version_non_null)."""
+    top_level = _top_level_positions(text)
+    for i, ch in enumerate(text):
+        if ch == ";" and i in top_level:
+            return i
     return None
 
 
@@ -497,10 +540,37 @@ def _set_clause_assignments(sql: str) -> list[str]:
 
 
 def _sql_writes_jd_adjudicated_version_non_null(sql: str) -> bool:
+    """Fail-closed, and bounded ONE STATEMENT AT A TIME: a semicolon-
+    batched multi-statement string is split at the first paren-depth-0,
+    outside-quotes `;` (_first_top_level_semicolon), and only the text up
+    to that boundary -- the anchored statement's own text -- is searched
+    for its SET-clause assignment. Text after the boundary belongs to a
+    DIFFERENT statement and is never attributed to the first one's SET
+    clause; it is instead re-anchored independently by recursing (PR #238
+    re-review round 2, closing the residual the refuter's diagnostic-only
+    probe flagged but left out of its actionable findings last round):
+    `"UPDATE postings SET jd_full = %(t)s; SELECT jd_adjudicated_version =
+    1"` -- an UPDATE that never touches the column, followed by an
+    unrelated SELECT whose operand happens to look like positive evidence
+    -- used to fire True because the old version scanned the WHOLE
+    remaining string with no boundary at the `;` at all. Conversely
+    `"SELECT 1; UPDATE postings SET jd_adjudicated_version = %(v)s"` must
+    still fire True: the second statement is a real, independently-anchored
+    write, and re-anchoring (not just bounding) is what keeps that case
+    correct."""
     norm = re.sub(r"\s+", " ", sql).strip()
-    if not _STATEMENT_ANCHOR_RE.match(norm):
+    if not norm:
         return False
-    return any(_segment_sets_non_null(seg) for seg in _set_clause_assignments(sql))
+    boundary = _first_top_level_semicolon(norm)
+    head = norm[:boundary] if boundary is not None else norm
+    tail = norm[boundary + 1 :] if boundary is not None else ""
+    if _STATEMENT_ANCHOR_RE.match(head) and any(
+        _segment_sets_non_null(seg) for seg in _set_clause_assignments(head)
+    ):
+        return True
+    if tail.strip():
+        return _sql_writes_jd_adjudicated_version_non_null(tail)
+    return False
 
 
 def _docstring_constant_ids(tree: ast.Module) -> set[int]:
@@ -977,4 +1047,50 @@ def test_writer_classifier_rejects_coalesce_null_first_arg():
     assert not _sql_writes_jd_adjudicated_version_non_null(
         "UPDATE postings SET jd_adjudicated_version = "
         "COALESCE(NULL, jd_adjudicated_version) WHERE dedup_key = %(k)s"
+    )
+
+
+def test_writer_classifier_rejects_write_after_a_semicolon_boundary():
+    """PR #238 re-review round 2: the exact residual the refuter's own
+    diagnostic-only ADVERSARIAL probe surfaced and flagged out of scope
+    last round. A genuine UPDATE that only touches jd_full, followed by an
+    unrelated SELECT whose operand happens to be `jd_adjudicated_version =
+    1`, must NOT classify as a writer -- the SELECT is a different
+    statement, past the top-level `;` boundary, never part of the
+    anchored UPDATE's SET clause."""
+    assert not _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_full = %(t)s; SELECT jd_adjudicated_version = 1"
+    )
+
+
+def test_writer_classifier_reanchors_a_write_after_a_semicolon_boundary():
+    """Control for the test above: bounding the search at the first `;`
+    must not blind the detector to a REAL write that happens to sit in the
+    second statement of a batch -- the text after the boundary is
+    re-anchored and classified independently, not simply discarded."""
+    assert _sql_writes_jd_adjudicated_version_non_null(
+        "SELECT 1; UPDATE postings SET jd_adjudicated_version = %(v)s"
+    )
+
+
+def test_writer_classifier_semicolon_inside_quoted_literal_is_not_a_boundary():
+    """A `;` inside a single-quoted SQL string literal must not be treated
+    as a statement boundary -- otherwise a real write whose OWN statement
+    merely contains a semicolon-bearing string value earlier in the SET
+    list would be wrongly truncated away and missed (a false negative:
+    exactly the direction this guard exists to prevent)."""
+    assert _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_full = 'note: a;b', jd_adjudicated_version = 1 "
+        "WHERE dedup_key = %(k)s"
+    )
+
+
+def test_writer_classifier_semicolon_inside_parens_is_not_a_boundary():
+    """A `;` nested inside a function call's argument list (paren-depth
+    > 0) must not be treated as a statement boundary either -- same false-
+    negative risk as the quoted-literal case above, via the paren-depth
+    side of the boundary scan instead of the quote-tracking side."""
+    assert _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_full = func(1; 2), jd_adjudicated_version = 1 "
+        "WHERE dedup_key = %(k)s"
     )
