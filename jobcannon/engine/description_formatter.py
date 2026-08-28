@@ -47,6 +47,23 @@ def strip_html_to_text(text: str) -> str:
     (``<b>Foo</b><i>Bar</i>`` → ``"Foo Bar"``, not ``"FooBar"``) — the property
     the portal-search ``_strip_html`` previously got from BeautifulSoup's
     ``get_text(separator=" ")`` and now inherits by delegating here.
+
+    The catch-all inline-tag regex below requires an HTML tag-open shape
+    (``<`` immediately followed by a letter, ``/``, ``!``, or ``?``) rather
+    than matching any ``<...>`` span. A bare comparison operator in prose
+    (``salary < $100k and role requires > 5 years``) has no letter/``/``/
+    ``!``/``?`` right after the ``<``, so it is never mistaken for a tag
+    opener and never fused with an unrelated later ``>`` into one bogus
+    "tag" that swallows everything between (#234) — this protects every
+    caller of this function, not just ``html_to_plain_text``.
+
+    Conversely, ``<`` immediately followed by a letter is STILL treated as
+    a tag opener regardless of what follows (``x<y`` → matches through to
+    the next ``>``, however far away), matching how a real browser/HTML
+    tokenizer treats ``<`` + ASCII letter as the start of a tag name. This
+    is pre-existing behavior, unchanged by #234 — #234 only narrows which
+    characters after ``<`` count as a tag-open, it does not touch what
+    happens once one is recognized.
     """
     # Convert <br> variants to newlines
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
@@ -61,8 +78,10 @@ def strip_html_to_text(text: str) -> str:
         flags=re.IGNORECASE,
     )
     # Strip remaining (inline) tags, leaving a space so adjacent inline elements
-    # do not fuse into one token.
-    text = re.sub(r"<[^>]+>", " ", text)
+    # do not fuse into one token. Tag-open shape required (see docstring) --
+    # NOT the old unconditional `<[^>]+>`, which matched a bare `<` through to
+    # the next unrelated `>` anywhere later in the string.
+    text = re.sub(r"<(?:[a-zA-Z/!?])[^>]*>", " ", text)
     # Decode any remaining entities (e.g. &amp; &nbsp;)
     text = _html.unescape(text)
     # Collapse runs of spaces/tabs introduced by tag removal (newlines preserved
@@ -84,14 +103,47 @@ def html_to_plain_text(raw: str) -> str:
     pages, whose recall/precision heuristics are tuned for boilerplate removal,
     not for terse standalone fragments.
 
-    Greenhouse's ``content`` arrives as entity-escaped HTML (``&lt;p&gt;…``), so
-    we unescape first to turn the encoded tags back into real tags, then
-    ``strip_html_to_text`` converts block tags to newlines / ``<li>`` to bullets
-    and removes the tags while preserving section + list structure. Plain-text
-    input passes through unchanged.
+    Two input shapes, two orderings (#234 fix) -- discriminated via the same
+    ``_html_tag_re`` detector ``format_description_filter`` already uses:
+
+    - **Real HTML** (``_html_tag_re`` finds at least one literal tag): strip
+      tags FIRST, unescape entities LAST -- delegate straight to
+      ``strip_html_to_text``, which already orders it that way. This keeps an
+      entity-escaped comparison operator sitting in the prose (``salary &lt;
+      $100k``) as inert literal text all the way through tag-stripping, so it
+      can never decode into a bare ``<`` that fuses with a later real tag
+      into one bogus "tag" span and gets swallowed.
+    - **No literal tag anywhere** (plain text, or a body that signals HTML
+      ONLY through entity-encoded tags -- Greenhouse's ``content`` field
+      arrives as ``&lt;p&gt;…``): unescape FIRST to turn the encoded tags
+      back into real ones, THEN strip -- there is nothing else to protect
+      here since no real tag exists yet for a decoded ``<`` to fuse with.
+
+    Hybrid-body tradeoff: a body that is MOSTLY entity-escaped but contains
+    at least one literal tag anywhere still takes the real-HTML branch, so
+    its escaped tags (e.g. an author literally writing ``&lt;div&gt;`` in
+    prose to describe markup they worked with) surface as visible plain
+    text rather than being decoded and stripped as structure -- content is
+    preserved, but any list/paragraph structure *that body only expressed
+    through escaped tags* is not recovered. This is a deliberate choice:
+    the alternative (unescaping unconditionally, then stripping) is exactly
+    the fuse-and-swallow failure #234 fixes, so a false-real-HTML
+    classification loses nothing, while a false-plain-text classification
+    on truly mixed content can silently swallow prose.
+
+    Prior to the #234 fix this function unconditionally unescaped first for
+    both shapes, matching the private original's ``html_to_plain_text``
+    (``job_finder/web/description_formatter.py``, READ-ONLY reference) --
+    which carries the identical bug (verified: same
+    ``strip_html_to_text(_html.unescape(raw))`` body). This is a deliberate,
+    Wave-4-scoped divergence from that file rather than a byte-identical
+    port; a private-repo port-back issue is being filed separately to bring
+    the fix upstream. See PR #232 / issue #234.
     """
     if not raw:
         return ""
+    if _html_tag_re.search(raw):
+        return strip_html_to_text(raw)
     return strip_html_to_text(_html.unescape(raw))
 
 
