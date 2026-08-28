@@ -8,7 +8,10 @@ jobcannon.engine.classification).
 This module is a pure-function addition in Phase 34 Plan 1 — no in-tree
 caller lands until a host wires score_and_persist_job (or equivalent)
 through it; the private repo's Plan 2 orchestrator that did so is not
-part of this engine port.
+part of this engine port. Whichever PR does that wiring must also ship a
+jd_adjudicated_version writer (or an equivalent resolution) per #183 —
+enforced by tests/test_scoring_precheck_wiring_guard.py, an AST guard that
+fails CI if scoring is ever wired outside jobcannon/engine/ without one.
 
 Routes through an injected call_model(tier="score", ...) callable (see the
 score_job Args below) per CONTEXT D-09. The engine does NOT instantiate its

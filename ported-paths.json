@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-27T10:46:00Z",
+  "generated_at": "2026-08-28T02:51:12Z",
   "roots": [
     "engine",
     "db",
@@ -450,31 +450,31 @@
           "text": "through it; the private repo's Plan 2 orchestrator that did so is not"
         },
         {
-          "line": 16,
+          "line": 19,
           "text": "job_finder.web.model_provider.call_model in the private repo, which"
         },
         {
-          "line": 44,
+          "line": 47,
           "text": "# Re-homed from the private repo's providers/ollama_provider.py; provider-tuning"
         },
         {
-          "line": 363,
+          "line": 366,
           "text": "it (private-repo D5, issue #1742). A"
         },
         {
-          "line": 444,
+          "line": 447,
           "text": "# the private repo's batch scoring does) gets self-healing for free: a"
         },
         {
-          "line": 499,
+          "line": 502,
           "text": "``job_finder.web.model_provider.call_model`` in the private repo, which"
         },
         {
-          "line": 500,
+          "line": 503,
           "text": "inherited schema retry, cascade fallback, rate limiting, and provider"
         },
         {
-          "line": 526,
+          "line": 529,
           "text": "the private repo's ``model_provider.call_model`` signature"
         }
       ]
