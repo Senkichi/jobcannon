@@ -55,8 +55,9 @@ def _get_tolerating_transient_db_unreachable(client, path):
     headers, not DB liveness, so a live-probe hiccup is incidental to what
     it verifies.
 
-    Scoped narrowly on purpose: only a response that is *exactly* healthz's
-    `{"status": "unhealthy", "db": "unreachable"}, 503` contract (see
+    Scoped narrowly on purpose: only a response that matches the two
+    discriminating fields of healthz's declared `{"status": "unhealthy",
+    "db": "unreachable"}, 503` contract (503 + `db == "unreachable"`; see
     jobcannon/web/__init__.py's `healthz()`) gets retried. Any other status,
     or a 503 with a different body, returns immediately — a genuine
     persistent outage still fails loudly, as does a real bug in another
