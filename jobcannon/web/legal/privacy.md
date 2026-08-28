@@ -159,9 +159,10 @@ earlier version stops authorizing collection until you make a new choice.
 
 **What withdrawing consent does and does not do.** Withdrawing consent stops future
 collection. It does **not** immediately delete analytics events already collected, and
-we do not currently issue a deletion request to our analytics provider on your behalf.
-Events already recorded are removed by the scheduled expiry described in §8 (one year
-after they were recorded) or when your account is deleted, whichever comes first.
+withdrawing consent alone does not trigger a deletion request to our analytics
+provider — deleting your account does (see §8). Events already recorded are removed by
+the scheduled expiry described in §8 (one year after they were recorded) or when your
+account is deleted, whichever comes first.
 
 
 ## 6. Who else processes your data
@@ -235,9 +236,9 @@ Analytics events, when consent is granted, are routed to PostHog's European Unio
 endpoint.
 
 
-The hosting region of our database is Oregon, USA. Render has not self-certified under
-the EU-U.S. Data Privacy Framework, so for any transfer to Render's infrastructure we
-rely on Standard Contractual Clauses under Render's Data Processing Addendum.
+The hosting region of our database is Oregon, USA. For any transfer to Render's
+infrastructure we rely on Standard Contractual Clauses under Render's Data Processing
+Addendum.
 
 Clerk's Data Processing Addendum states it hosts data primarily on Google Cloud and
 Cloudflare infrastructure with no fixed regional restriction — Clerk or its
@@ -262,10 +263,10 @@ analytics events — is removed with it by database cascade. This is not a soft 
 archival copy. The cascade runs when Clerk, our identity provider, confirms the account
 deletion to us, which normally follows your request shortly.
 
-Copies of analytics events that were already sent to PostHog under your consent are
-**not** separately deleted when your account is deleted. They remain at PostHog under the
-pseudonymous identifier described in §6.2, which cannot be linked back to you without
-our server's secret, and are subject to PostHog's own retention policy.
+When your account is deleted, we also submit a deletion request to PostHog for the
+pseudonymous analytics person described in §6.2, including their previously recorded
+events, using that same pseudonymous identifier. PostHog processes deletion requests
+asynchronously, so removal from PostHog's systems may not be immediate.
 
 
 ## 9. Your rights
@@ -278,7 +279,7 @@ Here is how each works today:
 |---|---|
 | **Withdraw or grant analytics consent** | Fully self-service on the consent page, at any time  |
 | **Correct your profile** | Your profile is set from the picker selections carried in when you sign up; there is currently no in-Service way to edit it afterward. Email hello@jobcannon.dev to correct it and we will action the request within 30 days (see below)  |
-| **Delete your account and all associated data** | **Self-service** — a "Delete account" link in the Service's footer takes you to a confirmation page; confirming tells Clerk (our identity provider) to delete your account, and when Clerk confirms that deletion to us the same cascade removes every dependent record we hold — profile, saved postings, pipeline status, analytics events. Copies of analytics events already sent to PostHog are not separately purged (see §8). You can also delete your account directly through Clerk's own account management at https://accounts.jobcannon.dev/user; either path triggers the same cascade described above. Clerk, our identity processor, may retain minimal records of your account (for example, logs) after this cascade runs where its own legal or regulatory obligations require it; that retention is governed by Clerk's privacy policy, not this one   |
+| **Delete your account and all associated data** | **Self-service** — a "Delete account" link in the Service's footer takes you to a confirmation page; confirming tells Clerk (our identity provider) to delete your account, and when Clerk confirms that deletion to us the same cascade removes every dependent record we hold — profile, saved postings, pipeline status, analytics events. We also submit a deletion request to PostHog for your pseudonymous analytics person and previously recorded events at the same time (see §8). You can also delete your account directly through Clerk's own account management at https://accounts.jobcannon.dev/user; either path triggers the same cascade described above. Clerk, our identity processor, may retain minimal records of your account (for example, logs) after this cascade runs where its own legal or regulatory obligations require it; that retention is governed by Clerk's privacy policy, not this one   |
 | **Export or download your data** | **Self-service** — the "Export your data" link in the Service's footer downloads a JSON file containing your profile, saved postings, pipeline status, consent decisions, and analytics events  |
 | **See a history of your consent decisions** | Included in the export above — every consent decision you have recorded appears in its events list, and the most recent one is also summarized. There is no separate history page  |
 
