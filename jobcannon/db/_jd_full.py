@@ -63,17 +63,23 @@ which fails against the pre-#184 two-statement shape and passes against
 this one.) The write remains unconditional on ``WHERE dedup_key = %s``, same
 as the pre-#184 first statement, so under a genuine same-row concurrent
 write the later commit wins outright and is fully self-consistent (last-
-writer-wins) for ``jd_full`` / ``jd_content_verdict`` / ``jd_content_signal`` /
-``jd_adjudicated_version`` — the four columns whose new value is decided by
-the SET clause itself, against the live pre-update row. This is stricter
-than the old fail-open behavior, which on a CAS miss left the loser's
-verdict-stamp UPDATE matching 0 rows — the persisted verdict simply kept
-whatever value it already had (NULL for a fresh row; a STALE prior verdict
-once a future caller re-touches an already-populated one), rather than
-being nulled. ``unresolved_reasons`` is the one column this guarantee does
-NOT cover: its new value is still computed from an earlier SELECT (see
-below), so it does not get the same-statement self-consistency the other
-four columns do (tracked as #217, pre-existing, not introduced here).
+writer-wins) for ``jd_full`` / ``unresolved_reasons`` / ``jd_content_verdict``
+/ ``jd_content_signal`` / ``jd_adjudicated_version`` — all five columns
+whose new value is decided by the SET clause itself, against the live
+pre-update row. This is stricter than the old fail-open behavior, which on
+a CAS miss left the loser's verdict-stamp UPDATE matching 0 rows — the
+persisted verdict simply kept whatever value it already had (NULL for a
+fresh row; a STALE prior verdict once a future caller re-touches an
+already-populated one), rather than being nulled. ``unresolved_reasons``
+used to be the one column this guarantee did NOT cover — its new value was
+computed from an earlier SELECT rather than a SQL expression against the
+live row — but #217 closed that gap: the SET clause now derives it via a
+``jsonb_array_elements_text``/filter set-difference (mirroring
+``_unresolved_reasons.remove_reasons``'s malformed-value tolerance and
+no-op-on-absent-reason semantics) evaluated at UPDATE-execution time, the
+same as the other four columns. ``_record_jd_content_reject`` below (the
+function this column's other writer races against) received the same
+treatment, as a single atomic UPDATE with no preceding SELECT at all.
 
 ``classify_jd_content`` is called unconditionally (its result feeds the SQL
 CASE, which decides whether to apply it) rather than gated on a
@@ -143,11 +149,8 @@ import logging
 import re
 from typing import Any
 
-from psycopg.types.json import Jsonb
-
-from jobcannon.db._unresolved_reasons import append_reason, remove_reasons
 from jobcannon.db.pool import commit_unless_nested
-from jobcannon.engine.description_formatter import strip_html_to_text
+from jobcannon.engine.description_formatter import html_to_plain_text
 from jobcannon.engine.jd_content_contract import (
     JD_CONTENT_REASON_CODES,
     _is_jd_junk,
@@ -157,7 +160,19 @@ from jobcannon.engine.jd_content_contract import (
 
 logger = logging.getLogger(__name__)
 
-_HTML_SIGNAL_RE = re.compile(r"<\s*(p|div|br|li|ul|span|h\d)\b", re.IGNORECASE)
+# HTML-signal regex: detects escaped tags (&lt;), closing tags (</...>), or
+# common opening block tags. Ported verbatim from the private original
+# (job_finder/db/_jd_full.py's _HTML_SIGNAL_RE, READ-ONLY reference) --
+# #216: the prior hosted pattern (`<\s*(p|div|br|li|ul|span|h\d)\b`) missed
+# entity-encoded (`&lt;`) and closing-tag-only (`</tag>` with no matching
+# earlier opening tag) bodies, so those bypassed normalization here and
+# diverged from the private engine on the same input. Plain prose that
+# merely contains a stray `<` (e.g. "earn < $100k") is not matched because a
+# word char or `/` is required immediately after the `<`.
+_HTML_SIGNAL_RE = re.compile(
+    r"(&lt;|</([\w]+)>|<p[\s>]|<div|<br|<li|<ul|<h[1-6])",
+    re.IGNORECASE,
+)
 
 
 def set_jd_full(
@@ -184,14 +199,14 @@ def set_jd_full(
     appended to ``unresolved_reasons`` so the row is flagged for review
     instead of silently staying ``jd_full IS NULL``. A successful write
     clears any stale I-18 reason codes from ``unresolved_reasons`` in the
-    same UPDATE as the ``jd_full`` write, but unlike that UPDATE's other four
-    columns, the new ``unresolved_reasons`` value is still a plain Python
-    list computed from an earlier SELECT (not a SQL CASE against the live
-    row), so it does not share their same-statement self-consistency
-    guarantee -- a concurrent writer to that column (e.g.
-    ``_record_jd_content_reject`` below) between the SELECT and this UPDATE
-    can still have its change silently clobbered. Pre-existing, identical in
-    kind to the private original, not introduced by #184; tracked as #217.
+    same UPDATE as the ``jd_full`` write; like that UPDATE's other four
+    columns, the new ``unresolved_reasons`` value is decided by a SQL
+    expression against the row's LIVE value at UPDATE-execution time, not a
+    Python value computed from an earlier SELECT (#217 fix), so it shares
+    their same-statement self-consistency guarantee -- a concurrent writer
+    to that column (e.g. ``_record_jd_content_reject`` below, itself now a
+    single atomic UPDATE with no preceding SELECT) can no longer have its
+    committed change clobbered by this one landing after it, or vice versa.
     See this module's docstring for the ``enrichment_tier`` reset the private
     original also performs, which has no column to act on in the Wave-1
     hosted schema.
@@ -206,7 +221,21 @@ def set_jd_full(
     if not text:
         return False
     if _HTML_SIGNAL_RE.search(text):
-        text = strip_html_to_text(text)
+        # #216: html_to_plain_text (not strip_html_to_text directly) --
+        # entity-encoded input (the `&lt;` signal this regex now also
+        # catches) must be unescaped BEFORE the tag-stripping regexes run,
+        # or literal `<p>`/`</p>` tags survive decoded-but-unstripped in the
+        # output (empirically confirmed: strip_html_to_text("&lt;p&gt;Hello
+        # &lt;/p&gt;World") == "<p>Hello</p>World"). html_to_plain_text does
+        # `_html.unescape(raw)` first, then delegates to strip_html_to_text
+        # -- a no-op reordering for already-plain-tag input, so this is a
+        # strict widening, not a behavior change, for the pre-existing
+        # opening-tag-shaped bodies. Matches the private original's
+        # `normalize_jd`, which calls `html_to_plain_text` for the same
+        # reason -- the brief's call-site note assumed the prior
+        # `strip_html_to_text` call was already equivalent; it is not, so
+        # this call site changes too (see PR body).
+        text = html_to_plain_text(text)
     if _is_jd_junk(text):
         logger.warning("set_jd_full: junk-gated [source=%s] prefix=%r", source, text.strip()[:60])
         return False
@@ -223,29 +252,26 @@ def set_jd_full(
         _record_jd_content_reject(raw, dedup_key, reason)
         return False
     existing = raw.execute(
-        "SELECT unresolved_reasons, company FROM postings WHERE dedup_key = %s",
+        "SELECT company FROM postings WHERE dedup_key = %s",
         (dedup_key,),
     ).fetchone()
     if existing is None:
-        # No posting row for this dedup_key -- nothing to write. Mirrors
-        # _record_jd_content_reject's existing is None guard below. Without
+        # No posting row for this dedup_key -- nothing to write. Without
         # this, the UPDATE below would silently affect 0 rows (Postgres
         # raises nothing) and this function would return True -- a false
         # "wrote" signal for a no-op, plus a wasted classify_jd_content call.
         return False
-    new_reasons = remove_reasons(
-        existing["unresolved_reasons"],
-        list(JD_CONTENT_REASON_CODES),
-    )
     # Pure Python, no DB access (#184) -- computed for the NEW text before
     # any write, using the row's `company` as read above. `company` is not a
     # decision input for WHETHER this write is applied (the SQL CASE below
     # ignores it entirely) but it IS a grounding input for WHAT verdict gets
     # stamped: classify_jd_content uses it to score title/company overlap, so
     # a concurrent writer changing `company` between this SELECT and the
-    # UPDATE below can make the stamped verdict reflect stale grounding.
-    # Bounded by the same #217 TOCTOU window as `unresolved_reasons` above
-    # (no live caller races `company` writes against this path today).
+    # UPDATE below can make the stamped verdict reflect stale grounding. This
+    # is a narrower, still-open TOCTOU distinct from #217 (closed below for
+    # `unresolved_reasons`): no live caller races `company` writes against
+    # this path today, so it is left as a Python value rather than folded
+    # into the UPDATE as a live-row SQL input -- revisit if that changes.
     # Called unconditionally; the UPDATE's SQL CASE below decides whether the
     # result is actually applied. See the module docstring for why an
     # external CAS guard is unnecessary once the write is a single statement.
@@ -254,7 +280,20 @@ def set_jd_full(
         cur = raw.execute(
             "UPDATE postings SET "
             "jd_full = %(text)s, "
-            "unresolved_reasons = %(reasons)s, "
+            # #217 fix: unresolved_reasons is now decided by a SQL
+            # expression against the row's LIVE value at UPDATE-execution
+            # time, not a Python value computed from an earlier SELECT --
+            # mirrors `_unresolved_reasons.remove_reasons`'s set-difference
+            # semantics (malformed/non-array values normalized to '[]' via
+            # the jsonb_typeof guard; removing an absent reason is a no-op).
+            "unresolved_reasons = COALESCE("
+            "(SELECT jsonb_agg(elem ORDER BY ord) "
+            "FROM jsonb_array_elements_text("
+            "CASE WHEN jsonb_typeof(unresolved_reasons) = 'array' "
+            "THEN unresolved_reasons ELSE '[]'::jsonb END"
+            ") WITH ORDINALITY AS t(elem, ord) "
+            "WHERE elem <> ALL(%(remove_codes)s)"
+            "), '[]'::jsonb), "
             "jd_content_verdict = CASE WHEN jd_full IS DISTINCT FROM %(text)s "
             "OR jd_content_verdict IS NULL THEN %(verdict)s ELSE jd_content_verdict END, "
             "jd_content_signal = CASE WHEN jd_full IS DISTINCT FROM %(text)s "
@@ -272,7 +311,7 @@ def set_jd_full(
             "WHERE dedup_key = %(dedup_key)s",
             {
                 "text": text,
-                "reasons": Jsonb(new_reasons),
+                "remove_codes": list(JD_CONTENT_REASON_CODES),
                 "verdict": jd_result.verdict.value,
                 "signal": jd_result.signal,
                 "dedup_key": dedup_key,
@@ -301,18 +340,32 @@ def _record_jd_content_reject(raw: Any, dedup_key: str, reason: str) -> None:
     Mirrors the private original's ``_record_jd_content_reject``, minus the
     ``enrichment_tier`` reset for ``JD_TRUNCATED`` — the hosted schema has no
     such column in Wave 1 (see this module's docstring).
+
+    Atomic single-statement append (#217 fix): the dedupe/malformed-value
+    tolerance semantics of ``_unresolved_reasons.append_reason`` are mirrored
+    in a SQL expression decided against the row's LIVE ``unresolved_reasons``
+    value at UPDATE-execution time, rather than a Python value computed from
+    an earlier SELECT — so a concurrent writer to the same column (e.g. a
+    same-row ``set_jd_full`` success clearing stale reason codes) can never
+    have its already-committed change clobbered by this UPDATE landing
+    after it, and vice versa. No pre-read is needed at all: a WHERE-clause
+    miss (no row for ``dedup_key``, or one deleted concurrently) just leaves
+    the UPDATE matching 0 rows, a silent no-op in Postgres — there is no
+    longer a SELECT-then-UPDATE gap here to race.
     """
     if reason not in JD_CONTENT_REASON_CODES:
         return
-    existing = raw.execute(
-        "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (dedup_key,)
-    ).fetchone()
-    if existing is None:
-        return
-    new_reasons = append_reason(existing["unresolved_reasons"], reason)
     with raw.transaction():
         raw.execute(
-            "UPDATE postings SET unresolved_reasons = %s WHERE dedup_key = %s",
-            (Jsonb(new_reasons), dedup_key),
+            "UPDATE postings SET unresolved_reasons = "
+            "(CASE WHEN jsonb_typeof(unresolved_reasons) = 'array' "
+            "THEN unresolved_reasons ELSE '[]'::jsonb END) "
+            "|| (CASE WHEN "
+            "(CASE WHEN jsonb_typeof(unresolved_reasons) = 'array' "
+            "THEN unresolved_reasons ELSE '[]'::jsonb END) "
+            "@> jsonb_build_array(%(reason)s::text) "
+            "THEN '[]'::jsonb ELSE jsonb_build_array(%(reason)s::text) END) "
+            "WHERE dedup_key = %(dedup_key)s",
+            {"reason": reason, "dedup_key": dedup_key},
         )
     commit_unless_nested(raw)
