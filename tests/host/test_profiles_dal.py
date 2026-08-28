@@ -183,3 +183,104 @@ def test_upsert_profile_explicit_workplace_type_none_overwrites_a_prior_value(db
     row = get_profile(db_conn, "u8")
     assert row["seniority_level"] == "staff"
     assert row["workplace_type"] is None
+
+
+# ---------------------------------------------------------------------------
+# clear_profile_targets (#228) — the ONE deliberate exception to
+# upsert_profile's required-workplace_type contract: a single UPDATE that
+# never names workplace_type at all, so there is no stale read for a
+# concurrent writer to clobber. See jobcannon/db/_profiles.py's module
+# docstring for the full race this replaces. The deterministic two-
+# connection lost-update proof lives in
+# tests/host/test_feed_clear_selection.py (exercises the real caller,
+# jobcannon/web/pages.py's clear_selection, end to end) — these are the DB
+# primitive's own semantics: what it clears, what it leaves alone, and its
+# no-row contract.
+# ---------------------------------------------------------------------------
+
+
+def test_clear_profile_targets_zeroes_targets_and_preserves_other_columns(db_conn):
+    from jobcannon.db._profiles import clear_profile_targets, get_profile, upsert_profile
+
+    _seed_user(db_conn, "u9")
+    upsert_profile(
+        db_conn,
+        "u9",
+        skills=["Python"],
+        experience_summary="10 years in data",
+        target_titles=["Engineer"],
+        target_locations=["Remote"],
+        seniority_level="senior",
+        years_of_experience=10.0,
+        comp_floor_usd=150000,
+        target_companies=["Acme"],
+        workplace_type="REMOTE",
+    )
+    before = get_profile(db_conn, "u9")
+
+    row = clear_profile_targets(db_conn, "u9")
+
+    assert row["target_titles"] == []
+    assert row["target_companies"] == []
+    # Byte-identical to the pre-clear row for every column this primitive
+    # has no business touching — workplace_type included, the whole point
+    # of #228's fix.
+    for col in (
+        "skills",
+        "experience_summary",
+        "target_locations",
+        "seniority_level",
+        "years_of_experience",
+        "comp_floor_usd",
+        "workplace_type",
+    ):
+        assert row[col] == before[col], col
+
+
+def test_clear_profile_targets_clears_a_null_target_companies_too(db_conn):
+    """Mirrors test_clear_selection_titles_only_seed_clears_both_target_lists
+    (route level): a companies value that was never set (NULL, not `[]`)
+    must still come back `[]` after clearing, same as an explicitly-empty
+    one would."""
+    from jobcannon.db._profiles import clear_profile_targets, upsert_profile
+
+    _seed_user(db_conn, "u10")
+    upsert_profile(db_conn, "u10", target_titles=["Engineer"], workplace_type=None)
+
+    row = clear_profile_targets(db_conn, "u10")
+
+    assert row["target_titles"] == []
+    assert row["target_companies"] == []
+
+
+def test_clear_profile_targets_advances_updated_at(db_conn):
+    """now() is the transaction-start timestamp — constant across every
+    statement in db_conn's single rollback-isolated transaction, so two
+    `now()` calls within this test can never differ. Seeding a known-past
+    literal timestamp directly (bypassing now()) sidesteps that: the
+    UPDATE's own now() call is still the live wall clock, which is always
+    later than a hardcoded 2020 literal, transaction-scoped or not."""
+    from jobcannon.db._profiles import clear_profile_targets, upsert_profile
+
+    _seed_user(db_conn, "u11")
+    upsert_profile(db_conn, "u11", target_titles=["Engineer"], workplace_type=None)
+    db_conn.execute(
+        "UPDATE profiles SET updated_at = '2020-01-01T00:00:00Z' WHERE user_id = %s", ("u11",)
+    )
+
+    row = clear_profile_targets(db_conn, "u11")
+
+    assert row["updated_at"].year > 2020
+
+
+def test_clear_profile_targets_returns_none_for_missing_profile_row(db_conn):
+    """No INSERT arm (unlike upsert_profile): a user_id with no profiles
+    row matches zero rows on the UPDATE, RETURNING nothing — mirrors
+    get_profile's own None-for-missing contract, and creates no phantom
+    row either way."""
+    from jobcannon.db._profiles import clear_profile_targets
+
+    assert clear_profile_targets(db_conn, "nobody-u12") is None
+
+    row = db_conn.execute("SELECT 1 FROM profiles WHERE user_id = %s", ("nobody-u12",)).fetchone()
+    assert row is None

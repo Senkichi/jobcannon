@@ -62,7 +62,32 @@ fixtures' dict_row support `row["col"]`).
 `upsert_profile` is called BOTH through a bare pooled connection (the seed
 script — a real .commit() is required) AND directly against
 tests/host/conftest.py's rollback-isolated `db_conn` fixture (an explicit
-.commit() is forbidden there and the no-op path applies)."""
+.commit() is forbidden there and the no-op path applies).
+
+`clear_profile_targets` (#228) is the ONE deliberate exception to "every
+`upsert_profile` caller states `workplace_type` explicitly." `jobcannon/web/
+pages.py`'s `clear_selection` wants to zero `target_titles`/
+`target_companies` only — it never intends to touch `workplace_type` at
+all — but `upsert_profile`'s required kwarg forced it to round-trip the
+column's current value through a `get_profile` read and write it straight
+back to satisfy the signature. That SELECT and the subsequent UPSERT are
+two separate statements with no lock between them, so a concurrent
+`upsert_profile(..., workplace_type=...)` commit landing in that window
+(e.g. the picker resubmitting from a second tab) was silently reverted by
+the stale value this route read before the race — a real lost-update, not
+theoretical (#228, flagged independently by two review passes on PR #226).
+Loosening `upsert_profile` itself (making `workplace_type` COALESCE-
+preserve, or optional) was rejected: that was m0012's whole point (this
+docstring, above) — a caller that means "leave workplace_type alone" would
+have no way to say so without also being able to mean "clear it," so the
+signature deliberately makes "leave it" unrepresentable there. The fix
+instead lives at the layer that actually has a caller who means "leave it
+alone": a narrower primitive that is not an upsert (no INSERT arm, no row
+created for a `profile is None` visitor — see its own docstring) and whose
+UPDATE's SET clause never names `workplace_type`, so there is no read to
+go stale and no window for a concurrent write to land in. This is narrower
+than `upsert_profile`, not a loosening of it — the required-kwarg contract
+above is untouched for every caller that still goes through it."""
 
 from __future__ import annotations
 
@@ -123,6 +148,41 @@ def upsert_profile(
         ),
     )
     commit_unless_nested(raw)
+
+
+def clear_profile_targets(conn: Any, user_id: str) -> Any:
+    """#228: zero `target_titles`/`target_companies` in ONE statement, never
+    naming `workplace_type` — see this module's docstring for why this is
+    the one deliberate exception to `upsert_profile`'s required-kwarg
+    contract rather than a loosening of it.
+
+    Not an upsert: no INSERT arm, so a `user_id` with no `profiles` row
+    (pre-onboarding visitor) matches zero rows and this returns None —
+    mirroring the pre-#228 `profile is None` guard `clear_selection` used
+    to implement with its own `get_profile` read, and creating no phantom
+    row either way. The RETURNING clause doubles as `clear_selection`'s
+    post-write re-read (the same column list `get_profile` selects, for
+    the same #105 export-classification reason its docstring gives — this
+    function widens no column `get_profile` doesn't already expose), so
+    the caller needs no second round trip to see the cleared row.
+
+    `Jsonb([])` — a literal empty list, never `None` — matches
+    `upsert_profile`'s existing clear-not-omit convention (#169): this
+    statement doesn't COALESCE at all (unconditional overwrite), but the
+    cleared value's shape stays the same real, non-NULL jsonb `[]` every
+    other "cleared" write in this table produces.
+    """
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    row = raw.execute(
+        "UPDATE profiles SET target_titles = %s, target_companies = %s, updated_at = now() "
+        "WHERE user_id = %s "
+        "RETURNING user_id, skills, experience_summary, target_titles, target_locations, "
+        "seniority_level, years_of_experience, comp_floor_usd, target_companies, "
+        "workplace_type, updated_at",
+        (Jsonb([]), Jsonb([]), user_id),
+    ).fetchone()
+    commit_unless_nested(raw)
+    return row
 
 
 def get_profile(conn: Any, user_id: str) -> Any:
