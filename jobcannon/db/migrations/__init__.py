@@ -28,6 +28,24 @@ def _fold_contract_step(module_attr: bool, migration_kwarg: bool) -> bool:
     return module_attr or migration_kwarg
 
 
+def _fold_lock_step(module_attr: bool, migration_kwarg: bool) -> bool:
+    """Same fold shape as _fold_contract_step, for the same reason: lock_step
+    is DOCUMENTED as a bare module attribute (next to the "Lock
+    justification:" docstring section tests/test_migration_deploy_safety.py
+    requires alongside it), but the dataclass field is still directly
+    settable, so this ORs both sources rather than letting the module-
+    attribute default silently win over an explicit kwarg (issue #219)."""
+    return module_attr or migration_kwarg
+
+
+def _fold_autocommit(module_attr: bool, migration_kwarg: bool) -> bool:
+    """Same fold shape as _fold_contract_step/_fold_lock_step, for the same
+    reason: autocommit is DOCUMENTED as a bare module attribute, but the
+    dataclass field is still directly settable, so this ORs both sources
+    (issue #219)."""
+    return module_attr or migration_kwarg
+
+
 MIGRATIONS: list[Migration] = []
 
 for _info in pkgutil.iter_modules(__path__):
@@ -40,6 +58,8 @@ for _info in pkgutil.iter_modules(__path__):
         contract_step=_fold_contract_step(
             getattr(_mod, "contract_step", False), _mod.MIGRATION.contract_step
         ),
+        lock_step=_fold_lock_step(getattr(_mod, "lock_step", False), _mod.MIGRATION.lock_step),
+        autocommit=_fold_autocommit(getattr(_mod, "autocommit", False), _mod.MIGRATION.autocommit),
     )
     MIGRATIONS.append(_mig)
 

@@ -50,3 +50,35 @@ class Migration:
     # jobcannon/db/migrate.py's _apply_migration logs a loud one-line notice
     # when applying one.
     contract_step: bool = False
+    # True when this migration deliberately ships a non-CONCURRENT
+    # `CREATE INDEX` against a table an EARLIER migration created -- that
+    # statement takes a SHARE lock for the whole build, blocking writes to
+    # the table while the previous release's web instance keeps serving
+    # them during Render's zero-downtime overlap window (issue #219). PREFER
+    # a bare `lock_step = True` module attribute (never a Migration(...)
+    # kwarg passed directly in the migration file), same reasoning as
+    # `contract_step` above -- it lives next to the docstring's "Lock
+    # justification:" section naming the expected row count / build time.
+    # jobcannon/db/migrations/__init__.py's `_fold_lock_step` folds either
+    # source (module attribute OR this kwarg) onto this field, same OR
+    # semantics as contract_step. An index on a table the SAME migration
+    # creates never needs this -- the table is empty, so the build is
+    # instant regardless of lock kind. Required alongside a docstring "Lock
+    # justification:" section (tests/test_migration_deploy_safety.py).
+    lock_step: bool = False
+    # True when this migration's `sql` statements must run OUTSIDE the
+    # per-migration ledger transaction, on an autocommit connection --
+    # `CREATE INDEX CONCURRENTLY` (the escape hatch from the lock-duration
+    # hazard `lock_step` documents an ACCEPTED risk for) refuses to run
+    # inside a transaction block at all, and every migration otherwise
+    # applies inside exactly one (jobcannon/db/migrate.py's
+    # `_apply_migration`). PREFER a bare `autocommit = True` module
+    # attribute, folded via `_fold_autocommit` exactly like `contract_step`/
+    # `lock_step` above. tests/test_migration_deploy_safety.py keeps this
+    # escape hatch narrow: a CONCURRENTLY statement always requires
+    # `autocommit = True` and vice versa, and an autocommit migration's
+    # `sql` may contain only CREATE/DROP INDEX statements (no py hook,
+    # no other DDL) -- the only thing autocommit buys you is running an
+    # index build outside a transaction, so there is no expand-safe reason
+    # to ever combine it with anything else.
+    autocommit: bool = False

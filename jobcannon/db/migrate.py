@@ -79,6 +79,121 @@ def applied_versions(conn: psycopg.Connection) -> set[int]:
     return {r[0] for r in rows}
 
 
+def _drop_invalid_indexes(conn: psycopg.Connection) -> None:
+    """`CREATE INDEX CONCURRENTLY` is the one DDL statement Postgres does NOT
+    roll back atomically on failure: a build that dies partway (deploy
+    timeout, connection drop, a duplicate value tripping a UNIQUE build)
+    leaves a real catalog entry behind, flagged `pg_index.indisvalid =
+    false` -- unusable, and `CREATE INDEX ... IF NOT EXISTS` on retry sees
+    the name already taken and silently no-ops instead of finishing the
+    build (issue #219's retry hazard). A plain, non-CONCURRENT `CREATE
+    INDEX` is fully transactional and can NEVER leave one of these, so this
+    sweep only ever runs from _apply_autocommit_migration -- a database with
+    no autocommit-flagged migration pending never issues this query at all.
+
+    Deliberately UNSCOPED to any particular index name (drops every invalid
+    index in the database, not just ones this migration's statements name).
+    Two things make that safe rather than reckless: an invalid index is
+    already unusable for anything (the planner refuses to plan against one,
+    so dropping it destroys no live behavior, only unusable catalog
+    wreckage), and the ledger guarantees whichever migration could have left
+    one behind was NOT recorded as applied -- so it is always retried before
+    any migration after it, meaning any invalid index this sweep finds
+    belongs either to the autocommit migration about to (re-)run or to
+    manual out-of-band intervention, never to a completed, ledgered step.
+    An alternative considered and rejected: parse each migration's own SQL
+    (via pglast, already a dev dependency for
+    tests/test_migration_deploy_safety.py) to scope the sweep to only the
+    index names this migration's statements declare. Rejected because it
+    would make `python -m jobcannon.db.migrate` -- the render.yaml
+    preDeployCommand that gates every deploy -- import pglast at runtime for
+    the first time; a wheel/resolution hiccup on Render would then fail
+    EVERY deploy at import, not just the rare failed-CONCURRENTLY-build
+    case this exists to recover from. That trade was upside down, so the
+    static parser stays dev-only and this sweep stays a blunt, dependency-
+    free SQL query."""
+    rows = conn.execute(
+        "SELECT n.nspname, c.relname FROM pg_index i "
+        "JOIN pg_class c ON c.oid = i.indexrelid "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE NOT i.indisvalid"
+    ).fetchall()
+    for schema_name, index_name in rows:
+        logger.warning(
+            "dropping INVALID index %r in schema %r -- leftover from a "
+            "previously failed CREATE INDEX CONCURRENTLY build -- before "
+            "retrying",
+            index_name,
+            schema_name,
+        )
+        conn.execute(
+            psycopg.sql.SQL("DROP INDEX CONCURRENTLY IF EXISTS {}").format(
+                psycopg.sql.Identifier(schema_name, index_name)
+            )
+        )
+
+
+def _apply_autocommit_migration(conn: psycopg.Connection, migration: Migration) -> None:
+    """autocommit=True migrations run their `sql` statements OUTSIDE the
+    normal per-migration transaction, on the SAME connection/session
+    `run_migrations` already holds the advisory lock on -- toggling
+    `conn.autocommit` at runtime rather than opening a second connection, so
+    the lock (session-scoped) covers this stretch by construction with no
+    extra plumbing. `CREATE INDEX CONCURRENTLY` refuses to run inside a
+    transaction block at all, which is the whole reason this path exists
+    (issue #219). tests/test_migration_deploy_safety.py enforces the escape
+    hatch stays narrow: only a CONCURRENTLY statement may set autocommit,
+    only an autocommit migration may use CONCURRENTLY, and an autocommit
+    migration's `sql` may contain nothing but CREATE/DROP INDEX statements
+    -- so a `py` hook here would silently never run; fail loudly instead of
+    letting that possibility exist quietly.
+
+    The ledger INSERT happens in its own ordinary transaction AFTER every
+    statement succeeds -- never inside the autocommit stretch itself (an
+    INSERT there would commit statement-by-statement with no atomicity, and
+    a mid-migration crash could ledger a partially-applied migration). A
+    crash between the last statement and the ledger INSERT instead leaves
+    the migration looking un-applied, which is exactly what
+    _drop_invalid_indexes + `IF NOT EXISTS` make a safe, idempotent retry."""
+    if migration.py is not None:
+        raise ValueError(
+            f"migration {migration.version} ({migration.name}) sets both "
+            f"autocommit=True and a py hook -- the hook would never run; "
+            f"see _apply_autocommit_migration's docstring"
+        )
+    conn.autocommit = True
+    try:
+        _drop_invalid_indexes(conn)
+        for statement in migration.sql:
+            conn.execute(statement)
+    finally:
+        # Swallow a failure here for the same reason run_migrations' own
+        # advisory-unlock finally does: if the loop above just failed
+        # because the connection itself died, resetting autocommit fails
+        # too, and letting THAT replace the real migration exception would
+        # hide the failure an operator actually needs to see. Whether this
+        # reset lands or not, the connection is discarded (closed, never
+        # reused) at run_migrations()'s own `with psycopg.connect(...)`
+        # exit, so a stuck autocommit=True never leaks into another
+        # migration's transaction.
+        try:
+            conn.autocommit = False
+        except Exception:
+            logger.warning(
+                "resetting autocommit off failed after applying migration "
+                "%s (%s); the connection is discarded at run_migrations() "
+                "exit either way",
+                migration.version,
+                migration.name,
+                exc_info=True,
+            )
+    with conn.transaction():
+        conn.execute(
+            "INSERT INTO schema_migrations (version, name) VALUES (%s, %s)",
+            (migration.version, migration.name),
+        )
+
+
 def _apply_migration(conn: psycopg.Connection, dsn: str, migration: Migration) -> None:
     if migration.contract_step:
         # Loud on purpose (WARNING, not INFO): this is the log line
@@ -96,6 +211,25 @@ def _apply_migration(conn: psycopg.Connection, dsn: str, migration: Migration) -
             migration.version,
             migration.name,
         )
+    if migration.lock_step:
+        # Same loudness rationale as CONTRACT-STEP above -- this is the log
+        # line docs/deploy-runbook.md's guard section points an operator at:
+        # this migration accepted a lock-duration risk instead of using
+        # CONCURRENTLY (issue #219), see its own 'Lock justification:'
+        # docstring section for why that was judged safe at the time it was
+        # written (e.g. an empty table).
+        logger.warning(
+            "LOCK-STEP migration %s (%s) applying -- ships a non-CONCURRENT "
+            "index build against a pre-existing table instead of accepting "
+            "autocommit=True; see the migration's own 'Lock justification:' "
+            "docstring",
+            migration.version,
+            migration.name,
+        )
+    if migration.autocommit:
+        _apply_autocommit_migration(conn, migration)
+        logger.info("applied migration %s (%s)", migration.version, migration.name)
+        return
     with conn.transaction():
         for statement in migration.sql:
             conn.execute(statement)

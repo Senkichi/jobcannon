@@ -1,4 +1,4 @@
-"""Single point of enforcement for mutating ``postings.unresolved_reasons``.
+"""Reference implementation for ``postings.unresolved_reasons`` semantics.
 
 Postgres port of the private repo's ``append_reason`` / ``remove_reasons``
 pair. ``postings.unresolved_reasons`` is a ``jsonb NOT NULL DEFAULT '[]'``
@@ -10,6 +10,20 @@ strings, psycopg round-trips ``jsonb`` as a native Python value on read (see
 ``_jobs.py``'s ``existing["unresolved_reasons"] or []`` / ``Jsonb(...)`` on
 write) — so these helpers take and return ``list[str]`` directly rather than
 JSON text.
+
+NOT the single point of enforcement (#217, PR #232): ``jobcannon/db/_jd_full.py``'s
+``set_jd_full`` and ``_record_jd_content_reject`` mutate this column
+themselves via atomic SQL expressions (jsonb set-difference / ``@>``
+containment append) evaluated against the row's LIVE value at
+UPDATE-execution time, rather than calling into these Python helpers —
+a prior SELECT-then-call-these-helpers-then-UPDATE shape was a lost-update
+window under a concurrent writer to the same column, which #217 closed by
+moving the logic into SQL. These two functions remain the documented
+semantic reference the SQL is written to match exactly (dedupe-on-append,
+set-difference-on-remove, malformed/non-array-value tolerance) and are
+exercised directly by their own test file
+(``tests/host/test_unresolved_reasons.py``) as that spec, but no production
+write path calls them — grep confirms zero remaining production callers.
 
 Exports:
     append_reason: Return unresolved_reasons with a reason code appended.
