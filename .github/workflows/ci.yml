@@ -214,18 +214,40 @@ jobs:
 
   tests-passed:
     name: Tests passed
-    # Single check branch protection / merge automation should require: it
-    # always reports (if: always()), so it can never be skipped-green the
-    # way a conditional test job could satisfy a required check without
-    # actually running. A fork PR (test/fork-proof both skipped) therefore
-    # fails this check by construction. migration-collision-guard is allowed
-    # to be "skipped" (it only runs on same-repo pull_request events -- a
-    # push to main has no PR to check) but never "failure"/"cancelled".
+    # Required check for branch protection / merge automation. `always()`
+    # keeps the JOB itself from being skipped: GitHub reports a job skipped
+    # by its own job-level `if:` as check-run conclusion "success" for
+    # required-status-check purposes (a required check only needs
+    # successful/skipped/neutral to unblock a merge), so gating this job's
+    # `if:` the same way `test`/`fork-proof` are gated would turn a fork PR
+    # straight into a passing required check instead of a failing one --
+    # the opposite of hardening. The same-repo condition is therefore
+    # applied per-STEP below instead of at the job level: a step skipped by
+    # `if:` does not by itself change the job's overall conclusion, so the
+    # job keeps reporting the real outcome. needs.*.result is evaluated
+    # explicitly rather than relying on the default all-succeeded gate, so
+    # any needed job's failure/cancellation still fails this one.
+    # migration-collision-guard is allowed to be "skipped" (it only runs on
+    # same-repo pull_request events -- a push to main has no PR to check)
+    # but never "failure"/"cancelled".
+    #
+    # Same same-repo condition as the jobs above: this job's inline `run:`
+    # content is, like every step in every job, read from the PR head on
+    # pull_request events, so an unconditional step here would still be
+    # schedulable onto the self-hosted pool from a fork PR even though
+    # test/fork-proof/migration-collision-guard themselves already refuse
+    # to run there. On a fork PR the real check step below is skipped and a
+    # second step fails the job outright instead, so the required
+    # "Tests passed" context still reports failure (never a skip, never a
+    # pass) and a fork PR cannot merge directly -- the flow for an outside
+    # contribution stays: a maintainer pushes the branch into this repo
+    # (same-repo PR) to get CI to run.
     needs: [test, fork-proof, migration-collision-guard]
     if: always()
     runs-on: [self-hosted, Windows, X64, jcpub]
     steps:
       - name: Require test success
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         shell: bash
         run: |
           if [ "${{ needs.test.result }}" != "success" ]; then
@@ -241,3 +263,9 @@ jobs:
             echo "migration-collision-guard job result: $guard"
             exit 1
           fi
+      - name: Reject fork pull request
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        shell: bash
+        run: |
+          echo "pull_request event from a fork: refusing to run this job's checks on self-hosted infra."
+          exit 1
