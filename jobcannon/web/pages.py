@@ -68,7 +68,7 @@ from flask import Blueprint, g, redirect, render_template, request, url_for
 
 from jobcannon.db import _feed
 from jobcannon.db._feed import list_feed_postings
-from jobcannon.db._profiles import GUEST_USER_ID, get_profile, upsert_profile
+from jobcannon.db._profiles import GUEST_USER_ID, clear_profile_targets, get_profile
 from jobcannon.db._stats import corpus_stats
 from jobcannon.db.pool import connection_factory
 from jobcannon.host.events import log_event
@@ -622,31 +622,40 @@ def clear_selection():
     hidden `csrf_token` form field nor the `X-CSRFToken` header 400s before
     reaching here too.
 
-    `upsert_profile(..., target_titles=[], target_companies=[])` — literal
-    empty lists, never `None` — is what actually clears the stored
-    selection: `jobcannon/db/_profiles.py`'s COALESCE-preserve columns treat
-    an omitted/None argument as "leave the old value," so passing `None`
-    here would silently no-op instead of clearing (the same distinction
-    `jobcannon/web/onboarding.py`'s picker resubmission already relies on,
-    #169). `workplace_type` is passed through as the profile's CURRENT
-    value, not touched by this route at all — m0012 made it a required,
-    non-COALESCE kwarg on `upsert_profile` (a caller must always state it
-    explicitly), so omitting it here would NULL out a saved workplace
-    preference this control has no business clearing.
+    `clear_profile_targets(conn, user_id)` (`jobcannon/db/_profiles.py`,
+    #228) is what actually clears the stored selection — ONE `UPDATE ...
+    RETURNING` statement that zeroes `target_titles`/`target_companies` to
+    literal empty lists (never `None` — `_profiles.py`'s COALESCE-preserve
+    columns treat an omitted/None argument as "leave the old value," the
+    same distinction `jobcannon/web/onboarding.py`'s picker resubmission
+    already relies on, #169) and never names `workplace_type` at all.
+    Before #228 this route round-tripped `workplace_type` through a
+    `get_profile` read and an `upsert_profile` write to satisfy that
+    function's required (non-COALESCE, m0012) kwarg without actually
+    intending to touch the column — the read and the write were two
+    separate statements with no lock between them, so a concurrent
+    `upsert_profile(..., workplace_type=...)` commit in that window (e.g.
+    the picker resubmitting from a second tab) was silently reverted by the
+    stale value this route wrote back. `clear_profile_targets` closes that
+    window structurally: its SET clause has nothing to read stale, so there
+    is nothing for a concurrent writer to race against
+    (`jobcannon/db/_profiles.py`'s module docstring has the full design
+    rationale, including why loosening `upsert_profile` itself was
+    rejected instead).
 
     No-profile-row guard (Devin review, #226): a signed-in user who has
     never completed the picker has no `profiles` row (`upsert_profile` —
-    `jobcannon/db/_profiles.py` — is the only writer), and this route is
-    reachable pre-onboarding regardless — `base.html` puts a valid CSRF
-    token on every authed page's `<body>` via `hx-headers`, Clear-button-
-    visibility notwithstanding. Writing a zeroed `profiles` row for that
-    visitor (the pre-fix behavior) would flip `feed.html`'s `has_selections
-    = profile is not None` gate true, silently skipping the "Set up your
-    feed" onboarding CTA (`feed.html:4`) for someone who never ran the
-    picker. There is nothing to clear for a `profile is None` visitor, so
-    the write (and the row it would otherwise create) is skipped entirely —
-    this route still responds normally (303 / HX 200), it just never touches
-    `profiles`.
+    `jobcannon/db/_profiles.py` — is the only row-creating writer), and this
+    route is reachable pre-onboarding regardless — `base.html` puts a valid
+    CSRF token on every authed page's `<body>` via `hx-headers`,
+    Clear-button-visibility notwithstanding. Writing a zeroed `profiles` row
+    for that visitor (the pre-#226 behavior) would flip `feed.html`'s
+    `has_selections = profile is not None` gate true, silently skipping the
+    "Set up your feed" onboarding CTA (`feed.html:4`) for someone who never
+    ran the picker. `clear_profile_targets` has no INSERT arm (see its own
+    docstring), so a `profile is None` visitor's UPDATE matches zero rows
+    and returns None on its own — no separate existence check needed here,
+    and no phantom row is ever created either way.
 
     HX-aware like every other mutation route in this codebase
     (`jobcannon/web/actions.py`, `jobcannon/web/onboarding.py`'s
@@ -665,16 +674,7 @@ def clear_selection():
     round trip instead of being dropped along with the saved selection."""
     user_id = g.clerk_user.user_id
     with connection_factory() as conn:
-        profile = get_profile(conn, user_id)
-        if profile is not None:
-            upsert_profile(
-                conn,
-                user_id,
-                target_titles=[],
-                target_companies=[],
-                workplace_type=profile["workplace_type"],
-            )
-            profile = get_profile(conn, user_id)
+        profile = clear_profile_targets(conn, user_id)
 
     filters = _parse_feed_filters(request.args)
 

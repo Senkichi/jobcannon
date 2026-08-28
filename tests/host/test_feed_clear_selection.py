@@ -26,6 +26,8 @@ exercising the redirect.
 
 from __future__ import annotations
 
+import contextlib
+
 import psycopg
 import pytest
 from psycopg.rows import dict_row
@@ -294,6 +296,129 @@ def test_clear_selection_preserves_other_coalesce_fields(app):
     assert profile["comp_floor_usd"] == 120000
     assert profile["skills"] == ["Python"]
     assert profile["seniority_level"] == "senior"
+
+
+def _install_race_injector(monkeypatch, dsn, user_id, competing_kwargs):
+    """#228 deterministic lost-update proof: wraps jobcannon.web.pages'
+    module-level connection_factory (see pages.py's own docstring on why
+    it's a patchable module attribute) so the FIRST statement clear_selection
+    issues that actually WRITES to `profiles` is preceded by a competing,
+    REAL committed upsert_profile(**competing_kwargs) on a SEPARATE
+    connection — reproducing the picker's second-tab resubmission
+    deterministically instead of via thread timing.
+
+    Injection keys on the SQL text (`INSERT INTO profiles` /
+    `UPDATE profiles`), not on which Python function issued it, so the same
+    injector proves the race on BOTH shapes: the pre-#228 two-statement
+    get_profile-then-upsert_profile round trip (the SELECT passes through
+    untouched — it reads the pre-race value — and injection fires right
+    before the subsequent INSERT...ON CONFLICT) and the #228-fixed single
+    `UPDATE ... RETURNING` (its one execute() call IS the write, so
+    injection fires immediately before it). Sabotage-verify (cited in the
+    PR body): temporarily restoring the old round trip in clear_selection
+    makes this fail, because the old code writes back the STALE
+    workplace_type it read before the competing commit landed.
+    """
+    from jobcannon.db._profiles import upsert_profile as _upsert_profile
+    from jobcannon.db.pool import connection_factory as _real_factory
+    from jobcannon.web import pages as pages_mod
+
+    fired = {"done": False}
+
+    def _inject_competing_write():
+        if fired["done"]:
+            return
+        fired["done"] = True
+        with psycopg.connect(dsn) as conn_b:
+            _upsert_profile(conn_b, user_id, **competing_kwargs)
+            conn_b.commit()
+
+    def _is_profiles_write(sql: str) -> bool:
+        return sql.startswith("INSERT INTO profiles") or sql.startswith("UPDATE profiles")
+
+    class _RawProxy:
+        def __init__(self, real_raw):
+            self._real_raw = real_raw
+
+        def __getattr__(self, name):
+            return getattr(self._real_raw, name)
+
+        def execute(self, sql, params=(), *args, **kwargs):
+            if not fired["done"] and _is_profiles_write(sql):
+                _inject_competing_write()
+            return self._real_raw.execute(sql, params, *args, **kwargs)
+
+    class _ConnProxy:
+        def __init__(self, real_conn):
+            self._real_conn = real_conn
+            self.raw = _RawProxy(real_conn.raw)
+
+        def __getattr__(self, name):
+            return getattr(self._real_conn, name)
+
+    @contextlib.contextmanager
+    def _patched_factory(*args, **kwargs):
+        with _real_factory(*args, **kwargs) as conn:
+            yield _ConnProxy(conn)
+
+    monkeypatch.setattr(pages_mod, "connection_factory", _patched_factory)
+
+
+def test_clear_selection_survives_concurrent_committed_workplace_type_write(app, monkeypatch):
+    """#228: a competing, REAL committed upsert_profile(workplace_type=
+    "HYBRID") from a second connection — the onboarding picker resubmitting
+    from a second tab — lands immediately before clear_selection's own
+    write executes. The final row must have BOTH the competing write's
+    workplace_type (never reverted) AND the cleared target lists (the write
+    this route actually intends to make)."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(
+        app,
+        target_titles=["Engineer"],
+        target_companies=["Clear Write Co"],
+        workplace_type="REMOTE",
+    )
+    _install_race_injector(monkeypatch, dsn, CLERK_ID, {"workplace_type": "HYBRID"})
+
+    resp = client.post("/feed/clear-selection")
+
+    assert resp.status_code == 303
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        profile = get_profile(conn, CLERK_ID)
+    assert profile["workplace_type"] == "HYBRID"
+    assert profile["target_titles"] == []
+    assert profile["target_companies"] == []
+
+
+def test_clear_selection_hx_survives_concurrent_committed_workplace_type_write(app, monkeypatch):
+    """Belt-and-suspenders on the HX-Request path (Devin review, #228):
+    the redirect-branch proof above (test_clear_selection_survives_
+    concurrent_committed_workplace_type_write) exercises clear_selection's
+    write via the 303 branch; this repeats the exact same injected race
+    through the HX-Request branch instead, proving the fix is
+    path-independent — the write happens inside the SAME `with
+    connection_factory() as conn:` block either way, but that's an
+    inference this test makes redundant by actually exercising both."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(
+        app,
+        target_titles=["Engineer"],
+        target_companies=["Clear Write Co"],
+        workplace_type="REMOTE",
+    )
+    _install_race_injector(monkeypatch, dsn, CLERK_ID, {"workplace_type": "HYBRID"})
+
+    resp = client.post("/feed/clear-selection", headers={"HX-Request": "true"})
+    body = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "<html" not in body
+    assert 'id="feed-content"' in body
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        profile = get_profile(conn, CLERK_ID)
+    assert profile["workplace_type"] == "HYBRID"
+    assert profile["target_titles"] == []
+    assert profile["target_companies"] == []
 
 
 def test_clear_selection_hx_request_returns_feed_content_fragment(app):
