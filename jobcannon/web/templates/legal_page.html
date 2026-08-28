@@ -37,11 +37,37 @@
      `padding: 0` or a one-sided edit would fail it. */
   .legal-prose a { color: #d4d4d4; text-decoration: underline; padding-top: 14px; padding-bottom: 14px; }
   .legal-prose a:hover { color: #f5f5f5; }
-  .legal-prose table { width: 100%; border-collapse: collapse; margin: 1rem 0 1.5rem; font-size: 0.875rem; }
+  .legal-prose table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
   .legal-prose th, .legal-prose td { border: 1px solid #404040; padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; }
   .legal-prose th { background: #171717; color: #e5e5e5; }
   .legal-prose blockquote { border-left: 3px solid #404040; padding-left: 1rem; color: #737373; margin: 1rem 0; }
   .legal-prose hr { border: none; border-top: 1px solid #262626; margin: 2rem 0; }
+  /* Narrow-viewport table fix: some legal-page tables (e.g. /privacy's
+     Purpose/Data/Legal-basis columns) don't fit 390px even with the
+     `width: 100%` above -- `table-layout: auto` (the default) treats a
+     percentage width as a MINIMUM, not a cap, so a browser still grows the
+     table past it when a cell's content can't wrap enough (CSS2.1
+     17.5.2.2). Unwrapped, that growth pushes the whole *document*
+     horizontally past the viewport, not just the table looking cramped.
+
+     Fix is a scroll wrapper, not a breakpoint: jobcannon/web/legal.py's
+     `_wrap_tables_for_scroll` (called from `_render`, the single render
+     chokepoint) wraps every rendered `<table>...</table>` in
+     `<div class="table-scroll">`. This ONE rule below -- no media query,
+     no breakpoint -- gives that wrapper its own scroll container at every
+     viewport width. `.legal-prose table` (width: 100%, above) is
+     completely untouched at any width, so a table that already fit can
+     never visually change; only a table whose content genuinely can't fit
+     triggers the wrapper's internal scrollbar.
+
+     `margin: 1rem 0 1.5rem` intentionally lives on the wrapper below, not
+     on `.legal-prose table` above -- see `_wrap_tables_for_scroll`'s
+     docstring (jobcannon/web/legal.py) for the full block-formatting-
+     context / margin-collapse reasoning and the rejected earlier approach
+     this rule replaces. tests/host/test_legal_table_scroll.py pins both
+     the wrapper (structurally, via a real HTML parser) and this CSS rule
+     (parsed as CSS, not string-matched), and sabotage-proves both. */
+  .legal-prose .table-scroll { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; margin: 1rem 0 1.5rem; }
 </style>
 <div class="legal-prose">
 {{ body_html|safe }}
