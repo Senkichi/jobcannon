@@ -95,17 +95,24 @@ jobs:
     # same-repo-only gate as `test` above, for the same reason (no code
     # execution on this box for a fork PR).
     #
-    # Known open risk (surfaced during review, not yet resolved as of this
-    # PR): the runner service that will actually execute this job logs on
-    # as NT AUTHORITY\NETWORK SERVICE, not the interactive account this
-    # job's WSL invocation was proven under. WSL distro registration is
-    # per-account, and NETWORK SERVICE's profile shows no evidence any WSL
-    # distro has ever been registered under it (its
-    # AppData\Local\Packages -- where Store-installed distros live --
-    # doesn't exist). The precondition check in the step below turns that
-    # into a clear, diagnosable failure instead of a cryptic one if it's
-    # real; this PR's own CI run is the empirical test of whether it's
-    # real at all.
+    # Runner-account risk, checked and resolved during review: the runner
+    # service that executes this job logs on as NT AUTHORITY\NETWORK
+    # SERVICE (verified via Get-CimInstance Win32_Service), not the
+    # interactive account this job's WSL invocation was first proven under
+    # -- and NETWORK SERVICE's own Windows profile shows no evidence any
+    # WSL distro was ever registered directly under it (no
+    # AppData\Local\Packages, where Store-installed distros live). WSL
+    # distro registration is normally per-account, so that looked like a
+    # real blocker. It wasn't: jobcannon#248's own PR (#249) CI run
+    # completed this job successfully on the real runner
+    # (jcpub-9800x3d-2, NETWORK SERVICE) -- 11 passed in 13.56s, both
+    # fork-gated tests included -- so whatever env/profile setup this
+    # runner already carries (its steps copy senki's .gitconfig, so some
+    # deliberate account passthrough exists in its config) also makes its
+    # WSL distro reachable. The `wsl.exe -l -q` precondition check below is
+    # kept as a defensive belt-and-suspenders measure -- a clear,
+    # diagnosable failure if that ever regresses -- not because the risk
+    # is still open.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64, jcpub]
     steps:
