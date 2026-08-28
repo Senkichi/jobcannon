@@ -121,6 +121,150 @@ def _table_scroll_declarations(css: str) -> dict[str, str] | None:
 
 
 # ---------------------------------------------------------------------------
+# `.legal-prose .table-scroll:focus-visible { ... }` (issue #239, WCAG
+# 2.4.7): the wrapper's `tabindex="0"` (jobcannon/web/legal.py's
+# `_wrap_tables_for_scroll`) puts it in the Tab order, but tabindex alone
+# gives no VISIBLE indication a keyboard user landed there -- this rule is
+# the other half of the fix. `:focus-visible`, not bare `:focus`, so the ring
+# only shows for keyboard navigation, matching every other focus ring in
+# this app.
+# ---------------------------------------------------------------------------
+
+_TABLE_SCROLL_FOCUS_RULE_RE = re.compile(
+    r"\.legal-prose\s+\.table-scroll:focus-visible\s*\{([^}]*)\}",
+    re.DOTALL,
+)
+
+
+def _table_scroll_focus_declarations(css: str) -> dict[str, str] | None:
+    """Same idea as `_table_scroll_declarations`, but for the
+    `:focus-visible` rule."""
+    match = _TABLE_SCROLL_FOCUS_RULE_RE.search(_CSS_COMMENT_RE.sub("", css))
+    if match is None:
+        return None
+    decls: dict[str, str] = {}
+    for decl in match.group(1).split(";"):
+        decl = decl.strip()
+        if not decl:
+            continue
+        prop, _, value = decl.partition(":")
+        decls[prop.strip().lower()] = value.strip()
+    return decls
+
+
+def test_table_scroll_focus_visible_rule_is_present():
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    decls = _table_scroll_focus_declarations(css)
+    assert decls is not None, (
+        "legal_page.html has no `.legal-prose .table-scroll:focus-visible { ... }` "
+        "rule -- keyboard focus on the scroll wrapper is invisible (WCAG 2.4.7)"
+    )
+
+
+def test_table_scroll_focus_visible_rule_declares_a_visible_outline():
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    decls = _table_scroll_focus_declarations(css)
+    assert decls is not None
+    outline = decls.get("outline", "")
+    assert outline and outline.strip().lower() != "none", (
+        decls,
+        "`outline` must be a real, visible value, not absent or 'none'",
+    )
+
+
+def test_table_scroll_focus_visible_rule_declares_the_outline_offset():
+    """`outline-offset: 2px` is a second, independent property from
+    `outline` itself -- a maintainer could keep a real, non-`none` outline
+    (satisfying the test above) while silently dropping or shrinking the
+    offset, which the outline test alone would not catch. The offset is
+    load-bearing, not cosmetic: it draws the ring 2px OUTSIDE the wrapper's
+    own border rather than overlapping it, which is what keeps the ring off
+    an adjacent `.legal-prose th` cell's `#171717` background in practice
+    (a `th` can sit flush against the wrapper's edge) -- see this rule's
+    comment in legal_page.html for the full contrast reasoning."""
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    decls = _table_scroll_focus_declarations(css)
+    assert decls is not None
+    assert decls.get("outline-offset", "").strip().lower() == "2px", (
+        decls,
+        "`.legal-prose .table-scroll:focus-visible` must declare "
+        "`outline-offset: 2px` -- without it the ring can overlap an "
+        "adjacent table-header cell instead of sitting outside the wrapper",
+    )
+
+
+def test_table_scroll_focus_visible_rule_detects_a_dropped_outline_offset():
+    """Sabotage-proves the check above actually fires, mirroring the
+    dropped-outline sabotage below."""
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    live_css = _CSS_COMMENT_RE.sub("", css)
+    match = _TABLE_SCROLL_FOCUS_RULE_RE.search(live_css)
+    assert match, "legal_page.html's focus-visible rule is missing -- update this sabotage fixture"
+    original_block = match.group(0)
+    sabotaged_block = original_block.replace("outline-offset: 2px;", "", 1)
+    assert sabotaged_block != original_block, (
+        "legal_page.html's focus-visible rule text changed -- update this sabotage fixture"
+    )
+    sabotaged = css.replace(original_block, sabotaged_block, 1)
+    assert sabotaged != css, (
+        "the live .table-scroll:focus-visible rule text wasn't found verbatim in "
+        "the raw (uncommented) file -- update this sabotage fixture"
+    )
+    decls = _table_scroll_focus_declarations(sabotaged)
+    assert decls is not None  # selector still there
+    assert decls.get("outline-offset", "").strip().lower() != "2px", (
+        "sabotaging away the outline-offset declaration must make the "
+        "offset check fail -- see "
+        "test_table_scroll_focus_visible_rule_declares_the_outline_offset"
+    )
+
+
+def test_table_scroll_focus_visible_rule_detects_a_dropped_selector():
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    original_selector = ".legal-prose .table-scroll:focus-visible"
+    assert original_selector in css, (
+        "legal_page.html's focus-visible rule selector changed -- update this sabotage fixture"
+    )
+    sabotaged = css.replace(original_selector, ".legal-prose .nope:focus-visible", 1)
+    assert sabotaged != css
+    assert _table_scroll_focus_declarations(sabotaged) is None, (
+        "sabotaging the selector must make the structural check fail -- "
+        "if this assertion fails, the guard above would silently pass a "
+        "rule that no longer targets .legal-prose .table-scroll:focus-visible"
+    )
+
+
+def test_table_scroll_focus_visible_rule_detects_a_dropped_outline():
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    # Comments stripped BEFORE searching -- same reasoning
+    # `_table_scroll_focus_declarations` already applies: this file
+    # documents rejected approaches by name in its own comments (see the
+    # `display:block` history further down), so a future commented-out
+    # `:focus-visible` rule must not let this fixture match the wrong
+    # (dead) block and pass vacuously.
+    live_css = _CSS_COMMENT_RE.sub("", css)
+    match = _TABLE_SCROLL_FOCUS_RULE_RE.search(live_css)
+    assert match, "legal_page.html's focus-visible rule is missing -- update this sabotage fixture"
+    original_block = match.group(0)
+    sabotaged_block = original_block.replace("outline: 2px solid #737373;", "", 1)
+    assert sabotaged_block != original_block, (
+        "legal_page.html's focus-visible rule text changed -- update this sabotage fixture"
+    )
+    sabotaged = css.replace(original_block, sabotaged_block, 1)
+    assert sabotaged != css, (
+        "the live .table-scroll:focus-visible rule text wasn't found verbatim in "
+        "the raw (uncommented) file -- update this sabotage fixture"
+    )
+    decls = _table_scroll_focus_declarations(sabotaged)
+    assert decls is not None  # selector still there
+    outline = decls.get("outline", "")
+    assert not outline or outline.strip().lower() == "none", (
+        "sabotaging away the outline declaration must make the visible-outline "
+        "check fail -- see test_table_scroll_focus_visible_rule_declares_a_visible_outline"
+    )
+
+
+# ---------------------------------------------------------------------------
 # `.legal-prose table { ... }` -- the OTHER selector on this page. Only the
 # margin-collapse-relevant half of it matters here (see
 # jobcannon/web/legal.py's `_wrap_tables_for_scroll` docstring): the wrapper
@@ -362,7 +506,8 @@ def test_wrap_tables_for_scroll_wraps_a_bare_table_exactly():
     html = "<h1>X</h1>\n<table>\n<tbody><tr><td>a</td></tr></tbody>\n</table>\n<p>after</p>"
     wrapped = legal._wrap_tables_for_scroll(html)
     assert wrapped == (
-        '<h1>X</h1>\n<div class="table-scroll"><table>\n'
+        '<h1>X</h1>\n<div class="table-scroll" tabindex="0" role="region" '
+        'aria-label="Scrollable table 1 of 1"><table>\n'
         "<tbody><tr><td>a</td></tr></tbody>\n</table></div>\n<p>after</p>"
     )
 
@@ -379,9 +524,47 @@ def test_wrap_tables_for_scroll_wraps_every_table_independently():
         "<table>\n<tbody><tr><td>b</td></tr></tbody>\n</table>"
     )
     wrapped = legal._wrap_tables_for_scroll(html)
-    assert wrapped.count('<div class="table-scroll">') == 2
+    assert wrapped.count('class="table-scroll"') == 2
     assert wrapped.count("<table>") == 2
     assert wrapped.count("</table>") == 2
+
+
+# ---------------------------------------------------------------------------
+# Keyboard accessibility (issue #239, WCAG 2.1.1 + 2.4.7): the wrapper must
+# be reachable and named without a mouse, and focus on it must be visible.
+# ---------------------------------------------------------------------------
+
+
+def test_wrap_tables_for_scroll_wrapper_is_keyboard_focusable_and_named():
+    html = "<table>\n<tbody><tr><td>a</td></tr></tbody>\n</table>"
+    wrapped = legal._wrap_tables_for_scroll(html)
+    assert 'tabindex="0"' in wrapped, "wrapper is not in the Tab order (WCAG 2.1.1)"
+    assert 'role="region"' in wrapped, "wrapper has no landmark role for assistive tech"
+    assert 'aria-label="Scrollable table 1 of 1"' in wrapped, (
+        "wrapper has no accessible name (WCAG 4.1.2) -- a bare tabindex "
+        "announces as an unlabeled region"
+    )
+
+
+def test_wrap_tables_for_scroll_labels_are_indexed_and_unique_per_call():
+    """Numbered by rendering order WITHIN one call -- not a hand-maintained
+    per-table list, and trivially unique regardless of table content (see
+    _wrap_tables_for_scroll's docstring for why a heading-derived label was
+    rejected: two tables under the same subheading would collide)."""
+    html = (
+        "<table>\n<tbody><tr><td>a</td></tr></tbody>\n</table>"
+        "<p>mid</p>"
+        "<table>\n<tbody><tr><td>b</td></tr></tbody>\n</table>"
+        "<table>\n<tbody><tr><td>c</td></tr></tbody>\n</table>"
+    )
+    wrapped = legal._wrap_tables_for_scroll(html)
+    labels = re.findall(r'aria-label="([^"]*)"', wrapped)
+    assert labels == [
+        "Scrollable table 1 of 3",
+        "Scrollable table 2 of 3",
+        "Scrollable table 3 of 3",
+    ]
+    assert len(labels) == len(set(labels)), "labels must be unique within one page"
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +631,61 @@ def test_every_table_on_every_served_legal_route_is_wrapped_inside_legal_prose()
         "no committed legal markdown file rendered any <table> at all -- "
         "this test would otherwise pass vacuously with nothing to cover "
         "(privacy.md is expected to contribute at least one)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Keyboard accessibility, served page (issue #239, WCAG 2.1.1 + 2.4.7): the
+# same wrapper the previous test checks structurally must also carry the
+# attributes that make it reachable and named without a mouse -- checked on
+# the real served response, not on _wrap_tables_for_scroll's return value in
+# isolation, so this proves the production request/response path.
+# ---------------------------------------------------------------------------
+
+
+def test_every_table_scroll_wrapper_on_every_served_route_is_keyboard_focusable_and_named():
+    client = _app().test_client()
+    assert legal._LEGAL_PAGES, "legal._LEGAL_PAGES is empty -- nothing to cover"
+
+    saw_at_least_one_wrapper = False
+    for path in legal._LEGAL_PAGES:
+        resp = client.get(path)
+        assert resp.status_code == 200, path
+        soup = BeautifulSoup(resp.data.decode("utf-8"), "html.parser")
+        wrappers = soup.find_all("div", class_="table-scroll")
+        tables = soup.find_all("table")
+        assert len(wrappers) == len(tables), (
+            path,
+            "wrapper count must equal table count -- every table gets exactly one wrapper",
+        )
+
+        labels = []
+        for wrapper in wrappers:
+            saw_at_least_one_wrapper = True
+            assert wrapper.get("tabindex") == "0", (
+                path,
+                'table-scroll wrapper has no tabindex="0" -- unreachable by keyboard (WCAG 2.1.1)',
+            )
+            assert wrapper.get("role") == "region", (
+                path,
+                'table-scroll wrapper has no role="region"',
+            )
+            label = wrapper.get("aria-label")
+            assert label, (
+                path,
+                "table-scroll wrapper has no accessible name (WCAG 4.1.2)",
+            )
+            labels.append(label)
+
+        assert len(labels) == len(set(labels)), (
+            path,
+            labels,
+            "aria-labels must be unique within one served page",
+        )
+
+    assert saw_at_least_one_wrapper, (
+        "no committed legal markdown file rendered any table-scroll wrapper "
+        "at all -- this test would otherwise pass vacuously with nothing to cover"
     )
 
 
