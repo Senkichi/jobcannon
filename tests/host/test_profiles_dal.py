@@ -254,12 +254,14 @@ def test_clear_profile_targets_clears_a_null_target_companies_too(db_conn):
 
 
 def test_clear_profile_targets_advances_updated_at(db_conn):
-    """now() is the transaction-start timestamp — constant across every
-    statement in db_conn's single rollback-isolated transaction, so two
-    `now()` calls within this test can never differ. Seeding a known-past
-    literal timestamp directly (bypassing now()) sidesteps that: the
-    UPDATE's own now() call is still the live wall clock, which is always
-    later than a hardcoded 2020 literal, transaction-scoped or not."""
+    """Postgres `now()` is `transaction_timestamp()` — the CURRENT
+    transaction's start time, constant across every statement in db_conn's
+    single rollback-isolated transaction, so two `now()` calls within this
+    test can never differ. Seeding a known-past literal timestamp directly
+    (bypassing now()) sidesteps that: this test's own transaction still
+    started today, not in 2020, so the UPDATE's now() — that transaction-
+    start timestamp — is always later than a hardcoded 2020 literal,
+    transaction-scoped or not."""
     from jobcannon.db._profiles import clear_profile_targets, upsert_profile
 
     _seed_user(db_conn, "u11")

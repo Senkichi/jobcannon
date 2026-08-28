@@ -1,9 +1,11 @@
-"""upsert_profile / get_profile — the first (and only) `profiles` writer
-(1B Wave 3 PR 11). `profiles` had no writer anywhere on merged main
-(Reconciliation Preamble item 6), so it starts life single-writer by
-construction — no AST-scanned guard test is needed the way `events` has one
-(tests/host/test_events_single_writer.py): there is only one call site to
-begin with.
+"""upsert_profile / get_profile / clear_profile_targets — the `profiles`
+writers (1B Wave 3 PR 11 for upsert_profile; #228 added clear_profile_targets
+as the one narrower, documented exception below). `profiles` had no writer
+anywhere on merged main (Reconciliation Preamble item 6), so it started life
+single-writer by construction — no AST-scanned guard test is needed the way
+`events` has one (tests/host/test_events_single_writer.py): every write to
+this table still goes through exactly one of the two functions defined here,
+both in this module, neither anywhere else.
 
 `GUEST_USER_ID` is defined ONCE here — `jobcannon/web/pages.py` and
 `scripts/seed_guest_demo.py` both import it rather than re-declaring the

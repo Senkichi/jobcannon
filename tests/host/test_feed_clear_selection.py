@@ -390,6 +390,37 @@ def test_clear_selection_survives_concurrent_committed_workplace_type_write(app,
     assert profile["target_companies"] == []
 
 
+def test_clear_selection_hx_survives_concurrent_committed_workplace_type_write(app, monkeypatch):
+    """Belt-and-suspenders on the HX-Request path (Devin review, #228):
+    the redirect-branch proof above (test_clear_selection_survives_
+    concurrent_committed_workplace_type_write) exercises clear_selection's
+    write via the 303 branch; this repeats the exact same injected race
+    through the HX-Request branch instead, proving the fix is
+    path-independent — the write happens inside the SAME `with
+    connection_factory() as conn:` block either way, but that's an
+    inference this test makes redundant by actually exercising both."""
+    dsn = app.config["_TEST_DSN"]
+    client = _feed_client(
+        app,
+        target_titles=["Engineer"],
+        target_companies=["Clear Write Co"],
+        workplace_type="REMOTE",
+    )
+    _install_race_injector(monkeypatch, dsn, CLERK_ID, {"workplace_type": "HYBRID"})
+
+    resp = client.post("/feed/clear-selection", headers={"HX-Request": "true"})
+    body = resp.get_data(as_text=True)
+
+    assert resp.status_code == 200
+    assert "<html" not in body
+    assert 'id="feed-content"' in body
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        profile = get_profile(conn, CLERK_ID)
+    assert profile["workplace_type"] == "HYBRID"
+    assert profile["target_titles"] == []
+    assert profile["target_companies"] == []
+
+
 def test_clear_selection_hx_request_returns_feed_content_fragment(app):
     dsn = app.config["_TEST_DSN"]
     client = _feed_client(app, target_titles=["Engineer"])
