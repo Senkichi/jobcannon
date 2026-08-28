@@ -121,6 +121,47 @@ def _table_scroll_declarations(css: str) -> dict[str, str] | None:
 
 
 # ---------------------------------------------------------------------------
+# `.legal-prose table { ... }` -- the OTHER selector on this page. Only the
+# margin-collapse-relevant half of it matters here (see
+# jobcannon/web/legal.py's `_wrap_tables_for_scroll` docstring): the wrapper
+# rule above must own `margin`, and this rule must not, or the two either
+# double-stack a table's vertical spacing or drop it entirely depending on
+# which maintainer mistake happens.
+# ---------------------------------------------------------------------------
+
+_TABLE_RULE_RE = re.compile(
+    r"\.legal-prose\s+table\s*\{([^}]*)\}",
+    re.DOTALL,
+)
+
+
+def _table_rule_declarations(css: str) -> dict[str, str] | None:
+    """Same idea as `_table_scroll_declarations`, but for `.legal-prose
+    table { ... }`. Comments are stripped FIRST, not optionally:
+    legal_page.html's own `<style>` comments have, in the past, quoted a
+    rejected `.legal-prose table { display: block; ... }` draft rule by
+    name as part of the fix's history -- a naive `.search()` against the
+    RAW (uncommented) file is one `.findall()`-plus-last-match refactor
+    away from reading that quoted, synthetic rule instead of the real, live
+    one below. That synthetic rule never declares `margin` either, so such
+    a bug would keep reporting "no margin" -- passing test_table_element_
+    rule_declares_no_margin below for the WRONG reason -- even after a
+    maintainer genuinely re-added `margin: 1rem 0 1.5rem` to the real,
+    live `.legal-prose table` rule."""
+    match = _TABLE_RULE_RE.search(_CSS_COMMENT_RE.sub("", css))
+    if match is None:
+        return None
+    decls: dict[str, str] = {}
+    for decl in match.group(1).split(";"):
+        decl = decl.strip()
+        if not decl:
+            continue
+        prop, _, value = decl.partition(":")
+        decls[prop.strip().lower()] = value.strip()
+    return decls
+
+
+# ---------------------------------------------------------------------------
 # Positive: the rule exists, declares the mechanism the PR body's
 # measurement actually exercised, and is not gated behind a media query.
 # ---------------------------------------------------------------------------
@@ -159,6 +200,87 @@ def test_table_scroll_rule_is_not_gated_by_a_media_query():
         "fix must not be viewport-width-conditional (see this module's "
         "docstring for why the previous @media-gated display:block "
         "approach was replaced)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Margin-collapse fix (re-review, MEDIUM): the wrapper -- not the table --
+# must own the vertical margin. `overflow-x: auto` makes `.table-scroll` a
+# block-formatting-context root, which stops a child table's margin from
+# collapsing through it with the wrapper's own siblings (CSS2.1 8.3.1); a
+# margin left on `.legal-prose table` instead would stack additively with
+# adjacent siblings rather than collapsing (measured +68px on /privacy when
+# this was misplaced during this fix's own development -- see
+# jobcannon/web/legal.py's `_wrap_tables_for_scroll` docstring). This was the
+# one mechanism in the fix with no test until now.
+# ---------------------------------------------------------------------------
+
+
+def test_table_scroll_rule_declares_margin():
+    """Half (a): `.legal-prose .table-scroll` must own the vertical margin
+    -- see the module-level comment above for why."""
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    decls = _table_scroll_declarations(css)
+    assert decls is not None
+    assert "margin" in decls, (
+        "`.legal-prose .table-scroll` has no margin declaration -- a "
+        "table's vertical spacing must live on the wrapper (the BFC "
+        "root), not on `.legal-prose table`, or it stacks instead of "
+        "collapsing with adjacent siblings"
+    )
+
+
+def test_table_element_rule_declares_no_margin():
+    """Half (b): `.legal-prose table` itself must NOT declare margin -- if
+    it does, the table's own margin STACKS on top of `.table-scroll`'s
+    margin (an element's own margin and a BFC-root ancestor's margin do not
+    merge) instead of the single collapsed value a bare table used to
+    produce. Comments are stripped before matching -- see
+    `_table_rule_declarations`'s docstring for why that matters here
+    specifically (unlike the sibling checks above)."""
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    decls = _table_rule_declarations(css)
+    assert decls is not None, (
+        "legal_page.html has no `.legal-prose table { ... }` rule -- "
+        "update this test or the template"
+    )
+    margin_props = [prop for prop in decls if prop == "margin" or prop.startswith("margin-")]
+    assert not margin_props, (
+        f"`.legal-prose table` declares {margin_props} -- vertical margin "
+        "belongs on `.legal-prose .table-scroll` (the BFC root), not on "
+        "the table itself, or the two double-stack instead of collapsing "
+        "with adjacent siblings"
+    )
+
+
+def test_table_element_rule_detects_margin_moved_back_from_the_wrapper():
+    """Sabotage D from the re-review: move `margin: 1rem 0 1.5rem` from
+    `.legal-prose .table-scroll` back onto `.legal-prose table` -- the
+    layout that shipped before this fix. Proves
+    test_table_element_rule_declares_no_margin actually fires on this
+    exact regression rather than passing vacuously."""
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    match = _TABLE_RULE_RE.search(_CSS_COMMENT_RE.sub("", css))
+    assert match, (
+        "legal_page.html's `.legal-prose table` rule is missing -- update this sabotage fixture"
+    )
+    original_block = match.group(0)
+    assert original_block.rstrip().endswith("}")
+    sabotaged_block = original_block.rstrip()[:-1] + " margin: 1rem 0 1.5rem; }"
+    assert sabotaged_block != original_block
+    sabotaged = css.replace(original_block, sabotaged_block, 1)
+    assert sabotaged != css, (
+        "the live `.legal-prose table` rule text wasn't found verbatim in "
+        "the raw (uncommented) file -- update this sabotage fixture"
+    )
+    decls = _table_rule_declarations(sabotaged)
+    assert decls is not None
+    margin_props = [prop for prop in decls if prop == "margin" or prop.startswith("margin-")]
+    assert margin_props, (
+        "sabotaging margin back onto `.legal-prose table` must make "
+        "test_table_element_rule_declares_no_margin fail -- if this "
+        "assertion fails, that check would silently pass the exact "
+        "regression it exists to catch"
     )
 
 

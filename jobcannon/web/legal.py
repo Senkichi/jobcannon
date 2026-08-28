@@ -108,18 +108,17 @@ _TABLE_RE = re.compile(r"<table>.*?</table>", re.DOTALL)
 
 def _wrap_tables_for_scroll(html: str) -> str:
     """Wrap every rendered `<table>...</table>` in `<div class="table-scroll">
-    ...</div>` (issue #229): at narrow viewports some legal-page tables (e.g.
-    /privacy §4's Purpose/Data/Legal-basis columns) don't fit even with
-    `.legal-prose table`'s `width: 100%` — `table-layout: auto` (the
-    default) treats a percentage width as a MINIMUM, not a cap, so a browser
-    still grows the table past it when a cell's content can't wrap enough
-    (CSS2.1 17.5.2.2). Without a wrapper, that growth pushes the whole
-    *document* past the viewport (clientWidth 390 vs scrollWidth 421 —
-    issue #229's own numbers), not just the table looking cramped. The
+    ...</div>` (narrow-viewport table fix): at narrow viewports some
+    legal-page tables (e.g. /privacy's Purpose/Data/Legal-basis columns)
+    don't fit even with `.legal-prose table`'s `width: 100%` — `table-layout:
+    auto` (the default) treats a percentage width as a MINIMUM, not a cap, so
+    a browser still grows the table past it when a cell's content can't wrap
+    enough (CSS2.1 17.5.2.2). Without a wrapper, that growth pushes the whole
+    *document* past the viewport, not just the table looking cramped. The
     wrapper gives the table its own scroll container instead, so overflow is
     contained to the table and the table's own sizing (`display: table`,
-    `width: 100%`) is completely untouched at every viewport width — unlike
-    a `display: block` media-query rule (the fix this replaces), which
+    `width: 100%`) is completely untouched at every viewport width — unlike a
+    `display: block` media-query rule (an earlier, rejected approach), which
     changes the table's box-sizing algorithm for every table below the
     breakpoint, including ones that never overflowed.
 
@@ -130,6 +129,19 @@ def _wrap_tables_for_scroll(html: str) -> str:
     legal page gains this for free the moment its markdown renders a
     table.
 
+    legal_page.html's `.legal-prose .table-scroll { ... }` rule carries
+    `margin: 1rem 0 1.5rem`; `.legal-prose table` deliberately does not.
+    `overflow-x: auto` makes the wrapper a block-formatting-context root,
+    which stops a CHILD's margin from collapsing THROUGH it with the
+    wrapper's own siblings (CSS2.1 8.3.1). A margin left on the table
+    instead would STACK on top of the previous/next sibling's own margin
+    rather than collapsing with it — a real, visible height change on every
+    legal page with a table (measured +68px on /privacy, only caught by
+    diffing full-page desktop screenshots before/after this fix). Putting
+    the margin on the wrapper restores byte-for-byte identical spacing: the
+    wrapper occupies the table's old position in `.legal-prose`'s flow and
+    collapses with its siblings exactly as the bare table used to.
+
     Plain string substitution, not an HTML parser: `markdown.markdown()`'s
     `tables` extension always emits a bare `<table>` (no attributes; see
     tests/host/test_legal_table_scroll.py's own `html.count("<table>")`
@@ -137,7 +149,15 @@ def _wrap_tables_for_scroll(html: str) -> str:
     regex match is unambiguous and leaves every other byte of the rendered
     HTML byte-for-byte untouched — no re-serialization risk to the rest of
     the document (headings, links, blockquotes) a full parse/round-trip
-    would carry."""
+    would carry. That "never nests" guarantee isn't just a markdown-syntax
+    fact: `_render` (below) runs `check_published_text` against the raw
+    source BEFORE this function ever sees it, and that guard's
+    `legal_guard._RAW_HTML_TAG` rule rejects any raw HTML tag outright — so a
+    hand-authored, nested `<table>` in markdown source (which WOULD mis-wrap
+    here, since the non-greedy regex's `</div>` would close before the outer
+    table's own `</table>`) can never reach this function at all. Relaxing
+    that guard to allow raw HTML in the future would silently reopen this
+    ambiguity."""
     return _TABLE_RE.sub(lambda m: f'<div class="table-scroll">{m.group(0)}</div>', html)
 
 

@@ -387,6 +387,81 @@ def _legal_body(html: str) -> str:
     return div.decode_contents()
 
 
+# ---------------------------------------------------------------------------
+# Response-boundary closure (re-review, LOW): check_published_text above
+# only inspects the committed .md SOURCE -- it has no visibility into
+# jobcannon/web/templates/legal_page.html, which renders unconditionally
+# alongside that source on every /privacy and /terms response. A re-review
+# of issue #229's table-scroll fix found FORBIDDEN_PHRASES matter (the
+# words "draft", "pr #", "issue #") living directly in that template's own
+# <style> comments -- exactly the class of content the guard exists to keep
+# off these pages, reaching real visitors through a chokepoint the guard was
+# never wired to check (fixed separately, in legal_page.html itself).
+#
+# Scoped to the <style> block + the .legal-prose body, NOT the whole
+# response: base.html's own <script> comment ("// ... Account Portal
+# sign-in redirect (issue #149) ...") is a legitimate, unrelated hit that
+# renders on every page a visitor loads while signed out of Clerk --
+# Jinja's `{# ... #}` comments are stripped server-side, but a `<script>`
+# block's `//` comment is not, so that text is genuinely part of the served
+# HTML. Scoping the assertion here (rather than dropping "issue #"/"pr #"
+# from FORBIDDEN_PHRASES) keeps that legitimate, pre-existing content out of
+# scope without weakening what counts as a violation anywhere it actually
+# matters -- namely, this template's own <style> block and body.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_served_legal_page_style_and_body_contain_no_forbidden_phrases(path):
+    app = _app(verify=lambda req: None)
+    client = app.test_client()
+
+    resp = client.get(path)
+    assert resp.status_code == 200
+    html = resp.data.decode("utf-8")
+    soup = BeautifulSoup(html, "html.parser")
+
+    style_tag = soup.find("style")
+    assert style_tag, (path, "no <style> tag in the served page")
+    scoped_text = (style_tag.get_text() + "\n" + _legal_body(html)).lower()
+
+    for phrase in FORBIDDEN_PHRASES:
+        assert phrase not in scoped_text, (
+            path,
+            phrase,
+            "drafting/review matter leaked through legal_page.html's "
+            "<style> block or .legal-prose body -- check_published_text "
+            "only inspects the committed .md source, not this template",
+        )
+
+
+def test_served_legal_page_forbidden_phrase_check_detects_a_reintroduced_comment():
+    """Sabotage-verify the check above actually catches something, rather
+    than passing vacuously because today's template happens to be clean:
+    re-inject a stray 'PR #' review-note comment into a REAL served
+    response (not a hand-built string) and confirm the SAME scoping logic
+    fires on it."""
+    app = _app(verify=lambda req: None)
+    client = app.test_client()
+    resp = client.get("/privacy")
+    assert resp.status_code == 200
+    html = resp.data.decode("utf-8")
+
+    sabotaged = html.replace("</style>", "/* leftover PR #999 review note */</style>", 1)
+    assert sabotaged != html, "no </style> tag found in the response -- fix this sabotage fixture"
+    soup = BeautifulSoup(sabotaged, "html.parser")
+    style_tag = soup.find("style")
+    assert style_tag, "no <style> tag found in the sabotaged response"
+    scoped_text = (style_tag.get_text() + "\n" + _legal_body(sabotaged)).lower()
+
+    assert any(phrase in scoped_text for phrase in FORBIDDEN_PHRASES), (
+        "sabotaging a 'PR #' comment into the served <style> block must "
+        "make the forbidden-phrase check fail -- if this assertion fails, "
+        "test_served_legal_page_style_and_body_contain_no_forbidden_phrases "
+        "would silently pass a template that leaked review matter"
+    )
+
+
 @pytest.mark.parametrize(
     "path,h1_text",
     [

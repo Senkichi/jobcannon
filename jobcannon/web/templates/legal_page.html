@@ -42,14 +42,13 @@
   .legal-prose th { background: #171717; color: #e5e5e5; }
   .legal-prose blockquote { border-left: 3px solid #404040; padding-left: 1rem; color: #737373; margin: 1rem 0; }
   .legal-prose hr { border: none; border-top: 1px solid #262626; margin: 2rem 0; }
-  /* #229: at narrow viewports some legal-page tables (e.g. /privacy §4's
+  /* Narrow-viewport table fix: some legal-page tables (e.g. /privacy's
      Purpose/Data/Legal-basis columns) don't fit 390px even with the
      `width: 100%` above -- `table-layout: auto` (the default) treats a
      percentage width as a MINIMUM, not a cap, so a browser still grows the
      table past it when a cell's content can't wrap enough (CSS2.1
-     17.5.2.2). The result was the *document* overflowing horizontally
-     (clientWidth 390 vs scrollWidth 421 -- issue #229), not just the
-     table looking cramped.
+     17.5.2.2). Unwrapped, that growth pushes the whole *document*
+     horizontally past the viewport, not just the table looking cramped.
 
      Fix is a scroll wrapper, not a breakpoint: jobcannon/web/legal.py's
      `_wrap_tables_for_scroll` (called from `_render`, the single render
@@ -57,59 +56,16 @@
      `<div class="table-scroll">`. This ONE rule below -- no media query,
      no breakpoint -- gives that wrapper its own scroll container at every
      viewport width. `.legal-prose table` (width: 100%, above) is
-     completely untouched: the table's own box-sizing algorithm and
-     `display: table` never change, at 390px or 1280px or anywhere between,
-     so there is no viewport width at which a table that already fit can
-     visually change. Only a table whose content genuinely can't fit
-     (min-content > available width) triggers the wrapper's internal
-     scrollbar; every other table's rendered width is provably identical
-     to before this rule existed -- see the PR body's per-table
-     getBoundingClientRect() measurements at 390/500/641/1280, before vs.
-     after.
+     completely untouched at any width, so a table that already fit can
+     never visually change; only a table whose content genuinely can't fit
+     triggers the wrapper's internal scrollbar.
 
-     This replaces an earlier `@media (max-width: 640px) { .legal-prose
-     table { display: block; overflow-x: auto; } }` rule (PR #231's first
-     draft). That CSS-only approach was chosen specifically to avoid a
-     wrapper `<div>` landing inside `body_html`, because
-     tests/host/test_legal_pages.py's byte-identity test extracted
-     `.legal-prose`'s contents with a non-greedy regex
-     (`<div class="legal-prose">(.*?)</div>`) that stopped at the FIRST
-     `</div>` -- a wrapper would have silently truncated what that test
-     actually verified. Adversarial review (Devin) flagged that
-     `display: block` changes the anonymous table box's own width
-     algorithm for every table below the breakpoint, including ones that
-     never overflowed, at every width from ~400px up to 640px -- a real,
-     undisclosed visual-change surface a breakpoint-scoped rule can't
-     avoid by construction. The wrapper has no such surface: it never
-     changes `display` or width computation on the table at all. The
-     `_legal_body()` extraction in test_legal_pages.py was fixed to parse
-     `.legal-prose`'s true closing tag (BeautifulSoup) instead of relying
-     on non-greedy-regex-happens-to-stop-in-the-right-place, which is what
-     makes the wrapper safe to adopt here.
-
-     `margin: 1rem 0 1.5rem` lives on the wrapper below, not on
-     `.legal-prose table` above, even though that's where a bare table's
-     margin used to live -- `overflow-x: auto` (below) makes the wrapper a
-     block-formatting-context root, which stops a CHILD's margin from
-     collapsing THROUGH it with the wrapper's own siblings (CSS2.1 8.3.1).
-     Left on the table, the table's margin would STACK on top of the
-     previous/next sibling's own margin instead of collapsing with it
-     (e.g. a preceding <p>'s 0.75rem bottom margin + the table's 1rem top
-     margin = 1.75rem gap, not the collapsed 1rem a bare table produces) --
-     a real, visible height change on every legal page with a table, only
-     caught by diffing full-page desktop-1280 screenshots before/after
-     (measured +68px on /privacy, 5 tables x 2 edges, during this fix's own
-     verification). Putting the margin on the wrapper instead restores
-     byte-for-byte identical spacing: the wrapper now occupies the table's
-     old position in `.legal-prose`'s flow and collapses with its siblings
-     exactly as the table used to.
-
-     Single point of enforcement: `_wrap_tables_for_scroll` is the ONLY
-     place any table in any committed legal .md file gets wrapped -- there
-     is no per-table markup in privacy.md/terms.md to add or maintain, and
-     a future legal page gains this for free the moment its markdown
-     renders a table. tests/host/test_legal_table_scroll.py pins both the
-     wrapper (structurally, via a real HTML parser) and this CSS rule
+     `margin: 1rem 0 1.5rem` intentionally lives on the wrapper below, not
+     on `.legal-prose table` above -- see `_wrap_tables_for_scroll`'s
+     docstring (jobcannon/web/legal.py) for the full block-formatting-
+     context / margin-collapse reasoning and the rejected earlier approach
+     this rule replaces. tests/host/test_legal_table_scroll.py pins both
+     the wrapper (structurally, via a real HTML parser) and this CSS rule
      (parsed as CSS, not string-matched), and sabotage-proves both. */
   .legal-prose .table-scroll { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; margin: 1rem 0 1.5rem; }
 </style>
