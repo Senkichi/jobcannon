@@ -172,6 +172,22 @@ def _wrap_tables_for_scroll(html: str) -> str:
     focus ring (WCAG 2.4.7) — a11y point-fixes at the enforcement site are
     dead without both halves.
 
+    `tabindex="0" role="region"` is applied to EVERY wrapper uniformly,
+    including ones that don't overflow at a given viewport (today, 3 of
+    /privacy's 5 tables don't clip at 390px). That's a deliberate trade-off,
+    not an oversight: whether a given table overflows depends on the
+    visitor's own viewport width, which this function — running once at
+    import time, server-side, with no viewport to measure — cannot
+    determine. Conditioning `tabindex`/`role` on overflow would mean either
+    computing layout server-side (not possible without a real viewport) or
+    re-deriving it per-request client-side (a second, JS-driven enforcement
+    point duplicating this one). `role="group"` was considered and rejected:
+    it drops the wrapper out of landmark (region) navigation entirely, which
+    costs exactly the users this fix is for — a keyboard/screen-reader
+    visitor who wants to jump between scroll regions without reading through
+    the intervening prose. A few extra, harmless Tab stops on non-overflowing
+    wrappers is the smaller cost.
+
     The label is `Scrollable table {n} of {total}`, numbered by rendering
     order WITHIN one page's `_wrap_tables_for_scroll` call (so /privacy and
     /terms each start back at 1) — not derived from the nearest preceding

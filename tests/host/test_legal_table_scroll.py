@@ -172,6 +172,53 @@ def test_table_scroll_focus_visible_rule_declares_a_visible_outline():
     )
 
 
+def test_table_scroll_focus_visible_rule_declares_the_outline_offset():
+    """`outline-offset: 2px` is a second, independent property from
+    `outline` itself -- a maintainer could keep a real, non-`none` outline
+    (satisfying the test above) while silently dropping or shrinking the
+    offset, which the outline test alone would not catch. The offset is
+    load-bearing, not cosmetic: it draws the ring 2px OUTSIDE the wrapper's
+    own border rather than overlapping it, which is what keeps the ring off
+    an adjacent `.legal-prose th` cell's `#171717` background in practice
+    (a `th` can sit flush against the wrapper's edge) -- see this rule's
+    comment in legal_page.html for the full contrast reasoning."""
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    decls = _table_scroll_focus_declarations(css)
+    assert decls is not None
+    assert decls.get("outline-offset", "").strip().lower() == "2px", (
+        decls,
+        "`.legal-prose .table-scroll:focus-visible` must declare "
+        "`outline-offset: 2px` -- without it the ring can overlap an "
+        "adjacent table-header cell instead of sitting outside the wrapper",
+    )
+
+
+def test_table_scroll_focus_visible_rule_detects_a_dropped_outline_offset():
+    """Sabotage-proves the check above actually fires, mirroring the
+    dropped-outline sabotage below."""
+    css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
+    live_css = _CSS_COMMENT_RE.sub("", css)
+    match = _TABLE_SCROLL_FOCUS_RULE_RE.search(live_css)
+    assert match, "legal_page.html's focus-visible rule is missing -- update this sabotage fixture"
+    original_block = match.group(0)
+    sabotaged_block = original_block.replace("outline-offset: 2px;", "", 1)
+    assert sabotaged_block != original_block, (
+        "legal_page.html's focus-visible rule text changed -- update this sabotage fixture"
+    )
+    sabotaged = css.replace(original_block, sabotaged_block, 1)
+    assert sabotaged != css, (
+        "the live .table-scroll:focus-visible rule text wasn't found verbatim in "
+        "the raw (uncommented) file -- update this sabotage fixture"
+    )
+    decls = _table_scroll_focus_declarations(sabotaged)
+    assert decls is not None  # selector still there
+    assert decls.get("outline-offset", "").strip().lower() != "2px", (
+        "sabotaging away the outline-offset declaration must make the "
+        "offset check fail -- see "
+        "test_table_scroll_focus_visible_rule_declares_the_outline_offset"
+    )
+
+
 def test_table_scroll_focus_visible_rule_detects_a_dropped_selector():
     css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
     original_selector = ".legal-prose .table-scroll:focus-visible"
@@ -189,7 +236,14 @@ def test_table_scroll_focus_visible_rule_detects_a_dropped_selector():
 
 def test_table_scroll_focus_visible_rule_detects_a_dropped_outline():
     css = _LEGAL_PAGE_TEMPLATE.read_text(encoding="utf-8")
-    match = _TABLE_SCROLL_FOCUS_RULE_RE.search(css)
+    # Comments stripped BEFORE searching -- same reasoning
+    # `_table_scroll_focus_declarations` already applies: this file
+    # documents rejected approaches by name in its own comments (see the
+    # `display:block` history further down), so a future commented-out
+    # `:focus-visible` rule must not let this fixture match the wrong
+    # (dead) block and pass vacuously.
+    live_css = _CSS_COMMENT_RE.sub("", css)
+    match = _TABLE_SCROLL_FOCUS_RULE_RE.search(live_css)
     assert match, "legal_page.html's focus-visible rule is missing -- update this sabotage fixture"
     original_block = match.group(0)
     sabotaged_block = original_block.replace("outline: 2px solid #737373;", "", 1)
@@ -197,6 +251,10 @@ def test_table_scroll_focus_visible_rule_detects_a_dropped_outline():
         "legal_page.html's focus-visible rule text changed -- update this sabotage fixture"
     )
     sabotaged = css.replace(original_block, sabotaged_block, 1)
+    assert sabotaged != css, (
+        "the live .table-scroll:focus-visible rule text wasn't found verbatim in "
+        "the raw (uncommented) file -- update this sabotage fixture"
+    )
     decls = _table_scroll_focus_declarations(sabotaged)
     assert decls is not None  # selector still there
     outline = decls.get("outline", "")
