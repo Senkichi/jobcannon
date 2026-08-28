@@ -33,7 +33,10 @@ explicit column-list projection to update (the sole read pattern used by
 A future host wiring ``score_and_persist_job`` (Wave 2 — no in-tree caller
 exists yet, per ``job_scorer.py``'s own module docstring) gets these three
 keys automatically from that same ``SELECT *`` pattern; no additional
-projection change is needed once this migration lands.
+projection change is needed once this migration lands. That same wiring PR
+must also ship a writer that sets ``jd_adjudicated_version`` non-NULL (or an
+equivalent resolution) per #183 — CI-enforced by
+tests/test_scoring_precheck_wiring_guard.py.
 """
 
 from __future__ import annotations
