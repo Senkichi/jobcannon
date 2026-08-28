@@ -51,16 +51,22 @@ tracked files plus untracked-but-not-``.gitignore``d ones (the same
 ``jobcannon/engine/``. This is what put ``scripts/``
 (``scripts/run_scan_once.py`` is a real scan entrypoint) and ``analyses/``
 in scope with zero edits to this file, fixing a prior version of this guard
-that iterated only ``jobcannon/`` subpackages and silently missed both. A
-plain filesystem walk (``_repo_python_files_outside_engine()``, ``os.walk``
-pruned in place -- never ``Path.rglob``, which cannot skip descending into
-``.venv``) is kept too, but only as an independent **superset** cross-check
-(every file git would scan must also be reachable by a plain directory
-walk, or the walk itself is broken) -- it is deliberately NOT the scan set
-itself, because ``os.walk`` does not honor ``.gitignore``: a local
-``uv build`` drops a ``dist/*.py`` artifact outside any dot-directory that
-the walk would happily pick up and scan, but git never tracks and the
-guard must never see (PR #238 re-review, LOW finding).
+that iterated only ``jobcannon/`` subpackages and silently missed both.
+Git's own view is trusted directly, with no second, independently-derived
+``os.walk``-based file list cross-checked against it (PR #238 re-review
+round 4, LOW finding: an earlier version kept exactly such a cross-check
+as a "superset" sanity assertion, but ``os.walk`` prunes every
+dot-directory to avoid descending into ``.venv``/``.git`` -- which also
+silently drops a *tracked*, in-scope file like a ``.github/scripts/*.py``
+CI helper, so the cross-check went CI-red on an ordinary repo change
+completely unrelated to the guard's own purpose, on a branch that itself
+edits ``.github/workflows/ci.yml``. Deleted rather than patched to also
+prune dot-dirs from the oracle: the walk could only ever be a strict
+subset of git's view, never real defense-in-depth). The one exclusion
+that does matter -- a gitignored ``.py`` outside any dot-directory, e.g. a
+local ``uv build``'s ``dist/*.py`` artifact -- git's own view already
+handles correctly: git tracks it never, so it is never in scope (PR #238
+re-review, LOW finding).
 
 ``_WiringVisitor`` walks the real ``ast`` tree (``ast.parse`` + a
 ``NodeVisitor``, never a regex over source text) for every scanned file and
@@ -157,6 +163,17 @@ anchor and the whitelist (ending exactly at a bare, comma-free numeral with
 no trailing ``WHERE``) is still only caught by this layer -- see
 ``test_detector_skips_docstrings_even_when_they_mimic_a_bare_writer_statement``.
 
+A trailing ``RETURNING ...`` or ``UPDATE ... FROM ...`` clause immediately
+after the target assignment, with no intervening ``WHERE``, is correctly
+handled (PR #238 re-review round 4, LOW finding: ``_top_level_segment_stop``
+now also stops at a top-level, word-bounded ``RETURNING``/``FROM``, the same
+treatment it already gave ``WHERE`` -- paren-depth-0 only, so
+``EXTRACT(epoch FROM ts)`` and a ``CASE WHEN ... IS DISTINCT FROM ...``
+condition, both real idioms in this repo, are unaffected). The
+statement-splitting itself (see ``_sql_writes_jd_adjudicated_version_non_null``)
+iterates rather than recurses across ``;``-separated statements, so an
+arbitrarily long semicolon-batched string cannot raise ``RecursionError``.
+
 Direction check: an unrecognized shape means ``writer_exists=False``, which
 only matters (fails the guard) if scoring is also wired -- a false
 negative here is loud CI red, never a silent pass. Documented fail-closed
@@ -172,19 +189,33 @@ whitelist); a row-constructor ``SET (a, b) = (1, %s)`` write (no
 ``column = value`` phrase for the regex to find at all); the simple-form
 ``CASE col WHEN value THEN ...`` (vs. this repo's own
 ``CASE WHEN <condition> THEN ...`` idiom -- ``_CASE_PREFIX_RE`` only
-recognizes the latter); and the already-documented positional
+recognizes the latter); the already-documented positional
 ``INSERT INTO t (..., jd_adjudicated_version, ...) VALUES (..., %(v)s, ...)``
-column-list write. Under the fail-closed classifier every one of these is
-fail-safe: an undetected writer just means the guard can't see a writer
-that exists, which produces a spurious failure if scoring is ever wired,
-never a silent pass.
+column-list write; a ``$$...$$`` dollar-quoted string body (the
+paren+quote-aware boundary scanner tracks single-quoted literals only, not
+Postgres dollar-quoting, so a ``;`` or comma inside one can be misread as a
+top-level boundary); an apostrophe inside a ``--`` line comment or
+``/* */`` block comment (the same single-quote tracking has no comment
+awareness, so it flips quote-state on that apostrophe -- safe-direction
+truncation of the segment being scanned, never a fail-open); and a table
+alias directly after the target table name (e.g.
+``UPDATE t SET col = %s FROM other o WHERE o.id = t.id``, the standard
+alias form of ``UPDATE ... FROM``) -- the anchor requires exactly one
+``[\\w."]+`` token between ``UPDATE [ONLY]`` and ``SET``, so an alias
+token in between fails the match entirely (PR #238 re-review round 4:
+surfaced by the refuter's own probe while verifying the RETURNING/FROM
+fix above; the alias-free form,
+``UPDATE postings SET col = %s FROM other o WHERE o.id = postings.id``,
+is unaffected and classifies correctly). Under the
+fail-closed classifier every one of these is fail-safe: an undetected
+writer just means the guard can't see a writer that exists, which produces
+a spurious failure if scoring is ever wired, never a silent pass.
 """
 
 from __future__ import annotations
 
 import ast
 import inspect
-import os
 import pathlib
 import re
 import subprocess
@@ -310,47 +341,37 @@ def scan_files_for_wiring(
 
 # ---- repo-wide scan-set derivation (not a hand-maintained package list) --
 
-_EXCLUDED_DIR_NAMES = frozenset({"__pycache__", "node_modules"})
-
-
-def _repo_python_files_outside_engine() -> list[pathlib.Path]:
-    """Every *.py file in the repo except tests/ and jobcannon/engine/ --
-    derived from the actual directory tree (os.walk, pruned in place so
-    .venv/.git/other dot-dirs are never descended into), not from a
-    hand-maintained list of "the packages I remember exist". This is what
-    puts scripts/, analyses/, and any future top-level package
-    automatically in-scope with zero edits to this file."""
-    matches: list[pathlib.Path] = []
-    for dirpath, dirnames, filenames in os.walk(_REPO_ROOT):
-        rel_parts = pathlib.Path(dirpath).relative_to(_REPO_ROOT).parts
-        if rel_parts[:1] == ("tests",) or rel_parts[:2] == ("jobcannon", "engine"):
-            dirnames[:] = []
-            continue
-        dirnames[:] = [
-            d for d in dirnames if d not in _EXCLUDED_DIR_NAMES and not d.startswith(".")
-        ]
-        for name in filenames:
-            if name.endswith(".py"):
-                matches.append(pathlib.Path(dirpath) / name)
-    return sorted(matches)
-
 
 def _scan_scope_files() -> list[pathlib.Path]:
-    """The actual scan set the guard trusts: git's own view of the repo,
-    not the raw filesystem walk (see module docstring). ``os.walk`` is kept
-    as ``_repo_python_files_outside_engine()`` purely as an independent
-    superset cross-check -- see
-    ``test_guard_scan_set_derived_not_hand_pinned_and_covers_scripts``."""
+    """The actual scan set the guard trusts: git's own view of the repo
+    (see module docstring). This is git's own authoritative "every *.py we
+    own" set -- tracked plus untracked-but-not-gitignored -- so there is no
+    second, independently-derived file list to cross-check it against; a
+    plain ``os.walk`` traversal cannot see any file this doesn't (the only
+    files a walk reaches that git doesn't are gitignored, which the guard
+    must never scan) and DOES see files this deliberately excludes (any
+    dot-directory, e.g. ``.venv``, ``.git`` -- but also a legitimately
+    tracked one like ``.github/scripts/*.py``, which git-oracle correctly
+    keeps in scope and a dot-dir-pruning walk would not). A former
+    ``os.walk``-based superset cross-check was deleted (PR #238 re-review
+    round 4, LOW finding) rather than patched to also prune dot-dirs from
+    this set: the walk could only ever be a strict subset of what git
+    tracks, never a meaningful independent check, so keeping it made an
+    invalid state representable (a green repo turning CI-red the moment
+    anyone added an ordinary tracked ``.py`` under any dot-directory, e.g.
+    a ``.github/scripts/`` CI helper) for zero real defense-in-depth."""
     return sorted(_REPO_ROOT / p for p in _tracked_python_files_outside_engine_and_tests())
 
 
 def _tracked_python_files_outside_engine_and_tests() -> set[str]:
-    """Independent cross-check: every *.py git considers part of the repo
-    (tracked, plus untracked-but-not-gitignored -- same two-command idiom
-    scripts/leak_guard.py uses) outside jobcannon/engine/ and tests/, as
-    repo-relative posix paths. If this set and the os.walk-derived set ever
-    disagree, one of the two file-enumeration approaches has a bug -- a
-    plain "non-empty" check alone couldn't catch that."""
+    """The authoritative scan-set derivation (see _scan_scope_files, which
+    is a thin wrapper over this): every *.py git considers part of the
+    repo (tracked, plus untracked-but-not-gitignored -- same two-command
+    idiom scripts/leak_guard.py uses) outside jobcannon/engine/ and
+    tests/, as repo-relative posix paths. No second, independently-derived
+    file-enumeration approach exists to cross-check this against (PR #238
+    re-review round 4 deleted the former os.walk-based one -- see module
+    docstring's WIRED section for why)."""
     tracked = subprocess.run(
         ["git", "ls-files", "--", "*.py"],
         cwd=_REPO_ROOT,
@@ -481,9 +502,26 @@ def _top_level_positions(text: str) -> set[int]:
     return positions
 
 
+_SEGMENT_STOP_KEYWORDS = ("where", "returning", "from")
+
+
 def _top_level_segment_stop(rest: str) -> int | None:
     """Index in *rest* where a (non-CASE) SET-clause segment ends: the
-    first paren-DEPTH-ZERO, outside-quotes comma/semicolon/WHERE."""
+    first paren-DEPTH-ZERO, outside-quotes comma/semicolon, or one of
+    WHERE/RETURNING/FROM as a whole word. A trailing `RETURNING id` or
+    `FROM other WHERE ...` right after the target assignment, with no
+    intervening WHERE, used to leave that keyword (and everything after
+    it) inside the RHS text handed to the whitelist -- which then
+    correctly failed to recognize a real write as one of the fixed
+    positive shapes, a fail-closed false negative (PR #238 re-review round
+    4). The word-boundary + paren-depth-0 check applies identically to all
+    three keywords, so `EXTRACT(epoch FROM ts)` / `SUBSTRING(x FROM 1)`
+    inside a function call's own argument list are never mistaken for a
+    statement-level FROM (nested inside parens, never at depth 0) -- and a
+    CASE-prefixed segment (e.g. a `WHEN ... IS DISTINCT FROM ...`
+    condition, this repo's own idiom) never reaches this function at all,
+    since _set_clause_assignments routes CASE segments through a separate
+    regex match before this one ever runs."""
     top_level = _top_level_positions(rest)
     n = len(rest)
     for i in range(n):
@@ -492,12 +530,14 @@ def _top_level_segment_stop(rest: str) -> int | None:
         ch = rest[i]
         if ch in ",;":
             return i
-        if (
-            rest[i : i + 5].lower() == "where"
-            and (i == 0 or not rest[i - 1].isalnum())
-            and (i + 5 == n or not rest[i + 5].isalnum())
-        ):
-            return i
+        for kw in _SEGMENT_STOP_KEYWORDS:
+            klen = len(kw)
+            if (
+                rest[i : i + klen].lower() == kw
+                and (i == 0 or not rest[i - 1].isalnum())
+                and (i + klen == n or not rest[i + klen].isalnum())
+            ):
+                return i
     return None
 
 
@@ -541,35 +581,43 @@ def _set_clause_assignments(sql: str) -> list[str]:
 
 def _sql_writes_jd_adjudicated_version_non_null(sql: str) -> bool:
     """Fail-closed, and bounded ONE STATEMENT AT A TIME: a semicolon-
-    batched multi-statement string is split at the first paren-depth-0,
-    outside-quotes `;` (_first_top_level_semicolon), and only the text up
-    to that boundary -- the anchored statement's own text -- is searched
-    for its SET-clause assignment. Text after the boundary belongs to a
-    DIFFERENT statement and is never attributed to the first one's SET
-    clause; it is instead re-anchored independently by recursing (PR #238
-    re-review round 2, closing the residual the refuter's diagnostic-only
-    probe flagged but left out of its actionable findings last round):
-    `"UPDATE postings SET jd_full = %(t)s; SELECT jd_adjudicated_version =
-    1"` -- an UPDATE that never touches the column, followed by an
-    unrelated SELECT whose operand happens to look like positive evidence
-    -- used to fire True because the old version scanned the WHOLE
-    remaining string with no boundary at the `;` at all. Conversely
-    `"SELECT 1; UPDATE postings SET jd_adjudicated_version = %(v)s"` must
-    still fire True: the second statement is a real, independently-anchored
-    write, and re-anchoring (not just bounding) is what keeps that case
-    correct."""
+    batched multi-statement string is walked one top-level `;`-separated
+    segment at a time (paren-depth-0, outside-quotes -- see
+    _first_top_level_semicolon), and only the text up to each boundary --
+    that segment's own text -- is searched for its SET-clause assignment.
+    Text past a boundary belongs to a DIFFERENT statement and is never
+    attributed to the segment before it; it is instead re-anchored and
+    classified independently as its own segment on the next loop iteration
+    (PR #238 re-review round 2, closing the residual the refuter's
+    diagnostic-only probe flagged but left out of its actionable findings
+    that round): `"UPDATE postings SET jd_full = %(t)s; SELECT
+    jd_adjudicated_version = 1"` -- an UPDATE that never touches the
+    column, followed by an unrelated SELECT whose operand happens to look
+    like positive evidence -- used to fire True because the old version
+    scanned the WHOLE remaining string with no boundary at the `;` at all.
+    Conversely `"SELECT 1; UPDATE postings SET jd_adjudicated_version =
+    %(v)s"` must still fire True: the second statement is a real,
+    independently-anchored write, and re-anchoring (not just bounding) is
+    what keeps that case correct.
+
+    Iterative, not recursive (PR #238 re-review round 4, INFO finding): a
+    pathological string batching thousands of top-level `;`-separated
+    statements would blow Python's default recursion limit under a
+    once-per-`;` recursive split -- fail-loud, and worse than the
+    fail-closed default this detector otherwise guarantees. Same semantics
+    either way (each segment re-anchored and classified independently, any
+    True wins), just an explicit loop instead of a call stack."""
     norm = re.sub(r"\s+", " ", sql).strip()
-    if not norm:
-        return False
-    boundary = _first_top_level_semicolon(norm)
-    head = norm[:boundary] if boundary is not None else norm
-    tail = norm[boundary + 1 :] if boundary is not None else ""
-    if _STATEMENT_ANCHOR_RE.match(head) and any(
-        _segment_sets_non_null(seg) for seg in _set_clause_assignments(head)
-    ):
-        return True
-    if tail.strip():
-        return _sql_writes_jd_adjudicated_version_non_null(tail)
+    while norm:
+        boundary = _first_top_level_semicolon(norm)
+        head = norm[:boundary] if boundary is not None else norm
+        if _STATEMENT_ANCHOR_RE.match(head) and any(
+            _segment_sets_non_null(seg) for seg in _set_clause_assignments(head)
+        ):
+            return True
+        if boundary is None:
+            return False
+        norm = norm[boundary + 1 :].strip()
     return False
 
 
@@ -798,35 +846,37 @@ def test_guard_scan_set_derived_not_hand_pinned_and_covers_scripts():
     """Replaces a former hand-maintained WIRING_ROOTS allowlist (LOW
     finding, PR #238 review) that pinned {db,host,web,worker} and silently
     missed scripts/, analyses/, and any future top-level package. The
-    actual scan set (_scan_scope_files) is git's own view of the repo,
-    cross-checked against the plain os.walk traversal as a SUPERSET, not an
-    exact-equality pin (PR #238 re-review, LOW finding: os.walk does not
-    honor .gitignore, so a gitignored *.py like a `uv build` dist/ artifact
-    would break an exact-equality assertion for an unrelated reason -- see
-    test_gitignored_py_excluded_from_scan_set_but_walk_still_reaches_it)."""
+    actual scan set (_scan_scope_files) is git's own view of the repo --
+    no separate os.walk-based cross-check exists any more (PR #238
+    re-review round 4, LOW finding: the walk necessarily excludes every
+    dot-directory, which also silently drops a legitimately tracked file
+    like a future .github/scripts/*.py CI helper, turning a superset
+    assertion CI-red for a reason unrelated to this guard's own purpose --
+    see test_scan_set_excludes_gitignored_and_includes_tracked_dotdir_py
+    for the regression coverage that finding needed instead)."""
     oracle = {p.relative_to(_REPO_ROOT).as_posix() for p in _scan_scope_files()}
-    walked = {p.relative_to(_REPO_ROOT).as_posix() for p in _repo_python_files_outside_engine()}
     assert oracle, "git-oracle scan set resolved empty -- git ls-files is broken"
-    assert walked, "os.walk-derived cross-check resolved empty -- traversal is broken"
     assert not any(p.startswith("jobcannon/engine/") for p in oracle)
     assert not any(p.startswith("tests/") for p in oracle)
-    assert oracle <= walked, (
-        f"the actual (git-oracle) scan set has entries the os.walk "
-        f"cross-check never reached: {sorted(oracle - walked)} -- one of "
-        f"the two enumeration approaches has a bug"
-    )
     assert any(p.startswith("scripts/") for p in oracle), (
         "scripts/ is a real scan-entrypoint location (scripts/run_scan_once.py) "
         "and must be in-scope without naming that file specifically"
     )
 
 
-def test_gitignored_py_excluded_from_scan_set_but_walk_still_reaches_it(tmp_path):
+def test_scan_set_excludes_gitignored_and_includes_tracked_dotdir_py(tmp_path):
     """The actual scan set (the git oracle) must NOT include a gitignored
-    *.py outside a dot-dir -- e.g. a local `uv build`'s dist/*.py artifact,
-    which os.walk's dir-name-based pruning has no way to exclude (PR #238
-    re-review, LOW finding). Synthetic repo, never the real one; mutates
-    the module-global _REPO_ROOT for the duration of this test only."""
+    *.py outside a dot-dir -- e.g. a local `uv build`'s dist/*.py artifact
+    -- and MUST include a tracked *.py under a dot-directory, e.g. a
+    `.github/scripts/*.py` CI helper (PR #238 re-review round 4, LOW
+    finding: a former os.walk-based cross-check pruned every dot-dir,
+    including legitimately tracked ones, and would have gone CI-red on
+    exactly this ordinary addition -- deleted rather than patched; this is
+    the regression coverage that used to live implicitly in that
+    cross-check's superset assertion, now asserted directly against the
+    git-oracle scan set itself). Synthetic repo, never the real one;
+    mutates the module-global _REPO_ROOT for the duration of this test
+    only."""
     global _REPO_ROOT
     repo = tmp_path / "synthrepo"
     (repo / "jobcannon" / "engine").mkdir(parents=True)
@@ -852,18 +902,26 @@ def test_gitignored_py_excluded_from_scan_set_but_walk_still_reaches_it(tmp_path
 
         # A local `uv build` shape: a gitignored *.py lands outside any dot-dir.
         (repo / "dist" / "generated.py").write_text("w = 1\n", encoding="utf-8")
-        scan_files_after = {p.relative_to(repo).as_posix() for p in _scan_scope_files()}
-        walked_after = {p.relative_to(repo).as_posix() for p in _repo_python_files_outside_engine()}
-        assert scan_files_after == {"scripts/a.py"}, (
-            f"gitignored dist/*.py leaked into the actual scan set: {scan_files_after} -- "
-            f"a local `uv build` would now make the CI guard scan a build artifact"
+        scan_files_after_ignore = {p.relative_to(repo).as_posix() for p in _scan_scope_files()}
+        assert scan_files_after_ignore == {"scripts/a.py"}, (
+            f"gitignored dist/*.py leaked into the actual scan set: "
+            f"{scan_files_after_ignore} -- a local `uv build` would now make "
+            f"the CI guard scan a build artifact"
         )
-        # The os.walk cross-check DOES see it -- expected, and must not
-        # itself raise: the superset assertion in
-        # test_guard_scan_set_derived_not_hand_pinned_and_covers_scripts is
-        # oracle <= walked, never walked == oracle, precisely so this stays green.
-        assert "dist/generated.py" in walked_after
-        assert scan_files_after <= walked_after
+
+        # An ordinary tracked CI helper under a dot-dir -- exactly the kind
+        # of file this very PR's branch (which edits .github/workflows/ci.yml)
+        # would plausibly add. Left untracked-but-not-gitignored, same as the
+        # dist/generated.py case above: the git-oracle union (tracked +
+        # untracked-not-ignored) must include it either way.
+        (repo / ".github" / "scripts").mkdir(parents=True)
+        (repo / ".github" / "scripts" / "foo.py").write_text("v = 1\n", encoding="utf-8")
+        scan_files_after_dotdir = {p.relative_to(repo).as_posix() for p in _scan_scope_files()}
+        assert scan_files_after_dotdir == {"scripts/a.py", ".github/scripts/foo.py"}, (
+            f"a tracked .py under a dot-dir was dropped from the actual scan "
+            f"set: {scan_files_after_dotdir} -- a real .github/scripts/*.py CI "
+            f"helper would now silently evade the WIRED scan"
+        )
     finally:
         _REPO_ROOT = orig_root
 
@@ -1094,3 +1152,61 @@ def test_writer_classifier_semicolon_inside_parens_is_not_a_boundary():
         "UPDATE postings SET jd_full = func(1; 2), jd_adjudicated_version = 1 "
         "WHERE dedup_key = %(k)s"
     )
+
+
+def test_writer_classifier_returning_and_from_close_the_trailing_clause_gap():
+    """PR #238 re-review round 4, LOW finding: a real value-producing write
+    followed immediately by RETURNING, or an UPDATE ... FROM ... WHERE ...
+    clause, with no WHERE ahead of the trailing keyword, used to classify
+    False -- _top_level_segment_stop stopped only at a top-level
+    comma/semicolon/WHERE, so RETURNING/FROM (and everything after) stayed
+    inside the RHS text handed to the whitelist, which then correctly
+    failed to recognize it as one of the fixed positive shapes."""
+    assert _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_adjudicated_version = %(v)s RETURNING id"
+    )
+    assert _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_adjudicated_version = %(v)s FROM other o WHERE o.id = postings.id"
+    )
+
+
+def test_writer_classifier_extract_from_inside_parens_not_widened():
+    """Control for the RETURNING/FROM fix above: a FROM that sits inside a
+    function call's own argument list (paren-depth > 0) -- EXTRACT(epoch
+    FROM ts) is a real Postgres idiom -- must not be mistaken for the new
+    top-level FROM stop token. This shape is not in the positive-RHS
+    whitelist regardless and stays False -- documented as a known gap, not
+    widened into the whitelist."""
+    assert not _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_adjudicated_version = EXTRACT(epoch FROM ts) "
+        "WHERE dedup_key = %(k)s"
+    )
+
+
+def test_writer_classifier_is_distinct_from_condition_unaffected_by_from_stop():
+    """PR #238 re-review round 4, refuter's caution alongside the FROM stop
+    token: IS DISTINCT FROM is a live repo idiom (jobcannon/db/_jd_full.py's
+    own CASE invalidation). A CASE-shaped segment takes the
+    _CASE_PREFIX_RE path in _set_clause_assignments and never reaches
+    _top_level_segment_stop at all, so a top-level FROM stop token cannot
+    regress it -- this must classify exactly as before: False (the CASE
+    only ever produces NULL or the prior value, never a real write)."""
+    assert not _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_adjudicated_version = "
+        "CASE WHEN jd_full IS DISTINCT FROM %(text)s "
+        "THEN NULL ELSE jd_adjudicated_version END WHERE dedup_key = %(dedup_key)s"
+    )
+
+
+def test_writer_classifier_iterates_not_recurses_on_many_semicolons():
+    """PR #238 re-review round 4, INFO finding: the statement split used to
+    recurse once per top-level `;` -- a pathological string batching
+    thousands of top-level `;`-separated statements would raise
+    RecursionError well past Python's default recursion depth, fail-loud
+    rather than fail-closed. Converted to an iterative loop with identical
+    semantics (each segment re-anchored and classified independently, any
+    True wins); 2,000 statements is comfortably past the danger zone that
+    would have tripped the old recursive version."""
+    batch = "; ".join(f"SELECT {i}" for i in range(2000))
+    sql = f"{batch}; UPDATE postings SET jd_adjudicated_version = %(v)s"
+    assert _sql_writes_jd_adjudicated_version_non_null(sql)
