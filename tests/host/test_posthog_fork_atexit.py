@@ -50,25 +50,30 @@ Two tests, two different confounder profiles:
   process can produce a false positive or misattribute a failure.
 
 CI caveat (see wiring.py's module docstring for the full citation, and
-jobcannon#162 for the investigation this paragraph reflects): as of
+jobcannon#162/#248 for the investigations this paragraph reflects): as of
 jobcannon#160, this repo's CI runs ONLY on self-hosted Windows runners
 (.github/workflows/ci.yml, the `jcpub` label) -- os.fork() does not exist
-on Windows, so neither test in this file's fork-gated pair executes in CI
-anymore. WSL is not installed on the runner box and Docker is not
-installed either (verified 2026-08-27: `wsl.exe --status` reports "The
-Windows Subsystem for Linux is not installed"; no `docker` on PATH;
-enabling WSL would need an elevated DISM call plus a reboot of the shared
-runner box, which is out of scope to do unilaterally). The
-`_require_fork_or_fail_loud` gate below (not a plain skipif) means CI
-would now FAIL rather than silently re-skip if this regressed further --
-ci.yml sets `JC_FORK_TESTS_UNAVAILABLE=1` explicitly, with a comment
-citing #162, to document that the gap is known and deliberate rather than
-accidental. So today NEITHER the 3.12.11 nor the 3.13.5 chain is closed by
-any CI run; both rest on the source-read citation in wiring.py's module
-docstring plus this test file, which any maintainer can still run
-directly on a POSIX machine (WSL, Linux, macOS, CI with a real fork-
-capable leg) on demand -- real, working coverage, just not CI-gated
-coverage.
+on Windows, so neither test in this file's fork-gated pair can execute in
+the `test` job itself. jobcannon#162 found WSL and Docker both absent from
+the runner box at the time (verified 2026-08-27: `wsl.exe --status`
+reported "not installed"), leaving no CI-leg path to real os.fork()
+coverage. jobcannon#248 closes that gap: the runner box has WSL2 (Ubuntu)
+now, and ci.yml's `fork-proof` job (self-hosted, `jcpub`+`light` labels)
+shells into it, pins Python 3.12 via uv to match the 3.12.x chain under
+proof (uv currently resolves 3.12.14; the source read cited above was
+against 3.12.11 specifically), and runs this whole file with no
+`JC_FORK_TESTS_UNAVAILABLE` opt-out -- both fork-gated tests below execute
+for real (PASS, not skip) on every CI run. (Open risk tracked in that job's
+own ci.yml comment, not repeated here: WSL distro registration is
+per-Windows-account, and the runner service's logon account may not have
+one -- the job's precondition check turns that into a clear failure rather
+than a cryptic one if so.) The `_require_fork_or_fail_loud` gate below (not a plain
+skipif) is what made the earlier silent-skip failure structurally
+impossible to repeat unnoticed: CI would FAIL rather than silently re-skip
+if `fork-proof` regressed or its opt-out-free invocation were lost without
+JC_FORK_TESTS_UNAVAILABLE=1 being restored alongside it. The `test` job
+still sets that opt-out (os.fork() is genuinely unavailable there, on
+Windows) -- only `fork-proof` runs this pair for real.
 """
 
 from __future__ import annotations

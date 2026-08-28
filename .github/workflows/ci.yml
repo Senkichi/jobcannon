@@ -52,19 +52,107 @@ jobs:
       # `CREATE EXTENSION IF NOT EXISTS vector` as its first statement, so
       # no separate psql step is needed.
       #
-      # jobcannon#162: os.fork() does not exist on Windows, so the two
+      # jobcannon#162 found os.fork() does not exist on Windows, so the two
       # fork-gated proof tests in tests/host/test_posthog_fork_atexit.py
-      # cannot run on this self-hosted Windows runner (#162 also checked
-      # WSL and Docker on the runner box -- neither is installed, so
-      # there's no path to real fork() coverage here today). This env var
-      # is the explicit, documented acknowledgment of that gap:
+      # cannot run on THIS job's runner regardless of what's installed
+      # alongside it -- that's a Windows API gap, not a missing-tool gap,
+      # and it never goes away. #162 also found neither WSL nor Docker
+      # installed on the runner box at the time; that part of the finding
+      # is now stale -- the box gained WSL2, and jobcannon#248 added the
+      # `fork-proof` job below, which shells into it and runs the pair for
+      # real. This env var remains the explicit, documented acknowledgment
+      # that THIS job specifically can't run them:
       # test_posthog_fork_atexit.py's _require_fork_or_fail_loud gate FAILS
       # the build instead of silently skipping if this line is ever
-      # removed without the gap actually being closed.
+      # removed without an equivalent gap-closer (fork-proof) in place.
       - name: Run tests
         run: uv run pytest -q --tb=short
         env:
           JC_FORK_TESTS_UNAVAILABLE: "1"
+
+  fork-proof:
+    name: Fork/atexit proof (WSL)
+    # jobcannon#248 (follow-up to #162/#213): the jcpub runner box gained
+    # WSL2 (Ubuntu) after #162 found neither WSL nor Docker installed there.
+    # This job is the real os.fork() leg #162 couldn't provide: it shells
+    # into WSL, pins Python 3.12 via uv (WSL's own system python is 3.14 --
+    # the claim under proof is the 3.12.x fork/join chain
+    # jobcannon/host/wiring.py's module docstring cites; uv currently
+    # resolves 3.12.14, while the docstring's source read was performed
+    # against 3.12.11 specifically), syncs the `dev` dependency group into
+    # a WSL-native venv (never under /mnt/c -- 9p I/O there is slow, and
+    # keeping the venv off the Windows-backed mount is cheap insurance
+    # either way), and runs tests/host/test_posthog_fork_atexit.py WITHOUT
+    # JC_FORK_TESTS_UNAVAILABLE set, so its two fork-gated tests actually
+    # execute (PASS, not SKIP -- see that file's `_require_fork_or_fail_loud`
+    # gate). `light` label: this job is short (~15s warm) and must never
+    # consume a `suite` runner slot. Same same-repo-only gate as `test`
+    # above, for the same reason (no code execution on this box for a fork
+    # PR).
+    #
+    # Known open risk (surfaced during review, not yet resolved as of this
+    # PR): the runner service that will actually execute this job logs on
+    # as NT AUTHORITY\NETWORK SERVICE, not the interactive account this
+    # job's WSL invocation was proven under. WSL distro registration is
+    # per-account, and NETWORK SERVICE's profile shows no evidence any WSL
+    # distro has ever been registered under it (its
+    # AppData\Local\Packages -- where Store-installed distros live --
+    # doesn't exist). The precondition check in the step below turns that
+    # into a clear, diagnosable failure instead of a cryptic one if it's
+    # real; this PR's own CI run is the empirical test of whether it's
+    # real at all.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Windows, X64, jcpub, light]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run fork/atexit proof under WSL (real os.fork())
+        run: |
+          # WSL distro registration is per-Windows-account (HKCU-scoped),
+          # not machine-wide: a distro installed interactively under one
+          # login is invisible to a process running as a different account.
+          # This repo's runner service currently logs on as
+          # NT AUTHORITY\NETWORK SERVICE (not the interactive account this
+          # job's design was proven under -- see PR body for jobcannon#248),
+          # so fail loud with a diagnosable message here instead of letting
+          # that surface as an opaque wslpath/bash error further down.
+          $distros = (wsl.exe -l -q 2>$null)
+          if ($LASTEXITCODE -ne 0 -or -not $distros) {
+            throw "No WSL distribution is visible to this job's Windows account. WSL distro registration is per-account -- if a distro was installed interactively under a different login, the runner service's logon account (see 'runs-on' account in Services) needs its own registered distro, or the service needs reconfiguring to run as that account. See jobcannon#248."
+          }
+          # GITHUB_WORKSPACE is a Windows path (C:\actions-runners\...).
+          # wslpath -u silently mangles a raw backslash-form argument when
+          # invoked through pwsh's native-exe argument passing (reproduced
+          # 2026-08-28: backslash-letter runs got dropped, e.g.
+          # "C:\Users\x" -> "C:Usersx"), so translate to forward slashes
+          # first -- Windows paths accept either form, and wslpath -u
+          # handles the forward-slash form cleanly.
+          $winPathFwd = $env:GITHUB_WORKSPACE -replace '\\', '/'
+          $wslPath = (wsl.exe wslpath -u $winPathFwd).Trim()
+          if (-not $wslPath) {
+            throw "wslpath translation of '$env:GITHUB_WORKSPACE' produced no output"
+          }
+          # This file's two fork-gated tests need no Postgres (they build
+          # HostConfig with an unroutable DSN and never open a pool -- see
+          # the test module's own docstring), so POSTGRES_ADMIN_DSN is
+          # deliberately not threaded through to WSL here.
+          #
+          # The venv is keyed by RUNNER_NAME, not a fixed path: jc-3/4/5
+          # are three `light`-labeled runner processes sharing one WSL
+          # instance and one $HOME on this box, so two fork-proof jobs
+          # (e.g. two open PRs) can run concurrently. A shared fixed venv
+          # path would let a `uv sync` from one PR's checkout silently
+          # repoint site-packages at whichever tree synced last, the same
+          # corruption class the `enable-cache: false` comment on the
+          # `test` job above guards against for the local disk cache.
+          $runnerKey = if ($env:RUNNER_NAME) { $env:RUNNER_NAME -replace '[^A-Za-z0-9_.-]', '_' } else { 'local' }
+          # PATH is exported before the `command -v uv` check, not after --
+          # an unqualified check in a bare `bash -lc` login shell cannot
+          # assume $HOME/.local/bin (uv's install target) is already on
+          # PATH, and checking before exporting would re-run the installer
+          # (and depend on astral.sh being reachable) on every single run.
+          $bashScript = 'set -euo pipefail; export PATH="$HOME/.local/bin:$PATH"; command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh; export UV_PROJECT_ENVIRONMENT="$HOME/.venvs/jobcannon-fork-$2"; cd "$1"; uv python install 3.12; uv sync --dev --python 3.12; uv run --python 3.12 pytest tests/host/test_posthog_fork_atexit.py -n0 -p no:cacheprovider --tb=short'
+          wsl.exe -e bash -lc $bashScript _ $wslPath $runnerKey
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   migration-collision-guard:
     name: Migration collision guard
@@ -107,11 +195,11 @@ jobs:
     # Single check branch protection / merge automation should require: it
     # always reports (if: always()), so it can never be skipped-green the
     # way a conditional test job could satisfy a required check without
-    # actually running. A fork PR (test skipped) therefore fails this check
-    # by construction. migration-collision-guard is allowed to be "skipped"
-    # (it only runs on same-repo pull_request events -- a push to main has
-    # no PR to check) but never "failure"/"cancelled".
-    needs: [test, migration-collision-guard]
+    # actually running. A fork PR (test/fork-proof both skipped) therefore
+    # fails this check by construction. migration-collision-guard is allowed
+    # to be "skipped" (it only runs on same-repo pull_request events -- a
+    # push to main has no PR to check) but never "failure"/"cancelled".
+    needs: [test, fork-proof, migration-collision-guard]
     if: always()
     runs-on: [self-hosted, Windows, X64, jcpub]
     steps:
@@ -120,6 +208,10 @@ jobs:
         run: |
           if [ "${{ needs.test.result }}" != "success" ]; then
             echo "test job result: ${{ needs.test.result }}"
+            exit 1
+          fi
+          if [ "${{ needs.fork-proof.result }}" != "success" ]; then
+            echo "fork-proof job result: ${{ needs.fork-proof.result }}"
             exit 1
           fi
           guard="${{ needs.migration-collision-guard.result }}"
