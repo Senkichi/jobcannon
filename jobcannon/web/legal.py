@@ -42,6 +42,7 @@ submodule and this file's import silently breaks. Don't add one.
 
 from __future__ import annotations
 
+import itertools
 import pathlib
 import re
 
@@ -157,8 +158,63 @@ def _wrap_tables_for_scroll(html: str) -> str:
     here, since the non-greedy regex's `</div>` would close before the outer
     table's own `</table>`) can never reach this function at all. Relaxing
     that guard to allow raw HTML in the future would silently reopen this
-    ambiguity."""
-    return _TABLE_RE.sub(lambda m: f'<div class="table-scroll">{m.group(0)}</div>', html)
+    ambiguity.
+
+    Keyboard accessibility (WCAG 2.1.1): the wrapper is the only element a
+    clipped table's extra columns scroll inside, but a bare `overflow-x:
+    auto` div is not in the default Tab order and has no accessible name —
+    a keyboard-only visitor could neither reach it nor know what it was for.
+    `tabindex="0"` puts it in the Tab order (arrow keys then scroll it, same
+    as a mouse drag); `role="region" aria-label="..."` gives it the name a
+    screen reader announces on focus (a bare `tabindex` alone reads as
+    "group" with no label). `legal_page.html`'s
+    `.legal-prose .table-scroll:focus-visible` rule supplies the matching
+    focus ring (WCAG 2.4.7) — a11y point-fixes at the enforcement site are
+    dead without both halves.
+
+    `tabindex="0" role="region"` is applied to EVERY wrapper uniformly,
+    including ones that don't overflow at a given viewport (today, 3 of
+    /privacy's 5 tables don't clip at 390px). That's a deliberate trade-off,
+    not an oversight: whether a given table overflows depends on the
+    visitor's own viewport width, which this function — running once at
+    import time, server-side, with no viewport to measure — cannot
+    determine. Conditioning `tabindex`/`role` on overflow would mean either
+    computing layout server-side (not possible without a real viewport) or
+    re-deriving it per-request client-side (a second, JS-driven enforcement
+    point duplicating this one). `role="group"` was considered and rejected:
+    it drops the wrapper out of landmark (region) navigation entirely, which
+    costs exactly the users this fix is for — a keyboard/screen-reader
+    visitor who wants to jump between scroll regions without reading through
+    the intervening prose. A few extra, harmless Tab stops on non-overflowing
+    wrappers is the smaller cost.
+
+    The label is `Scrollable table {n} of {total}`, numbered by rendering
+    order WITHIN one page's `_wrap_tables_for_scroll` call (so /privacy and
+    /terms each start back at 1) — not derived from the nearest preceding
+    heading. A heading-derived label reads better in isolation, but this
+    function is deliberately NOT an HTML parser (see above): finding "the
+    nearest preceding heading" for an arbitrary regex match position would
+    mean walking backward through the string for the last `<h1-6>`, handling
+    "no heading yet" (a table before any heading) and, worse, two tables
+    sharing the same nearest heading (a subsection with more than one table)
+    — which would need a second, hand-rolled dedup rule to keep the served
+    labels unique, reintroducing exactly the parsing/ambiguity risk this
+    function's design has avoided since #229. A running index has no such
+    edge case: it is trivially unique per page by construction, requires no
+    extra state beyond a plain counter, and still tells a screen-reader user
+    there are `total` scroll regions and which one they're in — enough
+    orientation to know whether skipping ahead is worthwhile."""
+    total = len(_TABLE_RE.findall(html))
+    counter = itertools.count(1)
+
+    def _wrap(match: re.Match[str]) -> str:
+        n = next(counter)
+        return (
+            f'<div class="table-scroll" tabindex="0" role="region" '
+            f'aria-label="Scrollable table {n} of {total}">{match.group(0)}</div>'
+        )
+
+    return _TABLE_RE.sub(_wrap, html)
 
 
 def _render(filename: str) -> tuple[str, str]:
