@@ -564,7 +564,11 @@ def test_every_served_legal_route_renders_inside_the_legal_prose_container():
 
 
 _EXPECTED_LEGAL_MARKDOWN_LINK_COUNTS = {
-    "privacy.md": 0,
+    # 2026-08-28 owner-ratified privacy wording pass: privacy.md §1 now
+    # carries its own reciprocal "Terms of Service" cross-reference sentence
+    # (mirroring terms.md's existing "Privacy Policy" one), which
+    # _link_first_cross_reference turns into a real <a href="/terms"> link.
+    "privacy.md": 1,
     "terms.md": 1,
 }
 
