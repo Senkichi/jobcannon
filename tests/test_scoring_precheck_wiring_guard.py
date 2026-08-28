@@ -330,7 +330,7 @@ def scan_files_for_wiring(
     """Same detector as scan_for_wiring, over an explicit file list rather
     than a directory root -- what the main guard uses, since the scan set
     is now the whole repo minus jobcannon/engine/ and tests/ (see
-    _repo_python_files_outside_engine), not a handful of package roots."""
+    _scan_scope_files), not a handful of package roots."""
     offenders: dict[str, list[str]] = {}
     for path in sorted(paths):
         hits = _scan_path_for_wiring(path, entrypoint_names)
