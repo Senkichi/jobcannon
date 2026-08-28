@@ -39,9 +39,9 @@ Things this module pins:
 from __future__ import annotations
 
 import pathlib
-import re
 
 import pytest
+from bs4 import BeautifulSoup
 
 from jobcannon.web.legal_guard import FORBIDDEN_PHRASES, check_published_text
 
@@ -364,19 +364,102 @@ def test_render_passes_through_a_clean_file(tmp_path, monkeypatch):
 # even though the surrounding nav now varies (closes review-1's Lens A(4)
 # gap — this claim was made in comments/docstrings but never actually
 # tested before this PR). Extracts the exact region legal_page.html wraps
-# body_html in (<div class="legal-prose">...</div>) — unambiguous because
-# jobcannon.web.legal_guard rejects any raw HTML tag in the source markdown
-# (test_guard_fires_on_raw_html_tag above), so body_html itself can never
-# contain a nested <div>, and the template emits exactly one such div.
+# body_html in (<div class="legal-prose">...</div>).
+#
+# Parsed with BeautifulSoup, not a regex, since issue #229's fix
+# (jobcannon/web/legal.py's `_wrap_tables_for_scroll`) wraps every rendered
+# <table> in its own <div class="table-scroll">, so body_html now DOES
+# contain nested <div>s. A prior version of this helper used a non-greedy
+# regex (`<div class="legal-prose">(.*?)</div>`) that relied on body_html
+# never nesting a <div> — true before #229, false now — and would have
+# silently truncated at the FIRST </div> (the wrapper's own close tag)
+# instead of .legal-prose's true close tag, weakening this test to only
+# compare the prefix up to the first table rather than the whole body. A
+# real parser finds the true matching close tag regardless of nesting
+# depth, so this now checks the ENTIRE body, not a truncated prefix.
 # ---------------------------------------------------------------------------
-
-_LEGAL_PROSE_RE = re.compile(r'<div class="legal-prose">(.*?)</div>', re.DOTALL)
 
 
 def _legal_body(html: str) -> str:
-    match = _LEGAL_PROSE_RE.search(html)
-    assert match, "legal-prose div not found in response body"
-    return match.group(1)
+    soup = BeautifulSoup(html, "html.parser")
+    div = soup.find("div", class_="legal-prose")
+    assert div, "legal-prose div not found in response body"
+    return div.decode_contents()
+
+
+# ---------------------------------------------------------------------------
+# Response-boundary closure (re-review, LOW): check_published_text above
+# only inspects the committed .md SOURCE -- it has no visibility into
+# jobcannon/web/templates/legal_page.html, which renders unconditionally
+# alongside that source on every /privacy and /terms response. A re-review
+# of issue #229's table-scroll fix found FORBIDDEN_PHRASES matter (the
+# words "draft", "pr #", "issue #") living directly in that template's own
+# <style> comments -- exactly the class of content the guard exists to keep
+# off these pages, reaching real visitors through a chokepoint the guard was
+# never wired to check (fixed separately, in legal_page.html itself).
+#
+# Scoped to the <style> block + the .legal-prose body, NOT the whole
+# response: base.html's own <script> comment ("// ... Account Portal
+# sign-in redirect (issue #149) ...") is a legitimate, unrelated hit that
+# renders on every page a visitor loads while signed out of Clerk --
+# Jinja's `{# ... #}` comments are stripped server-side, but a `<script>`
+# block's `//` comment is not, so that text is genuinely part of the served
+# HTML. Scoping the assertion here (rather than dropping "issue #"/"pr #"
+# from FORBIDDEN_PHRASES) keeps that legitimate, pre-existing content out of
+# scope without weakening what counts as a violation anywhere it actually
+# matters -- namely, this template's own <style> block and body.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_served_legal_page_style_and_body_contain_no_forbidden_phrases(path):
+    app = _app(verify=lambda req: None)
+    client = app.test_client()
+
+    resp = client.get(path)
+    assert resp.status_code == 200
+    html = resp.data.decode("utf-8")
+    soup = BeautifulSoup(html, "html.parser")
+
+    style_tag = soup.find("style")
+    assert style_tag, (path, "no <style> tag in the served page")
+    scoped_text = (style_tag.get_text() + "\n" + _legal_body(html)).lower()
+
+    for phrase in FORBIDDEN_PHRASES:
+        assert phrase not in scoped_text, (
+            path,
+            phrase,
+            "drafting/review matter leaked through legal_page.html's "
+            "<style> block or .legal-prose body -- check_published_text "
+            "only inspects the committed .md source, not this template",
+        )
+
+
+def test_served_legal_page_forbidden_phrase_check_detects_a_reintroduced_comment():
+    """Sabotage-verify the check above actually catches something, rather
+    than passing vacuously because today's template happens to be clean:
+    re-inject a stray 'PR #' review-note comment into a REAL served
+    response (not a hand-built string) and confirm the SAME scoping logic
+    fires on it."""
+    app = _app(verify=lambda req: None)
+    client = app.test_client()
+    resp = client.get("/privacy")
+    assert resp.status_code == 200
+    html = resp.data.decode("utf-8")
+
+    sabotaged = html.replace("</style>", "/* leftover PR #999 review note */</style>", 1)
+    assert sabotaged != html, "no </style> tag found in the response -- fix this sabotage fixture"
+    soup = BeautifulSoup(sabotaged, "html.parser")
+    style_tag = soup.find("style")
+    assert style_tag, "no <style> tag found in the sabotaged response"
+    scoped_text = (style_tag.get_text() + "\n" + _legal_body(sabotaged)).lower()
+
+    assert any(phrase in scoped_text for phrase in FORBIDDEN_PHRASES), (
+        "sabotaging a 'PR #' comment into the served <style> block must "
+        "make the forbidden-phrase check fail -- if this assertion fails, "
+        "test_served_legal_page_style_and_body_contain_no_forbidden_phrases "
+        "would silently pass a template that leaked review matter"
+    )
 
 
 @pytest.mark.parametrize(
