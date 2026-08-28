@@ -640,6 +640,49 @@ def test_entity_encoded_only_signal_is_normalized_before_storage(db_conn, postin
     assert "We are hiring a Staff Data Engineer" in row["jd_full"]
 
 
+# --- #234 chokepoint fix: mixed HTML + entity-escaped comparison operator ---
+
+
+def test_mixed_body_with_escaped_comparison_operator_stores_intact_prose(db_conn, posting):
+    """#234 regression pin, via the REAL set_jd_full write path (unit
+    coverage for the same fix lives in
+    tests/engine/test_description_formatter.py). A body mixing real HTML
+    tags with an entity-escaped comparison operator in the prose (the
+    refuter's exact probe on PR #232) must store the full prose intact in
+    jd_full -- pre-#234, html_to_plain_text's unescape-before-strip
+    ordering decoded `&lt;` into a real `<` that fused with the later real
+    `</p>` tag, and the greedy stripper swallowed everything in between."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    mixed_body = (
+        "<p>" + GOOD_JD + " Base salary &lt; $100k and role requires &gt; 5 years of "
+        "experience building data platforms.</p>"
+    )
+    assert set_jd_full(_svc_conn(db_conn), posting, mixed_body, source="test") is True
+    row = db_conn.execute(
+        "SELECT jd_full, jd_content_verdict, jd_content_signal, jd_adjudicated_version "
+        "FROM postings WHERE dedup_key = %s",
+        (posting,),
+    ).fetchone()
+    assert row["jd_full"] is not None
+    assert "<p>" not in row["jd_full"]
+    assert "&lt;" not in row["jd_full"]
+    assert "Base salary < $100k" in row["jd_full"]
+    assert "5 years of experience building data platforms" in row["jd_full"]
+
+    # Idempotent re-fetch of the IDENTICAL body must not change the row at
+    # all -- same jd_full, same stamped verdict (the self-heal / no-op
+    # branch in set_jd_full's UPDATE, unaffected by this fix).
+    stored = dict(row)
+    assert set_jd_full(_svc_conn(db_conn), posting, mixed_body, source="test") is True
+    row2 = db_conn.execute(
+        "SELECT jd_full, jd_content_verdict, jd_content_signal, jd_adjudicated_version "
+        "FROM postings WHERE dedup_key = %s",
+        (posting,),
+    ).fetchone()
+    assert dict(row2) == stored
+
+
 # --- #217 unresolved_reasons: malformed/NULL-value tolerance ----------------
 
 
