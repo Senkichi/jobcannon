@@ -107,6 +107,8 @@ def test_open_pr_versions_empty_pr_list_is_verified(monkeypatch, tmp_path):
 
     def fake_run(cmd, **kwargs):
         assert cmd[:2] == ["gh", "pr"]
+        assert "--limit" in cmd, "gh pr list must pass --limit -- gh's own default is 30 (#211)"
+        assert cmd[cmd.index("--limit") + 1] == str(nm._GH_PR_LIST_LIMIT)
         return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
 
     monkeypatch.setattr(nm.subprocess, "run", fake_run)
@@ -166,6 +168,89 @@ def test_open_pr_versions_one_unreachable_ref_is_unverified(monkeypatch, tmp_pat
     assert verified is False
 
 
+def test_open_pr_versions_result_count_equals_limit_is_unverified(monkeypatch, tmp_path):
+    """If gh returns exactly --limit rows, that's indistinguishable from
+    "there were exactly this many open PRs" and "gh silently truncated
+    here" -- gh's own undocumented-in-code default of 30 is exactly how the
+    #211 fast-follow gap hid. Must never be reported verified=True."""
+    monkeypatch.setattr(nm.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(nm, "_GH_PR_LIST_LIMIT", 2)
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["gh", "pr"]:
+            assert cmd[cmd.index("--limit") + 1] == "2"
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=json.dumps([{"number": 1}, {"number": 2}]), stderr=""
+            )
+        if cmd[:2] == ["git", "fetch"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-tree"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(nm.subprocess, "run", fake_run)
+    versions, verified = nm._open_pr_versions(tmp_path, "Senkichi/jobcannon")
+    assert verified is False
+
+
+def test_open_pr_versions_below_limit_stays_verified(monkeypatch, tmp_path):
+    """Sanity companion: a count strictly under the limit stays verified --
+    only a count == the limit is treated as unprovable."""
+    monkeypatch.setattr(nm.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(nm, "_GH_PR_LIST_LIMIT", 3)
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["gh", "pr"]:
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=json.dumps([{"number": 1}, {"number": 2}]), stderr=""
+            )
+        if cmd[:2] == ["git", "fetch"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-tree"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(nm.subprocess, "run", fake_run)
+    versions, verified = nm._open_pr_versions(tmp_path, "Senkichi/jobcannon")
+    assert verified is True
+
+
+# ---------------------------------------------------------------------------
+# _fetch_origin_main_versions -- git is faked; direct unit coverage
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_origin_main_versions_success(monkeypatch, tmp_path):
+    def fake_run(cmd, **kwargs):
+        if cmd == ["git", "fetch", "-q", "origin", "main"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["git", "ls-tree", "--name-only"]:
+            assert cmd[3] == "origin/main"
+            return subprocess.CompletedProcess(cmd, 0, stdout="m0001_x.py\nm0013_y.py\n", stderr="")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(nm.subprocess, "run", fake_run)
+    assert nm._fetch_origin_main_versions(tmp_path) == {1, 13}
+
+
+def test_fetch_origin_main_versions_none_on_fetch_failure(monkeypatch, tmp_path):
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="fatal: could not fetch")
+
+    monkeypatch.setattr(nm.subprocess, "run", fake_run)
+    assert nm._fetch_origin_main_versions(tmp_path) is None
+
+
+def test_fetch_origin_main_versions_none_on_ls_tree_failure(monkeypatch, tmp_path):
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "fetch"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="fatal: bad revision")
+
+    monkeypatch.setattr(nm.subprocess, "run", fake_run)
+    assert nm._fetch_origin_main_versions(tmp_path) is None
+
+
 # ---------------------------------------------------------------------------
 # main() -- end-to-end against a tmp_path migrations dir
 # ---------------------------------------------------------------------------
@@ -184,6 +269,7 @@ def fake_repo(tmp_path, monkeypatch):
 
 def test_main_mints_next_version_and_writes_file(fake_repo, monkeypatch, capsys):
     monkeypatch.setattr(nm.shutil, "which", lambda name: None)  # no gh -> local-only
+    monkeypatch.setattr(nm, "_fetch_origin_main_versions", lambda repo_root: set())
 
     rc = nm.main(["add widget column"])
 
@@ -199,15 +285,39 @@ def test_main_mints_next_version_and_writes_file(fake_repo, monkeypatch, capsys)
 
 def test_main_prints_loud_warning_when_unverified(fake_repo, monkeypatch, capsys):
     monkeypatch.setattr(nm.shutil, "which", lambda name: None)
+    monkeypatch.setattr(nm, "_fetch_origin_main_versions", lambda repo_root: set())
 
     nm.main(["some change"])
 
     out = capsys.readouterr().out
-    assert "WARNING: unverified against open PRs" in out
+    assert "WARNING: unverified" in out
+    assert "gh was unavailable" in out
+
+
+def test_main_warning_names_origin_main_failure_reason(fake_repo, monkeypatch, capsys):
+    """When origin/main's fetch/ls-tree fails (independent of gh/PR status),
+    the warning must name THAT reason specifically -- not just fall back to
+    generic wording that hides which check actually failed."""
+    monkeypatch.setattr(nm.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(nm, "_fetch_origin_main_versions", lambda repo_root: None)
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[:2] == ["gh", "pr"]
+        return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(nm.subprocess, "run", fake_run)
+
+    nm.main(["some change"])
+
+    out = capsys.readouterr().out
+    assert "WARNING: unverified" in out
+    assert "origin/main's migrations directory could not be fetched/listed" in out
+    assert "gh was unavailable" not in out
 
 
 def test_main_no_warning_when_verified_with_no_open_prs(fake_repo, monkeypatch, capsys):
     monkeypatch.setattr(nm.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(nm, "_fetch_origin_main_versions", lambda repo_root: set())
 
     def fake_run(cmd, **kwargs):
         assert cmd[:2] == ["gh", "pr"]
@@ -226,6 +336,7 @@ def test_main_accounts_for_open_pr_version_beyond_local_max(fake_repo, monkeypat
     """The exact #211 scenario: local disk tops out at m0012, but an open PR
     already carries m0013 -- the minted version must skip past it to 14."""
     monkeypatch.setattr(nm.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(nm, "_fetch_origin_main_versions", lambda repo_root: set())
 
     def fake_run(cmd, **kwargs):
         if cmd[:2] == ["gh", "pr"]:
@@ -236,6 +347,36 @@ def test_main_accounts_for_open_pr_version_beyond_local_max(fake_repo, monkeypat
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         if cmd[:2] == ["git", "ls-tree"]:
             return subprocess.CompletedProcess(cmd, 0, stdout="m0013_other_branch.py\n", stderr="")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(nm.subprocess, "run", fake_run)
+
+    rc = nm.main(["yet another change"])
+
+    assert rc == 0
+    dest = fake_repo / "m0014_yet_another_change.py"
+    assert dest.exists()
+
+
+def test_main_accounts_for_origin_main_version_beyond_local_max(fake_repo, monkeypatch, capsys):
+    """The #211 fast-follow gap this PR closes: local disk (this branch)
+    tops out at m0012 and no open PR carries anything newer, but
+    origin/main has since gained m0013 via a PR that already merged and
+    had its source branch deleted -- an open-PR check alone would never
+    see it. The minted version must still skip past it to 14. Without
+    `_fetch_origin_main_versions` actually feeding `known`, this would
+    mint m0013 again and collide with main on push."""
+    monkeypatch.setattr(nm.shutil, "which", lambda name: "/usr/bin/gh")
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["gh", "pr"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
+        if cmd == ["git", "fetch", "-q", "origin", "main"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["git", "ls-tree", "--name-only"] and cmd[3] == "origin/main":
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="m0013_landed_via_merged_pr.py\n", stderr=""
+            )
         raise AssertionError(f"unexpected command: {cmd}")
 
     monkeypatch.setattr(nm.subprocess, "run", fake_run)
@@ -261,6 +402,7 @@ def test_main_refuses_to_overwrite_existing_file(fake_repo, monkeypatch):
     pinning _mint_version so the dest-exists guard's own behavior is
     isolated and verified directly, independent of that scan."""
     monkeypatch.setattr(nm.shutil, "which", lambda name: None)
+    monkeypatch.setattr(nm, "_fetch_origin_main_versions", lambda repo_root: set())
     monkeypatch.setattr(nm, "_mint_version", lambda known: 13)
     (fake_repo / "m0013_dup.py").write_text("", encoding="utf-8")
     with pytest.raises(SystemExit):

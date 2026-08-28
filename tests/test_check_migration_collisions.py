@@ -11,6 +11,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = REPO_ROOT / "scripts" / "check_migration_collisions.py"
 
@@ -37,6 +39,18 @@ def test_parse_versions_maps_number_to_filename():
 
 def test_parse_versions_ignores_non_matching_names():
     assert cmc.parse_versions(["README.md"]) == {}
+
+
+def test_duplicate_versions_flags_multiple_files_same_version():
+    """The exact rebase hazard: two files in ONE ref's listing claim the
+    same version number. parse_versions would silently collapse this to
+    last-wins; duplicate_versions is what lets a caller catch it first."""
+    names = ["m0001_x.py", "m0013_a.py", "m0013_b.py", "m0014_c.py"]
+    assert cmc.duplicate_versions(names) == {13: ["m0013_a.py", "m0013_b.py"]}
+
+
+def test_duplicate_versions_empty_when_all_unique():
+    assert cmc.duplicate_versions(["m0001_x.py", "m0002_y.py"]) == {}
 
 
 def test_added_versions_is_head_minus_merge_base():
@@ -93,6 +107,35 @@ def test_format_collision_message_names_pr_and_sources():
     assert "version 13" in msg
     assert "origin/main, PR #7" in msg
     assert "scripts/new_migration.py" in msg
+
+
+def test_format_duplicate_message_names_pr_and_files():
+    msg = cmc.format_duplicate_message({13: ["m0013_a.py", "m0013_b.py"]}, pr_number=42)
+    assert "PR #42" in msg
+    assert "version 13" in msg
+    assert "m0013_a.py, m0013_b.py" in msg
+    assert "scripts/new_migration.py" in msg
+
+
+# ---------------------------------------------------------------------------
+# I/O layer -- response-shape validation (fail closed on a malformed body)
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_dir_entries_rejects_non_list_response():
+    def bad_transport(method, url, token):
+        return {"not": "a list"}
+
+    with pytest.raises(ValueError, match="expected a list"):
+        cmc.fetch_dir_entries("Senkichi/jobcannon", "main", "tok", bad_transport)
+
+
+def test_fetch_merge_base_rejects_non_dict_response():
+    def bad_transport(method, url, token):
+        return ["not", "a", "dict"]
+
+    with pytest.raises(ValueError, match="expected a dict"):
+        cmc.fetch_merge_base("Senkichi/jobcannon", "main", "abc123", "tok", bad_transport)
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +276,74 @@ def test_run_fails_on_sibling_open_pr_collision():
     assert "version 13" in messages[0]
 
 
+def test_run_fails_on_intra_head_duplicate_after_rebase():
+    """The exact rebase scenario a Devin-cross-family lead flagged: this PR
+    adds m0013_a.py; a sibling's m0013_b.py merges to main first; the
+    author rebases, keeping BOTH files (different paths, no git conflict).
+    added_versions comes out empty in isolation -- version 13 is already
+    present at the merge-base (via the sibling's file) so a naive
+    head-minus-merge-base diff sees nothing new -- but the PR's own head
+    still carries two files claiming version 13, which fails to import at
+    jobcannon/db/migrations/__init__.py. This must be caught BEFORE the
+    (correct, in isolation) "adds no new versions" skip, not after."""
+    responses = _base_responses(
+        head_files=["m0001_x.py", "m0013_a.py", "m0013_b.py"],
+        base_files=["m0001_x.py", "m0013_b.py"],
+        main_files=["m0001_x.py", "m0013_b.py"],
+    )
+    messages = []
+    rc = cmc.run(
+        event_name="pull_request",
+        repo="Senkichi/jobcannon",
+        token="tok",
+        pr_number=13,
+        pr_head_sha="abc123",
+        base_ref="main",
+        transport=_fake_transport(responses),
+        out=messages.append,
+    )
+    assert rc == 1
+    assert "PR #13" in messages[0]
+    assert "version 13" in messages[0]
+    assert "m0013_a.py" in messages[0]
+    assert "m0013_b.py" in messages[0]
+
+
+def test_run_labels_collision_with_actual_base_ref_not_hardcoded_main():
+    """base_ref need not be "main" (e.g. a PR targeting a release branch) --
+    the collision label must follow the actual ref that was checked, not a
+    hardcoded "origin/main" string that would misname the collision source."""
+    responses = {
+        "compare/release-1.0...abc123": {"merge_base_commit": {"sha": "deadbeef"}},
+        "contents/jobcannon/db/migrations?ref=abc123": [
+            {"name": "m0001_x.py", "type": "file"},
+            {"name": "m0013_new.py", "type": "file"},
+        ],
+        "contents/jobcannon/db/migrations?ref=deadbeef": [
+            {"name": "m0001_x.py", "type": "file"},
+        ],
+        "contents/jobcannon/db/migrations?ref=release-1.0": [
+            {"name": "m0001_x.py", "type": "file"},
+            {"name": "m0013_landed_already.py", "type": "file"},
+        ],
+        "pulls?state=open": [],
+    }
+    messages = []
+    rc = cmc.run(
+        event_name="pull_request",
+        repo="Senkichi/jobcannon",
+        token="tok",
+        pr_number=5,
+        pr_head_sha="abc123",
+        base_ref="release-1.0",
+        transport=_fake_transport(responses),
+        out=messages.append,
+    )
+    assert rc == 1
+    assert "origin/release-1.0" in messages[0]
+    assert "origin/main" not in messages[0]
+
+
 def test_run_excludes_self_from_open_pr_list():
     """fetch_open_prs must drop the PR under test itself -- otherwise every
     PR would "collide" with its own head forever."""
@@ -294,6 +405,18 @@ def test_fetch_open_prs_paginates():
     prs = cmc.fetch_open_prs("Senkichi/jobcannon", "tok", transport, exclude_number=999)
     assert len(prs) == 101
     assert any(c.endswith("&page=2") for c in calls)
+
+
+def test_fetch_open_prs_page_cap_fails_closed():
+    """A transport that never returns a short final page must not spin
+    forever -- this is the exact hazard test_fetch_open_prs_paginates'
+    docstring recorded happening by accident while writing that test."""
+
+    def always_full_page(method, url, token):
+        return [{"number": n, "head": {"sha": "x"}} for n in range(100)]
+
+    with pytest.raises(ValueError, match="exceeded"):
+        cmc.fetch_open_prs("Senkichi/jobcannon", "tok", always_full_page, exclude_number=999)
 
 
 # ---------------------------------------------------------------------------

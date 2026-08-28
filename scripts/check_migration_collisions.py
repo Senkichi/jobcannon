@@ -4,11 +4,14 @@
 `scripts/new_migration.py` mints a version free against origin/main and
 every open PR it can see when the migration is CREATED -- but that view can
 go stale the moment another PR merges (or a third PR opens) before this one
-does. This script is the race the minting script cannot close on its own:
-run on every pull_request event, it re-checks, at merge-review time, that
-the migration version(s) this PR adds are still free against origin/main's
-CURRENT head and every OTHER currently-open PR, and fails naming the exact
-colliding PR number(s) if not.
+does. This script narrows that window: run on every pull_request event, it
+re-checks, at merge-review time, that the migration version(s) this PR adds
+are still free against origin/main's CURRENT head and every OTHER
+currently-open PR, and fails naming the exact colliding PR number(s) if not.
+It does not fully close the race on its own (two PRs can each pass this
+check within the same window and still both merge back to back) --
+`jobcannon/db/migrations/__init__.py`'s duplicate-version import check is
+the final backstop.
 
 Runs on the self-hosted `jcpub` Windows runners only (.github/workflows/
 ci.yml), gated to same-repo PRs the same way the `test` job is. Talks to
@@ -31,7 +34,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
-from typing import Callable
+from typing import Any, Callable
 
 _API_ROOT = "https://api.github.com"
 _MIGRATIONS_PATH = "jobcannon/db/migrations"
@@ -48,13 +51,35 @@ Transport = Callable[[str, str, str], object]
 
 
 def parse_versions(filenames: list[str]) -> dict[int, str]:
-    """Map version number -> filename for every `m<digits>_*.py` name."""
+    """Map version number -> filename for every `m<digits>_*.py` name. If two
+    filenames in the SAME list share a version number, this silently keeps
+    only the last one -- callers that need to detect that condition (a ref
+    that will fail `jobcannon/db/migrations/__init__.py`'s own duplicate
+    check at import time) must call `duplicate_versions` on the same
+    filenames FIRST, before this collapses the information away."""
     out: dict[int, str] = {}
     for name in filenames:
         mo = _FILENAME_RE.match(name)
         if mo:
             out[int(mo.group(1))] = name
     return out
+
+
+def duplicate_versions(filenames: list[str]) -> dict[int, list[str]]:
+    """Version -> sorted filenames, for every version number carried by MORE
+    THAN ONE file within a single ref's directory listing (e.g. a PR branch
+    that rebased over a sibling's since-merged migration of the same
+    number, keeping both files with no git conflict). A ref in this state
+    always fails to import (`migrations/__init__.py` raises on a duplicate
+    version) regardless of what `added_versions`/`find_collisions` conclude
+    from the collapsed `parse_versions` view -- so this must be checked
+    against the raw filenames before that collapse happens."""
+    by_version: dict[int, list[str]] = {}
+    for name in filenames:
+        mo = _FILENAME_RE.match(name)
+        if mo:
+            by_version.setdefault(int(mo.group(1)), []).append(name)
+    return {version: sorted(names) for version, names in by_version.items() if len(names) > 1}
 
 
 def added_versions(head: dict[int, str], merge_base: dict[int, str]) -> dict[int, str]:
@@ -87,6 +112,21 @@ def format_collision_message(collisions: dict[int, list[str]], pr_number: int) -
     return "\n".join(lines)
 
 
+def format_duplicate_message(duplicates: dict[int, list[str]], pr_number: int) -> str:
+    lines = [
+        f"check_migration_collisions: PR #{pr_number}'s own head has duplicate "
+        "migration version(s):"
+    ]
+    for version in sorted(duplicates):
+        files = ", ".join(duplicates[version])
+        lines.append(f"  version {version} is carried by multiple files: {files}")
+    lines.append(
+        "This will fail to import at jobcannon/db/migrations/__init__.py -- "
+        "renumber with scripts/new_migration.py and re-push."
+    )
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # I/O layer -- urllib + GITHUB_TOKEN, no `gh` dependency.
 # ---------------------------------------------------------------------------
@@ -107,11 +147,25 @@ def _default_transport(method: str, url: str, token: str) -> object:
         return json.loads(response.read().decode("utf-8"))
 
 
-def fetch_dir_versions(repo: str, ref: str, token: str, transport: Transport) -> dict[int, str]:
+def fetch_dir_entries(repo: str, ref: str, token: str, transport: Transport) -> list[str]:
+    """Raw filenames in `ref`'s migrations directory (not yet collapsed to
+    a version->filename dict) -- the shape `duplicate_versions` needs."""
     url = f"{_API_ROOT}/repos/{repo}/contents/{_MIGRATIONS_PATH}?ref={ref}"
     entries = transport("GET", url, token)
-    names = [entry["name"] for entry in entries if entry.get("type") == "file"]
-    return parse_versions(names)
+    if not isinstance(entries, list):
+        raise ValueError(
+            f"fetch_dir_entries: expected a list of directory entries for "
+            f"ref={ref!r}, got {type(entries).__name__}"
+        )
+    return [
+        entry["name"]
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("type") == "file"
+    ]
+
+
+def fetch_dir_versions(repo: str, ref: str, token: str, transport: Transport) -> dict[int, str]:
+    return parse_versions(fetch_dir_entries(repo, ref, token, transport))
 
 
 def fetch_merge_base(
@@ -119,15 +173,37 @@ def fetch_merge_base(
 ) -> str:
     url = f"{_API_ROOT}/repos/{repo}/compare/{base_ref}...{head_sha}"
     data = transport("GET", url, token)
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"fetch_merge_base: expected a dict compare response, got {type(data).__name__}"
+        )
     return data["merge_base_commit"]["sha"]
 
 
-def fetch_open_prs(repo: str, token: str, transport: Transport, exclude_number: int) -> list[dict]:
-    prs: list[dict] = []
+_MAX_OPEN_PR_PAGES = 50  # 5000 open PRs at per_page=100 -- generous headroom.
+
+
+def fetch_open_prs(
+    repo: str, token: str, transport: Transport, exclude_number: int
+) -> list[dict[str, Any]]:
+    prs: list[dict[str, Any]] = []
     page = 1
     while True:
+        if page > _MAX_OPEN_PR_PAGES:
+            # Fail closed rather than loop forever: a transport that never
+            # returns a short final page (real GitHub always does once the
+            # open-PR list is exhausted) means something is wrong with the
+            # response, not that this repo genuinely has 5000+ open PRs.
+            raise ValueError(
+                f"fetch_open_prs: exceeded {_MAX_OPEN_PR_PAGES} pages "
+                "without reaching a short final page -- aborting"
+            )
         url = f"{_API_ROOT}/repos/{repo}/pulls?state=open&per_page=100&page={page}"
         batch = transport("GET", url, token)
+        if not isinstance(batch, list):
+            raise ValueError(
+                f"fetch_open_prs: expected a list of pull requests, got {type(batch).__name__}"
+            )
         prs.extend(batch)
         if len(batch) < 100:
             break
@@ -159,7 +235,23 @@ def run(
 
     try:
         merge_base_sha = fetch_merge_base(repo, base_ref, pr_head_sha, token, transport)
-        head_versions = fetch_dir_versions(repo, pr_head_sha, token, transport)
+
+        # Check the PR's own head for an intra-ref duplicate version BEFORE
+        # parse_versions collapses it to last-wins -- e.g. this PR adds
+        # m0013_a.py, a sibling merges m0013_b.py to main, this branch
+        # rebases (both files present, no git conflict): head_versions would
+        # otherwise silently become {13: "m0013_a.py"} or {13: "m0013_b.py"}
+        # depending on iteration order, `added` would come out empty against
+        # a merge-base that also has neither/one of them, and this guard
+        # would print "adds no new versions -- skipping" on a head that
+        # fails to import at jobcannon/db/migrations/__init__.py.
+        head_entries = fetch_dir_entries(repo, pr_head_sha, token, transport)
+        duplicates = duplicate_versions(head_entries)
+        if duplicates:
+            out(format_duplicate_message(duplicates, pr_number))
+            return 1
+        head_versions = parse_versions(head_entries)
+
         base_versions = fetch_dir_versions(repo, merge_base_sha, token, transport)
         added = added_versions(head_versions, base_versions)
 
@@ -167,7 +259,7 @@ def run(
             out("check_migration_collisions: PR adds no new migration versions -- skipping")
             return 0
 
-        others = {"origin/main": fetch_dir_versions(repo, base_ref, token, transport)}
+        others = {f"origin/{base_ref}": fetch_dir_versions(repo, base_ref, token, transport)}
         for pr in fetch_open_prs(repo, token, transport, exclude_number=pr_number):
             others[f"PR #{pr['number']}"] = fetch_dir_versions(
                 repo, pr["head"]["sha"], token, transport

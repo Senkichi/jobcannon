@@ -24,15 +24,20 @@ AND every OPEN PR's head, not just whatever this branch forked from. That's
 what actually closes the #211 gap -- a version free on disk locally was
 never the problem; a version invisible to a sibling PR was.
 
-`gh` (GitHub CLI, must already be authenticated) supplies the open-PR list;
-each PR's `refs/pull/<n>/head` is fetched and its migrations directory
-listed via `git ls-tree` (works even for a since-deleted source branch,
-unlike resolving through `origin/<branch>`). If `gh` is missing, not
-authenticated, or any PR's ref can't be fetched, this mints from
-origin/main's on-disk state alone and prints an UNMISSABLE warning -- the
-version is then only as safe as the CI collision guard
-(scripts/check_migration_collisions.py), which still catches a same-cycle
-race at merge time regardless of what this script saw.
+The known-version set is the union of three sources: this branch's local
+working-tree migrations directory, origin/main's CURRENT migrations
+directory (via a best-effort `git fetch origin main` + `git ls-tree
+origin/main`, so a stale or never-fetched local `origin/main` ref can't
+silently mint against an outdated view), and every open PR's head (`gh`,
+GitHub CLI, must already be authenticated: each PR's `refs/pull/<n>/head`
+is fetched and its migrations directory listed via `git ls-tree` -- works
+even for a since-deleted source branch, unlike resolving through
+`origin/<branch>`). If the origin/main fetch/ls-tree fails, or `gh` is
+missing/unauthenticated/erroring, or any PR's ref can't be fetched, this
+mints from whatever it *could* confirm and prints an UNMISSABLE warning
+naming which check(s) failed -- the version is then only as safe as the CI
+collision guard (scripts/check_migration_collisions.py), which still
+catches a same-cycle race at merge time regardless of what this script saw.
 """
 
 from __future__ import annotations
@@ -50,6 +55,11 @@ _MIGRATIONS_DIR = _REPO_ROOT / "jobcannon" / "db" / "migrations"
 _MIGRATIONS_SUBPATH = "jobcannon/db/migrations/"
 _FILENAME_RE = re.compile(r"^m(\d+)_")
 _GITHUB_REPO = "Senkichi/jobcannon"
+# gh's own documented default is --limit 30 -- exactly how the #211 bug hid
+# (>30 open PRs would have silently returned a partial view). Passing an
+# explicit, generous limit isn't itself the fix; treating a result count
+# equal to that limit as unprovable (see _open_pr_versions) is.
+_GH_PR_LIST_LIMIT = 1000
 
 _TEMPLATE = '''"""Migration {version} -- {human}."""
 
@@ -111,16 +121,60 @@ def _fetch_pr_head_versions(repo_root: Path, number: int) -> set[int] | None:
     return _versions_in_filenames(names)
 
 
+def _fetch_origin_main_versions(repo_root: Path) -> set[int] | None:
+    """Versions in origin/main's CURRENT migrations directory, or None on
+    any failure (fetch or ls-tree). A best-effort `git fetch origin main`
+    runs first so a stale or never-fetched local `origin/main` ref doesn't
+    silently mint against an outdated view -- this is what makes "free
+    against origin/main" (this module's docstring, the PR body,
+    docs/deploy-runbook.md Sec 3, CONTRIBUTING.md) actually true, rather
+    than only checking whatever this branch happened to fork from."""
+    fetch = subprocess.run(
+        ["git", "fetch", "-q", "origin", "main"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if fetch.returncode != 0:
+        return None
+    ls = subprocess.run(
+        ["git", "ls-tree", "--name-only", "origin/main", "--", _MIGRATIONS_SUBPATH],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if ls.returncode != 0:
+        return None
+    names = [Path(line).name for line in ls.stdout.splitlines() if line.strip()]
+    return _versions_in_filenames(names)
+
+
 def _open_pr_versions(repo_root: Path, repo: str) -> tuple[set[int], bool]:
     """Returns (versions, verified). verified is False whenever the result
     is NOT provably the full open-PR set -- gh missing/unauthenticated/
-    erroring, or any individual PR ref failing to fetch -- so a caller never
-    silently mints against a partial view without being told."""
+    erroring, the listing hitting our own --limit (indistinguishable from gh
+    silently truncating there -- gh's undocumented-in-code default is 30,
+    exactly how #211 hid), or any individual PR ref failing to fetch -- so a
+    caller never silently mints against a partial view without being told."""
     if shutil.which("gh") is None:
         return set(), False
     try:
         listing = subprocess.run(
-            ["gh", "pr", "list", "-R", repo, "--state", "open", "--json", "number"],
+            [
+                "gh",
+                "pr",
+                "list",
+                "-R",
+                repo,
+                "--state",
+                "open",
+                "--json",
+                "number",
+                "--limit",
+                str(_GH_PR_LIST_LIMIT),
+            ],
             capture_output=True,
             text=True,
             timeout=30,
@@ -135,13 +189,18 @@ def _open_pr_versions(repo_root: Path, repo: str) -> tuple[set[int], bool]:
     ):
         return set(), False
 
+    # A result count equal to our own --limit can never be told apart from
+    # "gh silently capped here" -- so it can never be reported verified=True,
+    # no matter how generous the limit is.
+    limit_hit = len(prs) >= _GH_PR_LIST_LIMIT
+
     versions: set[int] = set()
     for pr in prs:
         found = _fetch_pr_head_versions(repo_root, pr["number"])
         if found is None:
             return versions, False
         versions |= found
-    return versions, True
+    return versions, not limit_hit
 
 
 def _mint_version(known: set[int]) -> int:
@@ -160,8 +219,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("slug must contain at least one alphanumeric character")
 
     local = _local_versions(_MIGRATIONS_DIR)
-    pr_versions, verified = _open_pr_versions(_REPO_ROOT, _GITHUB_REPO)
-    version = _mint_version(local | pr_versions)
+    origin_main_versions = _fetch_origin_main_versions(_REPO_ROOT)
+    origin_main_verified = origin_main_versions is not None
+    pr_versions, pr_verified = _open_pr_versions(_REPO_ROOT, _GITHUB_REPO)
+    verified = origin_main_verified and pr_verified
+
+    known = local | (origin_main_versions or set()) | pr_versions
+    version = _mint_version(known)
     filename = f"m{version:04d}_{slug}.py"
     dest = _MIGRATIONS_DIR / filename
     if dest.exists():
@@ -176,14 +240,21 @@ def main(argv: list[str] | None = None) -> int:
     if verified:
         print(f"  verified free on origin/main and {len(pr_versions)} open PR(s)")
     else:
+        reasons = []
+        if not origin_main_verified:
+            reasons.append("origin/main's migrations directory could not be fetched/listed")
+        if not pr_verified:
+            reasons.append(
+                "gh was unavailable, not authenticated, hit its list limit, "
+                "or a PR ref could not be fetched"
+            )
         print("  " + "*" * 72)
-        print("  WARNING: unverified against open PRs -- `gh` was unavailable, not")
-        print("  authenticated, or a PR ref could not be fetched. This version is")
-        print("  only checked against the migrations on disk in THIS branch and")
-        print("  may still collide with another open PR. scripts/")
+        print("  WARNING: unverified -- " + "; ".join(reasons) + ".")
+        print("  This version is only checked against what could be confirmed and")
+        print("  may still collide with origin/main or another open PR. scripts/")
         print("  check_migration_collisions.py is the CI backstop that catches a")
-        print("  same-cycle race at merge time -- but fix `gh` and re-run this")
-        print("  script before pushing if you can.")
+        print("  same-cycle race at merge time -- but fix the issue(s) above and")
+        print("  re-run this script before pushing if you can.")
         print("  " + "*" * 72)
     print("Next: fill in sql=[...] (idempotent DDL) and add tests/host/ coverage for it.")
     return 0

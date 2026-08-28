@@ -71,12 +71,15 @@ jobs:
     # Issue #211: scripts/new_migration.py mints a version free against
     # origin/main and every open PR it can see AT CREATION TIME, but that
     # view goes stale the moment a sibling PR merges or a new one opens
-    # before this one does. This job re-checks at review/merge time, on
-    # every PR event, against origin/main's CURRENT head and every OTHER
-    # currently-open PR -- the race the minting script structurally cannot
-    # close on its own. Same self-hosted-only, same-repo-only gate as `test`
-    # above, for the same reason (pull_request reads the workflow file from
-    # the PR head, so a fork could otherwise smuggle in arbitrary steps).
+    # before this one does. This job narrows that window by re-checking at
+    # review/merge time, on every PR event, against origin/main's CURRENT
+    # head and every OTHER currently-open PR -- it does not fully close the
+    # race (two PRs can each pass this same check within the same window and
+    # still both merge back to back); jobcannon/db/migrations/__init__.py's
+    # duplicate-version import check is the final backstop. Same
+    # self-hosted-only, same-repo-only gate as `test` above, for the same
+    # reason (pull_request reads the workflow file from the PR head, so a
+    # fork could otherwise smuggle in arbitrary steps).
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64, jcpub]
     permissions:
