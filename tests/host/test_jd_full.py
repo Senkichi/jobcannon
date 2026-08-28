@@ -683,6 +683,40 @@ def test_mixed_body_with_escaped_comparison_operator_stores_intact_prose(db_conn
     assert dict(row2) == stored
 
 
+def test_mixed_body_with_escaped_tag_like_token_stores_literal_text(db_conn, posting):
+    """#234 regression pin for fix (a) specifically, via the REAL
+    set_jd_full write path. The sibling test above
+    (test_mixed_body_with_escaped_comparison_operator_stores_intact_prose)
+    only exercises fix (b) -- reverting fix (a) alone (restoring
+    `strip_html_to_text(_html.unescape(raw))` unconditionally in
+    html_to_plain_text, while keeping fix (b)'s tightened stripper) still
+    PASSES that test, because a bare `< $100k` never looks like a tag-open
+    regardless of decode order. This test uses the other #234 shape instead:
+    real HTML tags in the markup, PLUS an entity-escaped TAG-LIKE token
+    (`&lt;div&gt;`, `&lt;table&gt;`) in the prose. Pre-fix-(a),
+    html_to_plain_text unescapes before stripping, so `&lt;div&gt;` becomes
+    a literal, validly-tag-shaped `<div>` that fix (b)'s tightened stripper
+    then legitimately strips as if it were real markup -- losing the literal
+    text the author wrote. Fix (a) prevents the early unescape by
+    discriminating real-HTML input via _html_tag_re first, so the escaped
+    tokens survive stripping as literal visible text."""
+    from jobcannon.db._jd_full import set_jd_full
+
+    mixed_body = (
+        "<p>" + GOOD_JD + " Experience with &lt;div&gt; layouts and "
+        "&lt;table&gt; markup is a plus.</p>"
+    )
+    assert set_jd_full(_svc_conn(db_conn), posting, mixed_body, source="test") is True
+    row = db_conn.execute(
+        "SELECT jd_full FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["jd_full"] is not None
+    assert "<p>" not in row["jd_full"]
+    assert "<div>" in row["jd_full"]
+    assert "<table>" in row["jd_full"]
+    assert "Experience with <div> layouts and <table> markup is a plus" in row["jd_full"]
+
+
 # --- #217 unresolved_reasons: malformed/NULL-value tolerance ----------------
 
 

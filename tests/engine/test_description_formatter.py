@@ -53,6 +53,15 @@ Net: (a) and (b) close two DIFFERENT sub-cases of the same fuse-and-swallow
 failure mode (entity-escaped tag-shaped tokens vs. bare-`<`-in-prose
 spanning to an unrelated later `>`); both are required for full coverage,
 neither is redundant with the other.
+
+Host-level coverage: ``tests/host/test_jd_full.py`` carries the same two
+shapes through the real ``set_jd_full`` write path --
+``test_mixed_body_with_escaped_comparison_operator_stores_intact_prose``
+(fix (b), (a) alone does not discriminate it, sabotage-verified) and
+``test_mixed_body_with_escaped_tag_like_token_stores_literal_text`` (fix
+(a) specifically, sabotage-verified against a real revert-(a)-alone run --
+only the tag-like-token test fails, not the comparison-operator one,
+matching the unit-level finding above).
 """
 
 from jobcannon.engine.description_formatter import html_to_plain_text, strip_html_to_text

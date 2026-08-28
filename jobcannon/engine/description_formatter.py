@@ -56,6 +56,14 @@ def strip_html_to_text(text: str) -> str:
     opener and never fused with an unrelated later ``>`` into one bogus
     "tag" that swallows everything between (#234) — this protects every
     caller of this function, not just ``html_to_plain_text``.
+
+    Conversely, ``<`` immediately followed by a letter is STILL treated as
+    a tag opener regardless of what follows (``x<y`` → matches through to
+    the next ``>``, however far away), matching how a real browser/HTML
+    tokenizer treats ``<`` + ASCII letter as the start of a tag name. This
+    is pre-existing behavior, unchanged by #234 — #234 only narrows which
+    characters after ``<`` count as a tag-open, it does not touch what
+    happens once one is recognized.
     """
     # Convert <br> variants to newlines
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
@@ -110,6 +118,18 @@ def html_to_plain_text(raw: str) -> str:
       arrives as ``&lt;p&gt;…``): unescape FIRST to turn the encoded tags
       back into real ones, THEN strip -- there is nothing else to protect
       here since no real tag exists yet for a decoded ``<`` to fuse with.
+
+    Hybrid-body tradeoff: a body that is MOSTLY entity-escaped but contains
+    at least one literal tag anywhere still takes the real-HTML branch, so
+    its escaped tags (e.g. an author literally writing ``&lt;div&gt;`` in
+    prose to describe markup they worked with) surface as visible plain
+    text rather than being decoded and stripped as structure -- content is
+    preserved, but any list/paragraph structure *that body only expressed
+    through escaped tags* is not recovered. This is a deliberate choice:
+    the alternative (unescaping unconditionally, then stripping) is exactly
+    the fuse-and-swallow failure #234 fixes, so a false-real-HTML
+    classification loses nothing, while a false-plain-text classification
+    on truly mixed content can silently swallow prose.
 
     Prior to the #234 fix this function unconditionally unescaped first for
     both shapes, matching the private original's ``html_to_plain_text``
