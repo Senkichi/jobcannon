@@ -55,3 +55,8 @@ yet. `CLA Assistant Lite` is listed in `.aviator/config.yml`'s
 - One logical change per PR. Conventional commit style (`feat:`, `fix:`,
   `test:`, `chore:`) for commit messages.
 - CI (lint + tests) must pass before merge.
+- Adding a schema migration? Always run `python scripts/new_migration.py
+  "<slug>"` to create the file — never hand-pick a `version=`. It mints a
+  version free against origin/main and every open PR; a CI check
+  (`Migration collision guard`) re-verifies at PR time as a backstop. See
+  `docs/deploy-runbook.md` §3, "Creating a new migration".
