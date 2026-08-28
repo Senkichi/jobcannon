@@ -172,6 +172,49 @@ def _is_new_this_migration(
     return state.column_created_at.get((table, col)) == version
 
 
+def _register_created_table(
+    table: str, pre_existing: dict[str, int] | set[str], new_tables: set[str]
+) -> None:
+    """The single new-table-registration shielding rule, shared by every
+    table-creating statement shape every rule below tracks "which tables did
+    THIS migration create" for: a create earns the same-migration exemption
+    only for a genuinely new name. `CREATE TABLE IF NOT EXISTS <name>` (a
+    plain `CreateStmt`, OR a `CreateTableAsStmt` -- `CREATE TABLE IF NOT
+    EXISTS <name> AS SELECT ...` parses to the latter, and `if_not_exists`
+    means the same retry-safety-net thing on both) where `<name>` is already
+    in `pre_existing` is a retry-safe no-op against a table that may already
+    hold rows -- NOT a fresh table this migration owns -- so registering it
+    into `new_tables` unconditionally would wrongly shield every later
+    statement in the same migration from whichever rule calls this. #233
+    (A2) fixed this for `_scan_statement`'s CreateStmt branch (rule 1) and
+    `_index_lock_violations` (rule 3); #236 closed the same gap in
+    `_has_backfill_against_preexisting` (rule 2) and, in review, also in
+    `_scan_statement`'s separate CreateTableAsStmt branch (rule 1's CTAS
+    shape) -- by routing all four through this one helper instead of
+    re-deriving the condition at each call site, where it had already
+    drifted twice (Rule 2 initially, then CTAS, found in review of the Rule
+    2 fix itself).
+
+    Deliberately takes the already-extracted table name, not the AST node:
+    `CreateStmt.relation.relname` and `CreateTableAsStmt.into.rel.relname`
+    read the name from different node shapes, and Rules 2/3 have no CTAS
+    branch at all (by design -- see their module-docstring "Documented
+    coverage gaps"/`_has_backfill_against_preexisting`'s docstring; a CTAS
+    is conservatively left unrecognized as a new table there, never
+    under-flagging), so the node-shape dispatch has to stay at each call
+    site while this one membership-and-registration rule stays shared.
+
+    `pre_existing` is whatever container the caller already tracks
+    "pre-existing" against -- `_SchemaState.table_created_at` (a dict, keyed
+    by every table any migration up to and including this scan has created)
+    for `_scan_statement`, or a `pre_existing_tables` set (tables strictly
+    EARLIER migrations created, snapshotted before this migration runs) for
+    the other two -- both support `in`, which is all this needs.
+    """
+    if table not in pre_existing:
+        new_tables.add(table)
+
+
 class _ColumnRefCollector(visitors.Visitor):
     """Collects only genuine column references from a CHECK expression's AST
     -- a function name (`char_length(bio)`), a cast target (`::int`), or a
@@ -392,26 +435,29 @@ def _scan_alter_table(
 
 def _scan_statement(node, version: int, state: _SchemaState, new_tables: set[str]) -> list[str]:
     if isinstance(node, pg_ast.CreateStmt):
+        # A2 / _register_created_table: an IF NOT EXISTS create of a table an
+        # EARLIER migration already created (state.table_created_at already
+        # has it) must NOT earn the same-migration exemption -- only a
+        # genuinely new table does. Read membership BEFORE the setdefault
+        # below advances state, same ordering the pre-extraction code used.
         table = node.relation.relname
-        # A2: an IF NOT EXISTS create of a table an EARLIER migration already
-        # created (state.table_created_at already has it) must NOT earn the
-        # same-migration exemption -- only a genuinely new table does. Before
-        # this fix, new_tables.add(table) ran unconditionally, so `CREATE
-        # TABLE IF NOT EXISTS <pre-existing>` shielded every later statement
-        # in the same migration from this function's checks below.
-        is_new_table = table not in state.table_created_at
+        _register_created_table(table, state.table_created_at, new_tables)
         state.table_created_at.setdefault(table, version)
-        if is_new_table:
-            new_tables.add(table)
         for elt in node.tableElts or ():
             if isinstance(elt, pg_ast.ColumnDef):
                 state.column_created_at.setdefault((table, elt.colname), version)
         return []
 
     if isinstance(node, pg_ast.CreateTableAsStmt):
+        # Review follow-up (#236): this branch used to add unconditionally,
+        # the same shielding-bug shape Rule 2 had -- `CREATE TABLE IF NOT
+        # EXISTS <pre-existing> AS SELECT ...` (parses to CreateTableAsStmt,
+        # not CreateStmt) would wrongly earn the same-migration exemption.
+        # Same helper, same membership-before-advance ordering as the plain
+        # CreateStmt branch above.
         table = node.into.rel.relname
+        _register_created_table(table, state.table_created_at, new_tables)
         state.table_created_at.setdefault(table, version)
-        new_tables.add(table)
         return []
 
     if isinstance(node, pg_ast.IndexStmt):
@@ -525,7 +571,22 @@ def _has_backfill_against_preexisting(migration: Migration, pre_existing_tables:
         for raw in raw_stmts:
             node = raw.stmt
             if isinstance(node, pg_ast.CreateStmt):
-                new_tables_this_migration.add(node.relation.relname)
+                # #236 / _register_created_table: only a genuinely new table
+                # (not already in pre_existing_tables) earns the
+                # same-migration exemption -- an unconditional add here let
+                # `CREATE TABLE IF NOT EXISTS <pre-existing>` shield every
+                # backfill statement after it, the same shielding bug #233
+                # (A2) already fixed for rules 1 and 3. No CreateTableAsStmt
+                # branch here, deliberately: this rule doesn't recognize a
+                # CTAS as a new table at all, which is the safe conservative
+                # default (it can only ever OVER-flag a same-migration CTAS
+                # backfill, never under-flag a pre-existing one) -- verified
+                # in review (a CTAS of a pre-existing name still gets its
+                # following UPDATE flagged, same as any other pre-existing
+                # table).
+                _register_created_table(
+                    node.relation.relname, pre_existing_tables, new_tables_this_migration
+                )
                 continue
             if isinstance(node, pg_ast.UpdateStmt) and node.relation is not None:
                 table = node.relation.relname
@@ -755,11 +816,14 @@ def _index_lock_violations(migration: Migration, pre_existing_tables: set[str]) 
         for raw in raw_stmts:
             node = raw.stmt
             if isinstance(node, pg_ast.CreateStmt):
-                # A2: only a genuinely new table (not already pre-existing under
-                # an IF NOT EXISTS create of a name an earlier migration owns)
-                # earns the same-migration exemption below.
-                if node.relation.relname not in pre_existing_tables:
-                    new_tables_this_migration.add(node.relation.relname)
+                # A2 / _register_created_table: only a genuinely new table
+                # (not already pre-existing under an IF NOT EXISTS create of
+                # a name an earlier migration owns) earns the same-migration
+                # exemption below. No CreateTableAsStmt branch here either,
+                # deliberately -- same conservative default as Rule 2 above.
+                _register_created_table(
+                    node.relation.relname, pre_existing_tables, new_tables_this_migration
+                )
                 continue
             if isinstance(node, pg_ast.DoStmt):
                 # A3: opaque to this scanner -- mirror Rule 1's fail-closed
@@ -1298,6 +1362,33 @@ _KNOWN_BAD_FIXTURES = [
         "unreviewed ALTER TABLE sub-command",
         id="unrecognized-subtype-fail-closed-default",
     ),
+    # --- #236 review follow-up: Rule 1 had no dedicated IF NOT EXISTS
+    # shielding fixture of its own (Rule 3 had one, Rule 1 didn't) -- add
+    # the same A2 shape here so Rule 1's own exemption logic is pinned by a
+    # test that fails if _register_created_table's condition regresses,
+    # not just verified by code-reading + the aggregate 111-passed run. ---
+    pytest.param(
+        [
+            "CREATE TABLE IF NOT EXISTS companies (id bigserial PRIMARY KEY)",
+            "ALTER TABLE companies DROP COLUMN name",
+        ],
+        "DROP COLUMN",
+        id="rule1-create-table-if-not-exists-preexisting-does-not-shield",
+    ),
+    # --- #236 review follow-up: the CreateTableAsStmt branch (CREATE TABLE
+    # ... AS SELECT) had its own separate, still-unconditional `new_tables.
+    # add(table)` -- same shielding-bug shape as Rule 2's original bug, just
+    # in Rule 1. `CREATE TABLE IF NOT EXISTS <pre-existing> AS SELECT ...`
+    # parses to CreateTableAsStmt, not CreateStmt, so the CreateStmt-only
+    # fix above didn't cover it -- now routed through the same helper. ---
+    pytest.param(
+        [
+            "CREATE TABLE IF NOT EXISTS companies AS SELECT id FROM events",
+            "ALTER TABLE companies DROP COLUMN name",
+        ],
+        "DROP COLUMN",
+        id="rule1-ctas-if-not-exists-preexisting-does-not-shield",
+    ),
 ]
 
 
@@ -1426,6 +1517,25 @@ _KNOWN_SAFE_FIXTURES = [
             "ALTER TABLE users DROP CONSTRAINT tmp_chk",
         ],
         id="add-then-drop-constraint-same-migration",
+    ),
+    # --- #236 review follow-up: controls for the two new Rule 1 bad
+    # fixtures above -- a genuinely new name (not already in
+    # state.table_created_at) still earns the same-migration exemption,
+    # proving the fix doesn't just flag every IF NOT EXISTS create
+    # unconditionally in the other direction. ---
+    pytest.param(
+        [
+            "CREATE TABLE IF NOT EXISTS t_new4 (id bigserial PRIMARY KEY, name text)",
+            "ALTER TABLE t_new4 DROP COLUMN name",
+        ],
+        id="rule1-create-table-if-not-exists-genuinely-new-still-exempt",
+    ),
+    pytest.param(
+        [
+            "CREATE TABLE IF NOT EXISTS t_new5 AS SELECT id FROM events",
+            "ALTER TABLE t_new5 DROP COLUMN id",
+        ],
+        id="rule1-ctas-if-not-exists-genuinely-new-still-exempt",
     ),
 ]
 
@@ -1876,6 +1986,79 @@ def test_backfill_structural_signal_ignores_values_insert_and_same_migration_tab
         name="m999996_structural_safe",
     )
     assert not _has_backfill_against_preexisting(safe_probe, pre_existing)
+
+
+# --- #236: CREATE TABLE IF NOT EXISTS of a table an earlier migration
+# already owns must not shield a later backfill statement in the same
+# migration -- the parallel gap #233 (A2) already closed for rules 1 and 3.
+# One flagged/control pair per structural arm (UPDATE, INSERT ... SELECT). ---
+
+
+def test_backfill_structural_signal_not_shielded_by_create_table_if_not_exists():
+    """Before the #236 fix, `_has_backfill_against_preexisting` added every
+    CreateStmt's table to `new_tables_this_migration` unconditionally, so
+    this IF NOT EXISTS create of a table `postings` an EARLIER migration
+    already owns wrongly shielded the UPDATE right after it from Rule 2."""
+    pre_existing = {"postings"}
+    probe = Migration(
+        version=999991,
+        description="rule2 shield probe",
+        sql=[
+            "CREATE TABLE IF NOT EXISTS postings (id bigserial PRIMARY KEY)",
+            "UPDATE postings SET embedding = NULL WHERE embedding IS NULL",
+        ],
+        name="m999991_rule2_shield_probe",
+    )
+    assert _has_backfill_against_preexisting(probe, pre_existing)
+
+
+def test_backfill_structural_signal_create_table_if_not_exists_genuinely_new_still_exempt():
+    """Control for the fixture above: an IF NOT EXISTS create of a name NOT
+    already in pre_existing_tables is genuinely new this migration, so the
+    UPDATE right after it is the ordinary, safe same-migration shape and
+    must stay unflagged -- proves the fix doesn't just flag every IF NOT
+    EXISTS create unconditionally in the other direction."""
+    pre_existing = {"events"}
+    probe = Migration(
+        version=999990,
+        description="rule2 shield control probe",
+        sql=[
+            "CREATE TABLE IF NOT EXISTS brand_new (id bigserial PRIMARY KEY)",
+            "UPDATE brand_new SET id = id",
+        ],
+        name="m999990_rule2_shield_control_probe",
+    )
+    assert not _has_backfill_against_preexisting(probe, pre_existing)
+
+
+def test_backfill_structural_signal_insert_select_not_shielded_by_if_not_exists():
+    """Same shielding bug, the INSERT ... SELECT arm."""
+    pre_existing = {"postings"}
+    probe = Migration(
+        version=999989,
+        description="rule2 shield probe (insert-select)",
+        sql=[
+            "CREATE TABLE IF NOT EXISTS postings (id bigserial PRIMARY KEY)",
+            "INSERT INTO postings (id) SELECT id FROM companies",
+        ],
+        name="m999989_rule2_shield_insert_select_probe",
+    )
+    assert _has_backfill_against_preexisting(probe, pre_existing)
+
+
+def test_backfill_structural_signal_insert_select_if_not_exists_new_table_exempt():
+    """Control for the INSERT ... SELECT arm."""
+    pre_existing = {"events"}
+    probe = Migration(
+        version=999988,
+        description="rule2 shield control probe (insert-select)",
+        sql=[
+            "CREATE TABLE IF NOT EXISTS brand_new (id bigserial PRIMARY KEY)",
+            "INSERT INTO brand_new (id) SELECT id FROM companies",
+        ],
+        name="m999988_rule2_shield_insert_select_control_probe",
+    )
+    assert not _has_backfill_against_preexisting(probe, pre_existing)
 
 
 def _contract_step_ok(contract_step: bool, doc: str) -> bool:
