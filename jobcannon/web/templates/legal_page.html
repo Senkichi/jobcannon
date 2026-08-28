@@ -68,6 +68,15 @@
      the wrapper (structurally, via a real HTML parser) and this CSS rule
      (parsed as CSS, not string-matched), and sabotage-proves both. */
   .legal-prose .table-scroll { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; margin: 1rem 0 1.5rem; }
+  /* Keyboard focus ring for the scroll wrapper (WCAG 2.4.7): the wrapper
+     carries `tabindex="0"` (jobcannon/web/legal.py's `_wrap_tables_for_scroll`)
+     so a keyboard-only visitor can Tab to it and arrow-key/scroll a clipped
+     table column into view -- without a visible ring, that focus is
+     invisible and the visitor has no way to tell Tab landed there.
+     `:focus-visible` (not bare `:focus`) so the ring shows for keyboard
+     navigation only, not on a mouse/touch drag-scroll -- matches every
+     other focus ring in this app. */
+  .legal-prose .table-scroll:focus-visible { outline: 2px solid #737373; outline-offset: 2px; }
 </style>
 <div class="legal-prose">
 {{ body_html|safe }}
