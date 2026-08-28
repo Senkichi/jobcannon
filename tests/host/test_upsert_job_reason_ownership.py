@@ -432,3 +432,86 @@ def test_stray_foreign_code_on_live_row_is_dropped_on_canonical_change(db_conn, 
         "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (dedup_key,)
     ).fetchone()
     assert row["unresolved_reasons"] == ["salary_implausible"]
+
+
+def test_parser_reasserted_jd_code_is_deduplicated_not_appended(db_conn, company_id):
+    """The Python-side pre-strip filter (`parser_reasons` at `_jobs.py`:
+    343-345) has no direct test: this exercises it explicitly. The parser
+    independently re-derives the SAME JD code the live row already carries
+    (I-18 double-derivation) alongside a genuine parser-owned code. If the
+    pre-strip filter were removed or inverted, the SQL side's live-JD
+    subquery AND the raw (unfiltered) parser list would each contribute a
+    copy of `jd_full_truncated`, landing a duplicate -- exactly the #235
+    failure shape. A bare `set()` equality assertion would hide that
+    duplicate, so both set AND length are asserted here.
+    """
+    from jobcannon.db._jobs import upsert_job
+
+    dedup_key = "prestrip-co|staff data engineer"
+    p1 = _parsed_job(dedup_key=dedup_key, description="Short description.")
+    r1 = upsert_job(_svc_conn(db_conn), p1, company_id=company_id)
+    assert r1.kind == "inserted"
+
+    db_conn.execute(
+        "UPDATE postings SET unresolved_reasons = %s WHERE dedup_key = %s",
+        (Jsonb(["jd_full_truncated"]), dedup_key),
+    )
+
+    p2 = _parsed_job(
+        dedup_key=dedup_key,
+        description="Short description, now much longer than the original one.",
+        unresolved_reasons=["jd_full_truncated", "salary_implausible"],
+    )
+    r2 = upsert_job(_svc_conn(db_conn), p2, company_id=company_id)
+    assert r2.kind == "updated"
+
+    row = db_conn.execute(
+        "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (dedup_key,)
+    ).fetchone()
+    expected = {"jd_full_truncated", "salary_implausible"}
+    assert set(row["unresolved_reasons"]) == expected
+    assert len(row["unresolved_reasons"]) == len(expected), (
+        f"duplicate JD code landed: {row['unresolved_reasons']!r}"
+    )
+    assert set(r2.unresolved_reasons) == expected
+    assert len(r2.unresolved_reasons) == len(expected)
+
+
+def test_multiple_live_jd_codes_and_parser_reasons_all_survive(db_conn, company_id):
+    """Coverage gap: no existing test combines 2+ live `JD_CONTENT_REASON_CODES`
+    entries with non-empty parser-owned reasons in the same update. Live row
+    carries both `jd_full_truncated` and `jd_full_offsite`; the parser
+    supplies a genuine parser-owned code (`salary_implausible`) plus a third
+    JD code (`jd_full_expired`) it independently re-derived, which must be
+    stripped. Both live JD codes must survive untouched, the parser-owned
+    code must be appended, and the stripped code must be absent.
+    """
+    from jobcannon.db._jobs import upsert_job
+
+    dedup_key = "multi-jd-co|staff data engineer"
+    p1 = _parsed_job(dedup_key=dedup_key, description="Short description.")
+    r1 = upsert_job(_svc_conn(db_conn), p1, company_id=company_id)
+    assert r1.kind == "inserted"
+
+    db_conn.execute(
+        "UPDATE postings SET unresolved_reasons = %s WHERE dedup_key = %s",
+        (Jsonb(["jd_full_truncated", "jd_full_offsite"]), dedup_key),
+    )
+
+    p2 = _parsed_job(
+        dedup_key=dedup_key,
+        description="Short description, now much longer than the original one.",
+        unresolved_reasons=["salary_implausible", "jd_full_expired"],
+    )
+    r2 = upsert_job(_svc_conn(db_conn), p2, company_id=company_id)
+    assert r2.kind == "updated"
+
+    row = db_conn.execute(
+        "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (dedup_key,)
+    ).fetchone()
+    expected = {"jd_full_truncated", "jd_full_offsite", "salary_implausible"}
+    assert set(row["unresolved_reasons"]) == expected
+    assert len(row["unresolved_reasons"]) == len(expected)
+    assert "jd_full_expired" not in row["unresolved_reasons"]
+    assert set(r2.unresolved_reasons) == expected
+    assert len(r2.unresolved_reasons) == len(expected)
