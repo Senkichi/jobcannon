@@ -449,7 +449,7 @@ def scan_for_writer(root: pathlib.Path) -> list[str]:
 # ---- the guard -----------------------------------------------------------
 
 
-def test_scoring_not_wired_without_jd_adjudicated_version_writer():
+def test_scoring_not_wired_without_jd_adjudicated_version_writer(tmp_path_factory):
     entrypoint_names = _entrypoint_names()
     assert entrypoint_names, (
         "no scoring entrypoints derived from job_scorer.__all__ -- the "
@@ -460,6 +460,25 @@ def test_scoring_not_wired_without_jd_adjudicated_version_writer():
     # Positive control: a broken repo-root resolution would silently walk
     # zero files and pass vacuously.
     assert scan_files, "guard walked zero files -- run pytest from the repo root"
+
+    # Defensive: several sibling tests in this file write deliberately-wired
+    # fixture files (ScanServices(score_and_persist_job=...), etc.) under
+    # their own tmp_path. os.walk(_REPO_ROOT) only reaches those if pytest's
+    # tmp root happens to nest *inside* the checkout -- normally false (the
+    # runner's tmp lives beside the checkout, e.g. `_work/_temp` vs.
+    # `_work/<repo>/<repo>`, see feedback_path_guard_tests_vs_runner_workspace)
+    # but asserted here, not assumed, since a runner-config change would
+    # otherwise make `wired` nondeterministically True with no writer to
+    # match -- a CI-only false failure of this guard.
+    pytest_tmp_root = tmp_path_factory.getbasetemp()
+    leaked = [p for p in scan_files if pytest_tmp_root in p.resolve().parents]
+    assert not leaked, (
+        f"scan swept up pytest's own tmp_path tree ({pytest_tmp_root}) -- "
+        f"{leaked[:3]} -- _REPO_ROOT is no longer isolated from the runner's "
+        f"temp dir, so sibling tests' deliberately-wired fixture files can "
+        f"flip `wired` for the wrong reason; fix the scan root before "
+        f"trusting this assertion's verdict"
+    )
 
     wiring_hits = scan_files_for_wiring(scan_files, entrypoint_names)
     writer_hits = scan_for_writer(_REPO_ROOT / WRITER_ROOT)
