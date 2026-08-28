@@ -44,18 +44,23 @@ for the not-yet-ported orchestrator referenced in ``services.py``'s
 docstring) and folds in its public callables if that module ever lands --
 a no-op today, zero edits required later.
 
-The scan set itself is derived from the repo's actual directory tree
-(``_repo_python_files_outside_engine()``, ``os.walk`` pruned in place --
-never ``Path.rglob``, which cannot skip descending into ``.venv``), not
-from a hand-maintained list of package names: every tracked-shape ``*.py``
-file in the repo except ``tests/`` and ``jobcannon/engine/`` itself. This
-is what put ``scripts/`` (``scripts/run_scan_once.py`` is a real scan
-entrypoint) and ``analyses/`` in scope with zero edits to this file, fixing
-a prior version of this guard that iterated only ``jobcannon/`` subpackages
-and silently missed both. A dedicated test cross-checks the walked set
-against an independent ``git ls-files``-based oracle (the same idiom
-``scripts/leak_guard.py`` uses) so the two enumeration approaches can never
-silently diverge.
+The scan set (``_scan_scope_files()``) is git's own view of the repo --
+tracked files plus untracked-but-not-``.gitignore``d ones (the same
+``git ls-files`` / ``git ls-files --others --exclude-standard`` idiom
+``scripts/leak_guard.py`` uses), filtered to exclude ``tests/`` and
+``jobcannon/engine/``. This is what put ``scripts/``
+(``scripts/run_scan_once.py`` is a real scan entrypoint) and ``analyses/``
+in scope with zero edits to this file, fixing a prior version of this guard
+that iterated only ``jobcannon/`` subpackages and silently missed both. A
+plain filesystem walk (``_repo_python_files_outside_engine()``, ``os.walk``
+pruned in place -- never ``Path.rglob``, which cannot skip descending into
+``.venv``) is kept too, but only as an independent **superset** cross-check
+(every file git would scan must also be reachable by a plain directory
+walk, or the walk itself is broken) -- it is deliberately NOT the scan set
+itself, because ``os.walk`` does not honor ``.gitignore``: a local
+``uv build`` drops a ``dist/*.py`` artifact outside any dot-directory that
+the walk would happily pick up and scan, but git never tracks and the
+guard must never see (PR #238 re-review, LOW finding).
 
 ``_WiringVisitor`` walks the real ``ast`` tree (``ast.parse`` + a
 ``NodeVisitor``, never a regex over source text) for every scanned file and
@@ -113,27 +118,66 @@ order, a ``COALESCE``-wrapped self-reference, and a docstring sentence one
 ``=`` away from self-disarming). The current rule requires POSITIVE
 evidence that the right-hand side of ``jd_adjudicated_version = ...``
 produces a real value: a ``%s``/``%(name)s`` placeholder, a bare integer
-literal, an ``EXCLUDED.<col>`` upsert reference, or -- for a ``CASE``
-expression -- at least one ``THEN`` branch (not ``ELSE``; see
-``_case_value_branches``) that is itself one of those same three shapes.
-Anything else -- a bare self-reference, a ``COALESCE``-wrapped
-self-reference, an unrecognized shape, prose -- is NOT treated as a writer.
-The normalized statement is additionally anchored on
-``^(update|insert)\\b`` so a ``SET``-shaped phrase inside some other
-statement type can't count. Direction check: an unrecognized shape means
-``writer_exists=False``, which only matters (fails the guard) if scoring is
-also wired -- a false negative here is loud CI red, never a silent pass.
-Same static-analysis limits as the existing idiom otherwise: cannot see SQL
-assembled at runtime (f-strings / concatenation that splits the column name
-across separate literal nodes), and a positional
+literal, an ``EXCLUDED.<col>`` upsert reference, a ``COALESCE(<one of
+those three>, ...)`` wrapper (first argument only -- this repo's own idiom
+for exactly this kind of write, e.g. ``jobcannon/db/_companies.py``'s
+``SET homepage_url = COALESCE(%s, homepage_url)`` at lines 143 and 150; PR
+#238 re-review, LOW finding), or -- for a ``CASE`` expression -- at least
+one ``THEN`` branch (not ``ELSE``; see ``_case_value_branches``) that is
+itself one of those shapes. Anything else -- a bare self-reference, a
+``COALESCE``-wrapped self-reference, an unrecognized shape, prose -- is NOT
+treated as a writer. A ``CASE`` whose captured text itself contains a
+*second* ``case`` token (i.e. a nested ``CASE`` inside a ``WHEN``
+condition, such as ``CASE WHEN (CASE WHEN x THEN 1 ELSE 0 END) = 1 THEN
+NULL ELSE col END``) is refused outright rather than parsed: the
+non-greedy capture that finds a segment's ``END`` stops at the *inner*
+``END``, so a naively-extracted ``THEN`` branch could belong to the inner,
+condition-only ``CASE`` and never the outer value -- PR #238 re-review, LOW
+finding. Refusing beats mis-parsing here; the fail-closed default (not a
+writer) already covers it correctly.
+
+The normalized statement is anchored not just on the ``UPDATE``/``INSERT``
+keyword but on the surrounding SQL **shape**:
+``^(update\\s+(only\\s+)?[\\w."]+\\s+set|insert\\s+into)\\b`` (allows
+``UPDATE ONLY`` and a schema-qualified ``update public.t set``). This is
+what actually closes the prose vector at its root (PR #238 re-review, LOW
+finding: the keyword-only anchor let a plain-English sentence like
+``"UPDATE flow: we SET jd_adjudicated_version = 1, then commit"`` -- a
+realistic non-docstring string, e.g. a migration's ``description=`` kwarg
+constant -- read as a real ``UPDATE ... SET`` statement, since nothing
+about the RHS whitelist alone tells "prose that happens to end at a
+plausible value" apart from real SQL). **The AST-level docstring-node skip
+(``_docstring_constant_ids``) is a separate, independent defence-in-depth
+layer, not the fix for prose in general** -- it is currently INERT on this
+repo's real tree (``scan_for_writer(jobcannon/)`` returns the same ``[]``
+whether or not the skip runs), because nothing under ``jobcannon/db/``
+today puts writer-shaped prose in a first-statement string. It stays
+because an adversarial docstring built specifically to also satisfy the
+anchor and the whitelist (ending exactly at a bare, comma-free numeral with
+no trailing ``WHERE``) is still only caught by this layer -- see
+``test_detector_skips_docstrings_even_when_they_mimic_a_bare_writer_statement``.
+
+Direction check: an unrecognized shape means ``writer_exists=False``, which
+only matters (fails the guard) if scoring is also wired -- a false
+negative here is loud CI red, never a silent pass. Documented fail-closed
+gaps -- static-analysis limits this detector accepts rather than chases,
+because they are all safe-direction (false negative, not false positive)
+and none exists in the repo today (grep-confirmed): SQL assembled at
+runtime (f-strings / ``.format`` / ``psycopg.sql.SQL`` composition that
+splits the column name across separate literal nodes); a
+``WITH ... UPDATE`` CTE-prefixed statement (the anchor requires ``update``
+at the very start); a leading SQL comment before ``UPDATE``/``INSERT``
+(same reason); ``$1``-style positional parameters (not in the RHS
+whitelist); a row-constructor ``SET (a, b) = (1, %s)`` write (no
+``column = value`` phrase for the regex to find at all); the simple-form
+``CASE col WHEN value THEN ...`` (vs. this repo's own
+``CASE WHEN <condition> THEN ...`` idiom -- ``_CASE_PREFIX_RE`` only
+recognizes the latter); and the already-documented positional
 ``INSERT INTO t (..., jd_adjudicated_version, ...) VALUES (..., %(v)s, ...)``
-column-list write (no ``column = value`` phrase at all) is a documented gap
-this detector does not cover -- no such shape exists in the repo today
-(grep-confirmed), and under the fail-closed classifier this gap is now
-fail-safe rather than fail-open: an undetected positional writer just means
-the guard can't see a writer that exists, which (per the direction check
-above) produces a spurious failure if scoring is ever wired, not a silent
-pass.
+column-list write. Under the fail-closed classifier every one of these is
+fail-safe: an undetected writer just means the guard can't see a writer
+that exists, which produces a spurious failure if scoring is ever wired,
+never a silent pass.
 """
 
 from __future__ import annotations
@@ -291,6 +335,15 @@ def _repo_python_files_outside_engine() -> list[pathlib.Path]:
     return sorted(matches)
 
 
+def _scan_scope_files() -> list[pathlib.Path]:
+    """The actual scan set the guard trusts: git's own view of the repo,
+    not the raw filesystem walk (see module docstring). ``os.walk`` is kept
+    as ``_repo_python_files_outside_engine()`` purely as an independent
+    superset cross-check -- see
+    ``test_guard_scan_set_derived_not_hand_pinned_and_covers_scripts``."""
+    return sorted(_REPO_ROOT / p for p in _tracked_python_files_outside_engine_and_tests())
+
+
 def _tracked_python_files_outside_engine_and_tests() -> set[str]:
     """Independent cross-check: every *.py git considers part of the repo
     (tracked, plus untracked-but-not-gitignored -- same two-command idiom
@@ -320,18 +373,30 @@ def _tracked_python_files_outside_engine_and_tests() -> set[str]:
 
 # ---- writer detection ------------------------------------------------------
 
-_STATEMENT_ANCHOR_RE = re.compile(r"^\s*(update|insert)\b", re.IGNORECASE)
+# Anchored on SQL SHAPE, not just the keyword: requires an actual `... SET`
+# phrase after UPDATE (optionally `UPDATE ONLY`, optionally schema-qualified
+# `db.table`) or a literal `INSERT INTO`. A bare `^(update|insert)\b` let
+# plain-English prose starting with "UPDATE ..." read as SQL (PR #238
+# re-review, LOW finding) -- see module docstring's WRITER section.
+_STATEMENT_ANCHOR_RE = re.compile(
+    r'^(update\s+(only\s+)?[\w."]+\s+set|insert\s+into)\b', re.IGNORECASE
+)
 _CASE_PREFIX_RE = re.compile(r"^case\s+when\b", re.IGNORECASE)
+_CASE_TOKEN_RE = re.compile(r"\bcase\b", re.IGNORECASE)
 _THEN_BRANCH_RE = re.compile(
     r"\bthen\b(.*?)(?=\bwhen\b|\belse\b|\bend\b)", re.IGNORECASE | re.DOTALL
 )
 
-# Positive evidence ONLY: a placeholder, a bare integer literal, or an
-# EXCLUDED.<col> upsert reference. Fail-closed -- anything not matching one
-# of these exactly is NOT treated as write evidence (see module docstring's
-# WRITER section for why this must never default to True).
+# Positive evidence: a placeholder, a bare integer literal, an
+# EXCLUDED.<col> upsert reference, or a COALESCE(...) wrapping one of those
+# three as its FIRST argument (this repo's own idiom for exactly this kind
+# of write -- see module docstring's WRITER section). Fail-closed --
+# anything not matching one of these exactly is NOT treated as write
+# evidence (see module docstring's WRITER section for why this must never
+# default to True).
+_POSITIVE_BASE_RHS = r"%\([a-zA-Z_][a-zA-Z0-9_]*\)s|%s|-?\d+|excluded\.[a-zA-Z_][a-zA-Z0-9_]*"
 _POSITIVE_SIMPLE_RHS_RE = re.compile(
-    r"^(?:%\([a-zA-Z_][a-zA-Z0-9_]*\)s|%s|-?\d+|excluded\.[a-zA-Z_][a-zA-Z0-9_]*)$",
+    rf"^(?:{_POSITIVE_BASE_RHS}|coalesce\(\s*(?:{_POSITIVE_BASE_RHS})\s*(?:,.*)?\))$",
     re.IGNORECASE,
 )
 
@@ -364,8 +429,47 @@ def _segment_sets_non_null(segment: str) -> bool:
     never True."""
     seg = segment.strip()
     if _CASE_PREFIX_RE.match(seg):
+        if len(_CASE_TOKEN_RE.findall(seg)) > 1:
+            # Nested CASE inside a WHEN condition: _set_clause_assignments'
+            # non-greedy capture stops at the INNER `end`, so any THEN
+            # branch pulled from this text could belong to the inner,
+            # condition-only CASE rather than the outer value. Refuse to
+            # parse it at all rather than risk misreading it (PR #238
+            # re-review, LOW finding) -- fail-closed default (not a writer)
+            # already covers this correctly.
+            return False
         return any(_is_positive_write_evidence(b) for b in _case_value_branches(seg))
     return _is_positive_write_evidence(seg)
+
+
+def _top_level_segment_stop(rest: str) -> int | None:
+    """Index in *rest* where a (non-CASE) SET-clause segment ends: the
+    first paren-DEPTH-ZERO comma/semicolon/WHERE -- never one nested inside
+    a function call's own argument list (e.g. the comma inside
+    `COALESCE(%s, jd_adjudicated_version)`, which a plain
+    `,|;|\\bwhere\\b` search would wrongly treat as the next SET-clause
+    separator and truncate the segment before its closing paren -- PR #238
+    re-review, LOW finding surfaced this via the COALESCE widening)."""
+    depth = 0
+    n = len(rest)
+    i = 0
+    while i < n:
+        ch = rest[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif depth <= 0:
+            if ch in ",;":
+                return i
+            if (
+                rest[i : i + 5].lower() == "where"
+                and (i == 0 or not rest[i - 1].isalnum())
+                and (i + 5 == n or not rest[i + 5].isalnum())
+            ):
+                return i
+        i += 1
+    return None
 
 
 def _set_clause_assignments(sql: str) -> list[str]:
@@ -387,8 +491,8 @@ def _set_clause_assignments(sql: str) -> list[str]:
         if case_m:
             segments.append(case_m.group(0))
         else:
-            stop_m = re.search(r",|;|\bwhere\b", rest, re.IGNORECASE)
-            segments.append(rest[: stop_m.start()] if stop_m else rest)
+            stop_idx = _top_level_segment_stop(rest)
+            segments.append(rest[:stop_idx] if stop_idx is not None else rest)
     return segments
 
 
@@ -456,28 +560,30 @@ def test_scoring_not_wired_without_jd_adjudicated_version_writer(tmp_path_factor
         "derivation is broken, not proof there's nothing to guard"
     )
 
-    scan_files = _repo_python_files_outside_engine()
-    # Positive control: a broken repo-root resolution would silently walk
+    scan_files = _scan_scope_files()
+    # Positive control: a broken repo-root resolution would silently scan
     # zero files and pass vacuously.
-    assert scan_files, "guard walked zero files -- run pytest from the repo root"
+    assert scan_files, "guard scanned zero files -- run pytest from the repo root"
 
-    # Defensive: several sibling tests in this file write deliberately-wired
-    # fixture files (ScanServices(score_and_persist_job=...), etc.) under
-    # their own tmp_path. os.walk(_REPO_ROOT) only reaches those if pytest's
-    # tmp root happens to nest *inside* the checkout -- normally false (the
-    # runner's tmp lives beside the checkout, e.g. `_work/_temp` vs.
-    # `_work/<repo>/<repo>`, see feedback_path_guard_tests_vs_runner_workspace)
-    # but asserted here, not assumed, since a runner-config change would
-    # otherwise make `wired` nondeterministically True with no writer to
-    # match -- a CI-only false failure of this guard.
+    # Defensive tripwire, not a live concern today: several sibling tests in
+    # this file write deliberately-wired fixture files
+    # (ScanServices(score_and_persist_job=...), etc.) under their own
+    # tmp_path. Now that the scan set is git's own view of the repo
+    # (_scan_scope_files -> git ls-files, cwd=_REPO_ROOT), a path outside
+    # the repo's working tree -- which pytest's tmp_path always is -- cannot
+    # appear in it by construction; `git ls-files` has no way to report a
+    # file it was never asked about. Kept as a regression guard in case a
+    # future change ever swaps the scan source back to a plain filesystem
+    # walk (which DOES reach outside paths if _REPO_ROOT nests inside the
+    # runner's tmp tree -- see feedback_path_guard_tests_vs_runner_workspace).
     pytest_tmp_root = tmp_path_factory.getbasetemp()
     leaked = [p for p in scan_files if pytest_tmp_root in p.resolve().parents]
     assert not leaked, (
         f"scan swept up pytest's own tmp_path tree ({pytest_tmp_root}) -- "
-        f"{leaked[:3]} -- _REPO_ROOT is no longer isolated from the runner's "
-        f"temp dir, so sibling tests' deliberately-wired fixture files can "
-        f"flip `wired` for the wrong reason; fix the scan root before "
-        f"trusting this assertion's verdict"
+        f"{leaked[:3]} -- the scan source is no longer isolated from the "
+        f"runner's temp dir, so sibling tests' deliberately-wired fixture "
+        f"files can flip `wired` for the wrong reason; fix the scan source "
+        f"before trusting this assertion's verdict"
     )
 
     wiring_hits = scan_files_for_wiring(scan_files, entrypoint_names)
@@ -621,24 +727,75 @@ def test_detector_skips_docstrings_even_when_they_mimic_a_bare_writer_statement(
 def test_guard_scan_set_derived_not_hand_pinned_and_covers_scripts():
     """Replaces a former hand-maintained WIRING_ROOTS allowlist (LOW
     finding, PR #238 review) that pinned {db,host,web,worker} and silently
-    missed scripts/, analyses/, and any future top-level package. The scan
-    set is now cross-checked against an independent git-based oracle
-    (mirrors scripts/leak_guard.py's tracked + untracked-not-ignored idiom)
-    so the os.walk traversal and git's own view of the repo can never
-    silently diverge."""
+    missed scripts/, analyses/, and any future top-level package. The
+    actual scan set (_scan_scope_files) is git's own view of the repo,
+    cross-checked against the plain os.walk traversal as a SUPERSET, not an
+    exact-equality pin (PR #238 re-review, LOW finding: os.walk does not
+    honor .gitignore, so a gitignored *.py like a `uv build` dist/ artifact
+    would break an exact-equality assertion for an unrelated reason -- see
+    test_gitignored_py_excluded_from_scan_set_but_walk_still_reaches_it)."""
+    oracle = {p.relative_to(_REPO_ROOT).as_posix() for p in _scan_scope_files()}
     walked = {p.relative_to(_REPO_ROOT).as_posix() for p in _repo_python_files_outside_engine()}
-    oracle = _tracked_python_files_outside_engine_and_tests()
-    assert walked, "os.walk-derived scan set resolved empty -- traversal is broken"
-    assert not any(p.startswith("jobcannon/engine/") for p in walked)
-    assert not any(p.startswith("tests/") for p in walked)
-    assert walked == oracle, (
-        f"os.walk scan set disagrees with git's view of the repo: "
-        f"walked-only={sorted(walked - oracle)} git-only={sorted(oracle - walked)}"
+    assert oracle, "git-oracle scan set resolved empty -- git ls-files is broken"
+    assert walked, "os.walk-derived cross-check resolved empty -- traversal is broken"
+    assert not any(p.startswith("jobcannon/engine/") for p in oracle)
+    assert not any(p.startswith("tests/") for p in oracle)
+    assert oracle <= walked, (
+        f"the actual (git-oracle) scan set has entries the os.walk "
+        f"cross-check never reached: {sorted(oracle - walked)} -- one of "
+        f"the two enumeration approaches has a bug"
     )
-    assert any(p.startswith("scripts/") for p in walked), (
+    assert any(p.startswith("scripts/") for p in oracle), (
         "scripts/ is a real scan-entrypoint location (scripts/run_scan_once.py) "
         "and must be in-scope without naming that file specifically"
     )
+
+
+def test_gitignored_py_excluded_from_scan_set_but_walk_still_reaches_it(tmp_path):
+    """The actual scan set (the git oracle) must NOT include a gitignored
+    *.py outside a dot-dir -- e.g. a local `uv build`'s dist/*.py artifact,
+    which os.walk's dir-name-based pruning has no way to exclude (PR #238
+    re-review, LOW finding). Synthetic repo, never the real one; mutates
+    the module-global _REPO_ROOT for the duration of this test only."""
+    global _REPO_ROOT
+    repo = tmp_path / "synthrepo"
+    (repo / "jobcannon" / "engine").mkdir(parents=True)
+    (repo / "tests").mkdir()
+    (repo / "scripts").mkdir()
+    (repo / "dist").mkdir()
+    (repo / ".gitignore").write_text("dist/\n__pycache__/\n", encoding="utf-8")
+    (repo / "scripts" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "jobcannon" / "engine" / "e.py").write_text("y = 1\n", encoding="utf-8")
+    (repo / "tests" / "t.py").write_text("z = 1\n", encoding="utf-8")
+    for cmd in (
+        ["git", "init", "-q"],
+        ["git", "add", "-A"],
+        ["git", "-c", "user.email=a@b.c", "-c", "user.name=t", "commit", "-qm", "i"],
+    ):
+        subprocess.run(cmd, cwd=repo, check=True, capture_output=True)
+
+    orig_root = _REPO_ROOT
+    _REPO_ROOT = repo
+    try:
+        scan_files = {p.relative_to(repo).as_posix() for p in _scan_scope_files()}
+        assert scan_files == {"scripts/a.py"}, f"control failed: {scan_files}"
+
+        # A local `uv build` shape: a gitignored *.py lands outside any dot-dir.
+        (repo / "dist" / "generated.py").write_text("w = 1\n", encoding="utf-8")
+        scan_files_after = {p.relative_to(repo).as_posix() for p in _scan_scope_files()}
+        walked_after = {p.relative_to(repo).as_posix() for p in _repo_python_files_outside_engine()}
+        assert scan_files_after == {"scripts/a.py"}, (
+            f"gitignored dist/*.py leaked into the actual scan set: {scan_files_after} -- "
+            f"a local `uv build` would now make the CI guard scan a build artifact"
+        )
+        # The os.walk cross-check DOES see it -- expected, and must not
+        # itself raise: the superset assertion in
+        # test_guard_scan_set_derived_not_hand_pinned_and_covers_scripts is
+        # oracle <= walked, never walked == oracle, precisely so this stays green.
+        assert "dist/generated.py" in walked_after
+        assert scan_files_after <= walked_after
+    finally:
+        _REPO_ROOT = orig_root
 
 
 # ---- predicate unit tests -------------------------------------------------
@@ -713,8 +870,111 @@ def test_writer_classifier_rejects_self_assign_noop():
 
 
 def test_writer_classifier_rejects_non_update_insert_statement():
-    """The ^(update|insert) anchor: a SET-shaped phrase inside a statement
+    """The statement-shape anchor: a SET-shaped phrase inside a statement
     that isn't an UPDATE/INSERT this detector models must not count."""
     assert not _sql_writes_jd_adjudicated_version_non_null(
         "CREATE TRIGGER t AFTER UPDATE ON postings BEGIN SET jd_adjudicated_version = 1; END"
+    )
+
+
+def test_writer_classifier_anchor_preserves_update_only_and_schema_qualified():
+    """The tightened SQL-shape anchor (PR #238 re-review, LOW finding) must
+    still accept the two legitimate variants it was designed to keep."""
+    assert _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE ONLY postings SET jd_adjudicated_version = %(v)s WHERE dedup_key = %(k)s"
+    )
+    assert _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE public.postings SET jd_adjudicated_version = %(v)s WHERE dedup_key = %(k)s"
+    )
+
+
+def test_writer_classifier_rejects_prose_that_reaches_a_plausible_value():
+    """Refuter probe (PR #238 re-review, LOW finding): plain-English prose
+    starting with "UPDATE"/"INSERT" and ending at a value-shaped token used
+    to classify as a writer under the old keyword-only anchor. The
+    SQL-shape anchor now rejects it directly -- these are raw strings, not
+    embedded in a docstring, so the AST docstring-node skip (a separate,
+    independent layer) is not what is being tested here."""
+    assert not _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE flow: we SET jd_adjudicated_version = 1, then commit"
+    )
+    assert not _sql_writes_jd_adjudicated_version_non_null(
+        "INSERT path: SET jd_adjudicated_version = %(v)s, and log it"
+    )
+
+
+def test_writer_classifier_rejects_migration_description_kwarg_prose(tmp_path):
+    """Real-world shape of the prose vector: a non-docstring string
+    constant such as a Migration's `description=` kwarg (m0009's own
+    docstring already names the column this way). Exercises the full
+    scan_for_writer AST path, not just the SQL-string classifier, to prove
+    the anchor -- not the docstring skip -- is what closes this."""
+    (tmp_path / "fake_migration.py").write_text(
+        "class Migration:\n"
+        "    def __init__(self, description):\n"
+        "        self.description = description\n"
+        "\n"
+        'M = Migration(description="UPDATE flow: we SET jd_adjudicated_version = 1, '
+        'then commit")\n',
+        encoding="utf-8",
+    )
+    offenders = scan_for_writer(tmp_path)
+    assert not offenders, f"prose in a non-docstring kwarg constant false-fired: {offenders}"
+
+
+def test_writer_classifier_rejects_nested_case_in_when_condition():
+    """Refuter probe (PR #238 re-review, LOW finding): a CASE nested inside
+    an outer CASE's WHEN condition must not be parsed as if the inner
+    THEN were the outer's value -- see _segment_sets_non_null's nested-case
+    refusal."""
+    assert not _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_adjudicated_version = "
+        "CASE WHEN (CASE WHEN jd_full IS NULL THEN 1 ELSE 0 END) = 1 "
+        "THEN NULL ELSE jd_adjudicated_version END WHERE dedup_key = %(k)s"
+    )
+
+
+def test_writer_classifier_accepts_plain_case_when_not_nested():
+    """Control for the nested-CASE refusal above: an ordinary, non-nested
+    CASE WHEN ... THEN <value> ELSE <self> END must still classify True."""
+    assert _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_adjudicated_version = "
+        "CASE WHEN x THEN %(v)s ELSE jd_adjudicated_version END "
+        "WHERE dedup_key = %(k)s"
+    )
+
+
+def test_writer_classifier_accepts_coalesce_wrapping_positive_evidence():
+    """PR #238 re-review, LOW finding: this repo's own idiom for exactly
+    this kind of write is COALESCE(<new value>, <self>) (verbatim shape at
+    jobcannon/db/_companies.py:143 and :150) -- the most likely future
+    adjudicator statement would otherwise be a spurious CI red."""
+    assert _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_adjudicated_version = "
+        "COALESCE(%(v)s, jd_adjudicated_version) WHERE dedup_key = %(k)s"
+    )
+    assert _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_adjudicated_version = COALESCE(%(v)s, 0) WHERE dedup_key = %(k)s"
+    )
+    assert _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_adjudicated_version = COALESCE(%(v)s) WHERE dedup_key = %(k)s"
+    )
+
+
+def test_writer_classifier_rejects_coalesce_self_reference_first_arg():
+    """The COALESCE widening must require the POSITIVE shape as the FIRST
+    argument -- a self-reference first arg must stay rejected regardless of
+    what follows."""
+    assert not _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_adjudicated_version = "
+        "COALESCE(jd_adjudicated_version, 0) WHERE dedup_key = %(k)s"
+    )
+
+
+def test_writer_classifier_rejects_coalesce_null_first_arg():
+    """A NULL first argument is not positive evidence even though a
+    self-reference sits in the second argument."""
+    assert not _sql_writes_jd_adjudicated_version_non_null(
+        "UPDATE postings SET jd_adjudicated_version = "
+        "COALESCE(NULL, jd_adjudicated_version) WHERE dedup_key = %(k)s"
     )
