@@ -115,6 +115,14 @@ jobs:
     # is still open.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64, jcpub]
+    # The fork-gated tests themselves have a 10s SIGKILL bound (see the
+    # test file), but that only covers fork()/join() -- it does not bound
+    # the astral.sh installer curl, `uv python install`, `uv sync`, or WSL
+    # startup ahead of it. Without a job-level cap, a stall in any of those
+    # would pend the required tests-passed aggregate for up to GitHub's
+    # 360-minute default. 10 minutes is generous headroom over the ~15-17s
+    # warm-cache runtime observed in practice.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - name: Run fork/atexit proof under WSL (real os.fork())

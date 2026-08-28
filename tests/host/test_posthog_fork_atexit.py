@@ -58,16 +58,21 @@ the `test` job itself. jobcannon#162 found WSL and Docker both absent from
 the runner box at the time (verified 2026-08-27: `wsl.exe --status`
 reported "not installed"), leaving no CI-leg path to real os.fork()
 coverage. jobcannon#248 closes that gap: the runner box has WSL2 (Ubuntu)
-now, and ci.yml's `fork-proof` job (self-hosted, `jcpub`+`light` labels)
-shells into it, pins Python 3.12 via uv to match the 3.12.x chain under
-proof (uv currently resolves 3.12.14; the source read cited above was
-against 3.12.11 specifically), and runs this whole file with no
-`JC_FORK_TESTS_UNAVAILABLE` opt-out -- both fork-gated tests below execute
-for real (PASS, not skip) on every CI run. (Open risk tracked in that job's
-own ci.yml comment, not repeated here: WSL distro registration is
-per-Windows-account, and the runner service's logon account may not have
-one -- the job's precondition check turns that into a clear failure rather
-than a cryptic one if so.) The `_require_fork_or_fail_loud` gate below (not a plain
+now, and ci.yml's `fork-proof` job (self-hosted, `jcpub` label -- the
+public runner pool has no `light`/`suite` split) shells into it, pins
+Python 3.12 via uv to match the 3.12.x chain under proof (uv currently
+resolves 3.12.14; the source read cited above was against 3.12.11
+specifically), and runs this whole file with no `JC_FORK_TESTS_UNAVAILABLE`
+opt-out -- both fork-gated tests below execute for real (PASS, not skip)
+on every CI run. (A runner-account risk was raised during review -- WSL
+distro registration is per-Windows-account, and the runner service logs
+on as NT AUTHORITY\\NETWORK SERVICE, not the account the job was first
+proven under -- and checked and resolved during that same review: PR
+#249's own CI run passed on jcpub-9800x3d-2 as NETWORK SERVICE, 11 tests
+including both fork-gated ones. See ci.yml's own comment on the
+`fork-proof` job for the full account-risk writeup; its precondition
+check is kept as a defensive measure in case that ever regresses.) The
+`_require_fork_or_fail_loud` gate below (not a plain
 skipif) is what made the earlier silent-skip failure structurally
 impossible to repeat unnoticed: CI would FAIL rather than silently re-skip
 if `fork-proof` regressed or its opt-out-free invocation were lost without
