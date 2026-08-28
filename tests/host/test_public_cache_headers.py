@@ -35,12 +35,47 @@ test would go green over a broken route without the status check.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from jobcannon.web import PUBLIC_PATHS
 from tests.host.conftest import create_throwaway_db, drop_throwaway_db, requires_postgres
 
 pytestmark = requires_postgres
+
+_DB_UNREACHABLE_RETRIES = 3
+_DB_UNREACHABLE_BACKOFF_S = 0.3
+
+
+def _get_tolerating_transient_db_unreachable(client, path):
+    """GET `path`, absorbing a transient `/healthz`-shaped 503 (issue #250:
+    flaked once on a self-hosted runner under concurrent load — the app
+    could not reach Postgres for an instant). This test asserts cache
+    headers, not DB liveness, so a live-probe hiccup is incidental to what
+    it verifies.
+
+    Scoped narrowly on purpose: only a response that matches the two
+    discriminating fields of healthz's declared `{"status": "unhealthy",
+    "db": "unreachable"}, 503` contract (503 + `db == "unreachable"`; see
+    jobcannon/web/__init__.py's `healthz()`) gets retried. Any other status,
+    or a 503 with a different body, returns immediately — a genuine
+    persistent outage still fails loudly, as does a real bug in another
+    route. /demo, /start, and /preview also touch Postgres directly but have
+    no such controlled-503 contract of their own, so this helper is applied
+    uniformly to the one shared `client.get(path)` call site below rather
+    than special-cased to `/healthz`, and simply never matches for the
+    other paths."""
+    resp = client.get(path)
+    for _ in range(_DB_UNREACHABLE_RETRIES):
+        if resp.status_code != 503 or not resp.is_json:
+            break
+        body = resp.get_json(silent=True) or {}
+        if body.get("db") != "unreachable":
+            break
+        time.sleep(_DB_UNREACHABLE_BACKOFF_S)
+        resp = client.get(path)
+    return resp
 
 
 @pytest.fixture()
@@ -76,7 +111,7 @@ def _vary_values(resp) -> set[str]:
 def test_public_path_carries_vary_cookie_and_private_cache_control(path, app):
     client = app.test_client()
 
-    resp = client.get(path)
+    resp = _get_tolerating_transient_db_unreachable(client, path)
 
     assert resp.status_code == 200, (path, resp.status_code, resp.data[:200])
 
