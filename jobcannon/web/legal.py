@@ -57,6 +57,18 @@ _LEGAL_DIR = pathlib.Path(__file__).parent / "legal"
 _MD_EXTENSIONS = ["tables", "sane_lists"]
 _H1_LINE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 
+# issue #253: both terms.md and privacy.md's H1 reads "Job Cannon — <Page
+# Name>" (ratified legal text — the on-page <h1> is meant to carry the brand
+# prefix and stays untouched by this constant, see `_render` below). Every
+# templated page's `{% block title %}` — legal_page.html included — appends
+# its own "— Job Cannon" suffix to build the browser-tab <title> (the same
+# contract feed.html, demo.html, error.html, etc. all follow: the `title`
+# value a route hands to a template is the page-specific fragment ONLY, and
+# the template supplies the brand). `_render` echoing the raw H1 verbatim as
+# `title` violated that contract for these two routes specifically, doubling
+# the brand into "Job Cannon — Terms of Service — Job Cannon".
+_BRAND_TITLE_PREFIX = "Job Cannon — "
+
 # issue #182 item 4, corrected by issue #205: `private`, not `public`.
 # /privacy and /terms are both in PUBLIC_PATHS, and clerk_auth's
 # before_request hook (jobcannon/web/__init__.py) unconditionally sets
@@ -218,11 +230,18 @@ def _wrap_tables_for_scroll(html: str) -> str:
 
 
 def _render(filename: str) -> tuple[str, str]:
-    """Return (title, html) for one committed markdown file. `title` is the
-    document's own H1 text, used for the browser-tab <title> — the H1 that
-    actually appears on the page comes from `html` itself (markdown renders
-    the source '# ...' line as a real <h1>), so there is no second,
-    separately-authored heading to keep in sync with it.
+    """Return (title, html) for one committed markdown file. `title` is
+    derived from the document's own H1 text, used for the browser-tab
+    <title> — the H1 that actually appears on the page comes from `html`
+    itself (markdown renders the source '# ...' line as a real <h1>), so
+    there is no second, separately-authored heading to keep in sync with it.
+
+    issue #253: `title` strips a leading "Job Cannon — " brand prefix (see
+    `_BRAND_TITLE_PREFIX`) before returning — legal_page.html's `{% block
+    title %}` appends its own "— Job Cannon" suffix, so passing the raw H1
+    through doubled the brand in the rendered <title>. `html`'s <h1> is
+    unaffected: it renders straight from `raw` and keeps the brand prefix,
+    exactly as the ratified .md source has it.
 
     Calls the SAME `check_published_text` guard that
     `scripts/import_legal_text.py` runs before it ever writes the file and
@@ -245,6 +264,8 @@ def _render(filename: str) -> tuple[str, str]:
         raise RuntimeError(f"legal_guard rejected {filename} at boot: " + "; ".join(violations))
     match = _H1_LINE.search(raw)
     title = match.group(1) if match else filename
+    if title.startswith(_BRAND_TITLE_PREFIX):
+        title = title[len(_BRAND_TITLE_PREFIX) :]
     html = markdown.markdown(raw, extensions=_MD_EXTENSIONS)
     html = _wrap_tables_for_scroll(html)
     return title, html
