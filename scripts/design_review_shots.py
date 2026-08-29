@@ -35,7 +35,7 @@ SCHEMES = ("light", "dark")
 PORT = 5017
 
 
-def _boot_app(admin_dsn: str) -> tuple[object, str]:
+def _boot_app(admin_dsn: str):
     from jobcannon.db import pool as pool_mod
     from jobcannon.db.migrate import run_migrations
     from jobcannon.web import create_app
