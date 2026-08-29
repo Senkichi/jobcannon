@@ -1,0 +1,48 @@
+/* GENERATED FILE — DO NOT EDIT.
+   Source: jobcannon/web/design/tokens.json (vendored from swole @ 163da4fd9c1d42dc57fe125e0165da9cec680ca8)
+   Generator: scripts/gen_design_css.py — regenerate with: python scripts/gen_design_css.py
+   Drift-guarded by tests/test_design_tokens.py.
+   Light = Paper on :root; Dark = Lamplit Paper via prefers-color-scheme. */
+
+:root {
+  --lj-page: #FAF6EF;
+  --lj-card: #FFFDF8;
+  --lj-card2: #FBF6EC;
+  --lj-ink: #1E1611;
+  --lj-green: #2F9E44;
+  --lj-green-text: #1F7A40;
+  --lj-gray: #7A7A85;
+  --lj-gray-text: #70707A;
+  --lj-equipment: #7A7A85;
+  --lj-rule: #EAE1D2;
+  --lj-rule-2: #DED3C0;
+  --lj-hair: #1E161124;
+  --lj-hair-soft: rgba(var(--lj-shade), .08);
+  --lj-tan: #C9B79A;
+  --lj-serif: 'Fraunces Variable', 'Fraunces', Georgia, 'Times New Roman', serif;
+  --lj-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --lj-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --lj-sheen: rgba(255, 255, 255, .7);
+  --lj-shade: 30, 22, 17;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --lj-page: #1E1611;
+    --lj-card: #2A2018;
+    --lj-card2: #33271C;
+    --lj-ink: #EDE5D8;
+    --lj-green: #3DBD55;
+    --lj-green-text: #3DBD55;
+    --lj-gray: #A89A88;
+    --lj-gray-text: #A89A88;
+    --lj-equipment: #9C8F80;
+    --lj-rule: #3A2D20;
+    --lj-rule-2: #453626;
+    --lj-hair: #EDE5D824;
+    --lj-hair-soft: rgba(237, 229, 216, .09);
+    --lj-tan: #6E5A3E;
+    --lj-sheen: rgba(255, 244, 228, .06);
+    --lj-shade: 12, 8, 4;
+  }
+}
