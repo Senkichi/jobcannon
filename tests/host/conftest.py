@@ -1,13 +1,16 @@
 """Postgres test fixtures for the host layer.
 
 Strategy: DSN-driven. Integration tests connect through POSTGRES_ADMIN_DSN,
-whatever Postgres instance that points at — on CI (issue #212, following
-#160's move off GitHub-hosted runners) that's no longer a `services:`
-container: the self-hosted `jcpub` Windows runner machine owns its own PG18
-+ pgvector instance directly, and each runner's own `.env` supplies
-POSTGRES_ADMIN_DSN to every step (`.github/workflows/ci.yml`). Local
-development points the same variable at any local Postgres the same way.
-Each pytest session (per xdist worker) creates a throwaway database, runs
+whatever Postgres instance that points at — on CI that's a `services:`
+container (`.github/workflows/ci.yml`'s `test` job, `pgvector/pgvector:pg17`,
+matching render.yaml's production `postgresMajorVersion`), which the job
+wires POSTGRES_ADMIN_DSN to at the job level since the container is that
+job's own ephemeral Postgres and there's no persistent runner-level value it
+could shadow. Local development points the same variable at any local
+Postgres the same way. (Historical note, #212/#160: for a stretch this repo
+ran CI on self-hosted Windows runners that owned their own PG18 + pgvector
+instance directly, with no service container; that setup is retired.) Each
+pytest session (per xdist worker) creates a throwaway database, runs
 migrations once, and drops it at exit. Per-test isolation is
 transaction-rollback, not per-test databases. With POSTGRES_ADMIN_DSN unset,
 every test in tests/host/ SKIPS.

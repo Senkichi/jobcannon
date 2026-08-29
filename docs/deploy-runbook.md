@@ -446,8 +446,8 @@ works before pushing if you saw that warning.
 That view can still go stale between the moment a version is minted and
 the moment the PR merges (another PR opens or lands in between) — the
 `Migration collision guard` CI check (`scripts/
-check_migration_collisions.py`, `.github/workflows/ci.yml`, self-hosted
-`jcpub` runners) re-verifies on every PR event against origin/main's
+check_migration_collisions.py`, `.github/workflows/ci.yml`, GitHub-hosted
+`ubuntu-latest` runners) re-verifies on every PR event against origin/main's
 CURRENT head and every OTHER currently-open PR, and fails naming the
 colliding PR number(s) if the race actually lands. Never hand-pick a
 version to work around either check — renumber with the script instead.

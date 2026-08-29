@@ -45,8 +45,8 @@ import sys
 
 # psycopg3's async path cannot run on Windows' default ProactorEventLoop —
 # select the selector policy BEFORE any event loop is created. Harmless on
-# Linux (Render); required on the self-hosted Windows CI runner, where the
-# integration test imports this module.
+# Linux (Render, and CI as of the move to ubuntu-latest); required on
+# Windows dev machines, where the integration test also imports this module.
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 

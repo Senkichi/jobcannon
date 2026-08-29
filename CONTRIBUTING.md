@@ -32,11 +32,14 @@ push any new commit (an empty one is fine — `git commit --allow-empty -m
 "chore: retrigger CLA check"`) to force a fresh run, which always
 re-evaluates against your now-recorded signature.
 
-Note for external (forked) contributions: this project's CI runs on
-self-hosted hardware, so `ci.yml` only runs the test job for same-repo
-pull requests (see its own comment for why). A maintainer re-pushes your
-commits to a branch in this repository and opens the PR from there — the
-CLA flow above works the same way once that's done.
+Note for external (forked) contributions: just open your pull request as
+usual — `ci.yml` runs on GitHub-hosted runners now and no longer refuses
+fork PRs. The repo requires a maintainer to approve a first-time outside
+contributor's workflow runs (GitHub Actions' "require approval for all
+outside collaborators" setting); until that happens, the `Tests passed`
+check sits pending rather than failing, which still blocks merge but needs
+no action from you — a maintainer approves the run from the PR's Checks
+tab.
 
 Separately, add a line to `CONTRIBUTORS.md` in the form below, in the same
 PR as (or before) your first code contribution:

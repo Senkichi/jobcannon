@@ -13,11 +13,14 @@ check within the same window and still both merge back to back) --
 `jobcannon/db/migrations/__init__.py`'s duplicate-version import check is
 the final backstop.
 
-Runs on the self-hosted `jcpub` Windows runners only (.github/workflows/
-ci.yml), gated to same-repo PRs the same way the `test` job is. Talks to
-the GitHub REST API directly via `urllib` + `GITHUB_TOKEN` -- deliberately
-NOT the `gh` CLI, since nothing on this runner's PATH is assumed beyond
-what `actions/checkout` + `astral-sh/setup-uv` provide.
+Runs on GitHub-hosted `ubuntu-latest` runners (.github/workflows/ci.yml),
+on every pull_request event including from forks -- it is read-only and
+GITHUB_TOKEN is hard-restricted to read-only on a fork-triggered
+pull_request run regardless of repo permissions, so there is nothing here
+a fork PR gains by running it. Talks to the GitHub REST API directly via
+`urllib` + `GITHUB_TOKEN` -- deliberately NOT the `gh` CLI, since nothing
+on this runner's PATH is assumed beyond what `actions/checkout` +
+`astral-sh/setup-uv` provide.
 
 Decision logic (parse_versions / added_versions / find_collisions /
 format_collision_message) is pure and unit-tested with injected inputs, no
