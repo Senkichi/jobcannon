@@ -31,19 +31,20 @@
    identically. This marker branch emits no event of any kind — per-row
    posting_impression logging lives in the authed route in
    jobcannon/web/pages.py, never in this template. #}
-<article class="border border-neutral-800 rounded-lg p-4 space-y-2" data-posting-row>
-  <div class="flex items-baseline justify-between gap-4">
-    <h2 class="text-lg font-medium text-neutral-100">{{ entry.row.title }}</h2>
+<article class="jc-row" data-posting-row>
+  <div class="jc-stack">
+  <div class="jc-cluster">
+    <h2 class="jc-row-title">{{ entry.row.title }}</h2>
     {% if entry.row.workplace_type %}
-      <span class="text-xs uppercase tracking-wide text-neutral-500">{{ entry.row.workplace_type }}</span>
+      <span class="jc-note">{{ entry.row.workplace_type }}</span>
     {% endif %}
   </div>
-  <p class="text-sm text-neutral-400">
+  <p class="jc-row-sub">
     {{ entry.row.company }}
     {%- if entry.row.location %} &middot; {{ entry.row.location }}{% endif %}
   </p>
   {% if entry.row.salary_min or entry.row.salary_max %}
-    <p class="text-sm text-neutral-400">
+    <p class="jc-row-sub">
       {%- if entry.row.salary_currency and entry.row.salary_currency != "UNKNOWN" %}{{ entry.row.salary_currency }}{% endif %}
       {%- if entry.row.salary_min %} {{ entry.row.salary_min }}{% endif %}
       {%- if entry.row.salary_max %}&ndash;{{ entry.row.salary_max }}{% endif %}
@@ -51,22 +52,25 @@
     </p>
   {% endif %}
   {% if entry.row.structural_axes is none %}
-    <p class="text-xs text-neutral-500 italic" data-signals-pending>signals still computing for this posting</p>
+    <p class="jc-note" data-signals-pending>signals still computing for this posting</p>
   {% endif %}
   {% if entry.chips %}
-    <ul class="flex flex-wrap gap-2 text-xs text-neutral-300" data-why-chips>
-      {% for chip in entry.chips %}
-        <li class="bg-neutral-900 border border-neutral-700 rounded-full px-2 py-1">{{ chip }}</li>
-      {% endfor %}
-    </ul>
+    <div class="jc-why">
+      <span class="lj-label">Why this rank</span>
+      <ul class="jc-chips" data-why-chips>
+        {% for chip in entry.chips %}
+          <li class="jc-chip">{{ chip }}</li>
+        {% endfor %}
+      </ul>
+    </div>
   {% endif %}
   {% if show_actions %}
-    <div class="flex gap-3 text-xs pt-1" data-posting-actions>
+    <div class="jc-actions" data-posting-actions>
       <button type="button"
               hx-post="{{ url_for('actions.save', posting_id=entry.row.id) }}"
               hx-target="closest [data-posting-row]"
               hx-swap="outerHTML"
-              class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"
+              class="jc-btn {{ touch_target() }}"
               data-action-save>
         {{ "Saved" if entry.saved else "Save" }}
       </button>
@@ -74,7 +78,7 @@
               hx-post="{{ url_for('actions.dismiss', posting_id=entry.row.id) }}"
               hx-target="closest [data-posting-row]"
               hx-swap="outerHTML"
-              class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"
+              class="jc-btn {{ touch_target() }}"
               data-action-dismiss>
         Dismiss
       </button>
@@ -87,12 +91,15 @@
            undo_apply -> _fetch_entry -> build_entry means this branch simply
            stops being taken once the swap lands (entry.applied is False
            again), returning the row to its normal Apply control below. #}
-        <span class="text-neutral-400" data-apply-applied>Applied</span>
+        <span class="jc-cluster" data-apply-applied>
+          <svg class="jc-check" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8.5 6.2 12.2 13.5 4.5"/></svg>
+          <span class="jc-note">Applied</span>
+        </span>
         <button type="button"
                 hx-post="{{ url_for('actions.undo_apply', posting_id=entry.row.id) }}"
                 hx-target="closest [data-posting-row]"
                 hx-swap="outerHTML"
-                class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"
+                class="jc-btn {{ touch_target() }}"
                 data-action-undo-apply>
           Undo
         </button>
@@ -157,12 +164,12 @@
            target="_blank"
            rel="noopener noreferrer"
            hx-on:click="var row = this.closest('[data-posting-row]'); if (row.dataset.applyPending === '1') { return; } row.dataset.applyPending = '1'; var parent = row.parentNode; fetch('{{ url_for('actions.apply', posting_id=entry.row.id) }}', {method: 'POST', keepalive: true, headers: {'X-CSRFToken': document.querySelector('meta[name=csrf-token]').content}}).then(function(resp){ if (!resp.ok) { if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — refresh the page and try again.'); } return; } return resp.text().then(function(html){ var tmpl = document.createElement('template'); tmpl.innerHTML = html.trim(); var newRow = tmpl.content.firstElementChild; if (newRow && parent && row.parentNode === parent) { parent.replaceChild(newRow, row); if (window.htmx) { window.htmx.process(newRow); } } else if (window.jcSurfaceError) { window.jcSurfaceError('Apply recorded, but the row did not update — refresh'); } }); }).catch(function(){ if (window.jcSurfaceError) { window.jcSurfaceError('Apply could not be recorded — check your connection and try again.'); } }).finally(function(){ row.dataset.applyPending = ''; })"
-           class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"
+           class="jc-btn {{ touch_target() }}"
            data-action-apply>
           Apply
         </a>
       {% else %}
-        <span class="text-neutral-600" data-apply-degraded aria-disabled="true">
+        <span class="jc-error-note" data-apply-degraded aria-disabled="true">
           No application link available
         </span>
       {% endif %}
@@ -182,12 +189,13 @@
        show_actions=True, and every anonymous surface (row, /preview,
        /demo) shares one gate instead of each re-deriving its own
        fallback. #}
-    <div class="flex gap-3 text-xs pt-1" data-posting-signup>
+    <div class="jc-note" data-posting-signup>
       <a href="{{ signup_cta_url }}"
-         class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"
+         class="jc-btn jc-btn--primary {{ touch_target() }}"
          data-action-signup>
         Sign up to apply
       </a>
     </div>
   {% endif %}
+  </div>
 </article>
