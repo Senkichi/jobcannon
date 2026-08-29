@@ -30,32 +30,32 @@
        (_consent_panel.html / account_delete.html / onboarding_picker.html). #}
     <form method="post" action="{{ clear_selection_url }}"
           hx-post="{{ clear_selection_url }}" hx-target="#feed-content" hx-swap="outerHTML"
-          class="mb-3 flex items-center gap-2 flex-wrap text-sm text-neutral-400"
+          class="jc-note"
           data-saved-selection-indicator>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <span>Filtering to your saved picks ({{ saved_selection.title_label }} &middot; {{ saved_selection.company_label }})</span>
-      <button type="submit" class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"
+      <button type="submit" class="jc-btn {{ touch_target() }}"
               data-clear-selection>Clear</button>
     </form>
   {% endif %}
-  <form method="get" class="mb-6 grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm" data-feed-filters>
+  <form method="get" class="jc-filterbar" data-feed-filters>
     <input type="text" name="title" value="{{ filters.title }}" placeholder="Title contains"
-           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 {{ touch_target() }}">
+           class="jc-input {{ touch_target() }}">
     <input type="text" name="company" value="{{ filters.company }}" placeholder="Company"
-           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 {{ touch_target() }}">
+           class="jc-input {{ touch_target() }}">
     <input type="text" name="location" value="{{ filters.location }}" placeholder="Location contains"
-           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 {{ touch_target() }}">
-    <select name="workplace_type" class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 {{ touch_target() }}">
+           class="jc-input {{ touch_target() }}">
+    <select name="workplace_type" class="jc-input {{ touch_target() }}">
       {% for wt in workplace_types %}
         <option value="{{ wt }}" {% if wt == filters.workplace_type %}selected{% endif %}>{{ wt }}</option>
       {% endfor %}
     </select>
-    <select name="sort" class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100 {{ touch_target() }}">
+    <select name="sort" class="jc-input {{ touch_target() }}">
       {% for token in sort_tokens %}
         <option value="{{ token }}" {% if token == filters.sort %}selected{% endif %}>{{ token }}</option>
       {% endfor %}
     </select>
-    <button type="submit" class="text-sm underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-2">Apply filters</button>
+    <button type="submit" class="jc-btn {{ touch_target() }}">Apply filters</button>
   </form>
 {% endif %}
 {% if entries %}
@@ -70,9 +70,9 @@
      requires a non-empty saved selection by definition), so the indicator
      form above is always on screen too -- this text points at it rather
      than duplicating a second Clear control. #}
-  <p class="text-neutral-400" data-feed-empty data-feed-empty-collision>
+  <p class="jc-empty" data-feed-empty data-feed-empty-collision>
     Your search didn&#39;t match anything within your saved picks ({{ saved_selection.title_label }} &middot; {{ saved_selection.company_label }}). Clear your saved selection above to search your whole feed.
   </p>
 {% else %}
-  <p class="text-neutral-400" data-feed-empty>No postings match your selections yet.</p>
+  <p class="jc-empty" data-feed-empty>No postings match your selections yet.</p>
 {% endif %}

@@ -8,10 +8,11 @@
      "profiles and the ranked feed arrive in the next release", which was
      already false the moment this route started writing profiles. Mirrors
      jobcannon/web/onboarding.py's /preview `data-no-selections` CTA. #}
-  <h1 class="text-2xl font-semibold mb-3">Your feed isn't wired up yet</h1>
-  <p class="text-neutral-400" data-no-selections>
+  <h1 class="jc-title">Your feed isn't wired up yet</h1>
+  <svg class="jc-accent-rule" viewBox="0 0 188 5" preserveAspectRatio="none" aria-hidden="true"><line x1="3" y1="2.5" x2="185" y2="2.5"/></svg>
+  <p class="jc-lede" data-no-selections>
     Job Cannon builds your feed from a quick picker of target titles, seniority, and preferences.
-    <a href="/start" class="underline {{ touch_target() }} inline-flex items-center px-1">Set up your feed</a> to get started.
+    <a href="/start" class="jc-link {{ touch_target() }}">Set up your feed</a> to get started.
   </p>
 {% elif stats.postings == 0 %}
   {% include "_corpus_empty.html" %}
@@ -21,8 +22,9 @@
      instead of always being None: the real, server-filtered feed list,
      replacing the placeholder "live corpus" copy this branch rendered
      before any authed-user profile writer existed. #}
-  <h1 class="text-2xl font-semibold mb-3">Your feed</h1>
-  <p class="text-sm text-neutral-500 mb-4" data-ordering-label>
+  <h1 class="jc-title">Your feed</h1>
+  <svg class="jc-accent-rule" viewBox="0 0 188 5" preserveAspectRatio="none" aria-hidden="true"><line x1="3" y1="2.5" x2="185" y2="2.5"/></svg>
+  <p class="lj-label" data-ordering-label>
     {% if ordering.personalized %}
       Ranked by {{ ordering.ranker_version }}.
     {% else %}

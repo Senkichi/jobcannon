@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Preview — Job Cannon{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold mb-3">Your preview feed</h1>
+<h1 class="jc-title">Your preview feed</h1>
+<svg class="jc-accent-rule" viewBox="0 0 188 5" preserveAspectRatio="none" aria-hidden="true"><line x1="3" y1="2.5" x2="185" y2="2.5"/></svg>
 
 {% if signup_cta_url %}
   {# Acquisition CTA (issue #145, extended by #174): /preview is the
@@ -16,20 +17,20 @@
      line already existed here from #145 (merged after this branch was
      cut), so #174 extends it with the fallback rather than adding a
      second, duplicate paragraph. #}
-  <p class="text-sm text-neutral-400 mb-4" data-signup-cta>
-    <a href="{{ signup_cta_url }}" class="underline text-neutral-100 {{ touch_target() }} inline-flex items-center px-1">Sign up to keep this feed</a>
+  <p class="jc-cta" data-signup-cta>
+    <a href="{{ signup_cta_url }}" class="jc-link {{ touch_target() }}">Sign up to keep this feed</a>
     updated as new postings come in.
   </p>
 {% endif %}
 
 {% if not has_selections %}
-  <p class="text-neutral-400 mb-4" data-no-selections>
+  <p class="jc-lede" data-no-selections>
     You haven't completed the picker yet, so this is the unfiltered live feed.
-    <a href="/start" class="underline {{ touch_target() }} inline-flex items-center px-1">Tell us what you're looking for</a> to narrow it down.
+    <a href="/start" class="jc-link {{ touch_target() }}">Tell us what you're looking for</a> to narrow it down.
   </p>
 {% endif %}
 
-<p class="text-sm text-neutral-500 mb-4" data-ordering-label>
+<p class="lj-label" data-ordering-label>
   {% if ordering.personalized %}
     Ranked by {{ ordering.ranker_version }}.
   {% else %}
@@ -37,10 +38,10 @@
   {% endif %}
 </p>
 
-<form method="get" action="/preview" class="mb-6 flex gap-2">
+<form method="get" action="/preview" class="jc-filterbar">
   <input type="text" name="location" value="{{ location_contains }}" placeholder="Filter by location"
-         class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-sm text-neutral-100 {{ touch_target() }}">
-  <button type="submit" class="text-sm underline {{ touch_target() }} inline-flex items-center px-2">Filter</button>
+         class="jc-input {{ touch_target() }}">
+  <button type="submit" class="jc-btn {{ touch_target() }}">Filter</button>
 </form>
 
 {% include "_feed_list.html" %}
