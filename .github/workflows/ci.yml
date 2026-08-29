@@ -28,6 +28,7 @@ jobs:
     # See the `tests-passed` job's own comment for the fork-PR flow this
     # repo uses instead, and the PR body for the full rationale.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         # pg17, not pg18: render.yaml pins `postgresMajorVersion: "17"` for
@@ -39,11 +40,12 @@ jobs:
         # Nothing in this repo requires PG18 specifically: no migration uses
         # PG18-only syntax (the newest feature in play is `DROP DATABASE ...
         # WITH (FORCE)`, PG13+; pgvector's HNSW index needs pgvector>=0.5,
-        # also available since PG13). Tag left unpinned on pgvector's patch
-        # version (floating, matching the pre-#160 setup's own style) --
-        # confirmed to exist on Docker Hub (pgvector/pgvector:pg17) alongside
-        # dated per-version tags like 0.8.6-pg17.
-        image: pgvector/pgvector:pg17
+        # also available since PG13). Pinned by digest (review advisory):
+        # a floating `pg17` tag lets a re-tagged upstream image change what
+        # CI runs against with no diff here; the digest freezes the exact
+        # image (pgvector 0.8.5 on pg17 at pin time). Bump deliberately by
+        # updating the digest.
+        image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
