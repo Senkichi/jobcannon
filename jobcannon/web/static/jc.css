@@ -142,6 +142,9 @@
 .jc-title--roomy { margin-bottom: 24px; }
 
 .jc-lede { font-size: 15px; color: var(--lj-gray-text); max-width: 62ch; margin-bottom: 10px; }
+/* Inline emphasis inside body text (e.g. stat numerals in demo.html's lede)
+   lifts to full ink for contrast against gray-text — no new class, ink only. */
+.jc-lede strong { color: var(--lj-ink); }
 .jc-note { font-size: 13px; color: var(--lj-gray-text); }
 
 .jc-accent-rule { display: block; width: 188px; height: 5px; margin-top: 10px; }
@@ -290,6 +293,12 @@
   cursor: pointer;
   text-decoration: none;
 }
+/* Nested in-content links (jc-link) inside a CTA would sit ink-on-ink on the
+   CTA's dark ground; inherit the CTA's page foreground and keep an underline.
+   The :hover pair overrides jc-link:hover's ink underline color (higher
+   specificity) so the underline stays visible on hover. */
+.jc-cta a { color: inherit; text-decoration: underline; }
+.jc-cta a:hover { text-decoration-color: inherit; }
 
 .jc-check { display: inline-block; width: 16px; height: 16px; }
 .jc-check path {
