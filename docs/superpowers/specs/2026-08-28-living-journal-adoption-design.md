@@ -40,8 +40,8 @@ scripts/gen_design_css.py             # tokens.json → static/lj-tokens.css (de
 jobcannon/web/static/lj-tokens.css    # GENERATED — committed, drift-checked (test §7.1)
 jobcannon/web/static/jc.css           # hand-written: ported LJ primitives + jc-* components
 jobcannon/web/static/fonts/           # Fraunces + Inter variable woff2 + their OFL licenses
-jobcannon/web/static/htmx.min.js      # vendored htmx 2.0.4 (replaces the unpkg CDN tag)
-docs/design/README.md                 # jobcannon's identity rules + re-sync procedure (§7.6, §8)
+jobcannon/web/static/htmx.min.js      # vendored htmx 2.0.4 + its license file (replaces the unpkg CDN tag)
+docs/design/living-journal.md         # jobcannon's identity rules + re-sync procedure (§7.6, §8)
 ```
 
 - **Generator contract.** `gen_design_css.py` reads the vendored W3C tokens
@@ -53,8 +53,17 @@ docs/design/README.md                 # jobcannon's identity rules + re-sync pro
   `--lj-rule-2`, `--lj-hair`, `--lj-hair-soft`, `--lj-equipment`,
   `--lj-serif`, `--lj-sans`, `--lj-spring`, …). Output is deterministic
   (stable ordering, fixed formatting) so the drift test can assert
-  byte-equality. The mapping from token path to variable name is mechanical
-  (derived from the token tree), not a hand-maintained list.
+  byte-equality. The token-path → variable-name mapping is **explicit
+  config inside the generator** — it cannot be derived mechanically,
+  because base.css's names diverge from the token tree (`inkSecondary` →
+  `--lj-gray`, `hairline` → `--lj-hair`, …). The drift test makes that
+  config self-verifying: every token consumed, every canonical name
+  emitted. A few `--lj-*` variables exist only in base.css with no
+  tokens.json source (`--lj-shade`, `--lj-sheen`, `--lj-tan`); whichever
+  of these a ported primitive needs ride as a supplemental set in the same
+  generator config (values ported from base.css, provenance-commented) so
+  they land in the generated file and `jc.css` stays free of color
+  literals (§7.2). The vendored tokens.json stays a verbatim copy.
 - **Theme mechanism.** `lj-tokens.css` defines the light (Paper) values on
   `:root` and redefines the same set under
   `@media (prefers-color-scheme: dark)` (Lamplit Paper). Pure CSS: no
@@ -102,11 +111,14 @@ right edge is the data edge, left edge is the naming edge.
   (`--lj-rule`), not card-per-row.
 - **Stamp badges for provenance.** LJ's outlined small-caps pill with a
   leading dot, perfectly level: source marks (`LEVER · POSTED 2D`) in ink.
-  A **verified-fresh stamp renders in green** — honesty family.
-  Repost/dedup annotations stay ink.
-- **The "why" panel.** Rank-explanation marks are green (honesty family);
-  the panel is a card (`--lj-card`, hairline-bounded) with a small-caps
-  `WHY THIS RANK` header.
+  A **verified-fresh stamp renders in green** — honesty family — via
+  `--lj-green-text`: stamp text is small-caps *small* text, so the 4.5:1
+  tier applies, not the 3:1 base token. Repost/dedup annotations stay ink.
+- **The "why" chips.** Rank-explanation chips — the `data-why-chips` list
+  that `why_chips()` (jobcannon/web/why.py) feeds into `_posting_row.html`;
+  there is **no separate panel template** — are green (honesty family,
+  `--lj-green-text` at chip size), restyled as small-caps marks under a
+  small-caps `WHY THIS RANK` label.
 - **Actions in ink.** Save/dismiss are ink-ringed round buttons (ported
   `.lj-rbtn` geometry); Apply and other primary CTAs are the LJ primary
   CTA: ink-filled bar with paper text in light, cream-filled with ink text
@@ -154,7 +166,7 @@ finished ground):
 
 1. Token/asset layer + `base.html` — header, nav, footer, toast, fonts.
 2. Feed family: `_feed_page` / `_feed_content` / `_feed_list`,
-   `_posting_row`, the why panel, `_corpus_empty`, `feed.html`,
+   `_posting_row` (which contains the why chips), `_corpus_empty`, `feed.html`,
    `preview.html`, `demo.html`, `postings_history.html` +
    `_postings_history_list.html`.
 3. Onboarding picker: `onboarding_picker.html`, `_picker_options`,
@@ -209,7 +221,9 @@ Structural guards, all pytest unless noted:
    in both themes (via `prefers-color-scheme` emulation) produced as review
    artifacts and compared by eye against swole's `reference.html`. No
    pixel-diff CI (too flaky to earn its keep).
-6. **The un-testable rules get a home** — `docs/design/README.md` records
+6. **The un-testable rules get a home** — `docs/design/living-journal.md`
+   (plus a new row in the existing `docs/design/README.md` binding-docs
+   index, which already serves exactly this purpose) records
    the jobcannon-specific identity decisions (green = honesty signals only;
    errors are ink, never red; Fraunces numerals = rank + posting age; one
    accent rule per screen; no new `lj-` class names) plus vendoring
@@ -239,7 +253,7 @@ explicitly (§3); no separate contrast tooling is added.
   `static_url_path` and cache headers — note
   `tests/host/test_public_cache_headers.py` just gained assertions on main).
 - Acquire and subset the Fraunces + Inter variable woff2 files; record
-  exact versions and the subsetting command in `docs/design/README.md`.
+  exact versions and the subsetting command in `docs/design/living-journal.md`.
 - Sweep `tests/host/` (and any template-string unit tests) for Tailwind
   class assertions.
 - Decide the exact drawn-check/draw-on CSS technique (dash-offset on inline
