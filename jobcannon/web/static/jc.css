@@ -1,0 +1,369 @@
+/* jobcannon component layer — Living Journal identity.
+   Composes EXCLUSIVELY from the var(--lj-*) tokens in lj-tokens.css (generated;
+   see scripts/gen_design_css.py). No color literals anywhere in this file —
+   enforced by tests/test_design_css.py.
+   Naming: lj-* = ported design-system primitives (near-verbatim from the LJ
+   package's base.css); jc-* = jobcannon compositions. Never add a new lj-* name.
+   Spec-level constants used here (from tokens.json, reference-only):
+   radius.card 16 -> panels use the package's 19px card recipe; radius.tab 10px;
+   radius.button 14px; stroke.cardHairline 1.5px; motion.drawOn 600ms. */
+
+:root { color-scheme: light dark; }
+
+/* ---- ported primitives ---- */
+
+.lj-root {
+  background: var(--lj-page);
+  color: var(--lj-ink);
+  font-family: var(--lj-sans);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  margin: 0;
+}
+.lj-root *,
+.lj-root *::before,
+.lj-root *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+.lj-label {
+  font-family: var(--lj-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--lj-gray-text);
+}
+
+@keyframes lj-draw { to { stroke-dashoffset: 0; } }
+
+/* ---- global element rules ---- */
+
+.lj-root :focus-visible { outline: 2px solid var(--lj-ink); outline-offset: 2px; }
+.lj-root input[type="checkbox"] { accent-color: var(--lj-ink); cursor: pointer; }
+
+/* ---- chrome ---- */
+
+.jc-page { max-width: 48rem; margin-inline: auto; padding: 64px 24px; }
+
+.jc-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--lj-hair);
+}
+
+.jc-wordmark {
+  font-family: var(--lj-serif);
+  font-weight: 600;
+  font-size: 19px;
+  letter-spacing: -.01em;
+  color: var(--lj-ink);
+}
+
+.jc-nav { display: flex; align-items: center; gap: 16px; }
+.jc-nav--end { margin-left: auto; }
+
+.jc-nav-link {
+  display: inline-flex;
+  align-items: center;
+  padding-inline: 4px;
+  font-family: var(--lj-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--lj-gray-text);
+  text-decoration: none;
+  transition: color .18s ease;
+}
+.jc-nav-link:hover { color: var(--lj-ink); }
+
+.jc-footer {
+  border-top: 1px solid var(--lj-hair);
+  padding: 16px 24px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--lj-gray-text);
+}
+
+.jc-quiet-link {
+  display: inline-flex;
+  align-items: center;
+  padding-inline: 4px;
+  color: var(--lj-gray-text);
+  text-decoration: none;
+  transition: color .18s ease;
+}
+.jc-quiet-link:hover { color: var(--lj-ink); }
+
+.jc-link {
+  color: var(--lj-ink);
+  text-decoration: underline;
+  text-decoration-color: var(--lj-tan);
+  text-underline-offset: 3px;
+}
+.jc-link:hover { text-decoration-color: var(--lj-ink); }
+
+/* touch-target floor (emitted by touch_target(); tests pin these names) */
+.jc-touch { min-height: 44px; }
+.jc-touch-box { width: 44px; height: 44px; }
+
+.jc-toast {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  max-width: 28rem;
+  border: 1.5px solid var(--lj-ink);
+  border-radius: 10px;
+  background: var(--lj-card);
+  color: var(--lj-ink);
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 2px 2px 0 -1px rgba(var(--lj-shade), .16);
+}
+
+/* ---- type ---- */
+
+.jc-title {
+  font-family: var(--lj-serif);
+  font-weight: 600;
+  font-size: 26px;
+  line-height: 1.15;
+  letter-spacing: -.01em;
+  color: var(--lj-ink);
+  margin-bottom: 12px;
+}
+.jc-title--roomy { margin-bottom: 24px; }
+
+.jc-lede { font-size: 15px; color: var(--lj-gray-text); max-width: 62ch; margin-bottom: 10px; }
+.jc-note { font-size: 13px; color: var(--lj-gray-text); }
+
+.jc-accent-rule { display: block; width: 188px; height: 5px; margin-top: 10px; }
+.jc-accent-rule line {
+  stroke: var(--lj-green);
+  stroke-width: 4.5;
+  stroke-linecap: round;
+  stroke-dasharray: 190;
+  stroke-dashoffset: 190;
+  animation: lj-draw 1s .2s var(--lj-spring) forwards;
+}
+
+/* ---- layout helpers ---- */
+
+.jc-stack { display: grid; gap: 12px; }
+.jc-cluster { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+
+.jc-panel {
+  background: var(--lj-card);
+  border: 1.5px solid var(--lj-hair);
+  border-radius: 19px;
+  box-shadow: 0 1px 0 var(--lj-sheen) inset, 0 6px 16px -13px rgba(var(--lj-shade), .42);
+  padding: 18px 20px;
+}
+
+/* ---- the ledger (feed rows) ---- */
+
+.jc-ledger { list-style: none; margin-top: 16px; }
+.jc-ledger > * + * { border-top: 1px solid var(--lj-hair); }
+
+.jc-row { padding: 16px 0; }
+
+.jc-index {
+  font-family: var(--lj-serif);
+  font-weight: 600;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--lj-gray);
+}
+
+.jc-row-title {
+  font-family: var(--lj-serif);
+  font-weight: 600;
+  font-size: 17px;
+  line-height: 1.25;
+  color: var(--lj-ink);
+}
+
+.jc-row-sub { font-size: 13px; color: var(--lj-gray-text); }
+
+.jc-meta { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.jc-meta-num {
+  font-family: var(--lj-serif);
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--lj-ink);
+}
+.jc-meta-lab {
+  font-size: 10px;
+  color: var(--lj-gray-text);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+/* ---- stamps & honesty signals (the ONLY green consumers besides the accent rule) ---- */
+
+.jc-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1.5px solid var(--lj-ink);
+  border-radius: 6px;
+  padding: 4px 9px;
+  color: var(--lj-ink);
+  font-size: 9.5px;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  font-weight: 700;
+  box-shadow: 2px 2px 0 -1px rgba(var(--lj-shade), .16);
+}
+.jc-stamp-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.jc-stamp--green { border-color: var(--lj-green-text); color: var(--lj-green-text); }
+
+.jc-why { margin-top: 10px; }
+.jc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  list-style: none;
+  margin-top: 6px;
+}
+.jc-chip {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--lj-green-text);
+}
+
+/* ---- actions ---- */
+
+.jc-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+
+.jc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1.5px solid var(--lj-ink);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--lj-ink);
+  padding: 8px 14px;
+  font-family: var(--lj-sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background .18s ease, color .18s ease;
+}
+.jc-btn:hover { background: var(--lj-card2); }
+.jc-btn:active { background: var(--lj-ink); color: var(--lj-card); }
+.jc-btn[disabled] { opacity: .45; cursor: not-allowed; }
+.jc-btn--primary { background: var(--lj-ink); color: var(--lj-page); }
+.jc-btn--primary:hover { background: var(--lj-ink); opacity: .92; }
+
+/* full-width signup CTA. The reference recipe carries lj-breathe; deliberately
+   omitted — nothing breathes in v1 (spec §4/§7.6). */
+.jc-cta {
+  width: 100%;
+  border: none;
+  border-radius: 17px;
+  background: var(--lj-ink);
+  color: var(--lj-page);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  padding: 15px;
+  font-family: var(--lj-sans);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.jc-check { display: inline-block; width: 16px; height: 16px; }
+.jc-check path {
+  fill: none;
+  stroke: var(--lj-ink);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 22;
+  stroke-dashoffset: 22;
+  animation: lj-draw .6s var(--lj-spring) forwards;
+}
+
+/* ---- forms ---- */
+
+.jc-field { display: block; margin-bottom: 14px; }
+
+.jc-input {
+  background: var(--lj-card);
+  border: 1px solid var(--lj-rule-2);
+  border-radius: 10px;
+  padding: 8px 10px;
+  color: var(--lj-ink);
+  font-family: var(--lj-sans);
+  font-size: 14px;
+}
+
+.jc-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--lj-hair);
+}
+
+/* ---- tabs / pagination ---- */
+
+.jc-tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--lj-gray-text);
+  text-decoration: none;
+}
+.jc-tab--active { border-color: var(--lj-ink); color: var(--lj-ink); background: var(--lj-card); }
+
+/* ---- states ---- */
+
+.jc-error-note {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lj-ink);
+  border-left: 3px solid var(--lj-ink);
+  padding-left: 10px;
+}
+
+.jc-empty { padding: 28px 0; color: var(--lj-gray-text); font-size: 14px; }
+
+/* ---- reduced motion: every animation resolves to its drawn end state ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  .lj-root *,
+  .lj-root *::before,
+  .lj-root *::after {
+    animation-duration: .001s !important;
+    transition-duration: .001s !important;
+  }
+  .jc-accent-rule line,
+  .jc-check path { animation: none !important; stroke-dashoffset: 0; }
+}
