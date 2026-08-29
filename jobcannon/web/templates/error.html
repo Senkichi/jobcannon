@@ -7,9 +7,9 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} — Job Cannon{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold mb-3">{{ title }}</h1>
-<p class="text-neutral-400 mb-4">{{ message }}</p>
-<p class="text-neutral-400">
-  <a href="/" class="underline {{ touch_target() }} inline-flex items-center px-1">Back to the feed</a>
+<h1 class="jc-title">{{ title }}</h1>
+<p class="jc-lede">{{ message }}</p>
+<p class="jc-lede">
+  <a href="/" class="jc-link {{ touch_target() }}">Back to the feed</a>
 </p>
 {% endblock %}
