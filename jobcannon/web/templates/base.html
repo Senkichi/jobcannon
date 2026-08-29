@@ -9,8 +9,10 @@
      attribute on <body> below never reaches it) reads a token from. #}
   {{ csrf_meta_tag() }}
   <title>{% block title %}Job Cannon{% endblock %}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='lj-tokens.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='fonts.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='jc.css') }}">
+  <script src="{{ url_for('static', filename='htmx.min.js') }}"></script>
   {# Gate on the derived FAPI host, not the key: a key that decodes to no host
      must never emit `src="https:///npm/..."`. #}
   {% if clerk_publishable_key and clerk_frontend_api_host %}
@@ -41,7 +43,7 @@
    _posting_row.html's save/dismiss hx-post controls. It does NOT cover a
    plain fetch()/XMLHttpRequest call (htmx never sees those); Apply's own
    fetch() call reads the <meta> tag above instead. #}
-<body class="bg-neutral-950 text-neutral-100 min-h-screen antialiased"
+<body class="lj-root"
       hx-headers='{"X-CSRFToken": "{{ csrf_token() }}"}'>
   {# Persistent error-surfacing target — issue #146 follow-up (MED-1). htmx
      2.0.4's default `responseHandling` maps every 4xx to
@@ -55,7 +57,7 @@
      `window.jcSurfaceError` is also used by _posting_row.html's Apply
      control, whose plain fetch() is invisible to htmx entirely. #}
   <div id="jc-error-toast" role="alert" hidden
-       class="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-md rounded-lg border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-200 shadow-lg"></div>
+       class="jc-toast"></div>
   <script>
     (function () {
       var toast = document.getElementById('jc-error-toast');
@@ -78,11 +80,11 @@
       });
     })();
   </script>
-  <header class="border-b border-neutral-800 px-6 py-4 flex items-center gap-6">
-    <span class="font-semibold text-lg tracking-tight">Job Cannon</span>
-    <nav class="flex gap-4 text-sm text-neutral-400">
-      <a href="/" class="hover:text-neutral-100 {{ touch_target() }} inline-flex items-center px-1">Feed</a>
-      <a href="/demo" class="hover:text-neutral-100 {{ touch_target() }} inline-flex items-center px-1">Demo</a>
+  <header class="jc-header">
+    <span class="jc-wordmark">Job Cannon</span>
+    <nav class="jc-nav">
+      <a href="/" class="jc-nav-link {{ touch_target() }}">Feed</a>
+      <a href="/demo" class="jc-nav-link {{ touch_target() }}">Demo</a>
       {% if visitor_is_authed %}
       {# #180: the in-app saved/applied/dismissed review page
          (jobcannon/web/postings_history.py) -- gated on auth state the same
@@ -94,7 +96,7 @@
          from a signed-in visitor on /demo, /privacy, or /terms.
          visitor_is_authed (jobcannon/web/__init__.py's _inject_auth_links)
          resolves real identity there via _visitor_is_anonymous(). #}
-      <a href="{{ url_for('postings_history.index') }}" class="hover:text-neutral-100 {{ touch_target() }} inline-flex items-center px-1"
+      <a href="{{ url_for('postings_history.index') }}" class="jc-nav-link {{ touch_target() }}"
          data-postings-history-nav-link>My postings</a>
       {% endif %}
     </nav>
@@ -111,32 +113,32 @@
        from the _inject_auth_links context processor in
        jobcannon/web/__init__.py) so an unset URL renders nothing rather
        than a bare href="". #}
-    <nav class="flex gap-4 text-sm text-neutral-400 ml-auto" data-auth-nav>
+    <nav class="jc-nav jc-nav--end" data-auth-nav>
       {% if clerk_sign_in_url %}
-      <a href="{{ clerk_sign_in_url }}" class="hover:text-neutral-100 {{ touch_target() }} inline-flex items-center px-1">Sign in</a>
+      <a href="{{ clerk_sign_in_url }}" class="jc-nav-link {{ touch_target() }}">Sign in</a>
       {% endif %}
       {% if clerk_sign_up_url %}
-      <a href="{{ clerk_sign_up_url }}" class="hover:text-neutral-100 {{ touch_target() }} inline-flex items-center px-1">Sign up</a>
+      <a href="{{ clerk_sign_up_url }}" class="jc-nav-link {{ touch_target() }}">Sign up</a>
       {% endif %}
     </nav>
     {% endif %}
   </header>
-  <main class="max-w-3xl mx-auto px-6 py-16">
+  <main class="jc-page">
     {% block content %}{% endblock %}
   </main>
-  <footer class="border-t border-neutral-800 px-6 py-4 text-sm text-neutral-500 flex flex-wrap gap-4">
-    <a href="/consent" class="hover:text-neutral-300 {{ touch_target() }} inline-flex items-center px-1">Analytics preferences</a>
-    <a href="/privacy" class="hover:text-neutral-300 {{ touch_target() }} inline-flex items-center px-1">Privacy</a>
-    <a href="/terms" class="hover:text-neutral-300 {{ touch_target() }} inline-flex items-center px-1">Terms</a>
+  <footer class="jc-footer">
+    <a href="/consent" class="jc-quiet-link {{ touch_target() }}">Analytics preferences</a>
+    <a href="/privacy" class="jc-quiet-link {{ touch_target() }}">Privacy</a>
+    <a href="/terms" class="jc-quiet-link {{ touch_target() }}">Terms</a>
     {# Gates on visitor_is_authed, NOT g.clerk_user (issue #205) -- see the
        header nav's identical comment above /privacy and /terms are
        PUBLIC_PATHS, where g.clerk_user is force-None regardless of real
        identity. #}
     {% if visitor_is_authed %}
-    <a href="/account/export" class="hover:text-neutral-300 {{ touch_target() }} inline-flex items-center px-1">Export your data</a>
-    <a href="/account/delete" class="hover:text-neutral-300 {{ touch_target() }} inline-flex items-center px-1">Delete account</a>
+    <a href="/account/export" class="jc-quiet-link {{ touch_target() }}">Export your data</a>
+    <a href="/account/delete" class="jc-quiet-link {{ touch_target() }}">Delete account</a>
     {% endif %}
-    <a href="{{ source_url }}" target="_blank" rel="noopener noreferrer" class="hover:text-neutral-300 {{ touch_target() }} inline-flex items-center px-1"{% if source_sha_short %} title="commit {{ source_sha_short }}"{% endif %}>Source</a>
+    <a href="{{ source_url }}" target="_blank" rel="noopener noreferrer" class="jc-quiet-link {{ touch_target() }}"{% if source_sha_short %} title="commit {{ source_sha_short }}"{% endif %}>Source</a>
   </footer>
 </body>
 </html>

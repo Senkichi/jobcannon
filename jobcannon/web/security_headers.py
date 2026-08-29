@@ -39,11 +39,14 @@ sourced from Clerk's own CSP guidance
 local run, for exactly that reason. `script-src`/`style-src` need
 `'unsafe-inline'` (base.html's inline `<script>` blocks that call
 `Clerk.load()` / `error_401.html`'s `clerk_after_load` block have no nonce
-mechanism here; Tailwind's Play CDN injects a `<style>` tag with no nonce
-either) and `script-src` needs `'unsafe-eval'` (Tailwind's Play CDN
-JIT-compiles utility classes client-side using `new Function()` — confirmed
-by the same empirical run: omitting it produced a live CSP violation on
-every page, not merely a hypothesized one).
+mechanism here; legal_page.html's inline `<style>` block — kept inline
+deliberately, see its own template comment — has no nonce either). Scripts
+are otherwise self-hosted: `script-src` is `'self'` plus the derived Clerk
+Frontend API / Cloudflare / fraud-protection hosts below, with no
+`'unsafe-eval'` — the Living Journal restyle
+(docs/design/living-journal.md) dropped the Tailwind Play CDN, which was
+the only script on this page ever needing runtime `new Function()` JIT
+compilation.
 
 HSTS is conditional on the request having actually arrived over HTTPS,
 checked via `request.is_secure` OR the `X-Forwarded-Proto` header
@@ -115,7 +118,7 @@ def _build_csp(*, frontend_api_host: str, accounts_host: str | None) -> str:
     # img.clerk.com on img-src (avatar/profile images). Gated on
     # frontend_api_host, same as the FAPI host itself: these hosts only
     # matter when Clerk is configured at all.
-    script_hosts = ["https://cdn.tailwindcss.com", "https://unpkg.com"]
+    script_hosts: list[str] = []
     connect_hosts = ["'self'"]
     frame_hosts: list[str] = []
     img_hosts: list[str] = []
@@ -139,7 +142,7 @@ def _build_csp(*, frontend_api_host: str, accounts_host: str | None) -> str:
 
     directives = {
         "default-src": ["'self'"],
-        "script-src": ["'self'", *script_hosts, "'unsafe-inline'", "'unsafe-eval'"],
+        "script-src": ["'self'", *script_hosts, "'unsafe-inline'"],
         "style-src": ["'self'", "'unsafe-inline'"],
         "img-src": ["'self'", "data:", *img_hosts],
         "font-src": ["'self'"],

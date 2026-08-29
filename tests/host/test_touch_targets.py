@@ -18,17 +18,18 @@ jobcannon/web/templates/*.html file must carry a `touch_target(...)` call
 attribute:
 
   - `touch_target()` (default kind="block") for everything except
-    checkbox/radio inputs. It renders `min-h-11` -- Tailwind's `min-h-*`
-    scale gives a floor without clipping wrapped text (verified against
-    the live cdn.tailwindcss.com build with Playwright: a `min-h-11` div
+    checkbox/radio inputs. It renders `jc-touch` -- jobcannon/web/static/
+    jc.css's `.jc-touch { min-height: 44px; }` gives a floor without
+    clipping wrapped text (verified with Playwright: a `jc-touch` element
     renders at exactly 44px).
   - `touch_target('checkbox')` for `type="checkbox"`/`type="radio"`
-    inputs. It renders `h-11 w-11` (both height AND width) --
-    `min-height` alone doesn't touch a native checkbox's width, and its
-    intrinsic box is otherwise ~16px square regardless of the wrapping
-    <label>'s own size -- verified empirically (Playwright, both a
-    Chromium and a WebKit engine) that a native checkbox DOES honor
-    explicit `h-11 w-11` (renders 44x44), so the control's own rect
+    inputs. It renders `jc-touch-box` -- jc.css's
+    `.jc-touch-box { width: 44px; height: 44px; }` (both height AND
+    width) -- `min-height` alone doesn't touch a native checkbox's width,
+    and its intrinsic box is otherwise ~16px square regardless of the
+    wrapping <label>'s own size -- verified empirically (Playwright, both
+    a Chromium and a WebKit engine) that a native checkbox DOES honor
+    explicit `width`/`height` (renders 44x44), so the control's own rect
     clears the floor rather than relying solely on the label acting as a
     de facto larger target. Caveat: real desktop macOS Safari has a
     long-standing WebKit issue (webkit.org/b/148675) where native
@@ -40,18 +41,19 @@ attribute:
     but that's not independently confirmed either -- no real iOS device
     was available to test against.
 
-Single-sourced via the Jinja global, not a literal Tailwind class string:
-before #207, the floor was pasted as a literal `min-h-11`/`h-11 w-11`
-token at each of 65 sites across 17 templates, with nothing catching a
-site that silently reverted to a literal class (or never got the token in
-the first place) except this test failing ONE parametrized case at a
-time. The scan below now looks for the MARKER (a `touch_target(...)`
-call), not the rendered Tailwind token, which also makes a future change
-to the floor's actual pixel value a one-line edit in
+Single-sourced via the Jinja global, not a literal class string:
+before #207, the floor was pasted as a literal Tailwind utility token at
+each of 65 sites across 17 templates, with nothing catching a site that
+silently reverted to a literal class (or never got the token in the first
+place) except this test failing ONE parametrized case at a time. The scan
+below now looks for the MARKER (a `touch_target(...)` call), not the
+rendered class token (`jc-touch`/`jc-touch-box`, defined in
+jobcannon/web/static/jc.css since the Living Journal adoption), which also
+makes a future change to the floor's actual pixel value a one-line edit in
 jobcannon/web/template_globals.py instead of a 65-site find/replace.
 `test_sabotage_a_real_template_site_and_confirm_the_guard_fails` (below)
 verifies this the hard way: reverting one real template site from the
-marker back to a literal `min-h-11` class -- exactly the regression #207
+marker back to a literal `jc-touch` class -- exactly the regression #207
 exists to prevent, and exactly what the OLD literal-substring guard would
 have silently passed -- makes the corresponding parametrized case fail,
 naming the exact file/tag/attrs.
@@ -238,9 +240,9 @@ def test_touch_target_returns_the_documented_literal_tokens():
     module's docstring already names but never tested. Literal expected
     values, never derived from `_KIND_TOKENS` itself, so an edit there
     can't drag its own test along with it."""
-    assert touch_target() == "min-h-11"
-    assert touch_target("block") == "min-h-11"
-    assert touch_target("checkbox") == "h-11 w-11"
+    assert touch_target() == "jc-touch"
+    assert touch_target("block") == "jc-touch"
+    assert touch_target("checkbox") == "jc-touch-box"
     with pytest.raises(ValueError):
         touch_target("radio")
 
@@ -389,20 +391,18 @@ def test_touch_target_kind_detection(attrs, expected):
 def test_sabotage_a_real_template_site_and_confirm_the_guard_fails():
     """Sabotage-verify against a REAL template, not just the fixture above:
     reverts one real site (base.html's "Feed" nav link) from the
-    `touch_target()` marker back to the literal `min-h-11` class it used to
-    carry pre-#207 -- exactly the regression #207 exists to prevent, and
-    exactly the shape the OLD literal-substring guard would have silently
-    passed straight through. Runs the real collector against the sabotaged
-    text (not the fixture regex in isolation) so it also proves the
-    end-to-end wiring: `_iter_tags_in_text` -> `_collect_cases_from_tags` ->
-    `_touch_target_kind` correctly flags it, not just that the kind-
-    detection helper can be fooled in principle."""
+    `touch_target()` marker back to the literal `jc-touch` class it renders
+    -- exactly the regression #207 exists to prevent, and exactly the shape
+    the OLD literal-substring guard would have silently passed straight
+    through. Runs the real collector against the sabotaged text (not the
+    fixture regex in isolation) so it also proves the end-to-end wiring:
+    `_iter_tags_in_text` -> `_collect_cases_from_tags` -> `_touch_target_kind`
+    correctly flags it, not just that the kind-detection helper can be
+    fooled in principle."""
     path = _TEMPLATES_DIR / "base.html"
     original = path.read_text(encoding="utf-8")
-    marker = '<a href="/" class="hover:text-neutral-100 {{ touch_target() }} inline-flex items-center px-1">Feed</a>'
-    literal = (
-        '<a href="/" class="hover:text-neutral-100 min-h-11 inline-flex items-center px-1">Feed</a>'
-    )
+    marker = '<a href="/" class="jc-nav-link {{ touch_target() }}">Feed</a>'
+    literal = '<a href="/" class="jc-nav-link jc-touch">Feed</a>'
     assert marker in original, (
         "base.html's Feed link markup changed -- update this sabotage fixture"
     )
@@ -414,7 +414,7 @@ def test_sabotage_a_real_template_site_and_confirm_the_guard_fails():
     feed_cases = [
         (filename, tag_name, input_type, attrs)
         for (filename, tag_name, input_type, attrs) in cases
-        if _class_value(attrs) == "hover:text-neutral-100 min-h-11 inline-flex items-center px-1"
+        if _class_value(attrs) == "jc-nav-link jc-touch"
     ]
     assert len(feed_cases) == 1, (
         "expected exactly the sabotaged Feed link to carry the literal class"
@@ -422,7 +422,7 @@ def test_sabotage_a_real_template_site_and_confirm_the_guard_fails():
     filename, tag_name, input_type, attrs = feed_cases[0]
     assert _touch_target_kind(attrs) is None, (
         "the sabotaged site must fail kind detection -- if this assertion "
-        "fails, the guard would have silently passed a literal min-h-11 "
+        "fails, the guard would have silently passed a literal jc-touch "
         "class with no touch_target() marker"
     )
     # And the real parametrized assertion shape, run inline here so a
