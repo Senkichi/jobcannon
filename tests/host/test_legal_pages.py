@@ -229,6 +229,41 @@ def test_legal_page_head_request_200(path):
 
 
 # ---------------------------------------------------------------------------
+# (k) issue #253: the browser-tab <title> must carry the "Job Cannon" brand
+# exactly once. Both terms.md and privacy.md's own H1 already reads
+# "Job Cannon — <Page Name>" (ratified legal text — the on-page H1 itself,
+# asserted via h1_text above, is untouched by this fix and correctly keeps
+# that brand prefix). Before the fix, legal.py's _render() passed that whole
+# H1 string through as `title`, and legal_page.html's `{% block title %}`
+# unconditionally appended its own "— Job Cannon" suffix (the same suffix
+# every other templated page's block title appends to a page-specific
+# fragment — see e.g. feed.html, demo.html), doubling the brand into
+# "Job Cannon — Terms of Service — Job Cannon". Parsed with BeautifulSoup
+# rather than string-matched so this pins the actual <title> element, not
+# an incidental substring elsewhere in the response.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path,expected_title",
+    [
+        ("/privacy", "Privacy Policy — Job Cannon"),
+        ("/terms", "Terms of Service — Job Cannon"),
+    ],
+)
+def test_legal_page_title_tag_has_brand_exactly_once(path, expected_title):
+    app = _app(verify=lambda req: None)
+    client = app.test_client()
+
+    resp = client.get(path)
+
+    soup = BeautifulSoup(resp.data.decode("utf-8"), "html.parser")
+    title_text = soup.title.string
+    assert title_text == expected_title
+    assert title_text.count("Job Cannon") == 1
+
+
+# ---------------------------------------------------------------------------
 # (h) Cache-Control (issue #182 item 4). `private`, not `public`: every
 # request here — including this public-path branch — mints a per-visitor
 # session cookie via ensure_session_ids() on first contact (see
@@ -357,6 +392,29 @@ def test_render_passes_through_a_clean_file(tmp_path, monkeypatch):
     title, html = legal._render("good.md")
     assert title == "Good Title"
     assert "<h1>Good Title</h1>" in html
+
+
+def test_render_strips_brand_prefix_from_title_but_not_from_h1(tmp_path, monkeypatch):
+    """issue #253 unit-level pin: an H1 that starts with the "Job Cannon — "
+    brand prefix (the real shape of both terms.md and privacy.md) must have
+    that prefix stripped from the extracted `title` — legal_page.html's
+    `{% block title %}` appends its own "— Job Cannon" suffix, same as every
+    other templated page, so a `title` that already embeds the brand would
+    double it. The rendered `html` (what becomes the on-page <h1>) must keep
+    the brand prefix untouched — this fix only changes what's extracted for
+    the browser-tab title, not the document body."""
+    from jobcannon.web import legal
+
+    branded_file = tmp_path / "branded.md"
+    branded_file.write_text(
+        "# Job Cannon — Sample Policy\n\n**Effective date:** 2026-08-27\n\nOrdinary published prose.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(legal, "_LEGAL_DIR", tmp_path)
+
+    title, html = legal._render("branded.md")
+    assert title == "Sample Policy"
+    assert "<h1>Job Cannon — Sample Policy</h1>" in html
 
 
 # ---------------------------------------------------------------------------
