@@ -4,7 +4,15 @@
    (or allowlisted) — catches invented names and Tailwind leftovers at once.
 2. No color literals in applied template styles (legal_page.html's inline
    <style> composes from var(--lj-*); literal channels are banned there too).
-3. No CDN remnants.
+3. No literal third-party resource origins: every URL a template loads a
+   resource from (script/link/img/iframe attributes, url() in applied CSS)
+   is parsed with urlsplit and must have no hostname of its own. That is the
+   template-level half of the CSP's `'self'` posture — the only external
+   origin (base.html's Clerk loader) is Jinja-templated from config and
+   owned by jobcannon.web.security_headers' derivation, so a hardcoded
+   deny-list of CDN hosts is neither needed nor safe (a new CDN would slip
+   past it, and substring-matching a host inside a URL is the exact
+   pattern CodeQL's py/incomplete-url-substring-sanitization flags).
 
 The color-literal scan is scoped to APPLIED CSS contexts (<style> block bodies
 with CSS comments stripped, plus inline style="..." values). The plan's
@@ -20,6 +28,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 WEB = Path(__file__).resolve().parent.parent / "jobcannon" / "web"
 TEMPLATES = sorted(WEB.glob("templates/**/*.html"))
@@ -111,10 +120,67 @@ def test_applied_style_extractor_is_not_vacuous():
     assert any(p.search(extracted) for p in _LITERAL_PATTERNS)
 
 
-def test_no_cdn_remnants():
-    hits = [
-        p.name
-        for p in TEMPLATES
-        if "cdn.tailwindcss.com" in (t := p.read_text(encoding="utf-8")) or "unpkg.com" in t
-    ]
-    assert not hits, f"CDN references remain: {hits}"
+# Resource-loading attributes per the HTML spec (fixed vocabulary, not app
+# state): the tags whose src/href fetch bytes into the page, as opposed to
+# <a href>, which merely navigates.
+_RESOURCE_ATTR_RE = re.compile(
+    r"<(?:script|link|img|iframe|source|video|audio|embed)\b[^>]*?\s(?:src|href)\s*=\s*"
+    r"[\"']([^\"']*)[\"']",
+    re.I | re.S,
+)
+_CSS_URL_RE = re.compile(r"url\(\s*[\"']?([^\"')]+)[\"']?\s*\)", re.I)
+_JINJA_EXPR_RE = re.compile(r"\{\{.*?\}\}", re.S)
+
+
+def _resource_urls(html: str) -> list[str]:
+    """Every URL a template loads a resource from: resource-tag src/href
+    values plus url() references inside applied CSS."""
+    return _RESOURCE_ATTR_RE.findall(html) + _CSS_URL_RE.findall(_applied_style_text(html))
+
+
+def _literal_external_host(url: str) -> str | None:
+    """The hostname of a resource URL when, and only when, it is a literal
+    third-party origin. Relative and same-origin paths have none. A
+    Jinja-templated URL (url_for('static', ...) assets, base.html's Clerk
+    loader whose host comes from config) resolves at render time and is
+    covered by the CSP derivation in jobcannon.web.security_headers, not
+    here."""
+    if _JINJA_EXPR_RE.search(url):
+        return None
+    return urlsplit(url.strip()).hostname
+
+
+def test_templates_load_no_literal_third_party_resources():
+    hits = {}
+    for path in TEMPLATES:
+        hosts = sorted(
+            {
+                host
+                for url in _resource_urls(path.read_text(encoding="utf-8"))
+                if (host := _literal_external_host(url))
+            }
+        )
+        if hosts:
+            hits[path.name] = hosts
+    assert not hits, f"templates load resources from literal third-party origins: {hits}"
+
+
+def test_resource_url_extractor_is_not_vacuous():
+    """Positive control: the real templates must yield resource URLs (the
+    self-hosted stylesheets/htmx plus the Clerk loader all go through the
+    extractor), and a synthetic CDN sample must surface exactly its literal
+    hosts while relative, url_for-templated, and config-templated URLs pass."""
+    real = [url for p in TEMPLATES for url in _resource_urls(p.read_text(encoding="utf-8"))]
+    assert len(real) >= 4, "resource-URL scan collapsed — check the regexes"
+    assert all(_literal_external_host(url) is None for url in real)
+
+    sample = (
+        '<script src="https://unpkg.com/htmx.org@1.9.10"></script>\n'
+        '<link rel="stylesheet"\n      href="//cdn.tailwindcss.com">\n'
+        "<style>@font-face { src: url(https://fonts.gstatic.com/s/inter.woff2) }</style>\n"
+        "<link rel=\"stylesheet\" href=\"{{ url_for('static', filename='jc.css') }}\">\n"
+        '<script src="https://{{ clerk_frontend_api_host }}/npm/clerk.js"></script>\n'
+        '<img src="/static/logo.svg"><img src="data:image/png;base64,AAAA">'
+    )
+    hosts = {host for url in _resource_urls(sample) if (host := _literal_external_host(url))}
+    assert hosts == {"unpkg.com", "cdn.tailwindcss.com", "fonts.gstatic.com"}
