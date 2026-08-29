@@ -11,39 +11,42 @@
    non-htmx POST instead 303-redirects back to this same GET /consent page
    (Post/Redirect/Get -- see post_consent's docstring), which renders this
    partial again showing "Current choice: ..." either way. #}
-<div id="consent-panel">
-  {% if error %}
-    <p class="text-red-400 mb-4">{{ error }}</p>
-  {% endif %}
-  {% if confirmed %}
-    <p class="text-green-400 mb-4" data-consent-confirmation>
-      Analytics {{ "enabled" if consent_granted else "disabled" }}.
-    </p>
-  {% endif %}
-  <p class="text-neutral-400 mb-6">
-    {% if choice_made %}
-      Current choice: {{ "allowed" if consent_granted else "declined" }}.
-    {% else %}
-      You haven't made a choice yet.
+<div id="consent-panel" class="jc-panel">
+  <div class="jc-stack">
+    {% if error %}
+      <p class="jc-error-note">{{ error }}</p>
     {% endif %}
-  </p>
-  <p class="text-neutral-500 text-sm mb-6">
-    Analytics are off unless you allow them here. If you do, usage events are
-    sent to PostHog's EU endpoint under a pseudonymous identifier derived from
-    your account, not your raw account id. See our
-    <a href="/privacy" class="underline hover:text-neutral-300 {{ touch_target() }} inline-flex items-center px-1">privacy policy</a>
-    for the full detail.
-  </p>
-  <form hx-post="/consent" hx-target="#consent-panel" hx-swap="outerHTML"
-        method="post" action="/consent" class="flex gap-4">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button type="submit" name="choice" value="grant"
-            class="bg-neutral-100 text-neutral-950 px-4 py-2 rounded font-medium {{ touch_target() }} inline-flex items-center">
-      Allow analytics
-    </button>
-    <button type="submit" name="choice" value="decline"
-            class="border border-neutral-700 px-4 py-2 rounded font-medium {{ touch_target() }} inline-flex items-center">
-      Decline
-    </button>
-  </form>
+    {% if confirmed %}
+      <p class="jc-stamp" data-consent-confirmation>
+        <span class="jc-stamp-dot"></span>
+        Analytics {{ "enabled" if consent_granted else "disabled" }}.
+      </p>
+    {% endif %}
+    <p class="jc-note">
+      {% if choice_made %}
+        Current choice: {{ "allowed" if consent_granted else "declined" }}.
+      {% else %}
+        You haven't made a choice yet.
+      {% endif %}
+    </p>
+    <p class="jc-note">
+      Analytics are off unless you allow them here. If you do, usage events are
+      sent to PostHog's EU endpoint under a pseudonymous identifier derived from
+      your account, not your raw account id. See our
+      <a href="/privacy" class="jc-link {{ touch_target() }}">privacy policy</a>
+      for the full detail.
+    </p>
+    <form hx-post="/consent" hx-target="#consent-panel" hx-swap="outerHTML"
+          method="post" action="/consent" class="jc-cluster">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" name="choice" value="grant"
+              class="jc-btn jc-btn--primary {{ touch_target() }}">
+        Allow analytics
+      </button>
+      <button type="submit" name="choice" value="decline"
+              class="jc-btn {{ touch_target() }}">
+        Decline
+      </button>
+    </form>
+  </div>
 </div>

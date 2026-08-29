@@ -9,22 +9,22 @@
 {% extends "base.html" %}
 {% block title %}Analytics preferences — Job Cannon{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold mb-3">Analytics preferences</h1>
-<p class="text-neutral-400 mb-4">
+<h1 class="jc-title">Analytics preferences</h1>
+<p class="jc-lede">
   Analytics run only for signed-in accounts that opt in here — there's
   nothing to set until you have an account.
 </p>
 {% if clerk_sign_in_url or clerk_sign_up_url %}
-<p class="text-neutral-400 mb-6">
-  {% if clerk_sign_in_url %}<a href="{{ clerk_sign_in_url }}" class="underline text-neutral-100 {{ touch_target() }} inline-flex items-center px-1">Sign in</a>{% endif %}
+<p class="jc-lede">
+  {% if clerk_sign_in_url %}<a href="{{ clerk_sign_in_url }}" class="jc-link {{ touch_target() }}">Sign in</a>{% endif %}
   {% if clerk_sign_in_url and clerk_sign_up_url %}or{% endif %}
-  {% if clerk_sign_up_url %}<a href="{{ clerk_sign_up_url }}" class="underline text-neutral-100 {{ touch_target() }} inline-flex items-center px-1">sign up</a>{% endif %}
+  {% if clerk_sign_up_url %}<a href="{{ clerk_sign_up_url }}" class="jc-link {{ touch_target() }}">sign up</a>{% endif %}
   to set your preference.
 </p>
 {% endif %}
-<p class="text-neutral-500 text-sm">
+<p class="jc-note">
   See our
-  <a href="/privacy" class="underline hover:text-neutral-300 {{ touch_target() }} inline-flex items-center px-1">privacy policy</a>
+  <a href="/privacy" class="jc-link {{ touch_target() }}">privacy policy</a>
   for the full detail on what analytics we collect and why.
 </p>
 {% endblock %}
