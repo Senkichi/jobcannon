@@ -51,34 +51,25 @@ Two tests, two different confounder profiles:
 
 CI caveat (see wiring.py's module docstring for the full citation, and
 jobcannon#162/#248 for the investigations this paragraph reflects): as of
-jobcannon#160, this repo's CI runs ONLY on self-hosted Windows runners
-(.github/workflows/ci.yml, the `jcpub` label) -- os.fork() does not exist
-on Windows, so neither test in this file's fork-gated pair can execute in
-the `test` job itself. jobcannon#162 found WSL and Docker both absent from
-the runner box at the time (verified 2026-08-27: `wsl.exe --status`
-reported "not installed"), leaving no CI-leg path to real os.fork()
-coverage. jobcannon#248 closes that gap: the runner box has WSL2 (Ubuntu)
-now, and ci.yml's `fork-proof` job (self-hosted, `jcpub` label -- the
-public runner pool has no `light`/`suite` split) shells into it, pins
-Python 3.12 via uv to match the 3.12.x chain under proof (uv currently
-resolves 3.12.14; the source read cited above was against 3.12.11
-specifically), and runs this whole file with no `JC_FORK_TESTS_UNAVAILABLE`
-opt-out -- both fork-gated tests below execute for real (PASS, not skip)
-on every CI run. (A runner-account risk was raised during review -- WSL
-distro registration is per-Windows-account, and the runner service logs
-on as NT AUTHORITY\\NETWORK SERVICE, not the account the job was first
-proven under -- and checked and resolved during that same review: PR
-#249's own CI run passed on jcpub-9800x3d-2 as NETWORK SERVICE, 11 tests
-including both fork-gated ones. See ci.yml's own comment on the
-`fork-proof` job for the full account-risk writeup; its precondition
-check is kept as a defensive measure in case that ever regresses.) The
-`_require_fork_or_fail_loud` gate below (not a plain
-skipif) is what made the earlier silent-skip failure structurally
-impossible to repeat unnoticed: CI would FAIL rather than silently re-skip
-if `fork-proof` regressed or its opt-out-free invocation were lost without
-JC_FORK_TESTS_UNAVAILABLE=1 being restored alongside it. The `test` job
-still sets that opt-out (os.fork() is genuinely unavailable there, on
-Windows) -- only `fork-proof` runs this pair for real.
+jobcannon#160, this repo's CI ran ONLY on self-hosted Windows runners --
+os.fork() does not exist on Windows, so neither test in this file's
+fork-gated pair could execute in the `test` job itself. jobcannon#162 found
+WSL and Docker both absent from the runner box at the time, leaving no
+CI-leg path to real os.fork() coverage; jobcannon#248 closed that gap by
+having a dedicated `fork-proof` job shell from the Windows runner into
+WSL2. CI has since moved again (public repo, GitHub-hosted `ubuntu-latest`
+-- see ci.yml), which makes the whole Windows/WSL problem moot rather than
+merely worked around: os.fork() is native on Linux, so this file's two
+fork-gated tests now execute for real (PASS, not skip) inside the ordinary
+`test` job's pytest invocation, with no `JC_FORK_TESTS_UNAVAILABLE`
+opt-out set there anymore. A `fork-proof` job still exists in ci.yml and
+still runs this same pair on its own, deliberately, as a dedicated
+check-run signal -- see that job's own comment. The
+`_require_fork_or_fail_loud` gate below (not a plain skipif) is what made
+the original silent-skip failure structurally impossible to repeat
+unnoticed: CI would FAIL rather than silently re-skip if a future CI leg
+lost real os.fork() coverage without JC_FORK_TESTS_UNAVAILABLE=1 being set
+to explicitly acknowledge the gap.
 """
 
 from __future__ import annotations
@@ -109,24 +100,22 @@ def _require_fork_or_fail_loud() -> None:
     a dev box with a stray `CI` value set by unrelated tooling (some
     npm/yarn/cargo wrappers use it too) and no opt-out would `pytest.fail`
     here instead of skipping -- not narrowed to `GITHUB_ACTIONS` alone
-    since this repo's CI is exclusively self-hosted GitHub Actions and
-    erring toward on_ci=True is the fail-loud-safe direction this gate
-    wants anyway.
+    since this repo's CI is exclusively GitHub Actions and erring toward
+    on_ci=True is the fail-loud-safe direction this gate wants anyway.
 
-    CI is different (jobcannon#162): after #160 moved this repo's CI to
-    self-hosted Windows runners, os.fork() stopped existing there too, and
-    a plain skipif made both tests SKIP silently on every CI run forever --
-    CI stayed green either way, so nobody noticed the #132 proof lost its
-    only CI coverage. This gate makes that failure mode structurally
-    impossible to repeat: on CI, missing os.fork() now FAILS the test
+    CI is currently fork-capable (ubuntu-latest, native os.fork()), so this
+    gate is a no-op today -- it returns at the `hasattr` check above before
+    ever reaching the CI logic below. That logic stays as a structural
+    guard against the exact failure jobcannon#162 found: after jobcannon#160
+    moved this repo's CI to self-hosted Windows runners, os.fork() stopped
+    existing there, and a plain skipif made both tests SKIP silently on
+    every CI run forever -- CI stayed green either way, so nobody noticed
+    the #132 proof lost its only CI coverage. If CI ever moves back to a
+    platform without os.fork() again, missing os.fork() FAILS the test
     unless the workflow explicitly opts out via JC_FORK_TESTS_UNAVAILABLE=1
-    (ci.yml sets it today, with a comment citing #162, because WSL and
-    Docker are both absent from the jcpub runner box -- see this file's
-    module docstring). Remove that opt-out believing CI gained real fork
-    coverage and these tests fail loudly instead of silently skipping if
-    that belief was wrong; genuinely restore fork-capable CI and deleting
-    the opt-out is all it takes for these tests to start proving #132
-    again for real.
+    -- ci.yml does not set that today (deleted when CI moved to
+    ubuntu-latest), so restoring it (with a comment citing this history) is
+    what a future non-fork-capable CI leg would need to add.
     """
     if hasattr(os, "fork"):
         return

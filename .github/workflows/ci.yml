@@ -15,168 +15,116 @@ permissions:
 
 jobs:
   test:
-    # SELF-HOSTED, PERMANENTLY (owner decision 2026-08-26): this project does
-    # not rely on GitHub-hosted runner minutes, now or ever. The `jcpub`
-    # runners are the operator's own Windows machines, so the same-repo gate
-    # below is a load-bearing compensating control, not a nicety: a
-    # pull_request event from a fork would otherwise execute arbitrary code
-    # on that machine. Fork PRs therefore do not run CI here. To test an
-    # outside contribution, a maintainer pushes the fork's commits to a
-    # branch in this repository (`git push origin <sha>:refs/heads/<name>`)
-    # and opens a same-repo PR — the diff has then been read by a human
-    # before it runs. Post-flip, "require approval for all outside
-    # collaborators" is applied in repo settings as the second layer.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Windows, X64, jcpub]
-    # No Postgres service container: the runner machine has its own PG18 +
-    # pgvector instance and its per-runner `.env` provides
-    # POSTGRES_ADMIN_DSN to every step. Do NOT re-declare that variable under
-    # `env:` here — a step-level `env:` entry always shadows the runner's
-    # own shell environment for that step, even when the expression itself
-    # evaluates empty, which blanks the runner-level value (verified
-    # empirically on this runner), and a literal DSN does not belong in a
-    # tracked file. The fixture chain (tests/host/conftest.py
-    # postgres_test_dsn -> jobcannon.db.migrate.run_migrations) creates a
-    # uniquely named database per session, so two runners can test at once.
+    # GitHub-hosted (owner directive, superseding jobcannon#160's "this
+    # project does not rely on GitHub-hosted runner minutes, now or ever"):
+    # that doctrine was written for a PRIVATE repo, where hosted minutes
+    # cost money. This repo is public now -- public repos get GitHub-hosted
+    # Actions minutes for FREE, and running self-hosted infra on a public
+    # repo means a `pull_request` event from any fork can schedule
+    # arbitrary workflow-file code onto the operator's own machine. Moving
+    # to ubuntu-latest removes that attack surface entirely rather than
+    # compensating for it -- the same-repo-only gate jobcannon#160 added
+    # (and jobcannon#252 hardened) is therefore gone below, not tightened.
+    # See the `tests-passed` job's own comment for the fork-PR flow this
+    # repo uses instead, and the PR body for the full rationale.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # pg17, not pg18: render.yaml pins `postgresMajorVersion: "17"` for
+        # the real production database, and matching production is more
+        # representative than either the retired self-hosted box's PG18
+        # (whatever happened to be installed there) or the pre-jobcannon#160
+        # hosted-runner setup's own pg18 service container (see jobcannon#212's
+        # quote of the conftest.py docstring from before that migration).
+        # Nothing in this repo requires PG18 specifically: no migration uses
+        # PG18-only syntax (the newest feature in play is `DROP DATABASE ...
+        # WITH (FORCE)`, PG13+; pgvector's HNSW index needs pgvector>=0.5,
+        # also available since PG13). Tag left unpinned on pgvector's patch
+        # version (floating, matching the pre-#160 setup's own style) --
+        # confirmed to exist on Docker Hub (pgvector/pgvector:pg17) alongside
+        # dated per-version tags like 0.8.6-pg17.
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # tests/host/conftest.py reads this directly (ADMIN_DSN =
+      # os.environ.get("POSTGRES_ADMIN_DSN")); create_throwaway_db needs
+      # CREATEDB privilege, which the image's default `postgres` superuser
+      # has. A job-level env: is safe here, unlike on the old self-hosted
+      # runner: there is no persistent runner-level POSTGRES_ADMIN_DSN a
+      # step-level entry could shadow -- this ephemeral job's Postgres
+      # service is the only instance that DSN could ever point at.
+      POSTGRES_ADMIN_DSN: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-          # A shared local disk cache on a persistent runner is a corruption
-          # vector across concurrent jobs; the venv in _work already makes
-          # repeat installs fast.
-          enable-cache: false
+          # Ephemeral GitHub-hosted runner (fresh VM per job) -- unlike the
+          # old persistent self-hosted box, there is no shared-disk
+          # corruption vector across concurrent jobs to guard against here.
+          enable-cache: true
       - run: uv sync --dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       # jobcannon/db/migrations/m0005_postings_embedding.py runs
       # `CREATE EXTENSION IF NOT EXISTS vector` as its first statement, so
-      # no separate psql step is needed.
+      # no separate psql step is needed -- the pgvector/pgvector image
+      # ships the extension's shared library; the migration itself
+      # activates it inside the throwaway test database.
       #
-      # jobcannon#162 found os.fork() does not exist on Windows, so the two
-      # fork-gated proof tests in tests/host/test_posthog_fork_atexit.py
-      # cannot run on THIS job's runner regardless of what's installed
-      # alongside it -- that's a Windows API gap, not a missing-tool gap,
-      # and it never goes away. #162 also found neither WSL nor Docker
-      # installed on the runner box at the time; that part of the finding
-      # is now stale -- the box gained WSL2, and jobcannon#248 added the
-      # `fork-proof` job below, which shells into it and runs the pair for
-      # real. This env var remains the explicit, documented acknowledgment
-      # that THIS job specifically can't run them:
-      # test_posthog_fork_atexit.py's _require_fork_or_fail_loud gate FAILS
-      # the build instead of silently skipping if this line is ever
-      # removed without an equivalent gap-closer (fork-proof) in place.
+      # os.fork() is native on ubuntu-latest (unlike the old Windows
+      # runner), so tests/host/test_posthog_fork_atexit.py's two
+      # fork-gated tests run for real right here now -- no
+      # JC_FORK_TESTS_UNAVAILABLE opt-out needed or set. See that file's
+      # `_require_fork_or_fail_loud` gate and its own module docstring:
+      # "deleting the opt-out is all it takes for these tests to start
+      # proving #132 again for real." The `fork-proof` job below still
+      # runs the same pair again on purpose -- see its own comment.
       - name: Run tests
         run: uv run pytest -q --tb=short
-        env:
-          JC_FORK_TESTS_UNAVAILABLE: "1"
 
   fork-proof:
-    name: Fork/atexit proof (WSL)
-    # jobcannon#248 (follow-up to #162/#213): the jcpub runner box gained
-    # WSL2 (Ubuntu) after #162 found neither WSL nor Docker installed there.
-    # This job is the real os.fork() leg #162 couldn't provide: it shells
-    # into WSL, pins Python 3.12 via uv (WSL's own system python is 3.14 --
-    # the claim under proof is the 3.12.x fork/join chain
-    # jobcannon/host/wiring.py's module docstring cites; uv currently
-    # resolves 3.12.14, while the docstring's source read was performed
-    # against 3.12.11 specifically), syncs the `dev` dependency group into
-    # a WSL-native venv (never under /mnt/c -- 9p I/O there is slow, and
-    # keeping the venv off the Windows-backed mount is cheap insurance
-    # either way), and runs tests/host/test_posthog_fork_atexit.py WITHOUT
-    # JC_FORK_TESTS_UNAVAILABLE set, so its two fork-gated tests actually
-    # execute (PASS, not SKIP -- see that file's `_require_fork_or_fail_loud`
-    # gate). Same runner labels as `test`/`migration-collision-guard`:
-    # verified via `gh api repos/Senkichi/jobcannon/actions/runners` that
-    # this repo's registered runners (jcpub-9800x3d-1/-2) carry only
-    # [self-hosted, Windows, X64, jcpub] -- no `light`/`suite` split exists
-    # here (that distinction is the PRIVATE job-cannon repo's runner
-    # topology; do not carry it over). This job is short (~15-17s warm), so
-    # it's cheap to share the same 2-runner `jcpub` pool as `test`. Same
-    # same-repo-only gate as `test` above, for the same reason (no code
-    # execution on this box for a fork PR).
+    name: Fork/atexit proof
+    # jobcannon#160 moved CI to self-hosted Windows runners, where
+    # os.fork() does not exist; jobcannon#248 worked around that gap by
+    # shelling into WSL2 from the Windows runner to reach a real Linux
+    # process for jobcannon#132's fork/atexit proof. Now that CI runs on
+    # ubuntu-latest directly, os.fork() is native and the entire WSL
+    # indirection (distro-visibility precondition check, wslpath
+    # translation, per-runner-name venv keying, NETWORK SERVICE account
+    # investigation) is dead weight -- deleted below along with it.
     #
-    # Runner-account risk, checked and resolved during review: the runner
-    # service that executes this job logs on as NT AUTHORITY\NETWORK
-    # SERVICE (verified via Get-CimInstance Win32_Service), not the
-    # interactive account this job's WSL invocation was first proven under
-    # -- and NETWORK SERVICE's own Windows profile shows no evidence any
-    # WSL distro was ever registered directly under it (no
-    # AppData\Local\Packages, where Store-installed distros live). WSL
-    # distro registration is normally per-account, so that looked like a
-    # real blocker. It wasn't: jobcannon#248's own PR (#249) CI run
-    # completed this job successfully on the real runner
-    # (jcpub-9800x3d-2, NETWORK SERVICE) -- 11 passed in 13.56s, both
-    # fork-gated tests included -- so whatever env/profile setup this
-    # runner already carries (its steps copy senki's .gitconfig, so some
-    # deliberate account passthrough exists in its config) also makes its
-    # WSL distro reachable. The `wsl.exe -l -q` precondition check below is
-    # kept as a defensive belt-and-suspenders measure -- a clear,
-    # diagnosable failure if that ever regresses -- not because the risk
-    # is still open.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Windows, X64, jcpub]
-    # The fork-gated tests themselves have a 10s SIGKILL bound (see the
-    # test file), but that only covers fork()/join() -- it does not bound
-    # the astral.sh installer curl, `uv python install`, `uv sync`, or WSL
-    # startup ahead of it. Without a job-level cap, a stall in any of those
-    # would pend the required tests-passed aggregate for up to GitHub's
-    # 360-minute default. 10 minutes is generous headroom over the ~15-17s
-    # warm-cache runtime observed in practice.
+    # This job's two tests now ALSO run inside the main `test` job's full
+    # pytest invocation above (nothing skips them there anymore). Kept as
+    # its own job anyway for a distinct, easy-to-spot check-run signal on
+    # the #132 proof specifically -- on GitHub-hosted, ephemeral,
+    # free-for-public-repos runners, a few seconds of duplicated coverage
+    # costs nothing. `-n0 -p no:cacheprovider` are carried over from the
+    # old WSL job's invocation unchanged (single test file, avoid writing
+    # pytest's cache into the checkout); that was WSL-mount pragmatics, not
+    # a documented xdist-safety requirement, so this comment does not claim
+    # one that isn't there.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: Run fork/atexit proof under WSL (real os.fork())
-        run: |
-          # WSL distro registration is per-Windows-account (HKCU-scoped),
-          # not machine-wide: a distro installed interactively under one
-          # login is invisible to a process running as a different account.
-          # This repo's runner service currently logs on as
-          # NT AUTHORITY\NETWORK SERVICE (not the interactive account this
-          # job's design was proven under -- see PR body for jobcannon#248),
-          # so fail loud with a diagnosable message here instead of letting
-          # that surface as an opaque wslpath/bash error further down.
-          $distros = (wsl.exe -l -q 2>$null)
-          if ($LASTEXITCODE -ne 0 -or -not $distros) {
-            throw "No WSL distribution is visible to this job's Windows account. WSL distro registration is per-account -- if a distro was installed interactively under a different login, the runner service's logon account (see 'runs-on' account in Services) needs its own registered distro, or the service needs reconfiguring to run as that account. See jobcannon#248."
-          }
-          # GITHUB_WORKSPACE is a Windows path (C:\actions-runners\...).
-          # wslpath -u silently mangles a raw backslash-form argument when
-          # invoked through pwsh's native-exe argument passing (reproduced
-          # 2026-08-28: backslash-letter runs got dropped, e.g.
-          # "C:\Users\x" -> "C:Usersx"), so translate to forward slashes
-          # first -- Windows paths accept either form, and wslpath -u
-          # handles the forward-slash form cleanly.
-          $winPathFwd = $env:GITHUB_WORKSPACE -replace '\\', '/'
-          $wslPath = (wsl.exe wslpath -u $winPathFwd).Trim()
-          if (-not $wslPath) {
-            throw "wslpath translation of '$env:GITHUB_WORKSPACE' produced no output"
-          }
-          # This file's two fork-gated tests need no Postgres (they build
-          # HostConfig with an unroutable DSN and never open a pool -- see
-          # the test module's own docstring), so POSTGRES_ADMIN_DSN is
-          # deliberately not threaded through to WSL here.
-          #
-          # The venv is keyed by RUNNER_NAME, not a fixed path: this repo's
-          # registered runners (jcpub-9800x3d-1/-2, verified via
-          # `gh api .../actions/runners`) can both come online and share one
-          # WSL instance and one $HOME on this box, so two fork-proof jobs
-          # (e.g. two open PRs, or a PR run overlapping a push-to-main run)
-          # can run concurrently. A shared fixed venv path would let a
-          # `uv sync` from one checkout silently repoint site-packages at
-          # whichever tree synced last, the same corruption class the
-          # `enable-cache: false` comment on the `test` job above guards
-          # against for the local disk cache.
-          $runnerKey = if ($env:RUNNER_NAME) { $env:RUNNER_NAME -replace '[^A-Za-z0-9_.-]', '_' } else { 'local' }
-          # PATH is exported before the `command -v uv` check, not after --
-          # an unqualified check in a bare `bash -lc` login shell cannot
-          # assume $HOME/.local/bin (uv's install target) is already on
-          # PATH, and checking before exporting would re-run the installer
-          # (and depend on astral.sh being reachable) on every single run.
-          $bashScript = 'set -euo pipefail; export PATH="$HOME/.local/bin:$PATH"; command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh; export UV_PROJECT_ENVIRONMENT="$HOME/.venvs/jobcannon-fork-$2"; cd "$1"; uv python install 3.12; uv sync --dev --python 3.12; uv run --python 3.12 pytest tests/host/test_posthog_fork_atexit.py -n0 -p no:cacheprovider --tb=short'
-          wsl.exe -e bash -lc $bashScript _ $wslPath $runnerKey
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --dev
+      - name: Run fork/atexit proof (real os.fork())
+        run: uv run pytest tests/host/test_posthog_fork_atexit.py -n0 -p no:cacheprovider --tb=short
 
   migration-collision-guard:
     name: Migration collision guard
@@ -188,12 +136,19 @@ jobs:
     # head and every OTHER currently-open PR -- it does not fully close the
     # race (two PRs can each pass this same check within the same window and
     # still both merge back to back); jobcannon/db/migrations/__init__.py's
-    # duplicate-version import check is the final backstop. Same
-    # self-hosted-only, same-repo-only gate as `test` above, for the same
-    # reason (pull_request reads the workflow file from the PR head, so a
-    # fork could otherwise smuggle in arbitrary steps).
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Windows, X64, jcpub]
+    # duplicate-version import check is the final backstop.
+    #
+    # Runs on every `pull_request` event now, including from forks --
+    # unlike jobcannon#160/#252's same-repo-only gate, there's no reason to
+    # withhold this check from an outside contribution. It's safe by
+    # construction: scripts/check_migration_collisions.py is stdlib-only
+    # (urllib, not `gh`) and read-only (lists PRs / reads file trees, never
+    # writes), and GitHub hard-restricts a fork-triggered `pull_request`
+    # run's GITHUB_TOKEN to read-only with no access to repo secrets beyond
+    # itself, regardless of this repo's own `permissions:` grants -- so a
+    # fork PR gains no additional access by running this job.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
@@ -202,11 +157,9 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-          enable-cache: false
-      # scripts/check_migration_collisions.py is stdlib-only (urllib, not
-      # `gh` -- nothing on this runner's PATH beyond what setup-uv provides
-      # is assumed). --no-project skips syncing the full project
-      # dependency set for a script that needs none of it.
+          enable-cache: true
+      # --no-project skips syncing the full project dependency set for a
+      # script that needs none of it.
       - name: Check migration version collisions
         run: uv run --no-project python scripts/check_migration_collisions.py
         env:
@@ -218,39 +171,33 @@ jobs:
     name: Tests passed
     # Required check for branch protection / merge automation. `always()`
     # keeps the JOB itself from being skipped: GitHub reports a job skipped
-    # by its own job-level `if:` as check-run conclusion `skipped`, and
-    # required-status-check semantics then treat `skipped` as passing (a
-    # required check only needs successful/skipped/neutral to unblock a
-    # merge), so gating this job's `if:` the same way `test`/`fork-proof`
-    # are gated would turn a fork PR straight into a passing required check
-    # instead of a failing one -- the opposite of hardening. The same-repo
-    # condition is therefore applied per-STEP below instead of at the job
-    # level: a step skipped by `if:` does not by itself change the job's
-    # overall conclusion, so the job keeps reporting the real outcome.
-    # needs.*.result is evaluated explicitly rather than relying on the
-    # default all-succeeded gate, so any needed job's failure/cancellation
-    # still fails this one.
-    # migration-collision-guard is allowed to be "skipped" (it only runs on
-    # same-repo pull_request events -- a push to main has no PR to check)
-    # but never "failure"/"cancelled".
+    # by a failed dependency (the default `needs:` behavior) as check-run
+    # conclusion `skipped`, and required-status-check semantics treat
+    # `skipped` as passing -- so without `always()`, a failed `test` or
+    # `fork-proof` run would turn this required check green instead of red.
+    # needs.*.result is evaluated explicitly in the step below for the same
+    # reason: `always()` bypasses the default all-succeeded gate, so this
+    # job's own logic has to re-implement it.
     #
-    # Same same-repo condition as the jobs above: this job's inline `run:`
-    # content is, like every step in every job, read from the PR head on
-    # pull_request events, so an unconditional step here would still be
-    # schedulable onto the self-hosted pool from a fork PR even though
-    # test/fork-proof/migration-collision-guard themselves already refuse
-    # to run there. On a fork PR the real check step below is skipped and a
-    # second step fails the job outright instead, so the required
-    # "Tests passed" context still reports failure (never a skip, never a
-    # pass) and a fork PR cannot merge directly -- the flow for an outside
-    # contribution stays: a maintainer pushes the branch into this repo
-    # (same-repo PR) to get CI to run.
+    # migration-collision-guard is allowed to be "skipped" (it only runs on
+    # pull_request events -- a push to main has no PR to check) but never
+    # "failure"/"cancelled".
+    #
+    # Fork PRs: jobcannon#160/#252's same-repo refusal is gone -- moving off
+    # self-hosted infra removes the hazard that refusal existed to
+    # compensate for, so this repo now runs CI for fork PRs the way any
+    # other public GitHub project does. The repo's "require approval for
+    # all outside collaborators" Actions setting is the resulting gate: an
+    # unapproved fork PR's workflow runs sit PENDING (not failed) until a
+    # maintainer approves them from the Actions tab, so this job simply
+    # never completes (and this required check never reports success)
+    # until that happens -- no fork-specific logic needed in this job
+    # itself, unlike the old per-step same-repo guards.
     needs: [test, fork-proof, migration-collision-guard]
     if: always()
-    runs-on: [self-hosted, Windows, X64, jcpub]
+    runs-on: ubuntu-latest
     steps:
-      - name: Require test success
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+      - name: Require all needed jobs to succeed
         shell: bash
         run: |
           if [ "${{ needs.test.result }}" != "success" ]; then
@@ -266,9 +213,3 @@ jobs:
             echo "migration-collision-guard job result: $guard"
             exit 1
           fi
-      - name: Reject fork pull request
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
-        shell: bash
-        run: |
-          echo "pull_request event from a fork: refusing to run this job's checks on self-hosted infra."
-          exit 1

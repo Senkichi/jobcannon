@@ -71,23 +71,21 @@ the inherited husk directly, bypassing atexit entirely. jobcannon#160's move
 to self-hosted Windows CI runners took this test file's fork-gated pair off
 CI (os.fork() does not exist on Windows), and jobcannon#162's investigation
 found neither WSL nor Docker installed on the runner box, so there was no
-CI-leg path to real os.fork() coverage at the time. That gap is closed as of
-jobcannon#248: the runner box has WSL2 (Ubuntu) now, and ci.yml's
-`fork-proof` job shells into it, pins Python 3.12 via uv (matching the
-3.12.x chain this docstring cites -- WSL's own system python is newer;
-uv currently resolves 3.12.14, while the source read above was performed
-against 3.12.11 specifically, so treat the CI leg as confirming the
-fork/join behavior across the 3.12 series rather than pinning that exact
-patch version), and runs tests/host/test_posthog_fork_atexit.py with no
-JC_FORK_TESTS_UNAVAILABLE opt-out, so both fork-gated tests execute for
-real on every CI run (job PASS, not skip). The 3.12.x chain is therefore
-CI-verified again; the 3.13.5 chain still rests on the source-read citation
-above plus an on-demand run of tests/host/test_posthog_fork_atexit.py on a
-3.13 POSIX interpreter, since the `fork-proof` job deliberately pins 3.12
-to match the chain under proof. That test file's own
+CI-leg path to real os.fork() coverage at the time; jobcannon#248 closed
+that gap for a while by shelling from the Windows runner into WSL2. CI moved
+again after that (public repo, GitHub-hosted `ubuntu-latest`, see ci.yml),
+which makes the WSL workaround unnecessary rather than merely redundant:
+os.fork() is native on Linux, so both fork-gated tests run for real inside
+the ordinary `test` job's pytest invocation with no opt-out, in addition to
+the dedicated `fork-proof` job that also runs them (see ci.yml). Python
+version is whatever `astral-sh/setup-uv` resolves for the pinned "3.12"
+spec at run time (3.12.14 as of the CI moves referenced above) — the
+3.13.5 chain still rests on the source-read citation above plus an
+on-demand run of tests/host/test_posthog_fork_atexit.py on a 3.13 POSIX
+interpreter, not routine CI coverage. That test file's own
 `_require_fork_or_fail_loud` gate still fails CI loudly instead of silently
-skipping if this coverage is ever lost again without ci.yml's
-JC_FORK_TESTS_UNAVAILABLE=1 opt-out being restored alongside it.
+skipping if real os.fork() coverage is ever lost again without
+JC_FORK_TESTS_UNAVAILABLE=1 being restored in ci.yml.
 Because of all this, the husk is deliberately left alone — never
 shutdown()/flush()/join()ed manually — leaving its already-harmless
 atexit(join) in place costs nothing, while calling shutdown()/flush() on it

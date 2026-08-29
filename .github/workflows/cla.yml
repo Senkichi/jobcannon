@@ -27,20 +27,21 @@ jobs:
     # workflow file itself comes from the fork). The action also never
     # checks out or executes the PR's code: it only reads commit-author
     # metadata over the GitHub API, posts/reacts to PR comments, and commits
-    # a signatures file to the dedicated `cla-signatures` branch. So even
-    # though this job runs on our self-hosted `jcpub` runner, the only code
-    # that ever executes there is this action's own pinned-by-commit-SHA
-    # source — never anything from a contributor's branch.
+    # a signatures file to the dedicated `cla-signatures` branch. That was
+    # already true when this ran on the self-hosted `jcpub` runner (the only
+    # code that ever executed there was this action's own
+    # pinned-by-commit-SHA source, never anything from a contributor's
+    # branch) — now that this job runs on GitHub-hosted `ubuntu-latest`
+    # (public repo, free minutes, no self-hosted attack surface left to
+    # reason about at all), that safety argument is moot rather than merely
+    # satisfied.
     # Gated at job level (not just the step) so a non-matching issue_comment
-    # never occupies a jcpub runner slot at all — CI here is queue-bound
-    # (prior audits), and a step-level-only gate would schedule the job for
-    # every comment repo-wide before skipping the step. The
-    # `github.event.issue.pull_request` check additionally keeps this off
-    # plain-issue comments (the action's own README example omits it, which
-    # would otherwise error on a bare `recheck`/sign-phrase comment left on
-    # a non-PR issue).
+    # never wastes a run at all. The `github.event.issue.pull_request` check
+    # additionally keeps this off plain-issue comments (the action's own
+    # README example omits it, which would otherwise error on a bare
+    # `recheck`/sign-phrase comment left on a non-PR issue).
     if: (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA')) || github.event_name == 'pull_request_target'
-    runs-on: [self-hosted, Windows, X64, jcpub]
+    runs-on: ubuntu-latest
     steps:
       - name: CLA Assistant Lite
         uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
