@@ -20,7 +20,7 @@
 - **Body-size secondary text** uses `--lj-gray-text`, never `--lj-gray` (3:1 vs 4.5:1 tiers).
 - **Motion:** paper never moves — no transform/translate/scale on surfaces. Only ink draws on (`lj-draw`, 600ms–1s, `--lj-spring`). Nothing breathes in v1 (omit `lj-breathe` even though the reference CTA has it). Every animation must resolve to its fully-drawn end state under `prefers-reduced-motion`.
 - **Copy changes:** none, except label casing where small-caps styling demands uppercase source text is NOT needed (CSS `text-transform: uppercase` does it — leave source copy as-is).
-- **Testing:** `uv run --active pytest -q --tb=short` — never bare `pytest`. (In an isolated worktree with its own `.venv`, drop `--active`.)
+- **Testing:** `uv run --no-sync --active pytest -q --tb=short` — never bare `pytest`. (In an isolated worktree with its own `.venv`, drop `--active`.)
 - **Commits:** Conventional Commits (`feat:`, `test:`, `docs:`, `refactor:`); commit at every task's end, WIP-commit mid-task if a step is heavy. No attribution footers.
 - **Windows repo:** write files UTF-8, LF line endings for new `.css`/`.py`/`.md` (pass `newline="\n"` in Python writes).
 
@@ -155,7 +155,7 @@ def test_missing_token_fails_loudly():
 
 - [ ] **Step 3: Run the test to verify it fails**
 
-Run: `uv run --active pytest -q --tb=short tests/test_design_tokens.py`
+Run: `uv run --no-sync --active pytest -q --tb=short tests/test_design_tokens.py`
 Expected: FAIL / ERROR — `scripts/gen_design_css.py` does not exist yet.
 
 - [ ] **Step 4: Write the generator**
@@ -374,7 +374,7 @@ line: the dark block indents each `--lj-*: value;` by four spaces.)
 
 ```bash
 python scripts/gen_design_css.py
-uv run --active pytest -q --tb=short tests/test_design_tokens.py
+uv run --no-sync --active pytest -q --tb=short tests/test_design_tokens.py
 ```
 
 Expected: 3 passed. Open `jobcannon/web/static/lj-tokens.css` and confirm by
@@ -424,8 +424,8 @@ From the 2026-08-28 codebase survey; treat as authoritative.
    not be added to it (the cache-header test derives its `private` assertions
    from that set). No asset-caching policy work in this migration.
 6. **CI** = ruff check + ruff format --check + pytest on Python 3.12; no node,
-   no Playwright. All new Python must pass `uv run ruff check .` and
-   `uv run ruff format .` (line-length 100) before commit.
+   no Playwright. All new Python must pass `uv run --no-sync ruff check .` and
+   `uv run --no-sync ruff format .` (line-length 100) before commit.
 7. `touch_target()` call sites: 67 total (63 bare + 4 `'checkbox'`) across 20
    of 25 templates. The function's docstring counts are stale; Task 6 fixes them.
 
@@ -910,9 +910,9 @@ def test_literal_detector_catches_a_real_literal():
     assert not _LITERAL_PATTERNS[1].search("background: rgba(var(--lj-shade), .16);")
 ```
 
-- [ ] **Step 3: Run** `uv run --active pytest -q --tb=short tests/test_design_css.py`
+- [ ] **Step 3: Run** `uv run --no-sync --active pytest -q --tb=short tests/test_design_css.py`
   — expected: pass (fonts.css exists from the pre-warm). Then
-  `uv run ruff check tests/test_design_css.py && uv run ruff format tests/test_design_css.py`.
+  `uv run --no-sync ruff check tests/test_design_css.py && uv run --no-sync ruff format tests/test_design_css.py`.
 
 - [ ] **Step 4: Commit** —
   `git add jobcannon/web/static/jc.css tests/test_design_css.py && git commit -m "feat: jc.css Living Journal component vocabulary + no-literals guard"`
@@ -1068,7 +1068,7 @@ utilities now). Update the module docstring's Tailwind references to name
 jc.css instead.
 
 - [ ] **Step 5: Run owned tests** (background if slow):
-`uv run --active pytest -q --tb=short tests/host/test_touch_targets.py tests/host/test_auth_nav.py tests/host/test_clerk_loader_template.py tests/host/test_security_headers.py tests/host/test_public_cache_headers.py tests/host/test_routing_errors.py`
+`uv run --no-sync --active pytest -q --tb=short tests/host/test_touch_targets.py tests/host/test_auth_nav.py tests/host/test_clerk_loader_template.py tests/host/test_security_headers.py tests/host/test_public_cache_headers.py tests/host/test_routing_errors.py`
 Expected: pass. Then ruff check/format on the two .py files.
 
 - [ ] **Step 6: Commit** — `feat: Living Journal chrome (base.html, CSP self-host, jc-touch tokens)`
@@ -1092,7 +1092,7 @@ Common rules for every wave-1 task (in addition to Global Constraints):
   update instructions).
 - Stage explicitly (`git add <your files>`, never `-A`); if `index.lock` exists,
   wait 2s and retry (parallel agents share the checkout).
-- Finish: run owned tests (`uv run --active pytest -q --tb=short <owned files>`,
+- Finish: run owned tests (`uv run --no-sync --active pytest -q --tb=short <owned files>`,
   backgrounded if >2 min), then commit `feat: Living Journal restyle — <family>`.
 
 ### Task 7: `_posting_row.html` (the feed row)
@@ -1325,9 +1325,9 @@ def test_no_cdn_remnants():
   vocabulary list in this plan is NOT needed — the closure test is the source of
   truth) and apply it in the affected template; delete the notes file.
 - [ ] **Step 3:** Run the FULL suite, backgrounded:
-  `uv run --active pytest -q --tb=short` — fix every failure caused by this
+  `uv run --no-sync --active pytest -q --tb=short` — fix every failure caused by this
   branch (class-closure catches undefined names; sabotage fixtures name their
-  own updates). `uv run ruff check . && uv run ruff format .` for touched .py.
+  own updates). `uv run --no-sync ruff check . && uv run --no-sync ruff format .` for touched .py.
 - [ ] **Step 4:** Commit — `test: Living Journal structural guards (closure, literals, CDN sweep)`
 
 ### Task 14: Visual review artifacts (main session) → USER GATE

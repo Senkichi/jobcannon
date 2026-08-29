@@ -86,5 +86,5 @@ uvx --from "fonttools[woff]" pyftsubset <family>.ttf --flavor=woff2 \
    re-adding the `$vendored` key with the new commit sha.
 2. `python scripts/gen_design_css.py` — it errors on any token path not covered
    by `VAR_MAP`/`REFERENCE_ONLY`; resolve additions explicitly there.
-3. Run `uv run --active pytest -q --tb=short tests/test_design_tokens.py tests/test_design_css.py`.
+3. Run `uv run --no-sync --active pytest -q --tb=short tests/test_design_tokens.py tests/test_design_css.py`.
 4. Update the provenance table above and the divergence list if it changed.
