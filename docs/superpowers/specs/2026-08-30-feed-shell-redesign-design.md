@@ -1,7 +1,8 @@
 # Feed & shell redesign — design
 
 Date: 2026-08-30
-Status: approved by owner (this doc is the written record of that design)
+Status: design sections approved by owner in discussion; this written spec
+is pending owner review
 Scope: Spec 1 of 2. Spec 2 (the profile editor) is designed separately after
 this ships its plan; its packaging decision is recorded below.
 
@@ -62,7 +63,9 @@ Three emphasis tiers replace the flat card in `_posting_row.html`:
   `why.py`/`apply_url.py`) formats compactly: `$150k–200k/yr`;
   `from $150k` / `up to $200k` for one-sided ranges; period mapped
   annual→`/yr`, hourly→`/hr`, monthly→`/mo`, `unknown`→omitted; currency
-  symbol omitted for `UNKNOWN`. Sentinel cases are case-sensitive by schema:
+  renders `$` for `USD`, the bare ISO code as prefix for any other known
+  currency (`EUR 80k–100k/yr` — no symbol table to hand-maintain), and is
+  omitted entirely for `UNKNOWN`. Sentinel cases are case-sensitive by schema:
   currency uses uppercase `UNKNOWN`, period lowercase `unknown`
   (`m0001_initial_schema.py:64-67`). No salary data → no salary line.
 - **Secondary — company · location.** A dedup helper in
@@ -109,15 +112,21 @@ is vertical density, not a wider journal page.
 ## 3. Expandable card
 
 - **Mechanism**: whole card clickable, expanding in place via htmx —
-  `hx-get` to a new `GET /postings/<id>/detail` fragment route,
-  `hx-target="closest [data-posting-row]"`, `hx-swap="outerHTML"` (the
-  Save/Dismiss idiom). The expanded fragment = same card + detail panel +
-  collapse control that fetches the compact fragment back. htmx beats
+  `hx-get` to a new `GET /postings/<id>/detail` fragment route, swapped
+  into a persistent empty slot INSIDE the row (`<div data-posting-detail>`
+  within `[data-posting-row]`), never replacing the row itself. The card's
+  existing DOM — Save/Dismiss/Apply controls, saved/applied state, chips —
+  is untouched by expansion, which is what lets the detail route stay
+  genuinely stateless (a row-`outerHTML` swap from a stateless route would
+  strip the authed card's user state). Collapse is local removal of the
+  panel (no second fetch); the expand button toggles. htmx beats
   `<details>` because the content worth expanding for (`jd_full`,
   `comp_data_json`, provenance) is deliberately excluded from the list
   projection; the detail route does its own `SELECT * FROM postings WHERE
   id = %s`, mirroring `db/_jd_full.py`'s established single-posting read
-  pattern.
+  pattern. Accepted interaction: a Save/Dismiss/Undo action re-renders the
+  row via `_posting_row.html`, which carries an empty detail slot — acting
+  on an expanded row therefore collapses it.
 - **Click-target guards**: a delegate on the card root ignores clicks
   landing on `[data-posting-actions]`, `[data-action-apply]`, links,
   buttons, and forms, and checks `window.getSelection().toString()` is
@@ -137,8 +146,13 @@ is vertical density, not a wider journal page.
   "Not specified" — never a false negative ("Not remote"). `direct_url` is
   a decoy column (unconditionally NULL) and must not be read.
 - **Route exposure**: serves posting content only, no user state — public
-  like `/demo`, no event logging. Cards expand on all three surfaces
-  (feed, demo, preview). Reveal is a plain swap — no transform animation
+  like `/demo`, no event logging. Note the exposure delta this ratifies:
+  `/demo` shows postings only through the canned profile's filter, while
+  `GET /postings/<id>/detail` makes any posting's full `jd_full` fetchable
+  by id enumeration with no auth. Acceptable because the content is
+  scraped-public in origin, but it is a wider window than any existing
+  public surface. Cards expand on all three surfaces (feed, demo,
+  preview). Reveal is a plain swap — no transform animation
   (identity rule 3).
 
 ## 4. Navigation & identity
