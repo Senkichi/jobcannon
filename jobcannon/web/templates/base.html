@@ -12,6 +12,8 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='lj-tokens.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='fonts.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='jc.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
   <script src="{{ url_for('static', filename='htmx.min.js') }}"></script>
   {# Gate on the derived FAPI host, not the key: a key that decodes to no host
      must never emit `src="https:///npm/..."`. #}
@@ -81,10 +83,21 @@
     })();
   </script>
   <header class="jc-header">
-    <span class="jc-wordmark">Job Cannon</span>
+    {# Identity-aware wordmark (spec §4): the one route back to the feed
+       now that the Feed/Demo nav links are gone. Gates on
+       visitor_is_authed, NOT g.clerk_user (issue #205; see the
+       My-postings comment below): g.clerk_user is force-None on every
+       PUBLIC_PATHS render, so a bare g.clerk_user check would send a
+       signed-in visitor on /demo, /privacy, or /terms to /demo instead
+       of their own feed. #}
+    <a href="{{ '/' if visitor_is_authed else '/demo' }}" class="jc-wordmark {{ touch_target() }}">Job Cannon</a>
     <nav class="jc-nav">
-      <a href="/" class="jc-nav-link {{ touch_target() }}">Feed</a>
-      <a href="/demo" class="jc-nav-link {{ touch_target() }}">Demo</a>
+      {% if not visitor_is_authed %}
+      {# Signed-out primary action (spec §4). The old Feed link only
+         401-bounced anonymous visitors, and the separate Demo link is
+         redundant once the wordmark above covers /demo. #}
+      <a href="/start" class="jc-nav-link {{ touch_target() }}" data-build-feed-nav-link>Build your feed</a>
+      {% endif %}
       {% if visitor_is_authed %}
       {# #180: the in-app saved/applied/dismissed review page
          (jobcannon/web/postings_history.py) -- gated on auth state the same
