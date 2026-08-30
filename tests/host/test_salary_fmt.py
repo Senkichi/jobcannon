@@ -66,6 +66,5 @@ def test_lowercase_unknown_currency_is_not_the_sentinel():
     # prefix UNKNOWN gets — same "from " min-only shape as every other
     # single-bound case in this file (e.g. "from $150k/yr").
     assert (
-        format_salary(_row(salary_min=150000, salary_currency="unknown"))
-        == "from unknown 150k/yr"
+        format_salary(_row(salary_min=150000, salary_currency="unknown")) == "from unknown 150k/yr"
     )

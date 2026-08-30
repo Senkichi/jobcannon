@@ -41,9 +41,7 @@ def _tokenize(text: Any) -> set[str]:
     return set(_WORD_RE.findall(str(text).lower()))
 
 
-def dedupe_location(
-    location: str | None, workplace_type: str | None
-) -> tuple[str | None, bool]:
+def dedupe_location(location: str | None, workplace_type: str | None) -> tuple[str | None, bool]:
     """(display_location, show_workplace_badge) — spec §1 secondary tier.
 
     Token-based and case-insensitive, so scraped variants ("Remote",
@@ -77,9 +75,7 @@ def dedupe_location(
 def build_entry(row: Any, profile_or_selections: Any) -> dict[str, Any]:
     saved = row["saved"]
     applied = row["applied"]
-    display_location, show_workplace_badge = dedupe_location(
-        row["location"], row["workplace_type"]
-    )
+    display_location, show_workplace_badge = dedupe_location(row["location"], row["workplace_type"])
     return {
         "row": row,
         "chips": why_chips(row, profile_or_selections),

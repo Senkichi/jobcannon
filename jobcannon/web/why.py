@@ -149,9 +149,7 @@ def _overlap_chip(row: Any, selections_or_profile: Mapping[str, Any]) -> str | N
     return f"title matches your selections: {', '.join(matched)}"
 
 
-def chip_kinds(
-    row: Any, selections_or_profile: Mapping[str, Any] | None
-) -> dict[str, str | None]:
+def chip_kinds(row: Any, selections_or_profile: Mapping[str, Any] | None) -> dict[str, str | None]:
     """Chip label per kind, unprioritized and uncapped — the single source
     jobcannon.web.feed_entries.select_chips prioritizes and caps from
     (spec §1 tier 3). Keys are always exactly ("overlap", "freshness",
