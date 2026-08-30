@@ -572,7 +572,7 @@ def test_preview_renders_a_why_chip_for_a_row_with_axes_and_salary(app):
     assert "Chip Coverage Posting" in html
     assert "data-why-chips" in html
     assert "level stated in title" in html
-    assert "salary listed" in html
+    assert "salary listed" not in html
     # Positive control: proves structural_axes actually landed as a real
     # value rather than silently arriving NULL (e.g. a fixture that forgot
     # to pass Jsonb(...)) -- the pending marker and the chip block are

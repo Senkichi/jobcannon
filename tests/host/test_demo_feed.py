@@ -142,7 +142,7 @@ def test_demo_renders_postings_with_why_chips_unauthenticated(app):
     assert resp.status_code == 200
     assert "Distinctive Demo Feed Title" in html
     assert "data-why-chips" in html
-    assert "salary listed" in html
+    assert "salary listed" not in html
     # Positive control (standard-gate obligation 2): every empty-state
     # discriminator this route could plausibly fall back to must be ABSENT —
     # present would mean the seeded profile/postings never reached the page
