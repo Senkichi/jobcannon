@@ -28,7 +28,7 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -97,12 +97,15 @@ def _board_url(slug: str) -> str:
     ``slug`` is normally the bare tenant subdomain (e.g. ``"acme"``), which
     resolves to ``https://careers-acme.icims.com/jobs/search``. Tenants
     served on the ``jobs-`` host (or any explicit host) can store the full
-    host as the slug — if the slug already contains ``icims.com`` it is used
-    verbatim rather than wrapped in the ``careers-`` prefix.
+    host as the slug — if the slug's HOSTNAME is ``icims.com`` or one of its
+    subdomains it is used verbatim rather than wrapped in the ``careers-``
+    prefix. Hostname-parsed, not substring-matched: a tenant slug like
+    ``noticims.com`` must get the ``careers-`` wrapping, not be mistaken
+    for an explicit iCIMS host.
     """
     s = slug.strip()
-    if "icims.com" in s:
-        host = s.replace("https://", "").replace("http://", "").split("/")[0]
+    host = urlsplit(s if "://" in s else f"//{s}").hostname or ""
+    if host == "icims.com" or host.endswith(".icims.com"):
         return f"https://{host}/jobs/search?ss=1"
     return f"https://careers-{s}.icims.com/jobs/search?ss=1"
 
