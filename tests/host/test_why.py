@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from jobcannon.host.structural_axes.freshness import score_freshness
-from jobcannon.web.why import why_chips
+from jobcannon.web.why import chip_kinds, why_chips
 
 
 def _row(**overrides):
@@ -47,7 +47,7 @@ def test_chips_are_literal_restatements_of_stored_values():
     assert "posted within the last week" in chips
     assert "level stated in title" in chips
     assert "JD looks complete" in chips
-    assert "salary listed" in chips
+    assert "salary listed" not in chips
     assert any(chip.startswith("title matches your selections:") for chip in chips)
     # No chip may claim a quality/fit judgment beyond the literal
     # restatement of what is stored.
@@ -67,7 +67,7 @@ def test_no_chips_from_null_structural_axes_row_but_row_still_renders():
     # ... but the row still renders a non-empty chip list: axis absence does
     # not take down the salary and title-overlap chips, which read the row
     # and selections directly rather than through structural_axes.
-    assert "salary listed" in chips
+    assert "salary listed" not in chips
     assert any(chip.startswith("title matches your selections:") for chip in chips)
 
 
@@ -162,3 +162,47 @@ def test_freshness_chip_matches_real_scorer_output_when_stale_flagged():
 def test_malformed_axis_shape_does_not_raise():
     row = _row(structural_axes={"freshness": "not-a-mapping", "jd_quality": {"value": "nan"}})
     assert why_chips(row, {}) == []
+
+
+def test_chip_kinds_keys_stable_and_none_when_nothing_to_say():
+    row = {"structural_axes": None, "posted_date_precision": None, "title": "Engineer"}
+    assert chip_kinds(row, {}) == {
+        "overlap": None,
+        "freshness": None,
+        "seniority": None,
+        "jd_quality": None,
+    }
+
+
+def test_chip_kinds_overlap_resolves_without_axes():
+    row = {"structural_axes": None, "posted_date_precision": None, "title": "Staff Engineer"}
+    kinds = chip_kinds(row, {"titles": ["Staff Engineer"]})
+    assert kinds["overlap"] == "title matches your selections: engineer, staff"
+    assert kinds["freshness"] is None
+
+
+def test_salary_never_produces_a_chip_kind():
+    row = {
+        "structural_axes": None,
+        "posted_date_precision": None,
+        "title": "Engineer",
+        "salary_min": 150000,
+        "salary_max": 200000,
+    }
+    assert why_chips(row, {}) == []
+    assert "salary" not in " ".join(k for k in chip_kinds(row, {}))
+
+
+def test_why_chips_wrapper_preserves_legacy_order():
+    axes = {
+        "freshness": {"value": 1.0},
+        "seniority_clarity": {"value": True},
+        "jd_quality": {"value": 0.9},
+    }
+    row = {"structural_axes": axes, "posted_date_precision": "exact", "title": "Staff Engineer"}
+    assert why_chips(row, {"titles": ["Staff Engineer"]}) == [
+        "posted within the last week",
+        "level stated in title",
+        "JD looks complete",
+        "title matches your selections: engineer, staff",
+    ]

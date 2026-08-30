@@ -1,9 +1,9 @@
 """why_chips — pure, DB-free literal restatements of stored posting values.
 
 No model call, no classification, no fit label: a chip may say *what is
-stored* on the row (an age band, "salary listed", a title/skill token that
-overlaps the visitor's own selections), never *how good* the posting is for
-that visitor. The axis-value -> label mapping lives once, here, so
+stored* on the row (an age band, a title/skill token that overlaps the
+visitor's own selections), never *how good* the posting is for that
+visitor. The axis-value -> label mapping lives once, here, so
 `jobcannon/web/onboarding.py` (and later authenticated consumers of the
 shared feed partials) never re-derive it.
 
@@ -128,12 +128,6 @@ def _jd_quality_chip(axes: Mapping[str, Any]) -> str | None:
     return "JD looks complete" if value >= _JD_QUALITY_MIN else None
 
 
-def _salary_chip(row: Any) -> str | None:
-    if _get(row, "salary_min") is not None or _get(row, "salary_max") is not None:
-        return "salary listed"
-    return None
-
-
 def _selection_tokens(selections_or_profile: Mapping[str, Any]) -> set[str]:
     tokens: set[str] = set()
     for key in ("titles", "target_titles", "skills"):
@@ -155,46 +149,47 @@ def _overlap_chip(row: Any, selections_or_profile: Mapping[str, Any]) -> str | N
     return f"title matches your selections: {', '.join(matched)}"
 
 
-def why_chips(row: Any, selections_or_profile: Mapping[str, Any] | None) -> list[str]:
-    """Literal, stored-value-only restatements for one posting row.
+def chip_kinds(
+    row: Any, selections_or_profile: Mapping[str, Any] | None
+) -> dict[str, str | None]:
+    """Chip label per kind, unprioritized and uncapped — the single source
+    jobcannon.web.feed_entries.select_chips prioritizes and caps from
+    (spec §1 tier 3). Keys are always exactly ("overlap", "freshness",
+    "seniority", "jd_quality"); a kind with nothing honest to say maps to
+    None.
 
-    `row` must expose `structural_axes` (a mapping of the four axis dicts,
-    or None), `posted_date_precision`, `salary_min`, `salary_max`, and
-    `title` by string key — the exact shape
-    `jobcannon.db._feed.list_feed_postings` returns.
-    `posted_date_precision` picks which freshness label set applies (see
-    `_freshness_chip`): the freshness axis value is anchored on
-    `posted_date` only for a trustworthy precision, otherwise on
-    `last_seen`, and the label must say which one it is describing rather
-    than always claiming an origination date. A `None` or
-    malformed `structural_axes` degrades to skipping the axis-derived chips
-    only; the salary and token-overlap chips are independent of it and still
-    render (they read the row/selections directly, never through the axes
-    mapping) — a posting the axes batch hasn't reached yet (the
-    500-row-per-tick cap in `structural_axes/__init__.py`) still gets a
-    "why" list, just a shorter one.
+    Same row contract why_chips documented: `structural_axes`,
+    `posted_date_precision`, and `title` by string key — the exact shape
+    `jobcannon.db._feed.list_feed_postings` returns. A None or malformed
+    `structural_axes` degrades to None for the three axis-derived kinds
+    only; overlap reads the row/selections directly and still resolves
+    (a posting the axes batch hasn't reached yet still gets chips, just
+    fewer).
     """
     selections_or_profile = selections_or_profile or {}
-    chips: list[str] = []
-
+    kinds: dict[str, str | None] = {
+        "overlap": _overlap_chip(row, selections_or_profile),
+        "freshness": None,
+        "seniority": None,
+        "jd_quality": None,
+    }
     axes = _get(row, "structural_axes")
     if isinstance(axes, Mapping):
         posted_date_precision = _get(row, "posted_date_precision")
-        axis_chips = (
-            _freshness_chip(axes, posted_date_precision),
-            _seniority_chip(axes),
-            _jd_quality_chip(axes),
-        )
-        for chip in axis_chips:
-            if chip is not None:
-                chips.append(chip)
+        kinds["freshness"] = _freshness_chip(axes, posted_date_precision)
+        kinds["seniority"] = _seniority_chip(axes)
+        kinds["jd_quality"] = _jd_quality_chip(axes)
+    return kinds
 
-    salary_chip = _salary_chip(row)
-    if salary_chip is not None:
-        chips.append(salary_chip)
 
-    overlap_chip = _overlap_chip(row, selections_or_profile)
-    if overlap_chip is not None:
-        chips.append(overlap_chip)
-
-    return chips
+def why_chips(row: Any, selections_or_profile: Mapping[str, Any] | None) -> list[str]:
+    """COMPAT WRAPPER — deleted by this plan's Task 10. Flat chip strings
+    in the legacy render order (freshness, seniority, jd_quality, overlap),
+    kept only because feed_entries.build_entry renders flat strings until
+    the Wave-2 template rewrite (Task 8) swaps it to
+    select_chips(chip_kinds(...)). The "salary listed" chip is gone for
+    good (spec §1: redundant once the salary number is prominent in the
+    card's primary tier)."""
+    kinds = chip_kinds(row, selections_or_profile)
+    ordered = (kinds["freshness"], kinds["seniority"], kinds["jd_quality"], kinds["overlap"])
+    return [chip for chip in ordered if chip is not None]
