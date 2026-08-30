@@ -2140,7 +2140,8 @@ const RESULT_SCHEMA = {
     notes: { type: 'string' },
     blocked: { type: 'string' },
   },
-  required: ['task'],
+  // No `required`: a step-0 halt returns bare {"blocked": ...}, which must
+  // validate — a required field here would eat exactly the clean-stop path.
 }
 
 const VERDICT_SCHEMA = {
@@ -2149,8 +2150,9 @@ const VERDICT_SCHEMA = {
     verdict: { type: 'string', enum: ['pass', 'fixed', 'blocked'] },
     fixes: { type: 'array', items: { type: 'string' } },
     notes: { type: 'string' },
+    blocked: { type: 'string' },
   },
-  required: ['verdict'],
+  // No `required`, same reason as RESULT_SCHEMA.
 }
 
 const COMMON = `Repo: ${REPO}, branch ${BRANCH}. Plan: ${PLAN} — read ONLY its
