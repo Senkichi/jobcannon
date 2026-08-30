@@ -43,7 +43,7 @@
 
 /* ---- chrome ---- */
 
-.jc-page { max-width: 48rem; margin-inline: auto; padding: 64px 24px; }
+.jc-page { max-width: 48rem; margin-inline: auto; padding: 40px 24px 64px; }
 
 .jc-header {
   display: flex;
@@ -175,14 +175,14 @@
 .jc-ledger { list-style: none; margin-top: 16px; }
 .jc-ledger > * + * { border-top: 1px solid var(--lj-hair); }
 
-.jc-row { padding: 16px 0; }
+.jc-row { padding: 12px 0; }
 
 .jc-index {
   font-family: var(--lj-serif);
   font-weight: 600;
   font-size: 15px;
   font-variant-numeric: tabular-nums;
-  color: var(--lj-gray);
+  color: var(--lj-gray-text);
 }
 
 .jc-row-title {
@@ -211,7 +211,8 @@
   text-transform: uppercase;
 }
 
-/* ---- stamps & honesty signals (the ONLY green consumers besides the accent rule) ---- */
+/* ---- stamps & honesty signals (green consumers, besides the accent rule:
+   .jc-chip--why and the still-unused .jc-stamp--green) ---- */
 
 .jc-stamp {
   display: inline-flex;
@@ -243,6 +244,13 @@
   font-weight: 600;
   letter-spacing: .12em;
   text-transform: uppercase;
+  color: var(--lj-gray-text);
+}
+
+/* The ≤1-green-per-row honesty accent (spec §2): _posting_row.html applies
+   this to at most the FIRST rendered chip, and only when that chip's kind
+   is overlap or freshness (feed_entries.select_chips owns the decision). */
+.jc-chip--why {
   color: var(--lj-green-text);
 }
 
@@ -375,4 +383,37 @@
   }
   .jc-accent-rule line,
   .jc-check path { animation: none !important; stroke-dashoffset: 0; }
+}
+
+/* --- Feed & shell redesign (spec 2026-08-30) ------------------------- */
+
+/* Masthead (spec §1): h1 + accent rule (+ ordering label on the feed)
+   grouped with tight internal rhythm. Children keep their own type
+   recipes; the wrapper owns all spacing. */
+.jc-masthead {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 24px;
+}
+.jc-masthead > * {
+  margin: 0;
+}
+
+/* Wordmark-as-link (spec §4): renders identically to the old <span>. */
+a.jc-wordmark {
+  color: var(--lj-ink);
+  text-decoration: none;
+}
+
+/* Intra-card rhythm tightens without touching the global stack recipe
+   (spec §1: 12px -> 8px inside a posting row only). */
+.jc-row > .jc-stack {
+  gap: 8px;
+}
+
+/* Expanded-detail slot (spec §3): sits OUTSIDE the row's stack (an empty
+   grid child would still cost a gap), so it owns its own spacing — and
+   only when populated. */
+[data-posting-detail]:not(:empty) {
+  margin-top: 10px;
 }
