@@ -7,6 +7,7 @@ All HTTP calls are mocked. No live network use.
 """
 
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlsplit
 
 from tests.engine.helpers.ats_session import ats_session_method
 
@@ -687,7 +688,7 @@ class TestProbePersonio:
         mock_get.return_value = mock_resp
         assert _probe_personio("acme") is True
         # First call should hit .de
-        assert "personio.de" in mock_get.call_args_list[0].args[0]
+        assert urlsplit(mock_get.call_args_list[0].args[0]).hostname == "acme.jobs.personio.de"
 
     @patch("jobcannon.engine.ats_prober.requests.get")
     def test_falls_back_to_com_on_404(self, mock_get):
@@ -697,7 +698,7 @@ class TestProbePersonio:
         mock_com = MagicMock(status_code=200, content=_PERSONIO_XML_SAMPLE)
         mock_get.side_effect = [mock_de, mock_com]
         assert _probe_personio("acme") is True
-        assert "personio.com" in mock_get.call_args_list[1].args[0]
+        assert urlsplit(mock_get.call_args_list[1].args[0]).hostname == "acme.jobs.personio.com"
 
     @patch("jobcannon.engine.ats_prober.requests.get")
     def test_returns_false_when_feed_empty(self, mock_get):

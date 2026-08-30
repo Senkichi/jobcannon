@@ -93,8 +93,11 @@ def _assert_csp(headers) -> str:
     # Derived from HOST_CONFIG, not hardcoded (issue #147's design
     # requirement) -- both the FAPI host (from the publishable key) and the
     # accounts host (from clerk_sign_up_url) must show up verbatim.
-    assert "https://clerk.example.test" in csp
-    assert f"https://{_ACCOUNTS_HOST}" in csp
+    # Exact source-token membership, not substring: the origin must appear as
+    # a whole token in the CSP, not as a prefix of some longer source.
+    csp_tokens = set(csp.replace(";", " ").split())
+    assert "https://clerk.example.test" in csp_tokens
+    assert f"https://{_ACCOUNTS_HOST}" in csp_tokens
     assert "form-action 'self'" in csp
     # Clerk's own CSP guidance (clerk.com/docs/guides/secure/best-practices/
     # csp-headers) requires these on frame-src/connect-src/img-src for its

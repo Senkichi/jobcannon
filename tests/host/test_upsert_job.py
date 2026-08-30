@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 import pytest
 
 from tests.host.conftest import requires_postgres
@@ -136,7 +138,8 @@ def test_sightings_recorded_per_source(db_conn, company_id):
     assert len(row["sightings"]) == 1  # re-sight updates last_seen, does not append a duplicate
     entry = row["sightings"][0]
     assert entry["source"] == "ashby"
-    assert "ashbyhq.com" in entry["source_url"]  # canonicalized form of the helper's default URL
+    # Canonicalized form of the helper's default URL — host must survive intact.
+    assert urlsplit(entry["source_url"]).hostname == "jobs.ashbyhq.com"
     assert entry["first_seen"] <= entry["last_seen"]
 
 

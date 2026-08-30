@@ -180,6 +180,41 @@ class TestIcimsPostingToJob:
         assert job["posted_date"] is None
 
 
+class TestBoardUrl:
+    def test_bare_slug_wraps_in_careers_prefix(self):
+        from jobcannon.engine.ats_platforms._platforms_icims import _board_url
+
+        assert _board_url("acme") == "https://careers-acme.icims.com/jobs/search?ss=1"
+
+    def test_explicit_icims_host_slug_used_verbatim(self):
+        from jobcannon.engine.ats_platforms._platforms_icims import _board_url
+
+        assert _board_url("jobs-acme.icims.com") == "https://jobs-acme.icims.com/jobs/search?ss=1"
+
+    def test_scheme_prefixed_slug_with_path_extracts_host_only(self):
+        from jobcannon.engine.ats_platforms._platforms_icims import _board_url
+
+        assert (
+            _board_url("https://careers-acme.icims.com/some/path")
+            == "https://careers-acme.icims.com/jobs/search?ss=1"
+        )
+
+    def test_lookalike_domain_is_not_mistaken_for_icims_host(self):
+        # Regression pin for CodeQL py/incomplete-url-substring-sanitization:
+        # the old substring check (`"icims.com" in s`) matched "noticims.com"
+        # and treated it as an explicit iCIMS host; hostname parsing must not.
+        from jobcannon.engine.ats_platforms._platforms_icims import _board_url
+
+        assert (
+            _board_url("noticims.com") == "https://careers-noticims.com.icims.com/jobs/search?ss=1"
+        )
+
+    def test_whitespace_padded_bare_slug_matches_bare_slug(self):
+        from jobcannon.engine.ats_platforms._platforms_icims import _board_url
+
+        assert _board_url("  acme  ") == _board_url("acme")
+
+
 # TestIcimsDriverTitleGate deliberately not ported: both tests import
 # jobcannon.engine.ats_scanner._run_playwright, which is Task 3 scope (not
 # ported by this PR). See the PR body's "tests not ported" list.

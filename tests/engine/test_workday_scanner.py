@@ -3,6 +3,7 @@
 import threading
 import time
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -171,7 +172,7 @@ class TestScanWorkday:
         assert results[0]["title"] == "Senior Data Scientist"
         assert results[0]["company_source"] == "Workday"
         assert results[0]["location"] == "Sunnyvale, CA"
-        assert "walmart.wd5.myworkdayjobs.com" in results[0]["source_url"]
+        assert urlsplit(results[0]["source_url"]).hostname == "walmart.wd5.myworkdayjobs.com"
 
     @patch("jobcannon.engine.ats_platforms._platforms_workday.get_session")
     def test_scan_applies_exclusions(self, mock_get_session, _mock_detail):

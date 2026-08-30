@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -70,8 +71,9 @@ def detect_platform(url: str | None) -> str | None:
     """
     if not url:
         return None
-    u = url.lower()
-    if "linkedin.com" in u and "/jobs/" in u:
+    parts = urlsplit(url.lower())
+    host = parts.hostname or ""
+    if (host == "linkedin.com" or host.endswith(".linkedin.com")) and "/jobs/" in parts.path:
         return "linkedin"
     return None
 
