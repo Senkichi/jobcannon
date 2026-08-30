@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Living Journal icon-asset exemption (docs/design/living-journal.md
+       rule 5): literal hexes mirror lj-tokens.css. .ink mirrors the ink
+       custom property (#1E1611 light / #EDE5D8 dark); .arc mirrors the
+       green-text custom property (#1F7A40 light / #3DBD55 dark). Full
+       property names, prefixed lj, are given in lj-tokens.css; the
+       hyphen prefix is omitted here since XML comments disallow a
+       double hyphen. -->
+  <style>
+    .ink { stroke: #1E1611; }
+    .arc { stroke: #1F7A40; }
+    @media (prefers-color-scheme: dark) {
+      .ink { stroke: #EDE5D8; }
+      .arc { stroke: #3DBD55; }
+    }
+  </style>
+  <g fill="none" stroke-linecap="round">
+    <line class="ink" x1="9" y1="23" x2="21" y2="11" stroke-width="7"/>
+    <circle class="ink" cx="10" cy="24" r="4.5" stroke-width="3"/>
+    <path class="arc" d="M24.5 3.5 A 9 9 0 0 1 29 8.5" stroke-width="2.5"/>
+    <line class="arc" x1="25" y1="11.5" x2="27.5" y2="9" stroke-width="2.5"/>
+  </g>
+</svg>
