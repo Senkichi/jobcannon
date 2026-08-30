@@ -246,7 +246,7 @@ def test_table_scroll_focus_visible_rule_detects_a_dropped_outline():
     match = _TABLE_SCROLL_FOCUS_RULE_RE.search(live_css)
     assert match, "legal_page.html's focus-visible rule is missing -- update this sabotage fixture"
     original_block = match.group(0)
-    sabotaged_block = original_block.replace("outline: 2px solid #737373;", "", 1)
+    sabotaged_block = original_block.replace("outline: 2px solid var(--lj-gray);", "", 1)
     assert sabotaged_block != original_block, (
         "legal_page.html's focus-visible rule text changed -- update this sabotage fixture"
     )

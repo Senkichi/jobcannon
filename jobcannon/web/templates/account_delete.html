@@ -1,25 +1,27 @@
 {% extends "base.html" %}
 {% block title %}Delete account — Job Cannon{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold mb-3">Delete your account</h1>
+<h1 class="jc-title">Delete your account</h1>
 {% if error %}
-  <p class="text-red-400 mb-4">{{ error }}</p>
+  <p class="jc-error-note">{{ error }}</p>
 {% endif %}
-<p class="text-neutral-400 mb-6">
+<p class="jc-lede">
   This permanently deletes your Job Cannon account and everything tied to
   it — saved postings, pipeline status, and your event history. This
   cannot be undone.
 </p>
 <form method="post" action="/account/delete">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <label class="flex items-center gap-2 {{ touch_target() }} px-1 text-sm text-neutral-300 mb-6">
-    <input type="checkbox" name="confirm" value="delete-my-account" required
-           class="rounded border-neutral-700 bg-neutral-900 {{ touch_target('checkbox') }} shrink-0">
-    I understand this permanently deletes my account and cannot be undone.
-  </label>
-  <button type="submit"
-          class="bg-red-600 text-neutral-100 px-4 py-2 rounded font-medium {{ touch_target() }} inline-flex items-center">
-    Delete my account
-  </button>
+  <div class="jc-stack">
+    <label class="jc-cluster jc-note {{ touch_target() }}">
+      <input type="checkbox" name="confirm" value="delete-my-account" required
+             class="{{ touch_target('checkbox') }}">
+      I understand this permanently deletes my account and cannot be undone.
+    </label>
+    <button type="submit"
+            class="jc-btn {{ touch_target() }}">
+      Delete my account
+    </button>
+  </div>
 </form>
 {% endblock %}

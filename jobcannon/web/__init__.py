@@ -688,12 +688,13 @@ def create_app(config: dict | None = None) -> Flask:
     @app.errorhandler(401)
     def unauthorized(_error):
         """HTML body for every 401 in this app, not only an authed-route
-        sign-in prompt: `clerk_auth` below still renders this for
-        `/static/<path>` (Flask registers that rule unconditionally, and
-        it is not in PUBLIC_PATHS -- a missing file 404s from inside the
-        view, but the route itself still requires a session first) and
-        for any other real, matched, non-public route a signed-out
-        visitor hits. An UNMATCHED path or a wrong HTTP method on a real
+        sign-in prompt: `clerk_auth` below renders this for any real,
+        matched, non-public route a signed-out visitor hits.
+        (`/static/<path>` is NOT among them: Flask registers that rule
+        unconditionally and it is not in PUBLIC_PATHS, but clerk_auth
+        exempts the static ENDPOINT so self-hosted design assets load
+        for signed-out visitors on public pages -- a missing file still
+        404s from inside the view.) An UNMATCHED path or a wrong HTTP method on a real
         route no longer reaches this handler at all (issue #173):
         clerk_auth re-raises `request.routing_exception` before any auth
         logic runs, so Flask's own 404/405 errorhandlers below take over
@@ -863,6 +864,21 @@ def create_app(config: dict | None = None) -> Flask:
             g.clerk_user = None
             g.consent_granted = False
             raise request.routing_exception
+        # Self-hosted assets (lj-tokens.css, jc.css, fonts, htmx.min.js)
+        # must load for signed-out visitors on every public page, so the
+        # static endpoint is exempt as an ENDPOINT, not a PUBLIC_PATHS
+        # entry: PUBLIC_PATHS drives page-render behavior -- header-nav
+        # variance and _vary_and_cache_public_paths' Cache-Control:
+        # private -- none of which applies to asset bytes.
+        # ensure_session_ids() / capture_attribution() are deliberately
+        # skipped: an asset fetch must never set cookies or record
+        # attribution (tests/host/test_static_assets.py pins both).
+        # g.clerk_user still needs a value -- a missing file 404s from
+        # inside the view and error.html reads it for the header nav.
+        if request.endpoint == "static":
+            g.clerk_user = None
+            g.consent_granted = False
+            return None
         # The public-path exemption rests solely on _is_public_request_path()'s
         # normalized-path membership check: request.path is compared with a
         # trailing slash stripped (falling back to "/") because /demo is

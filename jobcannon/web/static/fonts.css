@@ -1,0 +1,23 @@
+/* Self-hosted variable fonts (SIL OFL — license files in fonts/).
+   Provenance + subset recipe: docs/design/living-journal.md. */
+@font-face {
+  font-family: 'Fraunces Variable';
+  src: url('fonts/fraunces-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Fraunces Variable';
+  src: url('fonts/fraunces-italic-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter Variable';
+  src: url('fonts/inter-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}

@@ -1,23 +1,21 @@
 """jobcannon/web/template_globals.py — Jinja globals shared across templates.
 
-`touch_target()` (issue #207) single-sources the Tailwind utility class(es)
-that satisfy the 44px touch-target floor enforced by
-tests/host/test_touch_targets.py, so the floor itself lives in exactly one
-place instead of being pasted as a literal string at every interactive-
-element site (61 `min-h-11` + 4 `h-11 w-11` sites across 17 templates as of
-#207 — a change to the floor value previously meant editing all of them by
-hand, with nothing catching a missed site except the guard test failing
-one-by-one).
+`touch_target()` (issue #207) single-sources the CSS class(es), defined in
+jobcannon/web/static/jc.css (44px floor), that satisfy the touch-target
+floor enforced by tests/host/test_touch_targets.py, so the floor itself
+lives in exactly one place instead of being pasted as a literal string at
+every interactive-element site (63 bare + 4 `'checkbox'` call sites across
+20 templates as of the Living Journal adoption — a change to the floor
+value previously meant editing all of them by hand, with nothing catching
+a missed site except the guard test failing one-by-one).
 
-Deliberately emits ONLY the floor token(s) — `min-h-11` for a normal
-element, `h-11 w-11` for a checkbox/radio — not a wider class bundle
-(`inline-flex items-center px-1`, `rounded font-medium`, `flex items-center
-gap-2`, ...): those surrounding utility classes vary legitimately per site
-(a nav link, a submit button, a `<select>`, a `<label>` wrapping a
-checkbox all want different layout/spacing), and forcing them into one
-shared bundle would either change real rendered layout at several sites
-(the `<select>`/bare-`<input>` sites carry no surrounding flex/padding
-classes at all today) or require a second, hand-maintained
+Deliberately emits ONLY the floor token(s) — `jc-touch` for a normal
+element, `jc-touch-box` for a checkbox/radio — not a wider class bundle:
+the surrounding class(es) vary legitimately per site (a nav link wants
+`jc-nav-link`, a submit button wants `jc-btn`, a `<select>`/bare `<input>`
+wants `jc-input`, a `<label>` wrapping a checkbox wants none at all), and
+forcing them into one shared bundle would either change real rendered
+layout at several sites or require a second, hand-maintained
 kind-name -> class-shape taxonomy that #207 exists to get away from — see
 the PR body for the exact per-site class-shape breakdown that ruled this
 out.
@@ -31,14 +29,14 @@ own.
 from __future__ import annotations
 
 _KIND_TOKENS = {
-    "block": "min-h-11",
-    "checkbox": "h-11 w-11",
+    "block": "jc-touch",
+    "checkbox": "jc-touch-box",
 }
 
 
 def touch_target(kind: str = "block") -> str:
-    """Return the Tailwind utility class(es) that satisfy the 44px
-    touch-target floor for `kind`.
+    """Return the CSS class(es) (defined in jobcannon/web/static/jc.css)
+    that satisfy the 44px touch-target floor for `kind`.
 
     - "block" (default): every interactive element except a checkbox/radio
       input — `<a>`, `<button>`, a non-checkbox `<input>`, `<label>`,

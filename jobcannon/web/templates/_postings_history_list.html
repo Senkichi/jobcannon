@@ -12,25 +12,25 @@
    (its save/dismiss/apply/undo block is entirely skipped -- see
    jobcannon/web/postings_history.py's module docstring for why). #}
 {% if entries %}
-  <div class="space-y-4" data-postings-history-list>
+  <div class="jc-ledger" data-postings-history-list>
     {% for entry in entries %}
       {% include "_posting_row.html" %}
     {% endfor %}
   </div>
-  <div class="flex items-center justify-between text-sm text-neutral-400 mt-4"
+  <div class="jc-cluster"
        data-postings-history-pagination>
-    <span data-postings-history-range>Showing {{ pagination.page_start }}&ndash;{{ pagination.page_end }} of {{ pagination.total }}</span>
-    <span class="flex gap-4">
+    <span class="jc-note" data-postings-history-range>Showing {{ pagination.page_start }}&ndash;{{ pagination.page_end }} of {{ pagination.total }}</span>
+    <span class="jc-cluster">
       {% if pagination.has_prev %}
         <a href="{{ url_for('postings_history.index', view=view, page=pagination.prev_page) }}"
-           class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1" data-postings-history-prev>Previous</a>
+           class="jc-btn {{ touch_target() }}" data-postings-history-prev>Previous</a>
       {% endif %}
       {% if pagination.has_next %}
         <a href="{{ url_for('postings_history.index', view=view, page=pagination.next_page) }}"
-           class="underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-1" data-postings-history-next>Next</a>
+           class="jc-btn {{ touch_target() }}" data-postings-history-next>Next</a>
       {% endif %}
     </span>
   </div>
 {% else %}
-  <p class="text-neutral-400" data-postings-history-empty>{{ empty_copy }}</p>
+  <p class="jc-empty" data-postings-history-empty>{{ empty_copy }}</p>
 {% endif %}

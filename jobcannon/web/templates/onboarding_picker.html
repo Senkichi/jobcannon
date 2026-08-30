@@ -2,16 +2,16 @@
 {% block title %}Get started — Job Cannon{% endblock %}
 {% block content %}
 {% if submitted %}
-  <h1 class="text-2xl font-semibold mb-3">Picker submitted</h1>
-  <p class="text-neutral-400">
+  <h1 class="jc-title">Picker submitted</h1>
+  <p class="jc-lede">
     Your selections are saved.
-    <a href="{{ url_for('onboarding.preview') }}" class="underline {{ touch_target() }} inline-flex items-center px-1">See your preview</a>.
+    <a href="{{ url_for('onboarding.preview') }}" class="jc-link {{ touch_target() }}">See your preview</a>.
   </p>
 {% else %}
-  <h1 class="text-2xl font-semibold mb-3">Tell us what you're looking for</h1>
-  <p class="text-neutral-400 mb-6">No account needed yet — this just tunes what the feed shows you later.</p>
+  <h1 class="jc-title">Tell us what you're looking for</h1>
+  <p class="jc-lede">No account needed yet — this just tunes what the feed shows you later.</p>
   {% if error %}
-    <p class="text-red-400 mb-4">{{ error }}</p>
+    <p class="jc-error-note">{{ error }}</p>
   {% endif %}
   {# #148: live-filters the Titles/Companies fieldsets below as you type.
      Its own GET form + submit button is the no-JS fallback (a plain
@@ -36,63 +36,63 @@
      hx-include's help (PR #192 review finding L1). GET /start reads them
      back with the same request.args.getlist("titles"/"companies") it
      already used for the hx-include case. #}
-  <form method="get" action="/start" class="mb-4 flex gap-2" data-picker-search>
+  <form method="get" action="/start" class="jc-cluster" data-picker-search>
     <input type="text" name="q" value="{{ q }}" placeholder="Search titles or companies&hellip;"
            hx-get="/start"
            hx-trigger="keyup changed delay:300ms"
            hx-target="#picker-options"
            hx-swap="outerHTML"
            hx-include="[name='titles']:checked,[name='companies']:checked"
-           class="bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-sm text-neutral-100 flex-1 {{ touch_target() }}">
+           class="jc-input {{ touch_target() }}">
     {% for title in checked_titles %}
       <input type="hidden" name="titles" value="{{ title }}">
     {% endfor %}
     {% for company in checked_companies %}
       <input type="hidden" name="companies" value="{{ company }}">
     {% endfor %}
-    <button type="submit" class="text-sm underline text-neutral-300 {{ touch_target() }} inline-flex items-center px-2">Search</button>
+    <button type="submit" class="jc-btn {{ touch_target() }}">Search</button>
   </form>
-  <form method="post" action="/start" class="space-y-8">
+  <form method="post" action="/start" class="jc-stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {% include "_picker_options.html" %}
-    <fieldset>
-      <legend class="font-medium mb-2">Skills</legend>
+    <fieldset class="jc-field">
+      <legend class="lj-label">Skills</legend>
       {% for skill in skills %}
-        <label class="flex items-center gap-2 {{ touch_target() }} px-1 text-sm text-neutral-300">
-          <input type="checkbox" name="skills" value="{{ skill }}" {% if skill in checked_skills %}checked{% endif %} class="{{ touch_target('checkbox') }} shrink-0 accent-neutral-100"> {{ skill }}
+        <label class="jc-cluster {{ touch_target() }}">
+          <input type="checkbox" name="skills" value="{{ skill }}" {% if skill in checked_skills %}checked{% endif %} class="{{ touch_target('checkbox') }}"> {{ skill }}
         </label>
       {% endfor %}
     </fieldset>
-    <label class="block {{ touch_target() }}">
-      <span class="font-medium">Seniority level</span>
-      <select name="seniority_level" class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 {{ touch_target() }}">
+    <label class="jc-field {{ touch_target() }}">
+      <span class="lj-label">Seniority level</span>
+      <select name="seniority_level" class="jc-input {{ touch_target() }}">
         <option value="" {% if not seniority_level %}selected{% endif %}>Prefer not to say</option>
         {% for level in seniority_levels %}
           <option value="{{ level }}" {% if level == seniority_level %}selected{% endif %}>{{ level }}</option>
         {% endfor %}
       </select>
     </label>
-    <label class="block {{ touch_target() }}">
-      <span class="font-medium">Years of experience</span>
+    <label class="jc-field {{ touch_target() }}">
+      <span class="lj-label">Years of experience</span>
       <input type="number" name="years_of_experience" min="0" max="60" step="0.5"
              value="{{ years_of_experience }}"
-             class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 {{ touch_target() }}">
+             class="jc-input {{ touch_target() }}">
     </label>
-    <label class="block {{ touch_target() }}">
-      <span class="font-medium">Compensation floor (USD/year, optional)</span>
+    <label class="jc-field {{ touch_target() }}">
+      <span class="lj-label">Compensation floor (USD/year, optional)</span>
       <input type="number" name="comp_floor_usd" min="0" step="1"
              value="{{ comp_floor_usd }}"
-             class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 {{ touch_target() }}">
+             class="jc-input {{ touch_target() }}">
     </label>
-    <label class="block {{ touch_target() }}">
-      <span class="font-medium">Workplace type</span>
-      <select name="workplace_type" class="block mt-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 {{ touch_target() }}">
+    <label class="jc-field {{ touch_target() }}">
+      <span class="lj-label">Workplace type</span>
+      <select name="workplace_type" class="jc-input {{ touch_target() }}">
         {% for wt in workplace_types %}
           <option value="{{ wt }}" {% if wt == workplace_type %}selected{% endif %}>{{ wt }}</option>
         {% endfor %}
       </select>
     </label>
-    <button type="submit" class="bg-neutral-100 text-neutral-950 px-4 py-2 rounded font-medium {{ touch_target() }} inline-flex items-center">Continue</button>
+    <button type="submit" class="jc-btn jc-btn--primary {{ touch_target() }}">Continue</button>
   </form>
 {% endif %}
 {% endblock %}

@@ -17,47 +17,51 @@
    (jobcannon/web/__init__.py's _inject_auth_links) -- so a signed-in
    visitor never sees a redundant "sign up" nudge; "Build your own feed"
    stays visible to everyone regardless. #}
-<p class="text-sm text-neutral-400 mb-4" data-demo-cta>
+<p class="jc-cta" data-demo-cta>
   This is a canned demo profile.
-  <a href="/start" class="underline text-neutral-100 {{ touch_target() }} inline-flex items-center px-1">Build your own feed</a>
+  <a href="/start" class="jc-link {{ touch_target() }}">Build your own feed</a>
   {% if signup_cta_url %}
-    or <a href="{{ signup_cta_url }}" class="underline text-neutral-100 {{ touch_target() }} inline-flex items-center px-1">sign up</a> to save it as new postings come in.
+    or <a href="{{ signup_cta_url }}" class="jc-link {{ touch_target() }}">sign up</a> to save it as new postings come in.
   {% endif %}
 </p>
 {% if stats.postings == 0 %}
   {% include "_corpus_empty.html" %}
 {% elif not profile %}
-  <h1 class="text-2xl font-semibold mb-3">The guest profile isn't seeded yet</h1>
-  <p class="text-neutral-400">This demo renders a canned guest profile against the live corpus. An operator needs to run the guest-seed script before this page has a profile to show.</p>
+  <h1 class="jc-title">The guest profile isn't seeded yet</h1>
+  <svg class="jc-accent-rule" viewBox="0 0 188 5" preserveAspectRatio="none" aria-hidden="true"><line x1="3" y1="2.5" x2="185" y2="2.5"/></svg>
+  <p class="jc-lede">This demo renders a canned guest profile against the live corpus. An operator needs to run the guest-seed script before this page has a profile to show.</p>
 {% else %}
-  <h1 class="text-2xl font-semibold mb-3">Guest demo feed</h1>
-  <p class="text-neutral-400 mb-6">
-    <strong class="text-neutral-100">{{ stats.postings }}</strong> live postings across
-    <strong class="text-neutral-100">{{ stats.companies }}</strong> companies
+  <h1 class="jc-title">Guest demo feed</h1>
+  <svg class="jc-accent-rule" viewBox="0 0 188 5" preserveAspectRatio="none" aria-hidden="true"><line x1="3" y1="2.5" x2="185" y2="2.5"/></svg>
+  <p class="jc-lede">
+    <strong>{{ stats.postings }}</strong> live postings across
+    <strong>{{ stats.companies }}</strong> companies
     {%- if stats.freshest_last_seen %} · freshest signal {{ stats.freshest_last_seen.strftime("%Y-%m-%d %H:%M") }} UTC{% endif %}
     — filtered below to the canned profile's target titles, no signup required.
   </p>
 
-  <div class="border border-neutral-800 rounded-lg p-4 mb-8 space-y-1" data-profile-card>
-    <h2 class="text-lg font-medium text-neutral-100">Guest profile</h2>
-    {% if profile.target_titles %}
-      <p class="text-sm text-neutral-400">Targeting: {{ profile.target_titles | join(", ") }}</p>
-    {% endif %}
-    {% if profile.seniority_level %}
-      <p class="text-sm text-neutral-400">Seniority: {{ profile.seniority_level }}</p>
-    {% endif %}
-    {% if profile.years_of_experience %}
-      <p class="text-sm text-neutral-400">{{ profile.years_of_experience }} years of experience</p>
-    {% endif %}
-    {% if profile.skills %}
-      <p class="text-sm text-neutral-400">Skills: {{ profile.skills | join(", ") }}</p>
-    {% endif %}
-    {% if profile.experience_summary %}
-      <p class="text-sm text-neutral-400">{{ profile.experience_summary }}</p>
-    {% endif %}
+  <div class="jc-panel" data-profile-card>
+    <div class="jc-stack">
+      <h2 class="lj-label">Guest profile</h2>
+      {% if profile.target_titles %}
+        <p class="jc-note">Targeting: {{ profile.target_titles | join(", ") }}</p>
+      {% endif %}
+      {% if profile.seniority_level %}
+        <p class="jc-note">Seniority: {{ profile.seniority_level }}</p>
+      {% endif %}
+      {% if profile.years_of_experience %}
+        <p class="jc-note">{{ profile.years_of_experience }} years of experience</p>
+      {% endif %}
+      {% if profile.skills %}
+        <p class="jc-note">Skills: {{ profile.skills | join(", ") }}</p>
+      {% endif %}
+      {% if profile.experience_summary %}
+        <p class="jc-note">{{ profile.experience_summary }}</p>
+      {% endif %}
+    </div>
   </div>
 
-  <p class="text-sm text-neutral-500 mb-4" data-ordering-label>
+  <p class="lj-label" data-ordering-label>
     {% if ordering.personalized %}
       Ranked by {{ ordering.ranker_version }}.
     {% else %}

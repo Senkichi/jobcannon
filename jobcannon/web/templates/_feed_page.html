@@ -16,14 +16,14 @@
    load_more_url, so /demo renders no button at all — Jinja's default
    Undefined is falsy in an `{% if %}`, the same tolerance `show_actions`
    already relies on below. #}
-<div class="space-y-4" data-feed-list>
+<div class="jc-ledger" data-feed-list>
   {% for entry in entries %}
     {% include "_posting_row.html" %}
   {% endfor %}
 </div>
 {% if load_more_url %}
 <button hx-get="{{ load_more_url }}" hx-target="this" hx-swap="outerHTML"
-        class="text-sm underline text-neutral-300 mt-4 {{ touch_target() }} inline-flex items-center" data-load-more>
+        class="jc-btn {{ touch_target() }}" data-load-more>
   Load more
 </button>
 {% endif %}

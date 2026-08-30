@@ -15,36 +15,36 @@
    {% include %} of this one, the full page, without duplicating: POST's
    `error` re-render never sets `notice`, and this block never sets
    `error`. #}
-<div id="picker-options">
+<div id="picker-options" class="jc-stack">
   {% if notice %}
-    <p class="text-red-400 mb-4">{{ notice }}</p>
+    <p class="jc-error-note">{{ notice }}</p>
   {% endif %}
-  <fieldset>
-    <legend class="font-medium mb-2">Titles</legend>
+  <fieldset class="jc-field">
+    <legend class="lj-label">Titles</legend>
     {% if titles %}
       {% for title in titles %}
-        <label class="flex items-center gap-2 {{ touch_target() }} px-1 text-sm text-neutral-300">
-          <input type="checkbox" name="titles" value="{{ title }}" {% if title in checked_titles %}checked{% endif %} class="{{ touch_target('checkbox') }} shrink-0 accent-neutral-100"> {{ title }}
+        <label class="jc-cluster {{ touch_target() }}">
+          <input type="checkbox" name="titles" value="{{ title }}" {% if title in checked_titles %}checked{% endif %} class="{{ touch_target('checkbox') }}"> {{ title }}
         </label>
       {% endfor %}
     {% elif q %}
-      <p class="text-sm text-neutral-500">No titles match &ldquo;{{ q }}&rdquo;.</p>
+      <p class="jc-note">No titles match &ldquo;{{ q }}&rdquo;.</p>
     {% else %}
-      <p class="text-sm text-neutral-500">No titles in the corpus yet.</p>
+      <p class="jc-note">No titles in the corpus yet.</p>
     {% endif %}
   </fieldset>
-  <fieldset>
-    <legend class="font-medium mb-2">Companies</legend>
+  <fieldset class="jc-field">
+    <legend class="lj-label">Companies</legend>
     {% if companies %}
       {% for company in companies %}
-        <label class="flex items-center gap-2 {{ touch_target() }} px-1 text-sm text-neutral-300">
-          <input type="checkbox" name="companies" value="{{ company }}" {% if company in checked_companies %}checked{% endif %} class="{{ touch_target('checkbox') }} shrink-0 accent-neutral-100"> {{ company }}
+        <label class="jc-cluster {{ touch_target() }}">
+          <input type="checkbox" name="companies" value="{{ company }}" {% if company in checked_companies %}checked{% endif %} class="{{ touch_target('checkbox') }}"> {{ company }}
         </label>
       {% endfor %}
     {% elif q %}
-      <p class="text-sm text-neutral-500">No companies match &ldquo;{{ q }}&rdquo;.</p>
+      <p class="jc-note">No companies match &ldquo;{{ q }}&rdquo;.</p>
     {% else %}
-      <p class="text-sm text-neutral-500">No companies in the corpus yet.</p>
+      <p class="jc-note">No companies in the corpus yet.</p>
     {% endif %}
   </fieldset>
 </div>

@@ -135,19 +135,6 @@ def test_bad_request_errorhandler_renders_branded_page():
     assert "Bad request" in resp.get_data(as_text=True)
 
 
-def test_static_path_is_unaffected_still_401s_signed_out():
-    """Design invariant: /static/<path> matches a real Werkzeug rule
-    (registered unconditionally, not in PUBLIC_PATHS) regardless of
-    whether the file exists, so routing_exception is None and the request
-    still reaches -- and is still rejected by -- the ordinary auth gate.
-    A missing file 404s only from inside the view, which a signed-out
-    visitor never reaches."""
-    app = _app()
-    resp = app.test_client().get("/static/does-not-exist.css")
-
-    assert resp.status_code == 401
-
-
 def test_healthz_is_unaffected_by_the_routing_exception_check():
     app = _app()
     resp = app.test_client().get("/healthz")
@@ -186,11 +173,13 @@ def test_gate_covers_every_registered_route_for_every_declared_method():
     OPTIONS /postings/1/save->401 same as any other method, so there was
     no reason to skip it) -- derived from app.url_map.iter_rules() itself
     (never a hand-maintained path list), so a future route is automatically
-    covered by this test too. Two exemptions, both intentional, none
+    covered by this test too. Three exemptions, all intentional, none
     hand-picked by route name: PUBLIC_PATHS members (clerk_auth's own
-    public-path branch) and _EXEMPT_STATUS above (issue #171's
+    public-path branch), _EXEMPT_STATUS above (issue #171's
     public_get-marked GET/HEAD/OPTIONS /consent, asserting the real
-    status a signed-out visitor gets, not merely "not 401")."""
+    status a signed-out visitor gets, not merely "not 401"), and the
+    static endpoint (clerk_auth's endpoint exemption, mirrored below by
+    the same `endpoint == "static"` predicate the gate consults)."""
     app = _app()
     client = app.test_client()
 
@@ -200,6 +189,14 @@ def test_gate_covers_every_registered_route_for_every_declared_method():
     endpoints_by_request: dict[tuple[str, str], list[str]] = {}
     for rule in app.url_map.iter_rules():
         if rule.endpoint.startswith("webhooks."):
+            continue
+        if rule.endpoint == "static":
+            # clerk_auth stands down for the static ENDPOINT (see
+            # jobcannon/web/__init__.py): self-hosted assets must load for
+            # signed-out visitors on every public page. That behavior --
+            # 200 for every template-referenced asset, 404-not-401 for a
+            # missing file, no Set-Cookie, and the gate-not-widened
+            # control -- is owned by tests/host/test_static_assets.py.
             continue
         path = _concrete_path(rule.rule)
         normalized = path.rstrip("/") or "/"

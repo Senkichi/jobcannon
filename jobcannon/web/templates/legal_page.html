@@ -2,17 +2,17 @@
 {% block title %}{{ title }} — Job Cannon{% endblock %}
 {% block content %}
 <style>
-  /* Tailwind's CDN build has no @apply and its preflight strips default
-     heading/table styling, so bare markdown output (h1-h3, p, table, a,
-     blockquote, hr) needs real CSS here rather than utility classes —
-     there is nothing to attach a class to inside the |safe-inserted HTML.
+  /* body_html is raw markdown-rendered HTML (h1-h3, p, table, a, blockquote,
+     hr) with no class attribute to attach a jc.css rule to, so it needs real
+     CSS here rather than a vocabulary class. Every value composes from the
+     var(--lj-*) tokens in lj-tokens.css — no color literals.
      Scoped to .legal-prose so it never leaks onto the rest of the app. */
-  .legal-prose h1 { font-size: 1.5rem; font-weight: 600; color: #f5f5f5; margin-bottom: 0.75rem; }
-  .legal-prose h2 { font-size: 1.15rem; font-weight: 600; color: #e5e5e5; margin-top: 2rem; margin-bottom: 0.5rem; }
-  .legal-prose h3 { font-size: 1rem; font-weight: 600; color: #d4d4d4; margin-top: 1.5rem; margin-bottom: 0.5rem; }
-  .legal-prose p, .legal-prose li { color: #a3a3a3; line-height: 1.65; margin-bottom: 0.75rem; }
+  .legal-prose h1 { font-family: var(--lj-serif); font-size: 1.5rem; font-weight: 600; color: var(--lj-ink); margin-bottom: 0.75rem; }
+  .legal-prose h2 { font-family: var(--lj-serif); font-size: 1.15rem; font-weight: 600; color: var(--lj-ink); margin-top: 2rem; margin-bottom: 0.5rem; }
+  .legal-prose h3 { font-family: var(--lj-serif); font-size: 1rem; font-weight: 600; color: var(--lj-ink); margin-top: 1.5rem; margin-bottom: 0.5rem; }
+  .legal-prose p, .legal-prose li { color: var(--lj-ink); line-height: 1.65; margin-bottom: 0.75rem; }
   .legal-prose ul, .legal-prose ol { margin-left: 1.25rem; margin-bottom: 0.75rem; }
-  .legal-prose strong { color: #e5e5e5; }
+  .legal-prose strong { color: var(--lj-ink); }
   /* #222: an inline markdown link's rendered box (terms.md's
      [Privacy Policy](/privacy), the only link any legal doc renders today
      -- see tests/host/test_touch_targets.py's #222 tests) measured
@@ -35,13 +35,13 @@
      test_legal_prose_link_padding_clears_the_touch_target_floor requires
      BOTH declarations present with a nonzero px value each -- a
      `padding: 0` or a one-sided edit would fail it. */
-  .legal-prose a { color: #d4d4d4; text-decoration: underline; padding-top: 14px; padding-bottom: 14px; }
-  .legal-prose a:hover { color: #f5f5f5; }
+  .legal-prose a { color: var(--lj-gray-text); text-decoration: underline; padding-top: 14px; padding-bottom: 14px; }
+  .legal-prose a:hover { color: var(--lj-ink); }
   .legal-prose table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-  .legal-prose th, .legal-prose td { border: 1px solid #404040; padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; }
-  .legal-prose th { background: #171717; color: #e5e5e5; }
-  .legal-prose blockquote { border-left: 3px solid #404040; padding-left: 1rem; color: #737373; margin: 1rem 0; }
-  .legal-prose hr { border: none; border-top: 1px solid #262626; margin: 2rem 0; }
+  .legal-prose th, .legal-prose td { border: 1px solid var(--lj-rule); padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; }
+  .legal-prose th { background: var(--lj-card2); color: var(--lj-ink); }
+  .legal-prose blockquote { border-left: 3px solid var(--lj-rule); padding-left: 1rem; color: var(--lj-gray-text); margin: 1rem 0; }
+  .legal-prose hr { border: none; border-top: 1px solid var(--lj-hair); margin: 2rem 0; }
   /* Narrow-viewport table fix: some legal-page tables (e.g. /privacy's
      Purpose/Data/Legal-basis columns) don't fit 390px even with the
      `width: 100%` above -- `table-layout: auto` (the default) treats a
@@ -76,7 +76,7 @@
      `:focus-visible` (not bare `:focus`) so the ring shows for keyboard
      navigation only, not on a mouse/touch drag-scroll -- matches every
      other focus ring in this app. */
-  .legal-prose .table-scroll:focus-visible { outline: 2px solid #737373; outline-offset: 2px; }
+  .legal-prose .table-scroll:focus-visible { outline: 2px solid var(--lj-gray); outline-offset: 2px; }
 </style>
 <div class="legal-prose">
 {{ body_html|safe }}

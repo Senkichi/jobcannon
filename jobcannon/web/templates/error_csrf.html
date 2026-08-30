@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Request could not be verified — Job Cannon{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold mb-3">Request could not be verified</h1>
-<p class="text-neutral-400 mb-4">
+<h1 class="jc-title">Request could not be verified</h1>
+<p class="jc-lede">
   This usually means the page was open a while before you submitted it, or
   you came back to it after signing in or out in another tab. Go back and
   try again.
 </p>
-<p class="text-neutral-600 text-sm">{{ reason }}</p>
+<p class="jc-error-note">{{ reason }}</p>
 {% endblock %}
