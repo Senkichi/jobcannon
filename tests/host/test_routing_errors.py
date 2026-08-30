@@ -183,13 +183,17 @@ def test_gate_covers_every_registered_route_for_every_declared_method():
     OPTIONS /postings/1/save->401 same as any other method, so there was
     no reason to skip it) -- derived from app.url_map.iter_rules() itself
     (never a hand-maintained path list), so a future route is automatically
-    covered by this test too. Three exemptions, all intentional, none
+    covered by this test too. Four exemptions, all intentional, none
     hand-picked by route name: PUBLIC_PATHS members (clerk_auth's own
     public-path branch), _EXEMPT_STATUS above (issue #171's
-    public_get-marked GET/HEAD/OPTIONS /consent, asserting the real
-    status a signed-out visitor gets, not merely "not 401"), and the
-    static endpoint (clerk_auth's endpoint exemption, mirrored below by
-    the same `endpoint == "static"` predicate the gate consults)."""
+    public_get-marked GET/HEAD/OPTIONS /consent, and OPTIONS
+    /postings/<id>/detail, asserting the real status a signed-out visitor
+    gets, not merely "not 401"), the static endpoint (clerk_auth's endpoint
+    exemption, mirrored below by the same `endpoint == "static"` predicate
+    the gate consults), and one per-endpoint method skip (GET/HEAD on
+    posting_detail.detail, whose real Postgres connection this DB-less
+    `_app()` can't provide -- see the skip's own comment below and
+    tests/host/test_posting_detail.py, which owns that coverage instead)."""
     app = _app()
     client = app.test_client()
 
