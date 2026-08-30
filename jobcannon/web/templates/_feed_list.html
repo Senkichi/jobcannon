@@ -1,20 +1,24 @@
 {# Shared posting-list partial: renders the first batch of `entries` (a
-   list of {"row": <postings row>, "chips": <why_chips(...) list[str]>}) via
-   _feed_page.html, which itself includes _posting_row.html once per entry
-   and, when `load_more_url` is set, a "Load more" control (#156). Consumed
-   by /preview, /, and /demo (all three server-render a real feed here); the
-   context that includes this template propagates through to _feed_page.html
-   / _posting_row.html unchanged (Jinja `{% include %}` shares context by
-   default) — no hx-* attributes live directly in THIS template, only in
-   _feed_page.html (the Load more button) and _posting_row.html (save/
-   dismiss/apply, gated on show_actions).
+   list of `build_entry` dicts — jobcannon/web/feed_entries.py — whose
+   `chips` are `select_chips` label/highlight dicts, not
+   `why_chips(...) list[str]`) via _feed_page.html, which itself includes
+   _posting_row.html once per entry and, when `load_more_url` is set, a
+   "Load more" control (#156). Consumed by /preview, /, and /demo (all three
+   server-render a real feed here); the context that includes this template
+   propagates through to _feed_page.html / _posting_row.html unchanged
+   (Jinja `{% include %}` shares context by default) — no hx-* attributes
+   live directly in THIS template, only in _feed_page.html (the Load more
+   button) and _posting_row.html (save/dismiss/apply, gated on
+   show_actions).
 
    Optional `filters` context (a dict of display-safe strings — see
-   jobcannon/web/pages.py's `_parse_feed_filters` — plus the `sort_tokens` /
-   `workplace_types` option lists it needs) renders a GET filter form above
+   jobcannon/web/pages.py's `_parse_feed_filters` — plus the
+   `workplace_types` option list it needs) renders a GET filter form above
    the list when the caller passes it. jobcannon/web/pages.py's authed feed
    does; jobcannon/web/onboarding.py's /preview does not yet, so it keeps
-   its own single location field unchanged and this block is skipped there. #}
+   its own single location field unchanged and this block is skipped there.
+   `?sort=` stays server-parsed for URL compatibility, the select was
+   removed while only one token exists (spec §4). #}
 {% if filters is defined %}
   {% if saved_selection %}
     {# #206: discoverability half of the AND-collision fix -- rendered ONLY
@@ -50,11 +54,6 @@
         <option value="{{ wt }}" {% if wt == filters.workplace_type %}selected{% endif %}>{{ wt }}</option>
       {% endfor %}
     </select>
-    <select name="sort" class="jc-input {{ touch_target() }}">
-      {% for token in sort_tokens %}
-        <option value="{{ token }}" {% if token == filters.sort %}selected{% endif %}>{{ token }}</option>
-      {% endfor %}
-    </select>
     <button type="submit" class="jc-btn {{ touch_target() }}">Apply filters</button>
   </form>
 {% endif %}
@@ -76,3 +75,28 @@
 {% else %}
   <p class="jc-empty" data-feed-empty>No postings match your selections yet.</p>
 {% endif %}
+{# Card-click expand delegate (spec §3): the whole card forwards to the
+   row's real [data-action-expand] button (keyboard/AT parity for free) —
+   unless the click landed on an interactive element, inside the expanded
+   panel, or amid a text selection. Bound ONCE on document with a window
+   guard: this partial is re-included by every #feed-content outerHTML
+   swap (filters, clear-selection) and by Load-more appends, so an
+   element-scoped or unguarded binding would stack duplicate listeners. #}
+<script>
+  (function () {
+    if (window.jcExpandBound) { return; }
+    window.jcExpandBound = true;
+    document.addEventListener('click', function (evt) {
+      var row = evt.target.closest('[data-posting-row]');
+      if (!row) { return; }
+      if (evt.target.closest('a, button, form, input, select, label, [data-posting-actions], [data-posting-detail]')) { return; }
+      var selection = window.getSelection && window.getSelection();
+      if (selection && String(selection).length > 0) { return; }
+      var slot = row.querySelector('[data-posting-detail]');
+      var button = row.querySelector('[data-action-expand]');
+      if (!slot || !button) { return; }
+      if (slot.childElementCount > 0) { slot.replaceChildren(); return; }
+      button.click();
+    });
+  })();
+</script>

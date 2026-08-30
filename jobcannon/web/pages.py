@@ -592,7 +592,6 @@ def feed():
         profile=profile,
         has_selections=has_selections,
         filters=filters,
-        sort_tokens=sorted(_feed._SORTS),
         workplace_types=_WORKPLACE_TYPES,
         show_actions=True,
         clear_selection_url=url_for("pages.clear_selection", **_carry_forward_filters(filters)),
@@ -683,7 +682,6 @@ def clear_selection():
         return render_template(
             "_feed_content.html",
             filters=filters,
-            sort_tokens=sorted(_feed._SORTS),
             workplace_types=_WORKPLACE_TYPES,
             show_actions=True,
             clear_selection_url=url_for("pages.clear_selection", **_carry_forward_filters(filters)),
