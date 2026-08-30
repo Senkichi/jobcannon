@@ -162,6 +162,16 @@ _EXEMPT_STATUS = {
     ("/consent", "GET"): 200,
     ("/consent", "HEAD"): 200,
     ("/consent", "OPTIONS"): 200,
+    # GET /postings/<id>/detail (jobcannon/web/posting_detail.py) is the
+    # other `@public_get` view in the app. Its OPTIONS is exactly like
+    # /consent's -- Flask's automatic responder answers it in
+    # dispatch_request before the view ever runs, so it's safe to call here
+    # and worth asserting for real. GET/HEAD are NOT listed here: unlike
+    # /consent, that view unconditionally opens a Postgres connection
+    # before it can return any status, which this module's `_app()` never
+    # provides (see the skip below, and the module docstring's "No
+    # Postgres needed").
+    ("/postings/1/detail", "OPTIONS"): 200,
 }
 
 
@@ -203,6 +213,20 @@ def test_gate_covers_every_registered_route_for_every_declared_method():
         if normalized in PUBLIC_PATHS:
             continue
         for method in rule.methods:
+            if rule.endpoint == "posting_detail.detail" and method in ("GET", "HEAD"):
+                # public_get opens GET/HEAD/OPTIONS on this route for a
+                # signed-out visitor (same exemption class as /consent
+                # above), but GET/HEAD reach get_posting_detail's real
+                # Postgres connection_factory before returning ANY status
+                # -- this module's `_app()` never opens a pool (module
+                # docstring: "No Postgres needed"), so calling either here
+                # would raise RuntimeError, not produce a status to assert.
+                # That coverage -- 200 for an anonymous visitor, identical
+                # render when authed, 404 for an unknown id -- is owned by
+                # tests/host/test_posting_detail.py instead. OPTIONS has no
+                # such problem (see _EXEMPT_STATUS above) and stays in the
+                # loop below.
+                continue
             endpoints_by_request.setdefault((path, method), []).append(rule.endpoint)
 
     checked = 0
