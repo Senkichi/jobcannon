@@ -1,8 +1,10 @@
 """build_entry — composes one `list_feed_postings` / `list_postings_by_ids` row
 into the dict shape `_posting_row.html` renders: `row` (the raw DB row),
-`chips` (jobcannon.web.why.why_chips(...), possibly empty — the pending
-marker in `_posting_row.html` is keyed on `structural_axes` being NULL, not
-on an empty chip list), `saved` (bool, from the `saved` column
+`chips` (jobcannon.web.feed_entries.select_chips(jobcannon.web.why.chip_kinds(...))
+output — a list of `{"label": str, "highlight": bool}` dicts, capped at 3,
+possibly empty — the pending marker in `_posting_row.html` is keyed on
+`structural_axes` being NULL, not on an empty chip list), `saved` (bool, from
+the `saved` column
 jobcannon/db/_feed.py now selects), `applied` (bool, from the `applied`
 column — `pipeline_status.status = 'applied'`, #177), `apply_url` (the
 first usable outbound link, jobcannon.web.apply_url.pick_apply_url, or None
@@ -24,11 +26,12 @@ filter logic per caller.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from jobcannon.web.apply_url import pick_apply_url
 from jobcannon.web.salary_fmt import format_salary
-from jobcannon.web.why import why_chips
+from jobcannon.web.why import chip_kinds
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
@@ -67,7 +70,28 @@ def dedupe_location(location: str | None, workplace_type: str | None) -> tuple[s
     return location, True
 
 
-# An empty why_chips() return renders an empty chip list on purpose — no
+# Priority is a total order (spec §1: overlap > freshness > seniority >
+# jd_quality — ties impossible), so selection is a stable slice, and the
+# green honesty accent can only ever land on the single top chip.
+_CHIP_PRIORITY = ("overlap", "freshness", "seniority", "jd_quality")
+_HIGHLIGHT_KINDS = frozenset({"overlap", "freshness"})
+_CHIP_CAP = 3
+
+
+def select_chips(kinds: Mapping[str, str | None]) -> list[dict[str, object]]:
+    """Cap and prioritize chip_kinds output for rendering (spec §1/§2).
+    highlight=True (-> .jc-chip--why, the row's one green accent) goes to
+    at most the FIRST selected chip, and only when its kind is overlap or
+    freshness — seniority/JD boilerplate never earns green even when it
+    happens to lead."""
+    ordered = [(kind, kinds.get(kind)) for kind in _CHIP_PRIORITY if kinds.get(kind)]
+    return [
+        {"label": label, "highlight": index == 0 and kind in _HIGHLIGHT_KINDS}
+        for index, (kind, label) in enumerate(ordered[:_CHIP_CAP])
+    ]
+
+
+# An empty chips selection renders an empty chip list on purpose — no
 # placeholder chip is injected here. The "signals still computing" marker in
 # _posting_row.html covers the one state worth flagging (structural_axes
 # still NULL), keyed on that column directly; a chips-empty fallback would
@@ -78,7 +102,7 @@ def build_entry(row: Any, profile_or_selections: Any) -> dict[str, Any]:
     display_location, show_workplace_badge = dedupe_location(row["location"], row["workplace_type"])
     return {
         "row": row,
-        "chips": why_chips(row, profile_or_selections),
+        "chips": select_chips(chip_kinds(row, profile_or_selections)),
         "saved": bool(saved) if saved is not None else False,
         "applied": bool(applied) if applied is not None else False,
         "apply_url": pick_apply_url(row),

@@ -4,7 +4,7 @@ needed."""
 
 import pytest
 
-from jobcannon.web.feed_entries import build_entry, dedupe_location
+from jobcannon.web.feed_entries import build_entry, dedupe_location, select_chips
 
 
 @pytest.mark.parametrize(
@@ -64,3 +64,48 @@ def test_build_entry_carries_display_fields():
 def test_build_entry_no_salary_renders_none():
     entry = build_entry(_row(salary_min=None, salary_max=None), {})
     assert entry["salary_display"] is None
+
+
+def test_select_chips_priority_and_cap():
+    kinds = {
+        "jd_quality": "detailed job description",
+        "seniority": "senior role",
+        "freshness": "posted in the last week",
+        "overlap": "title matches your selections: python",
+    }
+    chips = select_chips(kinds)
+    assert [c["label"] for c in chips] == [
+        "title matches your selections: python",
+        "posted in the last week",
+        "senior role",
+    ]  # priority order regardless of dict order; jd_quality capped off
+    assert [c["highlight"] for c in chips] == [True, False, False]
+
+
+def test_select_chips_freshness_leads_when_no_overlap():
+    chips = select_chips({"freshness": "posted in the last week", "seniority": "senior role"})
+    assert chips[0] == {"label": "posted in the last week", "highlight": True}
+    assert chips[1]["highlight"] is False
+
+
+def test_select_chips_never_highlights_boilerplate_kinds():
+    # Even when seniority/jd_quality lead, green stays off (spec §2).
+    chips = select_chips({"seniority": "senior role", "jd_quality": "detailed job description"})
+    assert [c["highlight"] for c in chips] == [False, False]
+
+
+def test_select_chips_skips_none_and_handles_empty():
+    assert select_chips({}) == []
+    assert select_chips({"overlap": None, "freshness": "posted in the last week"}) == [
+        {"label": "posted in the last week", "highlight": True}
+    ]
+
+
+def test_build_entry_chips_are_selected_dicts():
+    row = _row(title="Senior Python Engineer")  # this file's existing row helper
+    entry = build_entry(row, {"titles": ["Python Engineer"]})
+    assert entry["chips"], "expected at least the overlap chip"
+    for chip in entry["chips"]:
+        assert set(chip) == {"label", "highlight"}
+    assert sum(1 for chip in entry["chips"] if chip["highlight"]) <= 1
+    assert entry["chips"][0]["label"].startswith("title matches")
