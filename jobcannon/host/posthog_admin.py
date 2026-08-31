@@ -31,8 +31,12 @@ the worker's own `maintenance` queue, never inline in the webhook request
 thread: by the time this task even runs, the local deletion cascade
 (`jobcannon.host.user_deletion.cascade_delete_user`) has already committed,
 so a raised exception here cannot block or delay account deletion — it only
-fails that one procrastinate job (logged, no automatic retry configured;
-matches this module's general fail-soft-on-non-essential posture).
+fails that one procrastinate job. That job is not fire-and-forget:
+`purge_posthog_person` is registered with
+`RetryStrategy(max_attempts=5, linear_wait=30)` (jobcannon.host.tasks), so a
+transient HTTP failure here is retried (up to 5 attempts total, 30s linear
+backoff) before the job is finally logged as failed (matches this module's
+general fail-soft-on-non-essential posture only once retries are exhausted).
 """
 
 from __future__ import annotations
