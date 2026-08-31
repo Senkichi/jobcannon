@@ -198,6 +198,11 @@ def db_app():
 def test_post_start_with_token_mints_anon_user(db_app):
     """Prior behavior pinned by tests/host/test_onboarding.py: a valid
     submission redirects to /preview and writes an anon users row."""
+    # Spec 2 (#262): /start 303s a resolved Clerk identity to /profile before
+    # the form is parsed, so the token-accepted-and-minted path this test
+    # pins is only reachable anonymously. db_app is function-scoped; the
+    # override does not leak.
+    db_app.config["VERIFY_REQUEST"] = lambda req: None
     client = db_app.test_client()
     get_resp = client.get("/start")
     token = _token_from(get_resp.data)
