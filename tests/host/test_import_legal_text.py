@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import markdown
 
+from jobcannon.web.legal_guard import check_published_text
 from scripts.import_legal_text import (
     _collapse_blank_before_table_delimiter,
     _link_first_cross_reference,
@@ -257,3 +258,77 @@ def test_link_first_cross_reference_can_wrap_a_substring_of_a_longer_phrase():
     assert (
         once == "Please review our Data [Privacy Policy](/privacy) Statement before continuing.\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# (f) issue #243: "Effective date" and "Last updated" are DISTINCT
+# placeholders filled from DISTINCT CLI args, so a re-import can hold one
+# fixed while only advancing the other.
+# ---------------------------------------------------------------------------
+
+
+def test_effective_date_and_last_updated_track_independently_across_reimport():
+    """The core issue #243 regression: previously both header lines shared
+    the single [EFFECTIVE DATE] placeholder, so one .sub() call necessarily
+    stamped both fields with the same value on every import. An amendment
+    re-import (wording-only change: "Effective date" stays at the original
+    launch date, only "Last updated" advances) could not be expressed. Two
+    distinct placeholders fix that — this pins both the initial import and
+    a subsequent re-import that changes only last_updated."""
+    raw = (
+        "# Doc\n\n"
+        "**Effective date:** [EFFECTIVE DATE]\n\n"
+        "**Last updated:** [LAST UPDATED]\n\n"
+        "## 1. Body\n\nSome ratified prose.\n"
+    )
+
+    launch = build_published_text(raw, "privacy", "2026-08-27", "2026-08-27")
+    assert "**Effective date:** 2026-08-27" in launch
+    assert "**Last updated:** 2026-08-27" in launch
+
+    # Re-import for a wording-only amendment: "Effective date" must NOT
+    # move, only "Last updated" advances.
+    amended = build_published_text(raw, "privacy", "2026-08-27", "2026-09-15")
+    assert "**Effective date:** 2026-08-27" in amended
+    assert "**Last updated:** 2026-09-15" in amended
+    # The new last-updated value must not have also leaked into the
+    # effective-date line (the exact conflation issue #243 reports).
+    effective_line = amended.split("\n")[2]
+    assert effective_line == "**Effective date:** 2026-08-27"
+
+
+def test_last_updated_placeholder_left_unfilled_when_arg_omitted():
+    """Fail closed, not silently wrong: omitting last_updated (the CLI's
+    --last-updated) must NOT fall back to reusing effective_date's value —
+    that would silently reintroduce the #243 conflation the moment an
+    operator forgets the flag on an amendment re-import. Instead
+    [LAST UPDATED] is left in the text, where legal_guard's unfilled-
+    bracket-token rule catches it before anything is written."""
+    raw = (
+        "# Doc\n\n"
+        "**Effective date:** [EFFECTIVE DATE]\n\n"
+        "**Last updated:** [LAST UPDATED]\n\n"
+        "## 1. Body\n\nSome ratified prose.\n"
+    )
+
+    published = build_published_text(raw, "privacy", "2026-08-27")
+
+    assert "[LAST UPDATED]" in published
+    violations = check_published_text(published)
+    assert any("LAST UPDATED" in v for v in violations)
+
+
+def test_draft_with_no_last_updated_placeholder_is_unaffected_by_the_new_arg():
+    """terms.md's shape: no "Last updated" line at all. Omitting
+    --last-updated for a draft like this must keep producing exactly the
+    same output as before issue #243's fix — no [LAST UPDATED] placeholder
+    means nothing for the (unused) substitution to touch."""
+    raw = "# Doc\n\n**Effective date:** [EFFECTIVE DATE]\n\n## 1. Body\n\nSome ratified prose.\n"
+
+    published = build_published_text(raw, "terms", "2026-08-27")
+
+    assert (
+        published
+        == "# Doc\n\n**Effective date:** 2026-08-27\n\n## 1. Body\n\nSome ratified prose.\n"
+    )
+    assert check_published_text(published) == []
