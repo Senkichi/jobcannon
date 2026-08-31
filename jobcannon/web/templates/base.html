@@ -9,10 +9,18 @@
      attribute on <body> below never reaches it) reads a token from. #}
   {{ csrf_meta_tag() }}
   <title>{% block title %}Job Cannon{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='lj-tokens.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='fonts.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='jc.css') }}">
-  <script src="{{ url_for('static', filename='htmx.min.js') }}"></script>
+  {# static_url() (jobcannon/web/__init__.py, issue #258) wraps
+     url_for('static', ...) with a content-hash ?v= query param computed
+     once at create_app() boot, so the year-long immutable Cache-Control
+     these assets now carry is safe: a browser only serves a stale cached
+     copy if the URL itself is unchanged, and it changes exactly when the
+     file's bytes do. #}
+  <link rel="stylesheet" href="{{ static_url('lj-tokens.css') }}">
+  <link rel="stylesheet" href="{{ static_url('fonts.css') }}">
+  <link rel="stylesheet" href="{{ static_url('jc.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ static_url('favicon.svg') }}">
+  <link rel="apple-touch-icon" href="{{ static_url('apple-touch-icon.png') }}">
+  <script src="{{ static_url('htmx.min.js') }}"></script>
   {# Gate on the derived FAPI host, not the key: a key that decodes to no host
      must never emit `src="https:///npm/..."`. #}
   {% if clerk_publishable_key and clerk_frontend_api_host %}
@@ -81,10 +89,21 @@
     })();
   </script>
   <header class="jc-header">
-    <span class="jc-wordmark">Job Cannon</span>
+    {# Identity-aware wordmark (spec §4): the one route back to the feed
+       now that the Feed/Demo nav links are gone. Gates on
+       visitor_is_authed, NOT g.clerk_user (issue #205; see the
+       My-postings comment below): g.clerk_user is force-None on every
+       PUBLIC_PATHS render, so a bare g.clerk_user check would send a
+       signed-in visitor on /demo, /privacy, or /terms to /demo instead
+       of their own feed. #}
+    <a href="{{ '/' if visitor_is_authed else '/demo' }}" class="jc-wordmark {{ touch_target() }}">Job Cannon</a>
     <nav class="jc-nav">
-      <a href="/" class="jc-nav-link {{ touch_target() }}">Feed</a>
-      <a href="/demo" class="jc-nav-link {{ touch_target() }}">Demo</a>
+      {% if not visitor_is_authed %}
+      {# Signed-out primary action (spec §4). The old Feed link only
+         401-bounced anonymous visitors, and the separate Demo link is
+         redundant once the wordmark above covers /demo. #}
+      <a href="/start" class="jc-nav-link {{ touch_target() }}" data-build-feed-nav-link>Build your feed</a>
+      {% endif %}
       {% if visitor_is_authed %}
       {# #180: the in-app saved/applied/dismissed review page
          (jobcannon/web/postings_history.py) -- gated on auth state the same

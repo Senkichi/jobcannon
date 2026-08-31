@@ -19,7 +19,7 @@ from jobcannon.engine.location_canonical import (
     from_json,
     to_json,
 )
-from jobcannon.engine.location_parser import parse_locations
+from jobcannon.engine.location_parser import parse_locations, strip_workplace_tokens
 
 # ─── Anchor corpus (SPEC must-pass) ──────────────────────────────────
 
@@ -606,3 +606,73 @@ def test_jd_full_does_not_match_in_middle_of_word() -> None:
     )
     assert len(locations) == 1
     assert locations[0].workplace_type == "UNSPECIFIED"
+
+
+# ─── strip_workplace_tokens (#264 ingest-boundary normalizer) ─────────
+#
+# Unit-level coverage for the flat-string helper ParsedJob.from_job() calls
+# on job.location. Distinct from the parse_locations anchor corpus above:
+# this function has no notion of structured output, only "strip the token,
+# hand back what's left (or None)".
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # Real info beyond the token is preserved, token + separator debris
+        # removed.
+        ("Remote — Austin, TX", "Austin, TX"),
+        ("HYBRID, San Francisco, CA", "San Francisco, CA"),
+        ("On-Site, Chicago, IL", "Chicago, IL"),
+        ("Hybrid/Chicago, IL", "Chicago, IL"),
+        # Mixed-case tokens all detected (regexes are case-insensitive).
+        ("REMOTE — Austin, TX", "Austin, TX"),
+        ("remote - Austin, TX", "Austin, TX"),
+        ("rEmOtE — Austin, TX", "Austin, TX"),
+        ("Fully Remote - Austin, TX", "Austin, TX"),
+        # No token present → unchanged (not a general whitespace scrubber
+        # beyond what stripping a token already tidies up).
+        ("New York, NY", "New York, NY"),
+    ],
+)
+def test_strip_workplace_tokens_preserves_real_info(raw: str, expected: str) -> None:
+    assert strip_workplace_tokens(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "Remote",
+        "REMOTE",
+        "remote-only",
+        "Fully Remote",
+        "Hybrid",
+        "HYBRID",
+        "On-Site",
+        "onsite",
+        "in-office",
+    ],
+)
+def test_strip_workplace_tokens_pure_token_becomes_none(raw: str) -> None:
+    """Token-only input strips to '' internally; the column contract wants
+    None there (matches db/_jobs.py's ``parsed.location or None``), not a
+    misleading empty string."""
+    assert strip_workplace_tokens(raw) is None
+
+
+def test_strip_workplace_tokens_empty_string_passthrough() -> None:
+    """Already-empty input is returned as-is — a stripping normalizer
+    should not invent a value where the source supplied none."""
+    assert strip_workplace_tokens("") == ""
+
+
+def test_strip_workplace_tokens_none_passthrough() -> None:
+    assert strip_workplace_tokens(None) is None  # type: ignore[arg-type]
+
+
+def test_strip_workplace_tokens_first_match_only_documented_limitation() -> None:
+    """Combined tokens: if/elif precedence strips only the first match
+    (REMOTE > HYBRID > ONSITE) — a documented, accepted limitation, not a
+    bug. Regression-pins the current behavior so a future regex refactor
+    that silently changes it gets caught here."""
+    assert strip_workplace_tokens("Remote/Hybrid — Austin, TX") == "Hybrid — Austin, TX"

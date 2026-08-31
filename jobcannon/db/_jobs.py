@@ -79,6 +79,36 @@ so ``UpsertResult.unresolved_reasons`` reports what this statement actually
 persisted rather than the raw (possibly since-filtered) ``parsed`` value —
 without this, the returned value would drift from the DB the same way the
 bug this fix closes did.
+
+Lost-update fix (#245, advisory lock): ``canonical_changed`` (computed below
+from the ``existing`` row fetched by the initial SELECT) is itself derived
+from a snapshot that can go stale mid-transaction. Two concurrent
+``upsert_job`` calls for the SAME row can both SELECT before either commits;
+the second caller's ``canonical_changed`` computation then runs against
+pre-first-commit data, falsely concludes it is making a genuine canonical
+change, and blindly overwrites the parser-owned slice of
+``unresolved_reasons`` with its own Python-computed literal (unlike the
+JD-owned slice above, ``parser_reasons`` has no live-row SQL read to protect
+it). The fix is `pg_advisory_xact_lock(hashtext(...))`, acquired before any
+SELECT, transaction-scoped so it releases automatically at
+``commit_unless_nested`` / rollback with no extra cleanup code. Under the
+lock, a second caller's SELECT is serialized after the first's commit, sees
+live data, and correctly evaluates ``canonical_changed = False`` when its
+own payload no longer represents new information -- the CASE's ELSE branch
+then preserves the first caller's reasons untouched. Locking is keyed on
+``matched_dedup_key``, not unconditionally on ``parsed.dedup_key``: the
+(company_id, source_id) fallback match below can resolve to an existing row
+under a DIFFERENT dedup_key than ``parsed.dedup_key``, so the lock is
+acquired once on ``parsed.dedup_key`` before the primary SELECT and, only
+when the fallback resolves to a different key, a second time on that
+resolved key -- with ``existing`` re-read under the second lock, since the
+fallback SELECT that discovered it ran before that lock was held. SQL-level
+union and CAS/retry were considered and rejected: union is disqualified by
+``test_control_parser_codes_still_fully_replace_stale_parser_codes``
+(sequential calls must fully replace, not union) and reintroduces a
+can-never-shrink trap; CAS/retry doesn't help because ``parser_reasons`` is
+computed purely from ``parsed.unresolved_reasons``, never from ``existing``,
+so retrying against fresher data changes nothing about what gets written.
 """
 
 from __future__ import annotations
@@ -169,6 +199,13 @@ def upsert_job(
         )
     raw = conn.raw if hasattr(conn, "raw") else conn
 
+    # #245: serialize concurrent upsert_job calls on the same row so the
+    # canonical-change snapshot below can never go stale mid-flight. See the
+    # module docstring for why this closes the unresolved_reasons lost
+    # update and why the lock is keyed on matched_dedup_key, not
+    # unconditionally on parsed.dedup_key.
+    raw.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (parsed.dedup_key,))
+
     existing = raw.execute(
         "SELECT * FROM postings WHERE dedup_key = %s", (parsed.dedup_key,)
     ).fetchone()
@@ -180,6 +217,15 @@ def upsert_job(
         ).fetchone()
         if existing is not None:
             matched_dedup_key = existing["dedup_key"]
+            if matched_dedup_key != parsed.dedup_key:
+                # The fallback SELECT above ran before this second lock was
+                # held, so it may itself be stale relative to a concurrent
+                # writer already serialized on matched_dedup_key -- re-read
+                # under the lock rather than trusting that snapshot.
+                raw.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (matched_dedup_key,))
+                existing = raw.execute(
+                    "SELECT * FROM postings WHERE dedup_key = %s", (matched_dedup_key,)
+                ).fetchone()
 
     pd_date = parsed.posted_date.date() if parsed.posted_date else None
     pd_precision = (parsed.posted_date_precision or "proxy") if pd_date else None

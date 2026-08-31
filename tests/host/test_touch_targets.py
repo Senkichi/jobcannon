@@ -390,7 +390,7 @@ def test_touch_target_kind_detection(attrs, expected):
 
 def test_sabotage_a_real_template_site_and_confirm_the_guard_fails():
     """Sabotage-verify against a REAL template, not just the fixture above:
-    reverts one real site (base.html's "Feed" nav link) from the
+    reverts one real site (base.html's "Build your feed" nav link) from the
     `touch_target()` marker back to the literal `jc-touch` class it renders
     -- exactly the regression #207 exists to prevent, and exactly the shape
     the OLD literal-substring guard would have silently passed straight
@@ -401,10 +401,15 @@ def test_sabotage_a_real_template_site_and_confirm_the_guard_fails():
     fooled in principle."""
     path = _TEMPLATES_DIR / "base.html"
     original = path.read_text(encoding="utf-8")
-    marker = '<a href="/" class="jc-nav-link {{ touch_target() }}">Feed</a>'
-    literal = '<a href="/" class="jc-nav-link jc-touch">Feed</a>'
+    marker = (
+        '<a href="/start" class="jc-nav-link {{ touch_target() }}" '
+        "data-build-feed-nav-link>Build your feed</a>"
+    )
+    literal = (
+        '<a href="/start" class="jc-nav-link jc-touch" data-build-feed-nav-link>Build your feed</a>'
+    )
     assert marker in original, (
-        "base.html's Feed link markup changed -- update this sabotage fixture"
+        "base.html's Build your feed link markup changed -- update this sabotage fixture"
     )
     sabotaged = original.replace(marker, literal, 1)
     assert sabotaged != original
@@ -417,7 +422,7 @@ def test_sabotage_a_real_template_site_and_confirm_the_guard_fails():
         if _class_value(attrs) == "jc-nav-link jc-touch"
     ]
     assert len(feed_cases) == 1, (
-        "expected exactly the sabotaged Feed link to carry the literal class"
+        "expected exactly the sabotaged Build your feed link to carry the literal class"
     )
     filename, tag_name, input_type, attrs = feed_cases[0]
     assert _touch_target_kind(attrs) is None, (

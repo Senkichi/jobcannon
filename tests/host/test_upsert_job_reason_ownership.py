@@ -278,6 +278,158 @@ def test_upsert_job_then_jd_quarantine_both_survive(postgres_test_dsn):
             conn_b.close()
 
 
+def test_concurrent_upsert_job_second_caller_does_not_clobber_first(postgres_test_dsn):
+    """#245: two genuinely concurrent `upsert_job` calls on the SAME
+    `dedup_key`, both racing to apply a canonical change -- without the
+    `pg_advisory_xact_lock`, B's `canonical_changed` is computed from a
+    stale pre-A snapshot (both SELECT before either commits), so B falsely
+    concludes it is making a genuine canonical change and overwrites A's
+    committed `unresolved_reasons` with its own literal, losing A's code.
+
+    Modeled on `test_jd_quarantine_survives_concurrent_upsert_job`'s
+    pause/release harness (#217/#235), but both writers here are
+    `upsert_job` itself (the race is upsert_job-vs-upsert_job, not
+    cross-writer -- see recon-245.md #3). A is paused AFTER its UPDATE
+    (holding the advisory lock + row lock) so B's very first statement --
+    the lock acquisition, before B's own SELECT -- must genuinely BLOCK on
+    real Postgres locking, not just test-harness timing. B's payload
+    describes the SAME canonical state A just committed (identical
+    description string), so once B's SELECT is correctly serialized after
+    A's commit, B's own `canonical_changed` must evaluate False and the
+    UPDATE's ELSE branch must preserve A's parser-owned reason untouched --
+    B's reason must NOT appear.
+
+    Sabotage-verified: reverting to no advisory lock makes this test flaky
+    -- with the lock's initial `SELECT pg_advisory_xact_lock(...)` removed,
+    B's SELECT would race A's SELECT at initiation, both frequently completing before
+    either commits, and B's canonical_changed would (nondeterministically,
+    depending on Postgres row-lock timing at the UPDATE rather than at the
+    SELECT) land `["title_invalid_shape"]` only, dropping A's
+    `salary_implausible`.
+    """
+    from jobcannon.db._jobs import upsert_job
+
+    dedup_key = "concurrent-co|staff data engineer"
+    long_description = "A sufficiently long description to force a canonical change."
+    conn_a = psycopg.connect(postgres_test_dsn, row_factory=dict_row)
+    conn_b = psycopg.connect(postgres_test_dsn, row_factory=dict_row)
+    entered = threading.Event()
+    release = threading.Event()
+    b_committed = threading.Event()
+    thread_a: threading.Thread | None = None
+    thread_b: threading.Thread | None = None
+    real_execute = conn_a.execute
+    try:
+        cid = conn_a.execute(
+            "INSERT INTO companies (name) VALUES ('concurrent-co') RETURNING id"
+        ).fetchone()["id"]
+        conn_a.execute(
+            "INSERT INTO postings (dedup_key, company_id, title, company, description) "
+            "VALUES (%s, %s, 'Staff Data Engineer', 'concurrent-co', 'Short description.')",
+            (dedup_key, cid),
+        )
+        conn_a.commit()
+
+        def _execute_then_pause(query, *args, **kwargs):
+            cur = real_execute(query, *args, **kwargs)
+            if "unresolved_reasons" in query:
+                entered.set()
+                release.wait(timeout=10)
+            return cur
+
+        conn_a.execute = _execute_then_pause
+
+        results: dict = {}
+
+        def _run_a():
+            parsed = _parsed_job(
+                dedup_key=dedup_key,
+                description=long_description,
+                unresolved_reasons=["salary_implausible"],
+            )
+            results["a_result"] = upsert_job(_svc_conn(conn_a), parsed, company_id=cid)
+            results["a_done"] = True
+
+        def _run_b():
+            # Same canonical content A is committing -- once B's SELECT is
+            # correctly serialized after A's commit, this is NOT a new
+            # canonical change for B.
+            parsed = _parsed_job(
+                dedup_key=dedup_key,
+                description=long_description,
+                unresolved_reasons=["title_invalid_shape"],
+            )
+            results["b_result"] = upsert_job(_svc_conn(conn_b), parsed, company_id=cid)
+            results["b_done"] = True
+            b_committed.set()
+
+        thread_a = threading.Thread(target=_run_a)
+        thread_a.start()
+        assert entered.wait(timeout=10), "A's UPDATE was never entered"
+
+        thread_b = threading.Thread(target=_run_b)
+        thread_b.start()
+
+        # B must genuinely block acquiring the advisory lock (its very
+        # first statement, before its own SELECT) -- this wait is expected
+        # to time out, same as the #235 tests' row-lock equivalent.
+        b_committed.wait(timeout=1.0)
+        assert not results.get("b_done"), "B ran to completion without blocking on A's lock"
+
+        release.set()
+        thread_a.join(timeout=10)
+        thread_b.join(timeout=10)
+        assert not thread_a.is_alive(), "A did not finish within timeout"
+        assert not thread_b.is_alive(), "B did not finish within timeout"
+        assert results.get("a_done") is True
+        assert results.get("b_done") is True
+
+        a_result = results["a_result"]
+        b_result = results["b_result"]
+        assert a_result.kind == "updated"
+        assert a_result.unresolved_reasons == ["salary_implausible"]
+
+        # The critical assertion: B, serialized behind the lock, sees A's
+        # already-committed long description as live data -- B's own
+        # (identical) payload is no longer a canonical change, so B's
+        # UPDATE preserves A's reason untouched instead of overwriting it.
+        assert b_result.kind != "updated", (
+            f"B falsely detected a canonical change (kind={b_result.kind!r}) against "
+            "live post-commit data -- the lock did not serialize B's SELECT after A's commit"
+        )
+        assert b_result.unresolved_reasons == ["salary_implausible"], (
+            f"B clobbered A's parser-owned reason: {b_result.unresolved_reasons!r}"
+        )
+
+        row = conn_a.execute(
+            "SELECT unresolved_reasons, description FROM postings WHERE dedup_key = %s",
+            (dedup_key,),
+        ).fetchone()
+        assert row["description"] == long_description
+        assert row["unresolved_reasons"] == ["salary_implausible"]
+    finally:
+        release.set()
+        if thread_a is not None:
+            thread_a.join(timeout=10)
+        if thread_b is not None:
+            thread_b.join(timeout=10)
+        try:
+            try:
+                conn_a.rollback()
+                conn_a.execute = real_execute
+            except Exception:
+                pass
+            try:
+                conn_a.rollback()
+                conn_a.execute("DELETE FROM postings WHERE dedup_key = %s", (dedup_key,))
+                conn_a.execute("DELETE FROM companies WHERE name = 'concurrent-co'")
+                conn_a.commit()
+            finally:
+                conn_a.close()
+        finally:
+            conn_b.close()
+
+
 # ---------------------------------------------------------------------------
 # Tests 3-6: single-connection control + SQL-expression edge cases
 # ---------------------------------------------------------------------------

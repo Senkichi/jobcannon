@@ -4,7 +4,7 @@ serves (issue #94).
 
 Usage:
     python scripts/import_legal_text.py --source <draft.md> --target privacy \
-        --effective-date 2026-08-27 [--public-root .]
+        --effective-date 2026-08-27 [--last-updated 2026-08-27] [--public-root .]
 
 `--target` selects which committed file gets (over)written:
 `jobcannon/web/legal/privacy.md` or `jobcannon/web/legal/terms.md`, under
@@ -14,11 +14,19 @@ root, same as every other script here).
 The strip is deliberately MECHANICAL, not judgment-based: it removes only
 what the draft's own authoring convention marks as non-publication matter
 (the leading DRAFT blockquote banner, every HTML comment, and — for the
-privacy policy only — the Appendix A gap register), then fills in the one
-open placeholder ([EFFECTIVE DATE], matched case-insensitively so a drafting
-variant like [Effective Date] is filled too) and does whitespace cleanup. It makes no
-decision about what the TEXT says; that is the ratification step, done
-before this script ever runs on a given draft.
+privacy policy only — the Appendix A gap register), then fills in the two
+open placeholders — [EFFECTIVE DATE] from --effective-date and
+[LAST UPDATED] from --last-updated (each matched case-insensitively, so a
+drafting variant like [Effective Date] is filled too) — and does whitespace
+cleanup. The two placeholders are filled independently (issue #243): a draft
+that carries both fields can hold "Effective date" fixed across a re-import
+while only "Last updated" advances, or vice versa. --last-updated is
+optional; a draft that has no [LAST UPDATED] placeholder at all (terms.md's
+shape) never needs it. Passing --last-updated when the draft has no such
+placeholder, or omitting it when the draft does, is caught by the guard
+below rather than silently mismatched. It makes no decision about what the
+TEXT says; that is the ratification step, done before this script ever runs
+on a given draft.
 
 Before writing, the result is checked with
 `jobcannon.web.legal_guard.check_published_text` — the SAME function the
@@ -55,6 +63,15 @@ _TRAILING_RULE_OR_BLANK = re.compile(r"^(-{3,})?\s*$")
 # leave a mixed-case variant unfilled and the guard call below refuses the
 # write, so this fills every case variant of the same placeholder.
 _EFFECTIVE_DATE_PLACEHOLDER = re.compile(r"\[effective date\]", re.IGNORECASE)
+# issue #243: a DISTINCT placeholder from [EFFECTIVE DATE], filled from a
+# separate --last-updated value. Before this, both the "Effective date" and
+# "Last updated" header lines shared the one [EFFECTIVE DATE] placeholder, so
+# a single .sub() call necessarily stamped both fields with the same date on
+# every import — an amendment re-import (wording-only change, "Effective
+# date" unchanged, "Last updated" advances) could not be expressed. Two
+# placeholders + two independent .sub() calls in build_published_text fixes
+# that: each field now only ever moves when its own CLI arg is passed.
+_LAST_UPDATED_PLACEHOLDER = re.compile(r"\[last updated\]", re.IGNORECASE)
 
 # issue #178: a Markdown table delimiter row is only ever valid immediately
 # after its header row, so a blank line sitting between the two always
@@ -222,17 +239,33 @@ def _collapse_blank_lines(text: str) -> str:
     return "\n".join(out)
 
 
-def build_published_text(raw: str, target: str, effective_date: str) -> str:
+def build_published_text(
+    raw: str, target: str, effective_date: str, last_updated: str | None = None
+) -> str:
     """Apply the full mechanical strip, in order, and return the published
     text (guard-checking is the caller's job, not this function's — kept
     separate so tests can exercise the transform without also asserting the
-    guard passes in the same call)."""
+    guard passes in the same call).
+
+    `effective_date` and `last_updated` are substituted independently
+    (issue #243) — [EFFECTIVE DATE] and [LAST UPDATED] are distinct
+    placeholders, so a re-import can hold one fixed while advancing the
+    other. `last_updated` defaults to None and, when None, [LAST UPDATED] is
+    left UNTOUCHED rather than falling back to `effective_date`: silently
+    reusing effective_date here would reintroduce the exact conflation this
+    issue exists to fix (an operator who forgets --last-updated on an
+    amendment re-import would get a valid-looking but wrong date instead of
+    a caught error). A draft with an unfilled [LAST UPDATED] left behind is
+    caught by legal_guard.check_published_text's unfilled-bracket-token rule
+    before anything is written — fail closed, not silently wrong."""
     text = _strip_html_comments(raw)
     text = _strip_draft_banner(text)
     if target == "privacy":
         text = _cut_from_heading_to_eof(text, "# Appendix A")
     text = _strip_trailing_rule_and_blank_lines(text)
     text = _EFFECTIVE_DATE_PLACEHOLDER.sub(effective_date, text)
+    if last_updated is not None:
+        text = _LAST_UPDATED_PLACEHOLDER.sub(last_updated, text)
     text = _collapse_blank_lines(text)
     text = _collapse_blank_before_table_delimiter(text)
     text = _link_first_cross_reference(text, target)
@@ -253,6 +286,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--effective-date", required=True, help="YYYY-MM-DD")
     parser.add_argument(
+        "--last-updated",
+        default=None,
+        help=(
+            "YYYY-MM-DD, optional — fills the draft's separate [LAST UPDATED] "
+            "placeholder (issue #243). Omit for a draft with no such "
+            "placeholder (terms.md's shape); pass a value distinct from "
+            "--effective-date on an amendment re-import to advance 'Last "
+            "updated' without moving 'Effective date'."
+        ),
+    )
+    parser.add_argument(
         "--public-root",
         default=pathlib.Path("."),
         type=pathlib.Path,
@@ -267,12 +311,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    if args.last_updated is not None and not _EFFECTIVE_DATE_ARG.fullmatch(args.last_updated):
+        print(
+            f"import_legal_text: --last-updated must be YYYY-MM-DD, got {args.last_updated!r}",
+            file=sys.stderr,
+        )
+        return 2
+
     if not args.source.is_file():
         print(f"import_legal_text: --source not found: {args.source}", file=sys.stderr)
         return 2
 
     raw = args.source.read_text(encoding="utf-8")
-    published = build_published_text(raw, args.target, args.effective_date)
+    published = build_published_text(raw, args.target, args.effective_date, args.last_updated)
 
     violations = check_published_text(published)
     if violations:
@@ -289,8 +340,10 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / _TARGET_FILENAMES[args.target]
     out_path.write_text(published, encoding="utf-8")
+    suffix = f", last updated {args.last_updated}" if args.last_updated is not None else ""
     print(
-        f"import_legal_text: wrote {out_path} ({len(published)} bytes, effective {args.effective_date})"
+        f"import_legal_text: wrote {out_path} "
+        f"({len(published)} bytes, effective {args.effective_date}{suffix})"
     )
     return 0
 

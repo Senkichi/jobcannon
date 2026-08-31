@@ -85,25 +85,81 @@ private` (only when a route hasn't already set one; this half has no
 Flask equivalent and is the hook's real behavioral change) on every
 PUBLIC_PATHS response — the #205 nav variance above means those
 responses can no longer be treated as identity-independent for
-shared-cache purposes, even though each route's own body still is."""
+shared-cache purposes, even though each route's own body still is; adds a
+second, independent after_request hook, `_cache_static_assets` (issue
+#258), gated on `request.endpoint == "static"` — the same discriminator
+`clerk_auth`'s exemption above uses, deliberately NOT folded into
+`_vary_and_cache_public_paths`, which is scoped to `PUBLIC_PATHS`
+membership and never fires for `/static/*` — that sets `Cache-Control:
+public, max-age=31536000, immutable` uniformly on every asset response,
+replacing Werkzeug's unconditional `no-cache` default. Paired with a new
+`_JCFlask` subclass (this module's only change to which `Flask` subclass
+`create_app` instantiates) computing a boot-time content hash per file
+under `jobcannon/web/static/` (jobcannon.web.static_versioning) and
+exposing it as a `static_url()` Jinja global — `base.html`'s 6
+`url_for('static', ...)` sites now route through it so each asset URL
+carries a content-addressed `?v=` that only changes when the file does,
+making the year-long `immutable` cache safe. `_JCFlask` also overrides
+`send_static_file` to special-case `fonts.css`: that file's own internal
+`url('fonts/X.woff2')` references are invisible to the 6 template call
+sites, so left alone a font re-subset would never bust its own cached
+woff2 URLs; the override serves boot-time-substituted bytes (each
+internal ref gains the referenced font's own `?v=`) while leaving the
+committed `fonts.css` file on disk untouched and keeping the response on
+the `static` endpoint, so `clerk_auth`'s exemption and this new hook both
+still apply to it unchanged."""
 
 from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
-from flask import Flask, abort, g, make_response, render_template, request, session
+from flask import Flask, abort, g, make_response, render_template, request, session, url_for
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
 
 from jobcannon.web.anon_session import capture_attribution, ensure_session_ids
 from jobcannon.web.handoff import run_handoff_if_pending
 from jobcannon.web.security_headers import register_security_headers
+from jobcannon.web.static_versioning import compute_static_hashes, versioned_fonts_css
 from jobcannon.web.template_globals import touch_target
 
 logger = logging.getLogger(__name__)
 
 PUBLIC_PATHS = frozenset({"/healthz", "/demo", "/start", "/preview", "/privacy", "/terms"})
+
+
+class _JCFlask(Flask):
+    """`Flask` subclass whose only change is `send_static_file` (issue
+    #258): special-cases `fonts.css` to serve boot-time-substituted bytes
+    (see `jobcannon.web.static_versioning.versioned_fonts_css`) with its
+    internal `url('fonts/X.woff2')` refs carrying their own `?v=<hash>`,
+    instead of delegating to Werkzeug's `send_from_directory` for that one
+    filename. Every other filename falls through to `super().send_static_file`
+    unchanged.
+
+    This is the ONLY correct place to put that special-case: Flask
+    registers the static route once, at app-construction time, as
+    `add_url_rule(..., endpoint="static", view_func=lambda **kw:
+    self_ref().send_static_file(**kw))` (verified via
+    `inspect.getsource(flask.app)` — see the issue #258 recon). The
+    endpoint name is fixed to that lambda; only `send_static_file`'s body
+    is swappable. A dedicated view for `fonts.css` instead would register a
+    second endpoint, silently dropping it out of `clerk_auth`'s
+    `endpoint == "static"` exemption (401s for signed-out visitors), out of
+    `_cache_static_assets` below (same discriminator), and out of
+    `tests/host/test_static_assets.py`'s `url_for('static', ...)`-derived
+    asset list — all three simultaneously.
+    """
+
+    _fonts_css_bytes: bytes | None = None
+
+    def send_static_file(self, filename: str):
+        if filename == "fonts.css" and self._fonts_css_bytes is not None:
+            return self.response_class(self._fonts_css_bytes, mimetype="text/css")
+        return super().send_static_file(filename)
+
 
 # Terms of Service §8's AGPL Corresponding Source offer names this repo.
 _REPO_URL = "https://github.com/Senkichi/jobcannon"
@@ -385,8 +441,24 @@ def _is_subject_revoked(identity) -> bool:
 
 
 def create_app(config: dict | None = None) -> Flask:
-    app = Flask(__name__)
+    app = _JCFlask(__name__)
     app.config.update(config or {})
+
+    # Issue #258: one content hash per file under jobcannon/web/static/,
+    # computed once here from the actual bytes on disk (never a hand-
+    # maintained version string). Feeds both the `static_url()` Jinja
+    # global below (busts the 6 url_for('static', ...) call sites in
+    # base.html) and `_JCFlask.send_static_file`'s fonts.css special-case
+    # (busts that file's OWN internal font url() refs — see
+    # jobcannon.web.static_versioning's module docstring for why those
+    # need separate handling from the 6 template call sites).
+    _static_hashes = compute_static_hashes(app.static_folder)
+    app._fonts_css_bytes = versioned_fonts_css(
+        Path(app.static_folder) / "fonts.css", _static_hashes
+    )
+    app.jinja_env.globals["static_url"] = lambda filename: url_for(
+        "static", filename=filename, v=_static_hashes.get(filename, "")
+    )
 
     if not app.config.get("TESTING"):
         # Deployed processes get INFO-level logging on stderr, mirroring
@@ -981,6 +1053,10 @@ def create_app(config: dict | None = None) -> Flask:
 
     app.register_blueprint(legal_bp)
 
+    from jobcannon.web.posting_detail import posting_detail_bp
+
+    app.register_blueprint(posting_detail_bp)
+
     @app.after_request
     def _vary_and_cache_public_paths(response):
         """Issue #205 fallout: every PUBLIC_PATHS response's nav/footer now
@@ -1025,6 +1101,55 @@ def create_app(config: dict | None = None) -> Flask:
         response.vary.add("Cookie")
         if "Cache-Control" not in response.headers:
             response.cache_control.private = True
+        return response
+
+    @app.after_request
+    def _cache_static_assets(response):
+        """Issue #258: every `/static/*` response gets a uniform, long-lived
+        `Cache-Control: public, max-age=31536000, immutable`, replacing the
+        `no-cache` Werkzeug's `send_static_file`/`send_from_directory` sets
+        unconditionally whenever `SEND_FILE_MAX_AGE_DEFAULT` is unset (which
+        it is — nothing in this app sets it; verified via
+        `inspect.getsource` on the installed Werkzeug in the issue #258
+        recon).
+
+        Gated on `request.endpoint == "static"` — the SAME discriminator
+        `clerk_auth`'s exemption above uses — deliberately NOT
+        folded into `_vary_and_cache_public_paths` above, which is scoped
+        to `PUBLIC_PATHS` membership and returns early for every
+        `/static/*` request (the static endpoint is intentionally not a
+        `PUBLIC_PATHS` entry). One uniform value for every asset, not
+        graduated by file type: every asset URL is now content-hash
+        versioned (`static_url()`, `_JCFlask.send_static_file`'s fonts.css
+        special-case), so staleness is structurally impossible and a
+        year-long `immutable` TTL is safe for all of them alike — the same
+        pattern Django's `ManifestStaticFilesStorage`, webpack, and
+        Next.js's `_next/static` use.
+
+        Mirrors, rather than reuses, the public/max_age/immutable
+        assignment Werkzeug's own `send_file` performs internally when a
+        `max_age` IS supplied (same recon inspection) — setting
+        `no_cache = None` first is required to clear the directive
+        Werkzeug already set on this response before this hook ran, not
+        just to add the new ones alongside it.
+
+        Gated on status code too: `request.endpoint` is still `"static"`
+        on a 404 (the URL rule matched; `send_static_file` just couldn't
+        find the file) or a CSRF/error response some other handler wrote
+        for this same endpoint, so an unguarded hook would stamp
+        `immutable` onto a 404 page and a browser would cache "missing"
+        for a year. 200 is the normal asset response; 304 is a
+        conditional-GET revalidation hit; 206 is a Range request (Werkzeug
+        emits `Accept-Ranges: bytes` for static files, so a partial
+        request is a real, expected path here, not a hypothetical one).
+        Anything else (404, 5xx, ...) falls through untouched."""
+        if request.endpoint != "static" or response.status_code not in (200, 206, 304):
+            return response
+        cache_control = response.cache_control
+        cache_control.no_cache = None
+        cache_control.public = True
+        cache_control.max_age = 31536000
+        cache_control.immutable = True
         return response
 
     # Registered last, once every blueprint above is mounted and

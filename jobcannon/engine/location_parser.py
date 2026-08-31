@@ -465,6 +465,44 @@ def _detect_workplace_type(text: str) -> tuple[WorkplaceType, str]:
     return (detected, stripped)
 
 
+def strip_workplace_tokens(text: str) -> str | None:
+    """Strip an inline workplace-type token from a flat ``location`` string.
+
+    Ingest-boundary normalizer for issue #264: scraped ``location`` values
+    can carry an embedded workplace token ("Remote — Austin, TX") that
+    duplicates the structured ``workplace_type`` column and, pre-fix, leaked
+    straight through to the display string (``dedupe_location`` in
+    ``web/feed_entries.py`` can only suppress the redundant badge, not clean
+    the stored string itself). Reuses ``_detect_workplace_type``'s
+    token-detect regexes — the same ones ``parse_locations`` uses — rather
+    than re-deriving detection logic, so there is one definition of "what
+    counts as a workplace token" for both the structured and flat paths.
+
+    This helper only strips; it discards the detected ``workplace_type``
+    classification. Populating ``workplace_type`` from a flat string is
+    ``parse_locations``'s job when a source supplies ``locations_raw``.
+
+    Returns:
+      - The input unchanged when it is empty/falsy — a stripping normalizer
+        should not invent a value for an already-empty location.
+      - The cleaned string when content survives the strip
+        ("Remote — Austin, TX" -> "Austin, TX").
+      - ``None`` when the input was ONLY a workplace token ("Remote" ->
+        None), matching ``db/_jobs.py``'s ``parsed.location or None`` intent
+        rather than leaving a semantically-empty string in the column.
+
+    Known limitation (inherited from ``_detect_workplace_type``): detection
+    is if/elif (REMOTE > HYBRID > ONSITE precedence), so only the
+    first-matched token TYPE is stripped — "Remote/Hybrid — Austin" only
+    strips "Remote", leaving "Hybrid — Austin". Acceptable for #264:
+    workplace tokens are rarely combined in one scraped location string.
+    """
+    if not text:
+        return text
+    _workplace, stripped = _detect_workplace_type(text)
+    return stripped or None
+
+
 # ─── Layer 3 — heuristics for tightly-scoped shapes ──────────────────
 
 
