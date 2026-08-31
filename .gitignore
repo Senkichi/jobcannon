@@ -6,3 +6,7 @@ __pycache__/
 *.db
 *.sqlite3
 dist/
+
+# charlie-work fleet orchestrator state (local only — never committed)
+.var/
+orchestrator.config.yaml
