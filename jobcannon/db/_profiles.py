@@ -4,8 +4,10 @@ as the one narrower, documented exception below). `profiles` had no writer
 anywhere on merged main (Reconciliation Preamble item 6), so it started life
 single-writer by construction — no AST-scanned guard test is needed the way
 `events` has one (tests/host/test_events_single_writer.py): every write to
-this table still goes through exactly one of the two functions defined here,
-both in this module, neither anywhere else.
+this table still goes through exactly one of the three functions defined here
+(`upsert_profile`, `replace_profile` — Spec 2's complete-snapshot editor
+writer, plain overwrite instead of COALESCE — and `clear_profile_targets`),
+all in this module, none anywhere else.
 
 `GUEST_USER_ID` is defined ONCE here — `jobcannon/web/pages.py` and
 `scripts/seed_guest_demo.py` both import it rather than re-declaring the
@@ -146,6 +148,66 @@ def upsert_profile(
             years_of_experience,
             comp_floor_usd,
             Jsonb(target_companies) if target_companies is not None else None,
+            workplace_type,
+        ),
+    )
+    commit_unless_nested(raw)
+
+
+def replace_profile(
+    conn: Any,
+    user_id: str,
+    *,
+    skills: list,
+    experience_summary: str | None,
+    target_titles: list,
+    target_locations: list,
+    seniority_level: str | None,
+    years_of_experience: float | None,
+    comp_floor_usd: int | None,
+    target_companies: list,
+    workplace_type: str | None,
+) -> None:
+    """Spec 2 (profile editor): write a COMPLETE profile snapshot, overwriting
+    every column with the caller's literal value — None becomes NULL, an
+    empty list becomes a stored `[]`. Contrast `upsert_profile` above, whose
+    per-column COALESCE deliberately preserves a stored value when the caller
+    omits a field: that is the right contract for the onboarding picker
+    (which only collects a subset), and the wrong one for an editor whose
+    visitor has just blanked out their years-of-experience box and expects
+    it to stay blank. `workplace_type`'s required-keyword contract is
+    generalized here to every column — no defaults, so an incomplete
+    snapshot is a TypeError at the call site rather than a silent partial
+    write. The sole production caller is `jobcannon/web/profile.py`'s POST
+    handler; `jobcannon/web/profile_form.py`'s `parse_profile_form` returns
+    a dict keyed exactly by these kwarg names."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    raw.execute(
+        "INSERT INTO profiles (user_id, skills, experience_summary, target_titles, "
+        "target_locations, seniority_level, years_of_experience, comp_floor_usd, "
+        "target_companies, workplace_type, updated_at) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
+        "ON CONFLICT (user_id) DO UPDATE SET "
+        "skills = EXCLUDED.skills, "
+        "experience_summary = EXCLUDED.experience_summary, "
+        "target_titles = EXCLUDED.target_titles, "
+        "target_locations = EXCLUDED.target_locations, "
+        "seniority_level = EXCLUDED.seniority_level, "
+        "years_of_experience = EXCLUDED.years_of_experience, "
+        "comp_floor_usd = EXCLUDED.comp_floor_usd, "
+        "target_companies = EXCLUDED.target_companies, "
+        "workplace_type = EXCLUDED.workplace_type, "
+        "updated_at = now()",
+        (
+            user_id,
+            Jsonb(skills),
+            experience_summary,
+            Jsonb(target_titles),
+            Jsonb(target_locations),
+            seniority_level,
+            years_of_experience,
+            comp_floor_usd,
+            Jsonb(target_companies),
             workplace_type,
         ),
     )
