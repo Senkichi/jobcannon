@@ -353,3 +353,33 @@ def test_auth_link_context_tolerates_a_bare_host_config_double():
     assert resp.status_code == 401
     assert f'href="{_SIGN_UP_URL}"' in html
     assert ">Sign in<" not in html
+
+
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_signed_in_visitor_sees_the_profile_nav_link(path):
+    """Spec 2 §4: the profile editor link sits beside My postings, gated on
+    the same visitor_is_authed global — so it survives PUBLIC_PATHS renders
+    where g.clerk_user is force-None (#205), exactly like its neighbour."""
+    app = _app(
+        _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL),
+        verify=lambda req: ClerkIdentity(
+            user_id="user_authed_profile", claims={"sub": "user_authed_profile"}
+        ),
+    )
+    html = app.test_client().get(path).get_data(as_text=True)
+
+    assert "data-profile-nav-link" in html
+    assert 'href="/profile"' in html
+    assert ">Profile<" in html
+
+
+@pytest.mark.parametrize("path", ["/privacy", "/terms", "/start"])
+def test_anonymous_visitor_does_not_see_the_profile_nav_link(path):
+    app = _app(
+        _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL),
+        verify=lambda req: None,
+    )
+    html = app.test_client().get(path).get_data(as_text=True)
+
+    assert "data-profile-nav-link" not in html
+    assert ">Profile<" not in html
