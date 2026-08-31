@@ -69,6 +69,14 @@
   verification throws is treated as anonymous and gets today's exact behavior.
   The anonymous flow is byte-identical; the anon/pending domain keeps exactly
   its current writers.
+- **Cache safety of the redirect**: this makes `/start` — a PUBLIC_PATHS route —
+  return an identity-dependent response (303 for authed, form for anon). The
+  existing `_vary_and_cache_public_paths` after_request hook
+  (`web/__init__.py:988-1024`) already applies `Vary: Cookie` +
+  `Cache-Control: private` uniformly to ALL PUBLIC_PATHS responses, redirects
+  included, so no new code is needed — but the plan pins it with a test
+  asserting the 303 carries both headers, so the invariant is declared rather
+  than incidental.
 
 ## 2. The form
 
@@ -99,6 +107,8 @@ server-side into the same validated list shapes the picker produces. The
 - Success: PRG — `redirect` 303 back to `GET /profile` with a rendered
   "Profile saved" confirmation note (the `/consent` pattern).
 - Plain form POST; no htmx in v1 (the picker's own submit is a plain form).
+  `CSRFProtect` is app-wide (`web/__init__.py:519`) — the template includes
+  `csrf_token()` like the picker form; a missing token is a 400 error page.
 - **No-row edge case**: an authed user who signed up without onboarding has no
   `profiles` row. `get_profile` returns None → form renders empty; first POST
   creates the row via the upsert's INSERT arm. No special-casing beyond
@@ -154,7 +164,10 @@ server-side into the same validated list shapes the picker produces. The
   on success; unauthed request 401s.
 - Authed `/start` redirect: GET and POST both 303 to `/profile`; anonymous
   GET/POST behavior pinned unchanged; fail-open (verifier throws) pinned to
-  anonymous behavior.
+  anonymous behavior; the 303 carries `Vary: Cookie` +
+  `Cache-Control: private` (cache-safety invariant, §1).
+- CSRF: `POST /profile` without a token gets the 400 CSRF error page; the
+  rendered form includes a valid token (`tests/host/test_csrf.py` patterns).
 - Validator units for the two new parsers (caps, control chars, empty vs
   omitted).
 - `requires_postgres` tests for the COUNT primitives (seed → count → act →
