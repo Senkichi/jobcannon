@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-31T02:10:17Z",
+  "generated_at": "2026-08-31T02:59:33Z",
   "roots": [
     "engine",
     "db",
@@ -102,11 +102,11 @@
           "text": "gates the private repo's auto-reopen logic, which has no hosted counterpart"
         },
         {
-          "line": 99,
+          "line": 129,
           "text": "# of the append-only salary_observations JSON array (mirrors the private"
         },
         {
-          "line": 100,
+          "line": 130,
           "text": "# original's cap; oldest entries are dropped first once the cap is hit)."
         }
       ]
