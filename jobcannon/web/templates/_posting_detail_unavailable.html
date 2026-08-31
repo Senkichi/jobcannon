@@ -1,0 +1,28 @@
+{# Rendered when the posting-detail DB read raises (issue #261: a DB outage
+   degrades to this fragment -- never abort(404), which would falsely claim
+   the posting doesn't exist, and never a 5xx, which htmx 2.0.4's default
+   `responseHandling` config (`[45]..` -> `{swap: false, error: true}`)
+   would leave unswapped, dead-clicking the expand button since this app
+   never overrides that default for posting_detail.detail). Deliberately
+   200: hx-swap="innerHTML" on the expand button in _posting_row.html swaps
+   ANY 200 body unconditionally, so this reaches #posting-detail-<id> the
+   same way a real _posting_detail.html panel would.
+
+   A single element node (not bare text) is required, not cosmetic: the
+   whole-card click delegate in _feed_list.html checks
+   `slot.childElementCount > 0` to decide whether a click should collapse
+   the panel locally or forward to the expand button -- an empty-string
+   swap would leave that check permanently false and the card stuck
+   "open" with nothing to collapse. `data-detail-unavailable` is the
+   caller-visible signal this fragment is a degraded state, not a real
+   (if sparse) detail panel -- distinct from _posting_detail.html's own
+   data-detail-* attributes so nothing downstream can confuse the two.
+
+   Matches this codebase's other small error fragments in shape
+   (_csrf_error_fragment.html, _picker_error_fragment.html): the
+   jc-error-note class, no page chrome, swap-safe. Retrying is just
+   clicking Details again -- the button's hx-get is unconditional, so no
+   separate retry control is needed here. #}
+<p class="jc-error-note" data-detail-unavailable>
+  Details unavailable right now — try again in a moment.
+</p>

@@ -221,12 +221,17 @@ def test_gate_covers_every_registered_route_for_every_declared_method():
                 # public_get opens GET/HEAD/OPTIONS on this route for a
                 # signed-out visitor (same exemption class as /consent
                 # above), but GET/HEAD reach get_posting_detail's real
-                # Postgres connection_factory before returning ANY status
-                # -- this module's `_app()` never opens a pool (module
-                # docstring: "No Postgres needed"), so calling either here
-                # would raise RuntimeError, not produce a status to assert.
-                # That coverage -- 200 for an anonymous visitor, identical
-                # render when authed, 404 for an unknown id -- is owned by
+                # Postgres connection_factory -- this module's `_app()`
+                # never opens a pool (module docstring: "No Postgres
+                # needed"), so calling either here hits an unopened-pool
+                # RuntimeError. Since #261, that RuntimeError no longer
+                # propagates (it's caught in-route and degrades to a 200
+                # "unavailable" fragment), so a declared _EXEMPT_STATUS 200
+                # would mechanically pass this loop now -- but it would
+                # only ever exercise that outage fallback here, never a
+                # real render or the 404 branch. This endpoint's full
+                # status matrix (200 real detail / 404 unknown id / 200
+                # outage fragment) stays owned by
                 # tests/host/test_posting_detail.py instead. OPTIONS has no
                 # such problem (see _EXEMPT_STATUS above) and stays in the
                 # loop below.
