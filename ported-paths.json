@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-29T04:37:42Z",
+  "generated_at": "2026-08-31T02:10:17Z",
   "roots": [
     "engine",
     "db",
@@ -528,7 +528,7 @@
       "root": "engine",
       "markers": [
         {
-          "line": 90,
+          "line": 91,
           "text": "# Host-injectable denylist seam. The private repo read this from config.yaml"
         }
       ]
