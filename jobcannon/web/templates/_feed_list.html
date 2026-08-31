@@ -1,7 +1,7 @@
 {# Shared posting-list partial: renders the first batch of `entries` (a
    list of `build_entry` dicts — jobcannon/web/feed_entries.py — whose
-   `chips` are `select_chips` label/highlight dicts, not
-   `why_chips(...) list[str]`) via _feed_page.html, which itself includes
+   `chips` are `select_chips` label/highlight dicts, capped at 3 per
+   row) via _feed_page.html, which itself includes
    _posting_row.html once per entry and, when `load_more_url` is set, a
    "Load more" control (#156). Consumed by /preview, /, and /demo (all three
    server-render a real feed here); the context that includes this template

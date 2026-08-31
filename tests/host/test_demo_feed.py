@@ -124,7 +124,7 @@ def test_demo_renders_guest_profile_card(app):
     assert "Distinctive Guest Card Title" in html
 
 
-def test_demo_renders_postings_with_why_chips_unauthenticated(app):
+def test_demo_renders_postings_with_chips_unauthenticated(app):
     dsn = app.config["_TEST_DSN"]
     _seed_guest_profile(dsn, target_titles=["Distinctive Demo Feed Title"])
     company_id = _seed_company(dsn, "Demo Feed Positive Control Co")

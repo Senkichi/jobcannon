@@ -213,7 +213,8 @@ def test_each_row_renders_at_least_one_why_chip_or_the_pending_marker(app):
     # No titles/skills on the seeded profile -> no overlap chip is possible.
     client = _feed_client(app)
     company_id = _seed_company(dsn, "Chip Co")
-    # No structural_axes, no salary -> why_chips() returns [] for this row.
+    # No structural_axes, no overlap/freshness signals -> select_chips(
+    # chip_kinds(...)) returns [] for this row.
     _seed_posting(dsn, "feed-chip-1", company_id, title="Chip Test Posting")
 
     html = client.get("/").get_data(as_text=True)
