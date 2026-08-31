@@ -51,5 +51,13 @@ procedure.
   error, and needs no action from you beyond opening the PR normally.
 - CLA: first-time contributors must sign per `CONTRIBUTING.md` before merge
   (the `CLA Assistant Lite` check gates it). Existing signers need no action.
+- Merge queue: approved, green PRs are merged by Aviator when labeled
+  `mergequeue` (config in `.aviator/config.yml`). Aviator pushes an "update
+  branch" commit authored by `aviator-app[bot]` to a queued PR whose base has
+  moved, so `.github/workflows/cla.yml`'s `allowlist` MUST contain every bot
+  that authors commits on PR branches (`aviator-app[bot]`, `dependabot[bot]`).
+  A missing entry turns the required `CLA Assistant Lite` check red on the
+  bot's commit and Aviator marks the PR `blocked` (PR #260, fixed in #272).
+  When adding a new commit-authoring bot, extend that allowlist in the same PR.
 - `ruff` line length is 100 (`pyproject.toml`'s `[tool.ruff]`), Python
   `>=3.12`.
