@@ -307,6 +307,64 @@ class TestI07LocationShape:
 
 
 # ---------------------------------------------------------------------------
+# #264 — workplace-token stripping is wired into from_job()
+#
+# Unit coverage for the regex/return-contract lives in
+# tests/engine/test_location_parser.py (strip_workplace_tokens). These tests
+# instead verify from_job() actually CALLS it on job.location for every
+# result shape (ParsedJob AND UnresolvedParsedJob) — the L3 "wired" check,
+# not just "the helper works in isolation".
+# ---------------------------------------------------------------------------
+
+
+class TestWorkplaceTokenNormalization:
+    """from_job() strips embedded workplace tokens from job.location."""
+
+    def test_token_and_real_location_stripped(self):
+        """Mixed-case token + real location: token gone, location kept."""
+        job = _make_job(location="rEmOtE — Austin, TX")
+        with _clean_patches():
+            result = ParsedJob.from_job(job)
+        assert isinstance(result, ParsedJob)
+        assert result.location == "Austin, TX"
+
+    def test_hybrid_token_stripped(self):
+        job = _make_job(location="HYBRID, San Francisco, CA")
+        with _clean_patches():
+            result = ParsedJob.from_job(job)
+        assert isinstance(result, ParsedJob)
+        assert result.location == "San Francisco, CA"
+
+    def test_pure_token_location_becomes_none(self):
+        """A location that is ONLY a workplace token normalizes to None,
+        matching the existing ``parsed.location or None`` column contract
+        in db/_jobs.py rather than persisting a bare 'Remote' string."""
+        job = _make_job(location="Remote")
+        with _clean_patches():
+            result = ParsedJob.from_job(job)
+        assert isinstance(result, ParsedJob)
+        assert result.location is None
+
+    def test_location_without_token_unchanged(self):
+        """Locations carrying no workplace token pass through untouched."""
+        job = _make_job(location="New York, NY")
+        with _clean_patches():
+            result = ParsedJob.from_job(job)
+        assert isinstance(result, ParsedJob)
+        assert result.location == "New York, NY"
+
+    def test_stripped_on_unresolved_path_too(self):
+        """Normalization runs before the unresolved_reasons branch, so an
+        UnresolvedParsedJob (routed here via I-08) still gets a clean
+        location, not the raw scraped string."""
+        job = _make_job(title="Engineer) NY", location="Remote — Austin, TX")
+        with _clean_patches():
+            result = ParsedJob.from_job(job)
+        assert isinstance(result, UnresolvedParsedJob)
+        assert result.location == "Austin, TX"
+
+
+# ---------------------------------------------------------------------------
 # I-13 — jd_full content density
 # ---------------------------------------------------------------------------
 

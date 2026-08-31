@@ -81,6 +81,7 @@ from jobcannon.engine.careers_crawler._title_filters import (
     is_metadata_blob,
 )
 from jobcannon.engine.location_canonical import JobLocation
+from jobcannon.engine.location_parser import strip_workplace_tokens
 from jobcannon.engine.runtime_config import get_runtime_config
 from jobcannon.engine.url_canonical import canonicalize_url
 
@@ -193,7 +194,11 @@ class ParsedJob:
     dedup_key: str
 
     # ── Location (flat legacy + structured m066 columns) ────────────────────
-    location: str = ""
+    # str | None (not just str): from_job() runs job.location through
+    # strip_workplace_tokens (#264), which returns None when the scraped
+    # string was ONLY a workplace token ("Remote" -> None). db/_jobs.py
+    # already treats "" and None as equivalent (``parsed.location or None``).
+    location: str | None = ""
     locations_raw: list[str] = field(default_factory=list)
     locations_structured: list[JobLocation] = field(default_factory=list)
     workplace_type: str = "UNSPECIFIED"
@@ -440,7 +445,14 @@ class ParsedJob:
             "title": cleaned_title,
             "company": job.company,
             "dedup_key": dedup_key,
-            "location": job.location,
+            # #264: strip embedded workplace tokens ("Remote — Austin, TX" ->
+            # "Austin, TX") here, at the single ingest boundary every scanner
+            # funnels through, rather than leaving the raw scraped string for
+            # downstream display code to work around per-callsite. Not a
+            # validator (no raise, no unresolved_reasons entry) — a silent
+            # cleanup, so it isn't numbered alongside I-07..I-18 above. See
+            # strip_workplace_tokens() for the None-vs-"" return contract.
+            "location": strip_workplace_tokens(job.location),
             "locations_raw": locations_raw,
             "locations_structured": locations_structured,
             "workplace_type": workplace_type,
@@ -507,7 +519,10 @@ class UnresolvedParsedJob:
     dedup_key: str
 
     # ── Location ────────────────────────────────────────────────────────────
-    location: str = ""
+    # str | None — see ParsedJob.location for the strip_workplace_tokens
+    # (#264) None-vs-"" contract; identical here since from_job() builds both
+    # variants from the same common_kwargs.
+    location: str | None = ""
     locations_raw: list[str] = field(default_factory=list)
     locations_structured: list[JobLocation] = field(default_factory=list)
     workplace_type: str = "UNSPECIFIED"
