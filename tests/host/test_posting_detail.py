@@ -6,6 +6,7 @@ test, which carries the requires_postgres marker."""
 
 import contextlib
 import datetime
+import logging
 
 from jobcannon.db._posting_detail import get_posting_detail
 from jobcannon.web import create_app
@@ -90,6 +91,33 @@ def test_description_fallback_then_honest_note(monkeypatch):
 def test_unknown_id_is_404(monkeypatch):
     _patch(monkeypatch, None)
     assert _app().test_client().get("/postings/999/detail").status_code == 404
+
+
+def test_db_outage_renders_unavailable_fragment_not_404_or_500(monkeypatch, caplog):
+    """#261: a DB outage must never surface as abort(404) (that claims the
+    posting doesn't exist, which is false during an outage) nor as an
+    unhandled 500 -- both leave the expand slot either wrongly labeled or,
+    for a 5xx, entirely unswapped (htmx 2.0.4's default responseHandling
+    maps 4xx/5xx to `{swap: false}`), which is the dead-click this issue
+    exists to prevent. Monkeypatches connection_factory itself (not
+    get_posting_detail) so the raise happens exactly where a real pool
+    outage would surface it -- inside the `with connection_factory() as
+    conn:` block, before get_posting_detail is ever reached."""
+
+    def _boom():
+        raise RuntimeError("simulated DB outage")
+
+    monkeypatch.setattr(posting_detail_module, "connection_factory", _boom)
+
+    with caplog.at_level(logging.WARNING):
+        resp = _app().test_client().get("/postings/7/detail")
+    html = resp.get_data(as_text=True)
+
+    # Still 200: the swap target actually receives content (no dead click).
+    assert resp.status_code == 200
+    assert "data-detail-unavailable" in html
+    assert "data-posting-detail-panel" not in html
+    assert any("posting detail" in rec.message.lower() for rec in caplog.records)
 
 
 def test_post_is_405_not_401(monkeypatch):
