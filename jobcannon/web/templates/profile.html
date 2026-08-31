@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Your profile — Job Cannon{% endblock %}
+{% block content %}
+<h1 class="jc-title jc-title--roomy">Your profile</h1>
+
+{% if unavailable %}
+  {# Fail-closed read (see jobcannon/web/profile.py's module docstring): no
+     form, so nothing can be saved over a profile we couldn't read. #}
+  <p class="jc-error-note" data-profile-unavailable>
+    Your profile couldn't be loaded right now. Please try again in a moment.
+  </p>
+{% else %}
+
+  {% if stats %}
+    {# Spec 2 §3: three cells in postings-history tab order, each linking to
+       that filtered view. Zero renders "0" — never a hidden cell. #}
+    <nav class="jc-cluster" aria-label="Your postings" data-profile-stats>
+      {% for stat in stats %}
+        <a href="{{ stat.href }}" class="jc-meta jc-link {{ touch_target() }}"
+           data-profile-stat="{{ stat.view }}">
+          <span class="jc-meta-num">{{ stat.count }}</span>
+          <span class="jc-meta-lab">{{ stat.view | capitalize }}</span>
+        </a>
+      {% endfor %}
+    </nav>
+  {% endif %}
+
+  {% if saved %}
+    <p class="jc-stamp" data-profile-saved>
+      <span class="jc-stamp-dot"></span>
+      Profile saved.
+    </p>
+  {% endif %}
+  {% if error %}
+    <p class="jc-error-note">{{ error }}</p>
+  {% endif %}
+
+  <p class="jc-lede">
+    Edits show in your feed on the next page load; scoring picks them up on
+    its next run.
+  </p>
+
+  <form method="post" action="/profile" class="jc-stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label class="jc-field {{ touch_target() }}">
+      <span class="lj-label">Target titles (one per line)</span>
+      <textarea name="target_titles" rows="4" class="jc-input {{ touch_target() }}">{{ values.target_titles }}</textarea>
+    </label>
+
+    <label class="jc-field {{ touch_target() }}">
+      <span class="lj-label">Target companies (one per line)</span>
+      <textarea name="target_companies" rows="3" class="jc-input {{ touch_target() }}">{{ values.target_companies }}</textarea>
+    </label>
+
+    <label class="jc-field {{ touch_target() }}">
+      <span class="lj-label">Target locations (one per line)</span>
+      <textarea name="target_locations" rows="3" class="jc-input {{ touch_target() }}">{{ values.target_locations }}</textarea>
+    </label>
+
+    <fieldset class="jc-field">
+      <legend class="lj-label">Skills</legend>
+      {% for skill in skills %}
+        <label class="jc-cluster {{ touch_target() }}">
+          <input type="checkbox" name="skills" value="{{ skill }}" {% if skill in values.checked_skills %}checked{% endif %} class="{{ touch_target('checkbox') }}"> {{ skill }}
+        </label>
+      {% endfor %}
+    </fieldset>
+
+    <label class="jc-field {{ touch_target() }}">
+      <span class="lj-label">Seniority level</span>
+      <select name="seniority_level" class="jc-input {{ touch_target() }}">
+        <option value="" {% if not values.seniority_level %}selected{% endif %}>Prefer not to say</option>
+        {% for level in seniority_levels %}
+          <option value="{{ level }}" {% if level == values.seniority_level %}selected{% endif %}>{{ level }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label class="jc-field {{ touch_target() }}">
+      <span class="lj-label">Years of experience</span>
+      <input type="number" name="years_of_experience" min="0" max="60" step="0.5"
+             value="{{ values.years_of_experience }}"
+             class="jc-input {{ touch_target() }}">
+    </label>
+
+    <label class="jc-field {{ touch_target() }}">
+      <span class="lj-label">Compensation floor (USD/year, optional)</span>
+      <input type="number" name="comp_floor_usd" min="0" step="1"
+             value="{{ values.comp_floor_usd }}"
+             class="jc-input {{ touch_target() }}">
+    </label>
+
+    <label class="jc-field {{ touch_target() }}">
+      <span class="lj-label">Workplace type</span>
+      <select name="workplace_type" class="jc-input {{ touch_target() }}">
+        <option value="" {% if not values.workplace_type %}selected{% endif %}>No preference</option>
+        {% for wt in workplace_options %}
+          <option value="{{ wt }}" {% if wt == values.workplace_type %}selected{% endif %}>{{ wt }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label class="jc-field {{ touch_target() }}">
+      <span class="lj-label">Experience summary</span>
+      <textarea name="experience_summary" rows="6" class="jc-input {{ touch_target() }}">{{ values.experience_summary }}</textarea>
+    </label>
+
+    <button type="submit" class="jc-btn jc-btn--primary {{ touch_target() }}">Save profile</button>
+  </form>
+{% endif %}
+{% endblock %}
