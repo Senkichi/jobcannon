@@ -513,7 +513,7 @@ def test_signed_in_picker_resubmission_is_redirected_and_writes_nothing(app):
         assert "pending_picker" not in sess
     with psycopg.connect(dsn) as conn:
         anon_rows = conn.execute(
-            "SELECT count(*) FROM users WHERE id LIKE 'anon\_%' ESCAPE '\'"
+            "SELECT count(*) FROM users WHERE id LIKE 'anon\\_%' ESCAPE '\\'"
         ).fetchone()[0]
     assert anon_rows == 0
     clerk_profile = _profile_row(dsn, CLERK_ID)
