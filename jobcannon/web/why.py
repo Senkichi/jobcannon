@@ -1,4 +1,4 @@
-"""why_chips — pure, DB-free literal restatements of stored posting values.
+"""chip_kinds — pure, DB-free literal restatements of stored posting values.
 
 No model call, no classification, no fit label: a chip may say *what is
 stored* on the row (an age band, a title/skill token that overlaps the
@@ -156,8 +156,8 @@ def chip_kinds(row: Any, selections_or_profile: Mapping[str, Any] | None) -> dic
     "seniority", "jd_quality"); a kind with nothing honest to say maps to
     None.
 
-    Same row contract why_chips documented: `structural_axes`,
-    `posted_date_precision`, and `title` by string key — the exact shape
+    Row contract: `structural_axes`, `posted_date_precision`, and `title`
+    by string key — the exact shape
     `jobcannon.db._feed.list_feed_postings` returns. A None or malformed
     `structural_axes` degrades to None for the three axis-derived kinds
     only; overlap reads the row/selections directly and still resolves
@@ -178,16 +178,3 @@ def chip_kinds(row: Any, selections_or_profile: Mapping[str, Any] | None) -> dic
         kinds["seniority"] = _seniority_chip(axes)
         kinds["jd_quality"] = _jd_quality_chip(axes)
     return kinds
-
-
-def why_chips(row: Any, selections_or_profile: Mapping[str, Any] | None) -> list[str]:
-    """COMPAT WRAPPER — deleted by this plan's Task 10. Flat chip strings
-    in the legacy render order (freshness, seniority, jd_quality, overlap),
-    kept only because feed_entries.build_entry renders flat strings until
-    the Wave-2 template rewrite (Task 8) swaps it to
-    select_chips(chip_kinds(...)). The "salary listed" chip is gone for
-    good (spec §1: redundant once the salary number is prominent in the
-    card's primary tier)."""
-    kinds = chip_kinds(row, selections_or_profile)
-    ordered = (kinds["freshness"], kinds["seniority"], kinds["jd_quality"], kinds["overlap"])
-    return [chip for chip in ordered if chip is not None]
