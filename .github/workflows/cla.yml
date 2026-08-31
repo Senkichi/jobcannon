@@ -55,7 +55,10 @@ jobs:
           # of band with `git push origin main:refs/heads/cla-signatures`
           # before this workflow's first run.
           branch: "cla-signatures"
-          allowlist: Senkichi,dependabot[bot]
+          # aviator-app[bot] authors the "update branch" merge commits Aviator
+          # pushes to queued PRs; without it here every queued PR that needs a
+          # base update fails this required check (jobcannon#260, 2026-08-30).
+          allowlist: Senkichi,dependabot[bot],aviator-app[bot]
           # Default is "true", and the action's own source (main.ts, pinned
           # SHA) locks the PR conversation on ANY `closed` event with no
           # check for whether the PR was actually merged — the "aftermerge"
