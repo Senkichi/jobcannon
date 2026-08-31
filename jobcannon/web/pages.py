@@ -19,7 +19,7 @@ zero out an otherwise-matching search with no visible signal why, so
 filtering the feed and `clear_selection` (this module's other route) gives a
 one-click way out, rather than changing the AND itself. Each row carries its own
 literal "why" chips (jobcannon.web.feed_entries.build_entry, which wraps
-jobcannon.web.why.why_chips); a row whose `structural_axes` is still NULL
+jobcannon.web.why.chip_kinds); a row whose `structural_axes` is still NULL
 (the axes batch caps at 500 rows per scan tick, so a large pre-seed leaves
 a transient NULL slice) also renders a "signals still computing" marker
 alongside whatever chips it does have, rather than silently omitting the
@@ -592,7 +592,6 @@ def feed():
         profile=profile,
         has_selections=has_selections,
         filters=filters,
-        sort_tokens=sorted(_feed._SORTS),
         workplace_types=_WORKPLACE_TYPES,
         show_actions=True,
         clear_selection_url=url_for("pages.clear_selection", **_carry_forward_filters(filters)),
@@ -683,7 +682,6 @@ def clear_selection():
         return render_template(
             "_feed_content.html",
             filters=filters,
-            sort_tokens=sorted(_feed._SORTS),
             workplace_types=_WORKPLACE_TYPES,
             show_actions=True,
             clear_selection_url=url_for("pages.clear_selection", **_carry_forward_filters(filters)),

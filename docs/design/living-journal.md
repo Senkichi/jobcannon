@@ -24,6 +24,19 @@ This doc binds every future template or stylesheet change.
    the template scan in `tests/test_design_templates.py`. The one exception is
    `legal_page.html`'s inline `<style>` block, which host tests require to stay
    inline; it composes from `var(--lj-*)`.
+
+   **Icon-asset exemption** (2026-08-30, feed & shell redesign spec §4):
+   standalone icon assets — `jobcannon/web/static/favicon.svg`,
+   `jobcannon/web/static/apple-touch-icon.png`, and
+   `scripts/gen_touch_icon.py`, which generates the PNG — may carry literal
+   hex values, because an SVG fetched as its own document (or a PNG
+   rasterized offline) cannot resolve CSS custom properties from
+   `lj-tokens.css`. Constraints: every literal must mirror a current
+   `lj-tokens.css` value and name the token it mirrors in an adjacent
+   comment; dark-mode variants come from the same file's dark block (the SVG
+   carries its own embedded `prefers-color-scheme` media query). The design
+   tests scan only `.html`/CSS, so this exemption is documentation-enforced,
+   like the `legal_page.html` inline-style exception above.
 6. **Naming.** `lj-*` classes/variables are ported design-system primitives —
    never invent a new `lj-*` name. jobcannon-specific compositions are `jc-*`
    and compose exclusively from `var(--lj-*)`. The class vocabulary is closed:

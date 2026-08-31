@@ -139,7 +139,7 @@ def _fetch_entry(
 
     Loads the caller's profile and passes it to `build_entry` the same way
     `jobcannon/web/pages.py`'s route does — `build_entry`'s second argument
-    is the only input to `why_chips`'s title/skill overlap chip
+    is the only input to `why.chip_kinds`'s title/skill overlap chip
     (`jobcannon/web/why.py::_overlap_chip`), so skipping this read here would
     silently drop that chip from every mutation-response fragment, even
     though the page render right before it showed the chip for the same

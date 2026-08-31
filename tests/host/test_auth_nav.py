@@ -204,6 +204,44 @@ def test_public_page_still_hides_authed_nav_for_an_anonymous_visitor(path):
     assert ">Delete account<" not in html
 
 
+def test_wordmark_links_home_and_nav_trims_for_authed_visitor():
+    """Task 7 (spec §4): the wordmark becomes the sole route back to the
+    feed once the Feed/Demo nav links are removed, and it must send an
+    authed visitor home even on a PUBLIC_PATHS page (issue #205 semantics —
+    same visitor_is_authed gate the My-postings link above uses, not
+    g.clerk_user, which is force-None here regardless of real identity)."""
+    app = _app(
+        _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL),
+        verify=lambda req: ClerkIdentity(
+            user_id="user_authed_legal", claims={"sub": "user_authed_legal"}
+        ),
+    )
+    html = app.test_client().get("/privacy").get_data(as_text=True)
+
+    assert '<a href="/" class="jc-wordmark' in html
+    assert "data-build-feed-nav-link" not in html
+    assert ">Feed</a>" not in html  # old nav links are gone, not just hidden
+    assert ">Demo</a>" not in html
+
+
+def test_wordmark_links_demo_and_build_feed_shows_for_anon():
+    """Mirror of the test above: an anonymous visitor's wordmark points at
+    /demo (their signed-out preview), and the Build-your-feed CTA -- the
+    signed-out primary action replacing the old separate Feed/Demo links --
+    is present."""
+    app = _app(
+        _host_config(clerk_sign_up_url=_SIGN_UP_URL, clerk_sign_in_url=_SIGN_IN_URL),
+        verify=lambda req: None,
+    )
+    html = app.test_client().get("/privacy").get_data(as_text=True)
+
+    assert '<a href="/demo" class="jc-wordmark' in html
+    assert "data-build-feed-nav-link" in html
+    assert 'href="/start"' in html
+    assert ">Feed</a>" not in html
+    assert ">Demo</a>" not in html
+
+
 def test_public_page_omits_sign_in_link_when_sign_in_url_unset():
     """Tolerant defaults, first state: clerk_sign_in_url unset (dataclass
     default "") must render nothing for that link specifically — never a

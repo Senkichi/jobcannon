@@ -124,7 +124,7 @@ def test_demo_renders_guest_profile_card(app):
     assert "Distinctive Guest Card Title" in html
 
 
-def test_demo_renders_postings_with_why_chips_unauthenticated(app):
+def test_demo_renders_postings_with_chips_unauthenticated(app):
     dsn = app.config["_TEST_DSN"]
     _seed_guest_profile(dsn, target_titles=["Distinctive Demo Feed Title"])
     company_id = _seed_company(dsn, "Demo Feed Positive Control Co")
@@ -142,7 +142,7 @@ def test_demo_renders_postings_with_why_chips_unauthenticated(app):
     assert resp.status_code == 200
     assert "Distinctive Demo Feed Title" in html
     assert "data-why-chips" in html
-    assert "salary listed" in html
+    assert "salary listed" not in html
     # Positive control (standard-gate obligation 2): every empty-state
     # discriminator this route could plausibly fall back to must be ABSENT —
     # present would mean the seeded profile/postings never reached the page

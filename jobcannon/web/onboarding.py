@@ -69,8 +69,9 @@ every pre-signup surface's g.consent_granted is hardcoded False, so
 instrumenting a stranger here would contradict this codebase's consent-first
 stance. Consent has exactly one writer, on an authenticated surface, added in
 a later PR. The "why" chips shown per posting on /preview
-(jobcannon.web.why.why_chips) are pure literal restatements of stored values
-— no model call, no classification, no fit label.
+(jobcannon.web.feed_entries.build_entry composing chips via
+jobcannon.web.why) are pure literal restatements of stored values — no model
+call, no classification, no fit label.
 
 DAL functions are imported at MODULE level (mirroring jobcannon/web/pages.py's
 documented rationale) so tests can monkeypatch
@@ -96,11 +97,11 @@ from jobcannon.db._feed import (
     parse_cursor,
     selection_filter_kwargs,
 )
-from jobcannon.db._profiles import upsert_profile
+from jobcannon.db._profiles import get_profile, upsert_profile
 from jobcannon.db._users import mint_anon_user
 from jobcannon.db.pool import connection_factory
 from jobcannon.web.anon_session import get_pending_picker, set_pending_picker
-from jobcannon.web.why import why_chips
+from jobcannon.web.feed_entries import build_entry
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +240,14 @@ _WORKPLACE_FILTERS: dict[str, str | None] = {
     "hybrid": "HYBRID",
     "onsite": "ONSITE",
 }
+
+# Inverse of _WORKPLACE_FILTERS for the GET /start prefill (spec §5):
+# profiles.workplace_type stores the DB-facing value ('REMOTE'/'HYBRID'/
+# 'ONSITE' or NULL), the form speaks the lowercase option values. Derived
+# from the forward map — never a second hand-maintained table. The None
+# ("any") mapping is excluded: a NULL column prefills as "" (no
+# selection), the same rendering as an untouched form.
+_WORKPLACE_DB_TO_FORM = {db: form for form, db in _WORKPLACE_FILTERS.items() if db is not None}
 
 # postings has no skills column, so — unlike titles/companies — there is no
 # corpus-derived source for skill-token *options*. A small, curated,
@@ -527,6 +536,45 @@ def _parse_submission(form: Any) -> tuple[dict[str, Any] | None, str | None]:
     return selections, None
 
 
+def _profile_prefill() -> dict[str, Any]:
+    """Stored-profile defaults for a fresh, full-page GET /start render
+    (spec §5): defuses the footgun where a revisit + unchecked resubmit
+    silently wipes saved picks (upsert_profile submits literally, by
+    design). Uses the same identity re-check /preview uses
+    (_current_identity — /start is PUBLIC_PATHS, so g.clerk_user is
+    force-None here) and the same fail-OPEN posture: any failure renders
+    the ordinary blank picker (a UX miss on a public page), never a 500.
+
+    Values are returned in _picker_context's raw-string echo form (the
+    #175 error-re-render contract): numbers become strings, NULLs become
+    "" / [], skills are filtered to SKILLS_OPTIONS (a retired option must
+    not render an unknown checkbox), and the title/company lists respect
+    the same caps as a POST submission.
+    """
+    identity = _current_identity()
+    if identity is None:
+        return {}
+    try:
+        with connection_factory() as conn:
+            row = get_profile(conn, user_id=identity.user_id)
+    except Exception:
+        logger.warning("start prefill read failed (rendering blank picker)", exc_info=True)
+        return {}
+    if row is None:
+        return {}
+    years = row["years_of_experience"]
+    comp_floor = row["comp_floor_usd"]
+    return {
+        "checked_titles": list(row["target_titles"] or [])[:MAX_TITLES_PER_SELECTION],
+        "checked_companies": list(row["target_companies"] or [])[:MAX_COMPANIES_PER_SELECTION],
+        "checked_skills": [s for s in (row["skills"] or []) if s in SKILLS_OPTIONS],
+        "seniority_level": row["seniority_level"] or "",
+        "years_of_experience": format(years, "g") if years is not None else "",
+        "comp_floor_usd": str(comp_floor) if comp_floor is not None else "",
+        "workplace_type": _WORKPLACE_DB_TO_FORM.get(row["workplace_type"], ""),
+    }
+
+
 @onboarding_bp.get("/start", strict_slashes=False)
 def start():
     """#148: `q` (an optional search term) narrows the Titles/Companies
@@ -568,8 +616,23 @@ def start():
     ) or _too_many_selected_message("companies", len(raw_companies), MAX_COMPANIES_PER_SELECTION)
     checked_titles = raw_titles[:MAX_TITLES_PER_SELECTION]
     checked_companies = raw_companies[:MAX_COMPANIES_PER_SELECTION]
+    # Spec §5 prefill: a full-page GET with no carried-forward selections
+    # seeds the form from the stored profile row. HX fragment renders
+    # never prefill — the search box's hx-include carries the visitor's
+    # LIVE checked set, so an empty set there is a deliberate uncheck-all,
+    # not an absent submission; re-checking saved picks under the
+    # visitor's cursor would undo their edit.
+    profile_defaults: dict[str, Any] = {}
+    if not is_hx and not raw_titles and not raw_companies:
+        profile_defaults = _profile_prefill()
+        checked_titles = profile_defaults.pop("checked_titles", checked_titles)
+        checked_companies = profile_defaults.pop("checked_companies", checked_companies)
     context = _picker_context(
-        notice=notice, q=q, checked_titles=checked_titles, checked_companies=checked_companies
+        notice=notice,
+        q=q,
+        checked_titles=checked_titles,
+        checked_companies=checked_companies,
+        **profile_defaults,
     )
     if is_hx:
         return render_template("_picker_options.html", **context)
@@ -809,7 +872,13 @@ def preview():
         location_contains=location_contains,
         after=after,
     )
-    entries = [{"row": row, "chips": why_chips(row, selections)} for row in rows]
+    # build_entry, not an inline dict (spec §1 riding fix): /preview now
+    # renders the same entry shape as / and /demo, so the chip cap and
+    # salary_display reach all three surfaces from one composer. The
+    # anonymous list_feed_postings branch selects NULL::boolean AS
+    # saved/applied — exactly what build_entry's coercion expects — and
+    # preview.html still withholds show_actions, so no controls render.
+    entries = [build_entry(row, selections) for row in rows]
     load_more_url = _preview_load_more_url(location_contains, rows)
 
     if request.headers.get("HX-Request") == "true":

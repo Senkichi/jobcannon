@@ -176,7 +176,7 @@ def test_day_one_stranger_journey_end_to_end(app, seeded_feed_corpus):
     for title in seeded_feed_corpus["titles"]:
         assert title in preview_html
     assert "No postings match your selections yet." not in preview_html
-    assert "salary listed" in preview_html
+    assert "salary listed" not in preview_html
     assert "signals still computing for this posting" not in preview_html
     assert "Sorted by recency" in preview_html
     assert "personalized ranking is not live yet" in preview_html

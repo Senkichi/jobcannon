@@ -189,7 +189,7 @@ def test_null_structural_axes_row_renders_pending_marker_not_hidden_and_not_fake
     html = client.get("/").get_data(as_text=True)
 
     assert "Pending Axes Posting" in html
-    assert "salary listed" in html
+    assert "salary listed" not in html
     assert "signals still computing for this posting" in html
     # Never a fabricated stand-in for the missing axis values.
     assert "posted within the last week" not in html
@@ -229,7 +229,7 @@ def test_preview_also_renders_the_pending_marker_for_a_null_axes_row(app):
     html = app.test_client().get("/preview").get_data(as_text=True)
 
     assert "Preview Pending Axes Posting" in html
-    assert "salary listed" in html
+    assert "salary listed" not in html
     assert "signals still computing for this posting" in html
 
 

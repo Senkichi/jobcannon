@@ -572,7 +572,7 @@ def test_preview_renders_a_why_chip_for_a_row_with_axes_and_salary(app):
     assert "Chip Coverage Posting" in html
     assert "data-why-chips" in html
     assert "level stated in title" in html
-    assert "salary listed" in html
+    assert "salary listed" not in html
     # Positive control: proves structural_axes actually landed as a real
     # value rather than silently arriving NULL (e.g. a fixture that forgot
     # to pass Jsonb(...)) -- the pending marker and the chip block are
@@ -642,8 +642,10 @@ def test_preview_hides_an_unknown_salary_currency_but_still_shows_the_amount(app
     # Positive control: the amount must still render -- proves the salary
     # block itself rendered at all, so the "UNKNOWN" absence below reflects
     # the currency guard, not a block that failed to render for some other
-    # reason.
-    assert "120000" in html
+    # reason. Rendered via entry.salary_display (jobcannon/web/salary_fmt.py,
+    # spec §1's compact salary formatter), so 120000 renders as "120k", not
+    # the raw digit string.
+    assert "120k" in html
     assert "UNKNOWN" not in html
 
 
@@ -666,7 +668,8 @@ def test_preview_shows_a_real_salary_currency_label(app):
 
     assert "Real Currency Posting" in html
     assert "GBP" in html
-    assert "95000" in html
+    # Compact form (jobcannon/web/salary_fmt.py): 95000 renders as "95k".
+    assert "95k" in html
 
 
 # ---------------------------------------------------------------------------

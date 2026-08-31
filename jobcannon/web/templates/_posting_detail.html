@@ -1,0 +1,93 @@
+{# Detail fragment for one posting (spec §3): swapped by htmx into the
+   row's persistent slot (#posting-detail-<id>, hx-swap="innerHTML") by
+   the expand button in _posting_row.html — NEVER replacing the row, so
+   the card's Save/Dismiss/Apply state is untouched by expansion.
+   Stateless by design: no user state is read or rendered (the route is
+   public via public_get) and no events are logged. Collapse is a LOCAL
+   replaceChildren() on the slot — no second fetch. Reveal is a plain
+   swap — no transform animation (identity rule 3).
+
+   Uses ONLY classes that already existed in jc.css before this feature
+   (jc-panel / jc-stack / jc-note / lj-label / jc-btn / jc-chips) — a
+   deliberate zero-dependency stance toward the Wave-1 CSS task. JD text
+   is paragraphized by splitting on blank lines in Jinja rather than a
+   new white-space CSS recipe for the same reason.
+
+   NULL renders "Not specified" — never a fabricated negative ("Not
+   remote"). posted_date follows the same precision-trust rule as
+   jobcannon/web/why.py's freshness chips: only 'exact'/'approximate'
+   may be presented as an origination date. `direct_url` is a decoy
+   column (permanently NULL — apply_url.py's docstring) and is never
+   read. The axes list iterates whatever structural_axes actually stores
+   rather than hardcoding axis names. #}
+<div class="jc-panel" data-posting-detail-panel>
+  <div class="jc-stack">
+    <h3 class="lj-label">Full description</h3>
+    {% if row.jd_full %}
+      {% for para in row.jd_full.split("\n\n") %}{% if para.strip() %}
+        <p class="jc-note" data-detail-jd>{{ para }}</p>
+      {% endif %}{% endfor %}
+    {% elif row.description %}
+      {% for para in row.description.split("\n\n") %}{% if para.strip() %}
+        <p class="jc-note" data-detail-jd>{{ para }}</p>
+      {% endif %}{% endfor %}
+    {% else %}
+      <p class="jc-note" data-detail-jd-missing>Full description not yet available for this posting.</p>
+    {% endif %}
+
+    {% if comp_context %}
+      <h3 class="lj-label">Compensation context</h3>
+      <p class="jc-note" data-detail-comp>{{ comp_context }}</p>
+    {% endif %}
+
+    <h3 class="lj-label">Locations</h3>
+    {% if row.locations_structured %}
+      <ul class="jc-chips" data-detail-locations>
+        {% for loc in row.locations_structured %}
+          {# _loc_dict (jobcannon/db/_jobs.py) stores dataclass-shaped
+             dicts; render the non-empty string fields in stored order
+             rather than hardcoding field names. #}
+          <li class="jc-note">{% if loc is mapping %}{{ loc.values() | select("string") | select | join(", ") }}{% else %}{{ loc }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+    {% elif row.location %}
+      <p class="jc-note" data-detail-locations>{{ row.location }}</p>
+    {% else %}
+      <p class="jc-note" data-detail-locations>Not specified</p>
+    {% endif %}
+
+    <h3 class="lj-label">Timeline</h3>
+    {% if row.posted_date and row.posted_date_precision in ("exact", "approximate") %}
+      <p class="jc-note" data-detail-posted>Posted {{ row.posted_date.strftime("%Y-%m-%d") }}{% if row.posted_date_precision == "approximate" %} (approximate){% endif %}</p>
+    {% else %}
+      <p class="jc-note" data-detail-posted>No confirmed post date</p>
+    {% endif %}
+    {% if row.last_seen %}
+      <p class="jc-note" data-detail-last-seen>Last seen {{ row.last_seen.strftime("%Y-%m-%d %H:%M") }} UTC</p>
+    {% endif %}
+
+    {% if row.sightings %}
+      <h3 class="lj-label">Seen on</h3>
+      <ul class="jc-chips" data-detail-sightings>
+        {% for s in row.sightings %}{% if s is mapping %}
+          <li class="jc-note">{{ s.source or "unknown source" }}{% if s.first_seen %} &middot; first {{ s.first_seen[:10] }}{% endif %}{% if s.last_seen %} &middot; last {{ s.last_seen[:10] }}{% endif %}</li>
+        {% endif %}{% endfor %}
+      </ul>
+    {% endif %}
+
+    <h3 class="lj-label">Signals{% if row.structural_scored_at %} as of {{ row.structural_scored_at.strftime("%Y-%m-%d %H:%M") }} UTC{% endif %}</h3>
+    {% if row.structural_axes is mapping %}
+      {% for axis_name, axis in row.structural_axes.items() | sort %}
+        <p class="jc-note" data-detail-axis>{{ axis_name | replace("_", " ") }}: {% if axis is mapping and axis.value is defined and axis.value is not none %}{{ axis.value }}{% else %}Not specified{% endif %}</p>
+      {% endfor %}
+    {% else %}
+      <p class="jc-note" data-signals-pending>signals still computing for this posting</p>
+    {% endif %}
+
+    <button type="button" class="jc-btn {{ touch_target() }}"
+            hx-on:click="this.closest('[data-posting-detail]').replaceChildren()"
+            data-action-collapse>
+      Collapse
+    </button>
+  </div>
+</div>
