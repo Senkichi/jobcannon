@@ -1057,6 +1057,10 @@ def create_app(config: dict | None = None) -> Flask:
 
     app.register_blueprint(posting_detail_bp)
 
+    from jobcannon.web.profile import profile_bp
+
+    app.register_blueprint(profile_bp)
+
     @app.after_request
     def _vary_and_cache_public_paths(response):
         """Issue #205 fallout: every PUBLIC_PATHS response's nav/footer now

@@ -65,6 +65,14 @@ def _authed(app, user_id=CLERK_ID):
     )
 
 
+def _signed_out(app):
+    """Spec 2 (#262): /start 303s any resolved Clerk identity to /profile
+    before the form is parsed, so the picker is only reachable while the
+    verifier sees no identity — a signed-out browser whose Flask session
+    cookie (and its handoff_done marker) has survived the sign-out."""
+    app.config["VERIFY_REQUEST"] = lambda req: None
+
+
 def _complete_picker(client, comp_floor_usd=None):
     data = {
         "titles": ["Engineer"],
@@ -372,7 +380,13 @@ def test_picker_resubmission_after_signup_is_rekeyed_not_orphaned(app):
     marker gates only the emission phase, never the DB re-key phase. Before
     the fix, `_HANDOFF_DONE_KEY` short-circuited the whole handoff, so
     `pending_picker` was never consumed and the anon users+profiles pair
-    was orphaned permanently."""
+    was orphaned permanently.
+
+    Spec 2 (#262) closed the signed-in route to this state — an authed
+    /start POST is 303'd to /profile and writes nothing (pinned below by
+    test_signed_in_picker_resubmission_is_redirected_and_writes_nothing) —
+    so the reachable sequence is now sign-out -> picker -> sign-in on a
+    browser whose session cookie kept the handoff_done marker."""
     dsn = app.config["_TEST_DSN"]
     client = app.test_client()
     _authed(app)
@@ -381,15 +395,18 @@ def test_picker_resubmission_after_signup_is_rekeyed_not_orphaned(app):
     client.get("/")
     assert len(_events_rows(dsn, CLERK_ID, "user_signed_up")) == 1
 
-    # /start is public and cannot see the authed identity, so resubmitting
-    # the picker mints a fresh anon users+profiles pair.
+    # Signed out (session cookie intact), the picker is reachable again and
+    # resubmitting it mints a fresh anon users+profiles pair.
+    _signed_out(app)
     resp = _complete_picker(client)
     assert resp.status_code == 302
     with client.session_transaction() as sess:
         anon_id = sess["pending_picker"]["anon_id"]
 
-    # A later authed request must still consume the pending picker even
-    # though handoff_done is already set from the first request.
+    # Signed back in: the next authed request must still consume the
+    # pending picker even though handoff_done is already set from the
+    # first request.
+    _authed(app)
     client.get("/")
 
     clerk_profile = _profile_row(dsn, CLERK_ID)
@@ -442,9 +459,11 @@ def test_returning_user_picker_resubmission_overwrites_saved_selections(app):
     with psycopg.connect(dsn) as conn:
         upsert_profile(conn, CLERK_ID, target_companies=["Old Co"], workplace_type="REMOTE")
 
-    # /start is public and cannot see the authed identity, so resubmitting
-    # the picker with DIFFERENT selections mints a fresh anon users+profiles
-    # pair, same as test_picker_resubmission_after_signup_is_rekeyed_not_orphaned.
+    # Signed out (session cookie intact — Spec 2 redirects a signed-in
+    # visitor off /start), resubmitting the picker with DIFFERENT selections
+    # mints a fresh anon users+profiles pair, same as
+    # test_picker_resubmission_after_signup_is_rekeyed_not_orphaned.
+    _signed_out(app)
     resp = client.post(
         "/start",
         data={
@@ -454,16 +473,53 @@ def test_returning_user_picker_resubmission_overwrites_saved_selections(app):
             "workplace_type": "onsite",
         },
     )
-    assert resp.status_code in (302, 303)
+    assert resp.status_code == 302
 
-    # A later authed request still consumes the pending picker and re-keys
-    # it onto CLERK_ID, overwriting the previously-saved row.
+    # Signed back in: the next authed request still consumes the pending
+    # picker and re-keys it onto CLERK_ID, overwriting the previously-saved
+    # row.
+    _authed(app)
     client.get("/")
 
     clerk_profile = _profile_row(dsn, CLERK_ID)
     assert clerk_profile is not None
     assert clerk_profile["target_companies"] == ["New Co"]
     assert clerk_profile["workplace_type"] == "ONSITE"
+
+
+def test_signed_in_picker_resubmission_is_redirected_and_writes_nothing(app):
+    """Spec 2 decision 2 (#262), against the real DB: a signed-in visitor
+    who POSTs the picker is 303'd to /profile before parsing — no anon
+    users/profiles pair is minted, no pending_picker lands in the session,
+    the saved CLERK_ID profile is untouched, and no second signup event is
+    emitted. The clerk profile domain keeps exactly one writer."""
+    from jobcannon.db._profiles import upsert_profile
+
+    dsn = app.config["_TEST_DSN"]
+    client = app.test_client()
+    _authed(app)
+    client.get("/")
+    with psycopg.connect(dsn) as conn:
+        upsert_profile(conn, CLERK_ID, target_companies=["Old Co"], workplace_type="REMOTE")
+
+    resp = client.post(
+        "/start",
+        data={"titles": ["Engineer"], "companies": ["New Co"], "workplace_type": "onsite"},
+    )
+    assert resp.status_code == 303
+    assert resp.headers["Location"].endswith("/profile")
+
+    with client.session_transaction() as sess:
+        assert "pending_picker" not in sess
+    with psycopg.connect(dsn) as conn:
+        anon_rows = conn.execute(
+            "SELECT count(*) FROM users WHERE id LIKE 'anon\\_%' ESCAPE '\\'"
+        ).fetchone()[0]
+    assert anon_rows == 0
+    clerk_profile = _profile_row(dsn, CLERK_ID)
+    assert clerk_profile["target_companies"] == ["Old Co"]
+    assert clerk_profile["workplace_type"] == "REMOTE"
+    assert len(_events_rows(dsn, CLERK_ID, "user_signed_up")) == 1
 
 
 def test_signup_emission_failure_does_not_500_and_retries_next_request(app, monkeypatch):

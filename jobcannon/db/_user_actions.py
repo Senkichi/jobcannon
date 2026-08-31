@@ -186,3 +186,32 @@ def list_pipeline_status_entries(conn: Any, user_id: str) -> list[Any]:
         "FROM pipeline_status WHERE user_id = %s ORDER BY status_changed_at",
         (user_id,),
     ).fetchall()
+
+
+def count_saved_postings(conn: Any, user_id: str) -> int:
+    """Spec 2 stats strip: how many postings this user has saved. `watchlists`
+    holds either a posting watch or a company watch per row (m0001's CHECK
+    constraint), so the `posting_id IS NOT NULL` filter is what makes this a
+    count of SAVED POSTINGS rather than of watchlist rows. Single SELECT
+    COUNT; the first aggregate query over either user-action table."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    row = raw.execute(
+        "SELECT COUNT(*) AS n FROM watchlists WHERE user_id = %s AND posting_id IS NOT NULL",
+        (user_id,),
+    ).fetchone()
+    return int(row["n"])
+
+
+def count_pipeline_statuses(conn: Any, user_id: str) -> dict[str, int]:
+    """Spec 2 stats strip: per-status row counts for one user, keyed by every
+    member of `_PIPELINE_STATUSES` — a status with no rows is present as 0,
+    never missing (row-absence is the neutral state, and the template
+    renders "0" rather than hiding the cell). One GROUP BY query; the
+    result is built fresh, never mutated in place."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    rows = raw.execute(
+        "SELECT status, COUNT(*) AS n FROM pipeline_status WHERE user_id = %s GROUP BY status",
+        (user_id,),
+    ).fetchall()
+    zeroes = {status: 0 for status in _PIPELINE_STATUSES}
+    return {**zeroes, **{row["status"]: int(row["n"]) for row in rows}}

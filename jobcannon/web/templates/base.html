@@ -117,6 +117,13 @@
          resolves real identity there via _visitor_is_anonymous(). #}
       <a href="{{ url_for('postings_history.index') }}" class="jc-nav-link {{ touch_target() }}"
          data-postings-history-nav-link>My postings</a>
+      {# Spec 2: the profile editor (jobcannon/web/profile.py). Same
+         visitor_is_authed gate as My postings above, for the same #205
+         reason. Literal href rather than url_for: the link must render on
+         every page regardless of blueprint registration order, and
+         tests/host/test_profile_route.py pins url_for('profile.edit') to
+         exactly "/profile" so this literal cannot drift. #}
+      <a href="/profile" class="jc-nav-link {{ touch_target() }}" data-profile-nav-link>Profile</a>
       {% endif %}
     </nav>
     {% if not visitor_is_authed %}

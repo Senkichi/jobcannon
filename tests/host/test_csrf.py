@@ -198,6 +198,11 @@ def db_app():
 def test_post_start_with_token_mints_anon_user(db_app):
     """Prior behavior pinned by tests/host/test_onboarding.py: a valid
     submission redirects to /preview and writes an anon users row."""
+    # Spec 2 (#262): /start 303s a resolved Clerk identity to /profile before
+    # the form is parsed, so the token-accepted-and-minted path this test
+    # pins is only reachable anonymously. db_app is function-scoped; the
+    # override does not leak.
+    db_app.config["VERIFY_REQUEST"] = lambda req: None
     client = db_app.test_client()
     get_resp = client.get("/start")
     token = _token_from(get_resp.data)
@@ -392,3 +397,58 @@ def test_post_account_delete_with_token_calls_clerk(db_app):
     )
     assert resp.status_code == 200
     assert calls == [USER_ID]
+
+
+def test_post_profile_without_token_is_400():
+    """Spec 2 §2: /profile is a plain form POST under the app-wide
+    CSRFProtect — a missing token is the 400 CSRF error page, same as every
+    other form route pinned above. _stateless_app verifies as USER_ID, so
+    the 401 gate is not what rejects it."""
+    client = _stateless_app().test_client()
+    resp = client.post("/profile", data={"workplace_type": ""})
+    assert resp.status_code == 400
+
+
+@requires_postgres
+def test_post_profile_with_token_saves_and_redirects(db_app):
+    """Round trip through the real DB: the rendered form carries a valid
+    token; posting it back with the token is accepted (303 PRG) and the
+    snapshot lands in profiles. Seeds the users row (profiles.user_id FK)
+    and marks the handoff done, exactly as the /consent case above does."""
+    dsn = db_app.config["_TEST_DSN"]
+    with psycopg.connect(dsn) as conn:
+        conn.execute("INSERT INTO users (id) VALUES (%s)", (USER_ID,))
+        conn.commit()
+
+    client = db_app.test_client()
+    with client.session_transaction() as sess:
+        sess[_HANDOFF_DONE_KEY] = True
+    get_resp = client.get("/profile")
+    assert get_resp.status_code == 200
+    token = _token_from(get_resp.data)
+
+    resp = client.post(
+        "/profile",
+        data={
+            "csrf_token": token,
+            "target_titles": "Staff Engineer",
+            "target_locations": "Seattle, WA",
+            "experience_summary": "Twelve years.",
+            "skills": ["python"],
+            "seniority_level": "staff",
+            "years_of_experience": "12",
+            "comp_floor_usd": "",
+            "workplace_type": "remote",
+        },
+    )
+    assert resp.status_code == 303
+    assert resp.headers["Location"].endswith("/profile?saved=1")
+
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        row = get_profile(conn, USER_ID)
+    assert row is not None
+    assert row["target_titles"] == ["Staff Engineer"]
+    assert row["target_locations"] == ["Seattle, WA"]
+    assert row["experience_summary"] == "Twelve years."
+    assert row["workplace_type"] == "REMOTE"
+    assert row["comp_floor_usd"] is None
