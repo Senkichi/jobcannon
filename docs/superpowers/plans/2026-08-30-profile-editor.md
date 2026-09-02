@@ -1,6 +1,6 @@
 # Profile Editor (Spec 2) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement Spec 2 (`docs/superpowers/specs/2026-08-30-profile-editor-design.md`): an authed `/profile` edit form over every editable `profiles` column (the first real writer for `experience_summary` / `target_locations`), a three-count pipeline stats strip, an authed-only "Profile" nav link, and the #262 fix that redirects signed-in visitors off `/start`.
 
@@ -56,14 +56,14 @@ Within Wave 1, no file appears in two tasks. `tests/host/test_csrf.py` appears i
 
 Never put this inside a retried agent prompt (stall-retries would replay it). Run once from the main session:
 
-- [ ] **Step 1: Cut the feature branch from the spec branch tip** (the plan + spec must exist in the shared checkout):
+- [x] **Step 1: Cut the feature branch from the spec branch tip** (the plan + spec must exist in the shared checkout):
 
 ```powershell
 git -C C:\Users\senki\repos\jobcannon rev-parse --abbrev-ref HEAD   # expect docs/profile-editor-spec
 git -C C:\Users\senki\repos\jobcannon checkout -b feat/profile-editor
 ```
 
-- [ ] **Step 2: Record the baseline.** The post-Track-A baseline against main `9567515` is **3344 passed / 14 skipped / 0 failed** (verified 2026-08-31, `POSTGRES_ADMIN_DSN` set). Re-record it on this checkout so the gate compares like-with-like:
+- [x] **Step 2: Record the baseline.** The post-Track-A baseline against main `9567515` is **3344 passed / 14 skipped / 0 failed** (verified 2026-08-31, `POSTGRES_ADMIN_DSN` set). Re-record it on this checkout so the gate compares like-with-like:
 
 ```powershell
 $env:POSTGRES_ADMIN_DSN -ne $null   # record the boolean
@@ -87,7 +87,7 @@ Expected: `3344 passed, 14 skipped`, ruff clean. `baseline-pytest.log` stays unt
 - Consumes: nothing new (`Jsonb`, `commit_unless_nested` already imported in the module).
 - Produces: `replace_profile(conn, user_id: str, *, skills: list, experience_summary: str | None, target_titles: list, target_locations: list, seniority_level: str | None, years_of_experience: float | None, comp_floor_usd: int | None, target_companies: list, workplace_type: str | None) -> None`. Every kwarg is keyword-only with NO default — omitting any one is a `TypeError` at the call site. Lists are always written as `Jsonb(list)` (an empty list is a stored `[]`, never NULL); scalars are written literally (None → NULL). Task 4's `submit()` is the only production caller; Task 3's `parse_profile_form` returns a dict whose keys are exactly these nine kwarg names.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/host/test_replace_profile.py`:
 
@@ -237,12 +237,12 @@ def test_replace_profile_requires_an_existing_user(db_conn):
             replace_profile(db_conn, "rp-no-such-user", **_full_snapshot())
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_replace_profile.py`
 Expected: every test FAILS with `ImportError: cannot import name 'replace_profile'` (the pure test too — it imports before asserting). With `POSTGRES_ADMIN_DSN` unset, the four `db_conn` tests skip and only the pure one fails — still a failing baseline.
 
-- [ ] **Step 3: Add `replace_profile` to `jobcannon/db/_profiles.py`**
+- [x] **Step 3: Add `replace_profile` to `jobcannon/db/_profiles.py`**
 
 Insert immediately after `upsert_profile`'s closing `commit_unless_nested(raw)` line and before `def clear_profile_targets`:
 
@@ -307,7 +307,7 @@ def replace_profile(
     commit_unless_nested(raw)
 ```
 
-- [ ] **Step 4: Update the module docstring's single-writer sentence**
+- [x] **Step 4: Update the module docstring's single-writer sentence**
 
 In the first paragraph of the `jobcannon/db/_profiles.py` module docstring, replace:
 
@@ -327,12 +327,12 @@ writer, plain overwrite instead of COALESCE — and `clear_profile_targets`),
 all in this module, none anywhere else.
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_replace_profile.py tests/host/test_profiles_dal.py`
 Expected: all PASS (`test_profiles_dal.py` proves `upsert_profile` / `get_profile` / `clear_profile_targets` are unaffected).
 
-- [ ] **Step 6: Lint and commit**
+- [x] **Step 6: Lint and commit**
 
 ```bash
 uv run --no-sync ruff check jobcannon/db/_profiles.py tests/host/test_replace_profile.py
@@ -353,7 +353,7 @@ git commit -m "feat(db): add replace_profile plain-overwrite snapshot writer" --
 - Consumes: the module's existing `_PIPELINE_STATUSES = frozenset({"dismissed", "applied"})` and `raw = conn.raw if hasattr(conn, "raw") else conn` convention. Rows come back through the connection's `dict_row` factory (every existing reader in the module indexes by column name).
 - Produces: `count_saved_postings(conn, user_id: str) -> int` and `count_pipeline_statuses(conn, user_id: str) -> dict[str, int]` (keys are exactly `_PIPELINE_STATUSES`, every key present, 0 for absence). Task 4's `edit()` reads both.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/host/test_user_action_counts.py`:
 
@@ -470,12 +470,12 @@ def test_company_watches_do_not_count_as_saved_postings(db_conn):
     assert count_saved_postings(db_conn, "cnt-company") == 0
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_user_action_counts.py`
 Expected: FAIL with `ImportError: cannot import name 'count_saved_postings'` (or SKIP without `POSTGRES_ADMIN_DSN` — if so, note it in your report; the gate has the DSN).
 
-- [ ] **Step 3: Add the two primitives to `jobcannon/db/_user_actions.py`**
+- [x] **Step 3: Add the two primitives to `jobcannon/db/_user_actions.py`**
 
 Append at the end of the module, after `list_pipeline_status_entries`:
 
@@ -509,12 +509,12 @@ def count_pipeline_statuses(conn: Any, user_id: str) -> dict[str, int]:
     return {**zeroes, **{row["status"]: int(row["n"]) for row in rows}}
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_user_action_counts.py tests/host/test_user_actions.py`
 Expected: all PASS.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 uv run --no-sync ruff check jobcannon/db/_user_actions.py tests/host/test_user_action_counts.py
@@ -540,7 +540,7 @@ git commit -m "feat(db): add saved/pipeline COUNT primitives for the profile str
   - `profile_form_values(row) -> dict[str, Any]` — DB row (or `None`) → template values. Keys: `target_titles`, `target_companies`, `target_locations`, `experience_summary` (all `str`, lists joined by `"\n"`), `checked_skills: list[str]`, `seniority_level`, `years_of_experience`, `comp_floor_usd`, `workplace_type` (all `str`, `""` for NULL).
   - `echo_form_values(form) -> dict[str, Any]` — same key set, raw strings straight from a rejected submission.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/host/test_profile_form.py`:
 
@@ -893,12 +893,12 @@ def test_workplace_form_options_derive_from_the_forward_map():
     assert "any" not in WORKPLACE_FORM_OPTIONS
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_profile_form.py`
 Expected: every test FAILS with `ModuleNotFoundError: No module named 'jobcannon.web.profile_form'`. (`test_parse_keys_are_exactly_replace_profile_kwargs` also depends on Task 1's `replace_profile`; if Task 1 hasn't landed yet when you run, that single test fails with an ImportError on `replace_profile` — expected mid-wave, and the gate rechecks it.)
 
-- [ ] **Step 3: Create `jobcannon/web/profile_form.py`**
+- [x] **Step 3: Create `jobcannon/web/profile_form.py`**
 
 ```python
 """Pure parse / prefill / echo layer for the /profile editor (Spec 2 §2).
@@ -1165,12 +1165,12 @@ def echo_form_values(form: Any) -> dict[str, Any]:
     }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_profile_form.py`
 Expected: all PASS (`test_parse_keys_are_exactly_replace_profile_kwargs` passes once Task 1's `replace_profile` exists — if it is the only failure, report it as expected cross-task timing; it is on the gate's list).
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 uv run --no-sync ruff check --fix jobcannon/web/profile_form.py tests/host/test_profile_form.py   # --fix: import ordering only
@@ -1193,7 +1193,7 @@ git commit -m "feat(web): add profile editor form parse/prefill/echo layer" -- j
 - Consumes: the module's own `_current_identity() -> ClerkIdentity | None` (fail-open seam, defined at the bottom of the module — runtime resolution, so calling it from `start()` above is fine).
 - Produces: `GET|POST /start` → `303 Location: /profile` whenever `_current_identity()` is not None, checked FIRST in both views (before the HX-Request and pending-picker branches). The redirect target is the **literal string** `"/profile"`, not `url_for("profile.edit")`: the `profile` blueprint is Task 4's Wave-2 deliverable and does not exist while this task's tests run; Task 4 pins `url_for("profile.edit") == "/profile"` so the literal cannot drift silently.
 
-- [ ] **Step 1: Write the failing redirect tests**
+- [x] **Step 1: Write the failing redirect tests**
 
 Create `tests/host/test_start_authed_redirect.py`:
 
@@ -1352,12 +1352,12 @@ def test_verifier_failure_is_treated_as_anonymous(monkeypatch):
 
 (`_read_picker_options(q: str = "") -> dict[str, list[str]]` is the module-level helper `_picker_context` calls for the title/company option lists; it already fails open to empty options without a DB, so the monkeypatch only keeps the two anonymous GET tests from logging a warning — it is not load-bearing.)
 
-- [ ] **Step 2: Run the new tests to verify they fail**
+- [x] **Step 2: Run the new tests to verify they fail**
 
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_start_authed_redirect.py`
 Expected: the five authed tests FAIL (200 or 302 instead of 303; `test_authed_post_start_redirects_and_writes_nothing` fails with the AssertionError from `_boom`); the anonymous/verifier tests PASS already.
 
-- [ ] **Step 3: Add the identity check to both views in `jobcannon/web/onboarding.py`**
+- [x] **Step 3: Add the identity check to both views in `jobcannon/web/onboarding.py`**
 
 In `start()`, insert as the FIRST statements of the body (directly after the docstring, before `pending = get_pending_picker()`):
 
@@ -1389,12 +1389,12 @@ Append one sentence to the END of each view's docstring:
 - `start()`: `Spec 2 (#262): a resolved Clerk identity short-circuits every branch above with a 303 to /profile — see the first statement of the body.`
 - `start_submit()`: `Spec 2 (#262): a resolved Clerk identity 303s to /profile before parsing — the anon domain gains no writes from a signed-in visitor.`
 
-- [ ] **Step 4: Run the redirect tests to verify they pass**
+- [x] **Step 4: Run the redirect tests to verify they pass**
 
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_start_authed_redirect.py`
 Expected: all PASS.
 
-- [ ] **Step 5: Remove `_profile_prefill` and its call site**
+- [x] **Step 5: Remove `_profile_prefill` and its call site**
 
 In `start()`, replace the prefill block:
 
@@ -1449,7 +1449,7 @@ Rewrite the `_WORKPLACE_DB_TO_FORM` comment (≈ lines 244-250) so it names its 
 
 Then `grep -n "prefill\|spec §5\|Spec §5" jobcannon/web/onboarding.py` — any remaining hit in the module docstring or a comment that describes `/start` prefilling from the profile must be reworded to say `/start` redirects authed visitors to `/profile` (Spec 2, #262). Leave unrelated hits alone.
 
-- [ ] **Step 6: Prune `tests/host/test_start_prefill.py` to its one surviving test**
+- [x] **Step 6: Prune `tests/host/test_start_prefill.py` to its one surviving test**
 
 Delete these eight tests and the helpers only they used: `test_profile_prefill_maps_row_to_form_values`, `test_profile_prefill_anonymous_is_empty`, `test_profile_prefill_no_row_is_empty`, `test_profile_prefill_fails_open_on_db_error`, `test_profile_prefill_null_fields_echo_as_blank`, `test_start_get_prefills_from_profile`, `test_start_get_carry_forward_beats_prefill`, `test_start_hx_fragment_never_prefills`, plus `_identity`, `_profile_row`, `_patch_db`, and the now-unused imports `contextlib`, `Decimal`, `ClerkIdentity`. Keep `_app`, `_WEBHOOK_SECRET`, the `onboarding_module` import, and `test_preview_entries_come_from_build_entry` verbatim. Replace the module docstring with:
 
@@ -1464,7 +1464,7 @@ tests until Spec 2 removed the prefill: a signed-in visitor is now 303'd to
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_start_prefill.py`
 Expected: `1 passed`.
 
-- [ ] **Step 7: Fix the one CSRF test the redirect breaks**
+- [x] **Step 7: Fix the one CSRF test the redirect breaks**
 
 `tests/host/test_csrf.py`'s `db_app` fixture verifies every request as an authed user, and `test_post_start_with_token_mints_anon_user` exercises the ANONYMOUS picker path (it expects a 302 to `/preview` and a minted `anon_` user). Under the redirect it now gets a 303. The test's subject is CSRF-token acceptance on `/start`, which is an anonymous route — make it anonymous. Insert as the first statements of its body (before `client = db_app.test_client()`):
 
@@ -1481,12 +1481,12 @@ Change nothing else in the file (Task 4 appends two `/profile` tests to it in Wa
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_csrf.py`
 Expected: all PASS (or SKIP without `POSTGRES_ADMIN_DSN`; the gate has it).
 
-- [ ] **Step 8: Run this task's full green bar**
+- [x] **Step 8: Run this task's full green bar**
 
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_start_authed_redirect.py tests/host/test_start_prefill.py tests/host/test_onboarding.py tests/host/test_preview.py tests/host/test_csrf.py`
 Expected: all PASS. `test_onboarding.py` and `test_preview.py` use anonymous fixtures and must be unaffected — if either fails, the redirect landed in the wrong place (after a branch instead of first); fix, don't skip.
 
-- [ ] **Step 9: Lint and commit**
+- [x] **Step 9: Lint and commit**
 
 ```bash
 uv run --no-sync ruff check jobcannon/web/onboarding.py tests/host/test_start_prefill.py tests/host/test_start_authed_redirect.py tests/host/test_csrf.py
@@ -1507,7 +1507,7 @@ git commit -m "feat(web): redirect signed-in visitors off /start; drop prefill" 
 - Consumes: the `visitor_is_authed` template global and `touch_target()`.
 - Produces: `<a href="/profile" class="jc-nav-link …" data-profile-nav-link>Profile</a>` inside the authed block. Literal `href="/profile"` for the same Wave-1 reason as Task 5 (Task 4 pins `url_for("profile.edit") == "/profile"`).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/host/test_auth_nav.py`:
 
@@ -1544,12 +1544,12 @@ def test_anonymous_visitor_does_not_see_the_profile_nav_link(path):
 
 (`pytest`, `ClerkIdentity`, `_app`, `_host_config`, `_SIGN_UP_URL`, `_SIGN_IN_URL` are already defined/imported in this module.) If `/start` needs a DB read to render anonymously in this module's app, drop `"/start"` from the second parametrize list rather than adding fixtures.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_auth_nav.py -k profile_nav_link`
 Expected: the signed-in cases FAIL (`data-profile-nav-link` absent); the anonymous cases PASS already.
 
-- [ ] **Step 3: Add the link to `jobcannon/web/templates/base.html`**
+- [x] **Step 3: Add the link to `jobcannon/web/templates/base.html`**
 
 Inside the existing `{% if visitor_is_authed %}` block, directly after the My postings anchor (`data-postings-history-nav-link>My postings</a>`) and before that block's `{% endif %}`, insert:
 
@@ -1563,12 +1563,12 @@ Inside the existing `{% if visitor_is_authed %}` block, directly after the My po
       <a href="/profile" class="jc-nav-link {{ touch_target() }}" data-profile-nav-link>Profile</a>
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_auth_nav.py tests/host/test_touch_targets.py tests/test_design_templates.py`
 Expected: all PASS (touch-target scan sees the class on the new anchor; design closure sees only existing classes).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 uv run --no-sync ruff check tests/host/test_auth_nav.py
@@ -1599,7 +1599,7 @@ git commit -m "feat(web): add authed-only Profile nav link" -- jobcannon/web/tem
   - `jobcannon.web.onboarding.SKILLS_OPTIONS`, `SENIORITY_LEVELS`.
 - Produces: blueprint `profile` with endpoints `profile.edit` (`GET /profile`) and `profile.submit` (`POST /profile`); `url_for("profile.edit") == "/profile"` (pinned — Tasks 5 and 6 rely on the literal).
 
-- [ ] **Step 1: Write the failing route tests**
+- [x] **Step 1: Write the failing route tests**
 
 Create `tests/host/test_profile_route.py`:
 
@@ -1876,12 +1876,12 @@ def test_post_write_failure_is_a_500_not_a_silent_success(db, monkeypatch):
     assert resp.status_code == 500
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_profile_route.py`
 Expected: collection FAILS with `ModuleNotFoundError: No module named 'jobcannon.web.profile'`.
 
-- [ ] **Step 3: Create `jobcannon/web/profile.py`**
+- [x] **Step 3: Create `jobcannon/web/profile.py`**
 
 ```python
 """GET/POST /profile — the profile editor (Spec 2, resolving #262's "how does
@@ -2025,7 +2025,7 @@ def submit():
     return redirect(url_for("profile.edit", saved=1), code=303)
 ```
 
-- [ ] **Step 4: Create `jobcannon/web/templates/profile.html`**
+- [x] **Step 4: Create `jobcannon/web/templates/profile.html`**
 
 Every class below already exists in `jc.css`; every interactive tag carries `touch_target()`.
 
@@ -2146,7 +2146,7 @@ Every class below already exists in `jc.css`; every interactive tag carries `tou
 
 The `<option value="…" {% if … %}selected{% endif %}>` spacing matters: the route tests assert the literal `<option value="staff" selected>` / `<option value="" selected>`, so keep exactly one space and no trailing attributes.
 
-- [ ] **Step 5: Register the blueprint in `jobcannon/web/__init__.py`**
+- [x] **Step 5: Register the blueprint in `jobcannon/web/__init__.py`**
 
 Directly after the existing lines
 
@@ -2166,12 +2166,12 @@ add:
 
 `/profile` is deliberately NOT added to `PUBLIC_PATHS`.
 
-- [ ] **Step 6: Run the route tests and the design/touch guards**
+- [x] **Step 6: Run the route tests and the design/touch guards**
 
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_profile_route.py tests/test_design_templates.py tests/host/test_touch_targets.py tests/host/test_auth_nav.py`
 Expected: all PASS. If `test_design_templates.py` reports an undefined class, you used a class not in `jc.css` — swap for one listed in Global Constraints; never add to `jc.css`.
 
-- [ ] **Step 7: Append the two CSRF cases to `tests/host/test_csrf.py`**
+- [x] **Step 7: Append the two CSRF cases to `tests/host/test_csrf.py`**
 
 At the very end of the file:
 
@@ -2236,7 +2236,7 @@ Every name used above is already defined/imported at the top of `tests/host/test
 Run: `uv run --no-sync --active pytest -q --tb=short tests/host/test_csrf.py`
 Expected: all PASS (DB cases SKIP without `POSTGRES_ADMIN_DSN`).
 
-- [ ] **Step 8: Lint and commit**
+- [x] **Step 8: Lint and commit**
 
 ```bash
 uv run --no-sync ruff check --fix jobcannon/web/profile.py tests/host/test_profile_route.py tests/host/test_csrf.py
@@ -2258,7 +2258,7 @@ git commit -m "feat(web): add /profile editor page with pipeline stats strip" --
 - Consumes: every Wave-1/Wave-2 commit on `feat/profile-editor`; `baseline-pytest.log` from Task 0 (baseline **3344 passed / 14 skipped**).
 - Produces: a green full suite, clean ruff, and a report listing the delta in test counts.
 
-- [ ] **Step 1: Confirm branch and the expected commit set**
+- [x] **Step 1: Confirm branch and the expected commit set**
 
 ```bash
 git -C C:/Users/senki/repos/jobcannon rev-parse --abbrev-ref HEAD    # feat/profile-editor
@@ -2267,7 +2267,7 @@ git -C C:/Users/senki/repos/jobcannon log --oneline docs/profile-editor-spec..HE
 
 Expected: six `feat(...)` commits (Tasks 1, 2, 3, 5, 6, 4) plus any `fix:`/`test:` commits from verifiers. If a task's commit is missing, STOP and report `blocked` — do not implement it yourself.
 
-- [ ] **Step 2: Full suite in the background, tee'd, exit code echoed**
+- [x] **Step 2: Full suite in the background, tee'd, exit code echoed**
 
 ```bash
 cd C:/Users/senki/repos/jobcannon
@@ -2276,7 +2276,7 @@ uv run --no-sync --active pytest -q --tb=short > gate-pytest.log 2>&1; echo "PYT
 
 Run that as a background command (it takes ~8 minutes), then poll `tail -n 5 gate-pytest.log` until `PYTEST_EXIT=` appears. Never sit silent waiting on it — run Step 3 meanwhile.
 
-- [ ] **Step 3: Lint while the suite runs**
+- [x] **Step 3: Lint while the suite runs**
 
 ```bash
 uv run --no-sync ruff check .
@@ -2285,7 +2285,7 @@ uv run --no-sync ruff format --check .
 
 Expected: both clean. A formatting diff in a file this plan owns: run `uv run --no-sync ruff format <file>` and pathspec-commit it as `style: format <file>`. A diff in any other file is pre-existing — report, do not touch.
 
-- [ ] **Step 4: Triage the suite result against the baseline**
+- [x] **Step 4: Triage the suite result against the baseline**
 
 Read the tail of `gate-pytest.log` and `baseline-pytest.log`. Expected shape: `PYTEST_EXIT=0`, passed count = 3344 − 8 (deleted prefill tests) + the new tests (Task 1: 5, Task 2: 4, Task 3: ~21, Task 4: 14 + 2 CSRF, Task 5: 9, Task 6: 5 parametrized cases) — roughly **3396 passed**, skipped unchanged at 14 (with `POSTGRES_ADMIN_DSN` set; without it, the DB-backed tests in Tasks 1, 2 and the two CSRF/`db_app` cases skip instead — compare like-with-like against what Task 0 recorded).
 
@@ -2296,7 +2296,7 @@ For each FAILED test:
 
 Re-run only the files you edited, then re-run the FULL suite once more (background + tee, same as Step 2) — the gate's deliverable is a full green run, not a green subset.
 
-- [ ] **Step 5: Verify the repo guards explicitly**
+- [x] **Step 5: Verify the repo guards explicitly**
 
 ```bash
 uv run --no-sync --active pytest -q --tb=short tests/test_ported_paths_manifest.py tests/test_design_templates.py tests/test_design_css.py tests/test_design_tokens.py tests/host/test_touch_targets.py tests/host/test_account_export.py
@@ -2304,7 +2304,7 @@ uv run --no-sync --active pytest -q --tb=short tests/test_ported_paths_manifest.
 
 Expected: all PASS. (`test_account_export.py` pins the exported `profiles` key set — `get_profile`'s column list must be untouched; `test_ported_paths_manifest.py` is the PR #268 lesson.)
 
-- [ ] **Step 6: Commit any fallout and report**
+- [x] **Step 6: Commit any fallout and report**
 
 ```bash
 git add <only the files you edited>
