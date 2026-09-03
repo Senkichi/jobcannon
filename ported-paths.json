@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-03T07:27:47Z",
+  "generated_at": "2026-09-03T07:43:46Z",
   "roots": [
     "engine",
     "db",
@@ -540,6 +540,16 @@
         {
           "line": 3,
           "text": "The private source reads scan-tuning knobs from Flask's app config"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/scoring_prompts/__init__.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/scoring_prompts/__init__.py @ cc4150c8d7ea711c1bb5f15266379b675e90c298 (private job-cannon). Ledger L-0458."
         }
       ]
     },
