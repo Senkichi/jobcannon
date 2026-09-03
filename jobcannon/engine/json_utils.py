@@ -144,8 +144,13 @@ def safe_json_load(value: str | None, default: Any = None) -> Any:
     try:
         return json.loads(value)
     except (json.JSONDecodeError, TypeError, ValueError):
+        # PORT-SEAM: codeql py/clear-text-logging-sensitive-data -- this is a
+        # generic shared helper (source_registry.py, data_enricher.py's
+        # salary_observations reload, and any future caller); log the length
+        # only, never the raw column content, since some caller's column may
+        # hold data CodeQL (or a future reviewer) can't rule out as sensitive.
         logger.debug(
-            "safe_json_load: failed to parse %r, returning default",
-            value[:80] if len(value) > 80 else value,
+            "safe_json_load: failed to parse %d-char value, returning default",
+            len(value),  # PORT-SEAM: codeql py/clear-text-logging-sensitive-data seam
         )
         return default

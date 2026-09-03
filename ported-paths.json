@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-03T12:35:12Z",
+  "generated_at": "2026-09-03T15:28:13Z",
   "roots": [
     "engine",
     "db",
@@ -824,6 +824,64 @@
       ]
     },
     {
+      "path": "jobcannon/engine/data_enricher.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/data_enricher.py @ 5fd8807eba99f087984f1baac707b404b67c871d (private job-cannon). Ledger L-0174."
+        },
+        {
+          "line": 45,
+          "text": "# _run_inline_agentic_pass (private data_enricher.py:562-860) are NOT ported here."
+        },
+        {
+          "line": 47,
+          "text": "# (job_finder.web.db_helpers.standalone_connection) are covered by this port's"
+        },
+        {
+          "line": 48,
+          "text": "# seams, but they also call job_finder.web.autoheal.agentic_enricher"
+        },
+        {
+          "line": 86,
+          "text": "# PORT-SEAM: job_finder.web.enrichment_tiers is L-0178 (HOLD, unlanded) -- its"
+        },
+        {
+          "line": 90,
+          "text": "# instead of a copied module. job_finder.sources._error_envelope is L-0111"
+        },
+        {
+          "line": 94,
+          "text": "# job_finder.web.autoheal.health_monitor has no ledger row in this port's"
+        },
+        {
+          "line": 97,
+          "text": "# job_finder.db._jd_full.set_jd_full is the required ScanServices.set_jd_full"
+        },
+        {
+          "line": 100,
+          "text": "# jobcannon.db import). job_finder.config.JD_STORAGE_MAX_CHARS is"
+        },
+        {
+          "line": 1197,
+          "text": "# PORT-SEAM: job_finder.db._jobs._reconcile_salary_for_write has no"
+        },
+        {
+          "line": 1350,
+          "text": "# This is a SEPARATE write path from job_finder.db._jobs.upsert_job (this"
+        },
+        {
+          "line": 1376,
+          "text": "# PORT-SEAM: job_finder.db._persistence.update_pipeline_status -> svc.update_pipeline_status"
+        },
+        {
+          "line": 1385,
+          "text": "# PORT-SEAM: job_finder.db._persistence.update_pipeline_status has"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/dedup_normalizer.py",
       "root": "engine",
       "markers": [
@@ -942,6 +1000,28 @@
         {
           "line": 222,
           "text": "# stamping and scoring_precheck's docstring (job_finder/web/job_scorer.py)"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/expiry_checker.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/expiry_checker.py @ 039de5a24d4eceba3992c036cd33ecff1ca9592a (private job-cannon). Ledger L-0182."
+        },
+        {
+          "line": 61,
+          "text": "# PORT-SEAM: job_finder.web.db_helpers.standalone_connection is DIES ->"
+        },
+        {
+          "line": 62,
+          "text": "# svc.connection_factory(). job_finder.web.primary_source_tiebreak is L-0230"
+        },
+        {
+          "line": 63,
+          "text": "# (HOLD) -> svc.tiebreak_primary_posting(...). job_finder.db.{persist_job_"
         }
       ]
     },
@@ -1330,6 +1410,28 @@
       ]
     },
     {
+      "path": "jobcannon/engine/primary_source_resolver.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/primary_source_resolver.py @ c6e37b72c6706e6f547c63d0a697b9ef645c2dff (private job-cannon). Ledger L-0229."
+        },
+        {
+          "line": 98,
+          "text": "# PORT-SEAM: job_finder.web.db_helpers.standalone_connection is DIES ->"
+        },
+        {
+          "line": 99,
+          "text": "# svc.connection_factory(). job_finder.web.primary_source_tiebreak."
+        },
+        {
+          "line": 103,
+          "text": "# precedent). job_finder.db._postings.annotate_posting_apply_url is L-0075"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/profile_schema.py",
       "root": "engine",
       "markers": [
@@ -1492,6 +1594,18 @@
         {
           "line": 104,
           "text": "#   Whole-scan runtime budget in seconds. Replaces the private repo's"
+        },
+        {
+          "line": 112,
+          "text": "# -- Wave 2 job_finder/web follow-up (L-0174/L-0182/L-0229) --"
+        },
+        {
+          "line": 134,
+          "text": "# `run_detection` field above, which already covers a third function from"
+        },
+        {
+          "line": 135,
+          "text": "# this same private module."
         }
       ]
     },

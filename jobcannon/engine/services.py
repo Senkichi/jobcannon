@@ -109,6 +109,78 @@ class ScanServices:
     #   <= 0 is normalized to "no bound" by the engine, matching the
     #   documented ">0" semantics of ats.runtime_limit_s.
 
+    # -- Wave 2 job_finder/web follow-up (L-0174/L-0182/L-0229) --
+    # enrichment_tiers.* (L-0178, HOLD): data_enricher.enrich_job's cost-ordered
+    # cascade. `scrape_careers_tier` is intentionally distinct from the
+    # existing `scrape_careers_page` field -- that one matches
+    # careers_scraper.scrape_careers_page (a different private module); this
+    # one matches enrichment_tiers.scrape_careers.
+    fetch_direct_jd: Callable[..., Any] | None = None
+    query_ats_api: Callable[..., Any] | None = None
+    scrape_careers_tier: Callable[..., Any] | None = None
+    search_ddg_web: Callable[..., Any] | None = None
+    fetch_ddg_jds: Callable[..., Any] | None = None
+    search_duckduckgo: Callable[..., Any] | None = None
+    search_serpapi: Callable[..., Any] | None = None
+    parse_structured_fields: Callable[..., Any] | None = None
+    # sources._error_envelope.VendorAccountError (L-0111, HOLD). A TYPE, not a
+    # callable -- the raising side lives inside the seamed enrichment_tiers
+    # calls above; this lets the ported `except` clause name it without
+    # importing the private module. None => callers fall back to a local
+    # placeholder exception type that never matches (see data_enricher.py).
+    vendor_account_error: type[BaseException] | None = None
+    # autoheal.health_monitor.* — no ledger row identified in this port's read
+    # scope (L-0174/L-0182/L-0229 only); seamed the same way as the existing
+    # `run_detection` field above, which already covers a third function from
+    # this same private module.
+    is_source_rate_limited: Callable[..., Any] | None = None
+    record_source_error: Callable[..., None] | None = None
+    #   matches autoheal.health_monitor.record_source_error(conn, source,
+    #   message) -> None
+    # primary_source_tiebreak.tiebreak_primary_posting (L-0230, HOLD). The
+    # module's other public symbol, DEFAULT_MAX_BOARD (=40), is a plain int
+    # constant, not a callable, and is copied verbatim into each ported
+    # caller instead (same treatment as ats_slug_challenge's
+    # TRIGGER_PREFIX_CAREERS_URL, documented above).
+    tiebreak_primary_posting: Callable[..., Any] | None = None
+    # db._postings.annotate_posting_apply_url (L-0075, escalated/unlanded).
+    annotate_posting_apply_url: Callable[..., Any] | None = None
+    # db._persistence.{persist_job_expiry_state,update_pipeline_status} — no
+    # ledger row identified in this port's read scope; both are DB-layer
+    # writers with no jobcannon.db counterpart, so seamed rather than
+    # invented as a copied module (same fallback rule as the named HOLD
+    # rows above).
+    persist_job_expiry_state: Callable[..., None] | None = None
+    update_pipeline_status: Callable[..., None] | None = None
+    # salary_extractor.extract_salary_from_text (L-0253, DIES -- this private
+    # module will never be ported). Kept as an optional hook rather than
+    # deleting the calling code's fast-path branch: a DIES verdict retires
+    # the module itself, not the calling code's branch structure, and "no
+    # host ever supplies this" is exactly what None already means here.
+    extract_salary_from_text: Callable[..., Any] | None = None
+    # ats_reconciler.reconcile_all_companies (L-0135, ADAPT/adjudicated, not
+    # yet landed -- no ledger row named in this port's read scope but the
+    # same "seam rather than invent a copied module" fallback applies).
+    reconcile_all_companies: Callable[..., Any] | None = None
+    # db._direct_link.{set_direct_url,stamp_direct_url_checks} (L-0068,
+    # already landed publicly) -- an OPTIONAL seam, not required, even
+    # though these are the sanctioned single writers for
+    # postings.direct_url/direct_url_confidence/direct_url_checked_at/
+    # direct_url_attempts. Both functions already implement the
+    # `conn.raw if hasattr(conn, "raw") else conn` unwrap contract
+    # internally (jobcannon/db/pool.py's EngineCompatConnection docstring:
+    # "Host code should use the raw psycopg connection (.raw) and psycopg
+    # placeholders"), so calling them directly with a ScanServices
+    # connection_factory connection is safe in production. The seam exists
+    # anyway so a host CAN wire them (matching the upsert_job/set_jd_full/
+    # upsert_company precedent) and so the bare-sqlite3 tests/engine/
+    # convention can fake them, instead of every caller needing its own
+    # ad hoc direct import -- Postgres-native %s SQL against postings has
+    # no sqlite3-compatible fallback, so a direct import cannot be
+    # exercised by the engine's own isolated test harness at all.
+    set_direct_url: Callable[..., Any] | None = None
+    stamp_direct_url_checks: Callable[..., Any] | None = None
+
 
 _active: ScanServices | None = None
 
