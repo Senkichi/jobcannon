@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/ats_platforms/_title_match.py @ 7788dcfa71b4ad05f7015c357cf57c67fa436e32 (private job-cannon). Ledger L-0015.
 """Title normalization + word-boundary matching shared across ATS platforms.
 
 Recruiters use shorthand ("Sr DS", "ML Eng", "PM, Growth") that the old
@@ -7,9 +8,15 @@ common abbreviations BEFORE the keyword check, so a config keyword of
 
 Extracted from ``ats_platforms.py`` during the H3 package promotion
 (2026-05-28). Module-level state — ``_TITLE_EXPANSIONS``, ``_PUNCT_RUN``,
-``_WS_RUN``, ``_MAX_TARGET_GAP`` — is intentionally kept private to the
-package; the package ``__init__`` re-exports the callables for external
-consumers (~30 import sites).
+``_WS_RUN`` — is intentionally kept private to the package; the package
+``__init__`` re-exports the callables for external consumers (~30 import
+sites). ``TITLE_MATCH_VERSION`` names the current tier-3 fallback
+semantics (bumped to 2 by WI-10 / #1834 when the ordered matcher became
+an order-insensitive token-set match).
+
+All-caps abbreviations (EM, DS, DA, …) are expanded *case-sensitively*
+so that a lowercased "em" (Portuguese preposition) or "da" (Italian / Da
+Nang) is not mistaken for the recruiter shorthand (#1861).
 """
 
 from __future__ import annotations
@@ -24,39 +31,56 @@ from functools import lru_cache
 # Each entry is (compiled regex, replacement). Regexes use \b word boundaries
 # so "DS" does not match "DSP" or "SDS"; the replacement is the canonical
 # spelled-out form lowercased once at module load.
-_TITLE_EXPANSIONS: list[tuple[re.Pattern, str]] = [
-    (re.compile(rf"\b{abbr}\b", re.IGNORECASE), full.lower())
-    for abbr, full in [
-        (r"Sr\.?", "Senior"),
-        (r"Jr\.?", "Junior"),
-        (r"Mgr\.?", "Manager"),
-        (r"Mgmt\.?", "Management"),
-        (r"Eng\.?", "Engineer"),
-        (r"Engr\.?", "Engineer"),
-        (r"Dev\.?", "Developer"),
-        (r"Arch\.?", "Architect"),
-        (r"Ops\b", "Operations"),
-        (r"Admin\b", "Administrator"),
-        (r"Dir\.?", "Director"),
-        (r"VP\b", "Vice President"),
-        (r"DS\b", "Data Scientist"),
-        (r"DA\b", "Data Analyst"),
-        (r"DE\b", "Data Engineer"),
-        (r"PM\b", "Product Manager"),
-        (r"TPM\b", "Technical Program Manager"),
-        (r"EM\b", "Engineering Manager"),
-        (r"MLE\b", "Machine Learning Engineer"),
-        (r"ML\b", "Machine Learning"),
-        (r"AI\b", "Artificial Intelligence"),
-        (r"SRE\b", "Site Reliability Engineer"),
-        (r"SWE\b", "Software Engineer"),
-        (r"SE\b", "Software Engineer"),
-        (r"IC\b", "Individual Contributor"),
-        (r"QA\b", "Quality Assurance"),
-        (r"UX\b", "User Experience"),
-        (r"UI\b", "User Interface"),
-    ]
+#
+# The list is split into two case-sensitivity classes (#1861):
+#
+# * **All-caps abbreviations** (EM, DS, DA, DE, PM, …) are compiled
+#   *case-sensitively*. A lowercased "em" is the Portuguese preposition "in",
+#   "da" is Italian "from" / the Vietnamese city Da Nang, "de" is
+#   Portuguese/Spanish "of", "ds" is Polish "do spraw" (regarding), etc.
+#   Case-insensitive expansion of these injected spurious tokens ("manager"
+#   from "em", "data analyst" from "da") into non-English titles, producing
+#   false-positive token-set matches.
+# * **Period / title-case abbreviations** (Sr., Jr., Mgr., Ops, Admin, …)
+#   remain case-insensitive: their lowercased forms do not collide with
+#   common non-English words.
+_ALL_CAPS_ABBREVIATIONS: list[tuple[str, str]] = [
+    (r"VP\b", "Vice President"),
+    (r"DS\b", "Data Scientist"),
+    (r"DA\b", "Data Analyst"),
+    (r"DE\b", "Data Engineer"),
+    (r"PM\b", "Product Manager"),
+    (r"TPM\b", "Technical Program Manager"),
+    (r"EM\b", "Engineering Manager"),
+    (r"MLE\b", "Machine Learning Engineer"),
+    (r"ML\b", "Machine Learning"),
+    (r"AI\b", "Artificial Intelligence"),
+    (r"SRE\b", "Site Reliability Engineer"),
+    (r"SWE\b", "Software Engineer"),
+    (r"SE\b", "Software Engineer"),
+    (r"IC\b", "Individual Contributor"),
+    (r"QA\b", "Quality Assurance"),
+    (r"UX\b", "User Experience"),
+    (r"UI\b", "User Interface"),
 ]
+
+_CI_ABBREVIATIONS: list[tuple[str, str]] = [
+    (r"Sr\.?", "Senior"),
+    (r"Jr\.?", "Junior"),
+    (r"Mgr\.?", "Manager"),
+    (r"Mgmt\.?", "Management"),
+    (r"Eng\.?", "Engineer"),
+    (r"Engr\.?", "Engineer"),
+    (r"Dev\.?", "Developer"),
+    (r"Arch\.?", "Architect"),
+    (r"Ops\b", "Operations"),
+    (r"Admin\b", "Administrator"),
+    (r"Dir\.?", "Director"),
+]
+
+_TITLE_EXPANSIONS: list[tuple[re.Pattern, str]] = [
+    (re.compile(rf"\b{abbr}\b"), full.lower()) for abbr, full in _ALL_CAPS_ABBREVIATIONS
+] + [(re.compile(rf"\b{abbr}\b", re.IGNORECASE), full.lower()) for abbr, full in _CI_ABBREVIATIONS]
 
 
 _PUNCT_RUN = re.compile(r"[^\w\s]+")
@@ -103,61 +127,50 @@ def _compile_word_boundary(keyword: str) -> re.Pattern:
     return re.compile(rf"\b{re.escape(norm)}\b", re.IGNORECASE)
 
 
-_MAX_TARGET_GAP = 2
-"""Maximum tokens allowed between consecutive target words in the
-ordered-fallback matcher. Tuned so "Senior Manager, Analytics" matches
-"Senior Manager, Data Analytics" (1 intervening token = "data") while
-"Senior Data Analyst" still rejects "Senior Marketing Manager — Data
-Analyst Hiring Help" (4 intervening tokens between "senior" and
-"data")."""
+TITLE_MATCH_VERSION = 2
+"""Semantic version of the tier-3 title-matching fallback.
+
+- **1** — ordered words with a bounded intervening-token gap
+  (``_ordered_words_match``): target words had to appear *in order*.
+- **2** — order-insensitive token-set subset (``_token_set_match``,
+  WI-10 / #1834): target words may appear in any order, any gap.
+
+The value is **persisted nowhere** — the title filter runs per-scan
+against the live ``target_titles``, so there is no stored score to
+re-version. This constant exists purely so callers and tests can assert
+which matcher semantics are in force."""
 
 
-def _ordered_words_match(target_norm: str, candidate_norm: str) -> bool:
-    """Return True if target's words appear in order in candidate.
+def _token_set_match(target_norm: str, candidate_norm: str) -> bool:
+    """Return True if every word of ``target_norm`` appears in ``candidate_norm``.
 
-    Tokens are split on whitespace from the already-normalised forms.
-    Up to ``_MAX_TARGET_GAP`` intervening tokens are tolerated between
-    each consecutive pair of target words; the first target token may
-    appear at any position in the candidate.
+    Both inputs are already-normalised titles (lowercased, abbreviations
+    expanded, punctuation/whitespace collapsed). Matching is *order-free*
+    and *gap-free*: the target's words may appear anywhere in the
+    candidate, in any order, with any number of intervening tokens.
+    Seniority/level tokens ("senior", "staff", "lead", "ii") are ordinary
+    required words — neither stripped nor treated specially, exactly as in
+    the strict tier.
 
-    Each target word must match a *complete* candidate token — this
-    preserves the word-boundary semantic from the strict matcher
-    ("data" still doesn't match "database", "lead" still doesn't match
-    "leadership").
+    Each target word must equal a *complete* candidate token — set
+    membership is whole-token, so this preserves the word-boundary
+    semantic of the strict matcher ("data" still does not match
+    "database", "lead" still does not match "leadership").
 
-    This is the fallback used by ``_title_matches`` only when the
-    strict phrase match fails. It exists to unstick narrow user-
-    configured phrases ("Senior Manager, Analytics") that legitimate
-    job postings break apart with intervening qualifiers ("Senior
-    Manager, **Data** Analytics", "Senior **Technical** Data Analyst").
+    This is the tier-3 fallback used by ``_title_matches`` only when the
+    strict phrase match fails. It replaces the former ordered/bounded-gap
+    matcher (``_ordered_words_match``, TITLE_MATCH_VERSION 1): an
+    order-insensitive subset test lets a configured phrase like
+    "Analytics Lead" match a scrambled posting title such as
+    "Lead, Advanced Analytics" — the false-negative class documented in
+    the 2026-08-22 ATS pipeline review (D-4, #1834) — without
+    re-introducing substring sloppiness (whole-token equality is kept).
     """
     target_words = target_norm.split()
-    candidate_words = candidate_norm.split()
-    if not target_words or len(target_words) > len(candidate_words):
+    if not target_words:
         return False
-
-    # The first target word may appear anywhere — try each candidate
-    # position as the anchor and see if the remaining target words can
-    # be matched in order with bounded gaps from there.
-    for start in range(len(candidate_words)):
-        if candidate_words[start] != target_words[0]:
-            continue
-        pos = start + 1
-        ok = True
-        for tw in target_words[1:]:
-            stop = min(len(candidate_words), pos + _MAX_TARGET_GAP + 1)
-            found_at = -1
-            for i in range(pos, stop):
-                if candidate_words[i] == tw:
-                    found_at = i
-                    break
-            if found_at < 0:
-                ok = False
-                break
-            pos = found_at + 1
-        if ok:
-            return True
-    return False
+    candidate_tokens = set(candidate_norm.split())
+    return all(word in candidate_tokens for word in target_words)
 
 
 def _title_matches(title: str, target_titles: list[str], exclusions: list[str]) -> bool:
@@ -177,14 +190,16 @@ def _title_matches(title: str, target_titles: list[str], exclusions: list[str]) 
        matching "Database". This is the strict tier — it requires the
        target's words to appear contiguously in the candidate.
 
-    3. **Ordered-words fallback** (inclusion only): when the strict phrase
-       check fails, fall back to checking that the target's words appear
-       *in order* in the candidate with at most ``_MAX_TARGET_GAP``
-       intervening tokens. This lets "Senior Manager, Analytics" match
-       "Senior Manager, Data Analytics" (NVIDIA-style narrow-phrase
-       miss) without re-introducing substring sloppiness. Exclusions
-       still use strict phrase match so a sloppier exclude doesn't
-       over-filter.
+    3. **Token-set fallback** (inclusion only): when the strict phrase
+       check fails, fall back to checking that *every* word of the target
+       appears somewhere in the candidate's token set — order-free and
+       gap-free (``_token_set_match``, TITLE_MATCH_VERSION 2). This lets
+       "Senior Manager, Analytics" match "Senior Manager, Data Analytics"
+       (NVIDIA-style narrow-phrase miss) *and* "Analytics Lead" match a
+       scrambled "Lead, Advanced Analytics" (WI-10 / #1834), without
+       re-introducing substring sloppiness — whole-token equality still
+       means "data" ≠ "database". Exclusions still use strict phrase
+       match so a sloppier exclude doesn't over-filter.
 
     Args:
         title: Job title to evaluate.
@@ -203,10 +218,9 @@ def _title_matches(title: str, target_titles: list[str], exclusions: list[str]) 
     if target_titles:
         # Strict tier first — fast and unambiguous.
         if not any(_compile_word_boundary(t).search(normalized) for t in target_titles):
-            # Ordered-words fallback — slower but rescues narrow phrases.
-            if not any(
-                _ordered_words_match(_normalize_title(t), normalized) for t in target_titles
-            ):
+            # Token-set fallback — order-free subset match, rescues
+            # scrambled/qualified phrases (WI-10 / #1834).
+            if not any(_token_set_match(_normalize_title(t), normalized) for t in target_titles):
                 return False
 
     return not any(_compile_word_boundary(ex).search(normalized) for ex in exclusions)

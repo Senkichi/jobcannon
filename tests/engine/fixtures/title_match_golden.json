@@ -1,0 +1,4753 @@
+{
+ "_meta": {
+  "generated": "2026-08-22",
+  "source": "live jobs.db companies.last_scan_postings_json",
+  "rubric": "MATCH iff after _normalize_title every token of >=1 target_title is in the title token set (order-free subset); exclusions empty",
+  "title_match_version": 2,
+  "counts": {
+   "suspicious_rescued": 741,
+   "true_discards": 110,
+   "true_matches": 832
+  }
+ },
+ "target_titles": [
+  "Lead Product Analyst",
+  "Analytics Manager",
+  "Senior Manager, Analytics",
+  "Analytics Lead",
+  "Product Analytics Manager",
+  "Lead Analyst",
+  "Lead Data Analyst",
+  "Principal Analyst",
+  "Staff Data Scientist",
+  "Staff Product Data Scientist",
+  "Principal Data Scientist",
+  "Lead Data Scientist",
+  "Senior Data Scientist",
+  "Senior Product Data Scientist",
+  "Data Scientist",
+  "Data Science Manager",
+  "Marketing Data Scientist",
+  "Senior Marketing Data Scientist",
+  "Lead Marketing Analytics Data Scientist",
+  "Senior Analyst",
+  "Senior Data Analyst",
+  "Senior Business Analyst",
+  "Business Analyst",
+  "Healthcare Data Analyst",
+  "Experimentation Lead"
+ ],
+ "exclusions": [],
+ "rows": [
+  {
+   "title": "(GOVERNMENT OF ONTARIO) looking for ems Analyst - senior",
+   "company": "system canada",
+   "expected": "MATCH"
+  },
+  {
+   "title": "AI Engineering Lead, Product Analytics",
+   "company": "thomson reuters",
+   "expected": "MATCH"
+  },
+  {
+   "title": "AI Manager in Pharma & Life Science (Strategy & Data/AI Transformation) ",
+   "company": "artefact",
+   "expected": "MATCH"
+  },
+  {
+   "title": "AML Data Quality and Quantitative Analytics  and Model Development Analyst Senior",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "AWSI Operations Analyst , AWSI Business Operations:  FaaST",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Account Manager - Data Science",
+   "company": "dentsu",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Advanced Data & Insights Analyst - Deposits Line of Business",
+   "company": "u.s. bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Advice Methodology Analyst, Senior Specialist",
+   "company": "the vanguard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst - Business & Technical Supp",
+   "company": "ny state electric & gas",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst - Structural Sr",
+   "company": "blue origin personnel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst 3, Business Intelligence",
+   "company": "bd",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst Lead, Client Services",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst Lead, Financial Planning & Analysis (Enterprise Modeling)",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst Lead, Outside Counsel",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst Lead, Pricing",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst Lead, Testing",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst Relations Lead",
+   "company": "socure",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst Senior, Cybersecurity",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst Senior, Executive Compensation",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst Senior, Implementation - Debit Experience",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst Senior, TPO Operations",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst Sr Lead, Financial Planning & Analysis",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst Sr Lead, Managed Service",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst Sr Lead, Pricing",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst – Business Support",
+   "company": "*us amr-jones lang lasalle americas",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst, Business & Competitive Intelligence",
+   "company": "precision for medicine",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst, Business Controller",
+   "company": "coinbase",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst, Business Intelligence",
+   "company": "t-mobile",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst, Business Intelligence (SAP EWM)",
+   "company": "revlon corporate",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst, Business Planning & Forecasting",
+   "company": "lyft",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst, Business Product",
+   "company": "ensemble health partners",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst, IS Business Analysis",
+   "company": "the folger coffee",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analyst, Lead Supplier Management",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analytics Business Partner, Senior Lead  - Madrid, Spain",
+   "company": "salesforce",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analytics and Modeling Associate Manager",
+   "company": "logic",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analytics, Research & Mapping (ARM) Lead",
+   "company": "*us amr-jones lang lasalle americas",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Analytics/Dashboarding Analyst (ADA) – Senior",
+   "company": "cgs federal (contact government services)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Application System Technical Analyst Senior",
+   "company": "intermountain health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Applied Genetics Scientist - Pipeline Data Science",
+   "company": "syngenta",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Applied Scientist II, Data Intelligence and Governance",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Applied Scientist, Data Processing Agents Science",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Applied Scientist, WHS Data-Tech",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Assistant Manager - Commute Analytics",
+   "company": "*us amr-jones lang lasalle americas",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Assistant Scientist - Entry Level - Vaccines - Dry Lab/Data Review",
+   "company": "thermo fisher scientific",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Assistant Vice President, Senior Securities Services Operations Analyst",
+   "company": "citi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Associate / Senior Associate, Portfolio Finance Loan Asset Management Operations Analyst",
+   "company": "barings",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Associate Analyst, Business Development Operations",
+   "company": "zscaler",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Associate Manager, DashMart - Network Strategy & Analytics",
+   "company": "doordash usa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Associate Manager, Ecommerce Analytics and Insights",
+   "company": "mattel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Associate Manager, Indirect Tax Audit Analytics",
+   "company": "doordash",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Associate Manager, Strategy & Analytics - Strategic Partnerships (Bangkok-based, Relocation Provided) ",
+   "company": "agoda",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Associate Scientist, Data II",
+   "company": "abbvie",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Automation Developer Analyst Sr",
+   "company": "the huntington national bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Automation Testing Analyst Senior Lead (Mainframe/Lending, SAFAL)",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Bank Platform Transformation - Test Analyst Lead - Sr Associate",
+   "company": "pricewaterhousecoopers",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Binance Accelerator Program - Product Manager (Analytics/Strategy Insights)",
+   "company": "binance",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Budget and Financial Systems Analyst, Business Affairs [R0152027]",
+   "company": "university of nevada, las vegas (unlv)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Bus Systems Analyst Senior",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Analysis Manager - EP Strategy & Analytics",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Analytics & Insights (BAI) Sr. Manager",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Banking Credit Relationship Analyst 3- Sacramento, CA",
+   "company": "u.s. bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Continuity and Emergency Management Analyst",
+   "company": "intuitive",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Data & Regulatory Reporting Analyst II",
+   "company": "truist bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Data & Regulatory Reporting Analyst II or III",
+   "company": "truist bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Development/Go-to-Market Financial Analyst",
+   "company": "ihs global",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Disruption & Safety Risk Analyst, Vice President",
+   "company": "citi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business IT Systems Support Analyst",
+   "company": "st jude medical s c",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Intelligence Manager, Cross Border Science and Analytics",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Intelligence Manager, Product Analytics",
+   "company": "zillow",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Manager - Insights & Analytics (ERM)",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Manager - Sales Analytics, Capital One Travel",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Manager - Strategy & Analytics (Emerging Payments)",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Manager, Marketing, Analytics & Product Strategy",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Manager, Sales Analytics",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Model Validation and Implementation- Analyst II",
+   "company": "citi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Operations & Program Management Analyst (Senior) #808",
+   "company": "allen integrated",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Operations & Program Management Analyst (Senior) Job #807",
+   "company": "allen integrated",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Operations Co-Ordinator and Analyst",
+   "company": "microsoft",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Risk and Control Intmd Analyst",
+   "company": "citi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Rules Configuration Management (BRCM) Analyst",
+   "company": "sonsoft",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Services and Transport Analyst",
+   "company": "citi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Strategist, Government Intelligence Analyst",
+   "company": "t-mobile",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Systems and Change Analyst",
+   "company": "intuitive",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Transformation AI Enablement (Finance)  - Analyst",
+   "company": "raymond james & associates",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business-Line Quality Assurance Analyst/Tester - Corporate Functions",
+   "company": "u.s. bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "CMDB & Service Mapping Analyst - Senior Engineer IT Asset Management",
+   "company": "unisys",
+   "expected": "MATCH"
+  },
+  {
+   "title": "CN Strategy and Insights Lead, Ads Analytics & Insights",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "CS Ops Lead - Sales Operations & Analytics",
+   "company": "thomson reuters",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Capital Markets Analyst Senior",
+   "company": "usaa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Captured Enemy Material (CEM) Analyst – Senior",
+   "company": "cgs federal (contact government services)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Chapter Lead Data Analytics",
+   "company": "ab inbev",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Claims Bluecard Analyst IV, Lead",
+   "company": "hma (healthcare management administrators)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Client Services Analyst Lead (Japanese Speaking)",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Client Services Analyst Senior",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Client Services Analyst Sr Lead",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Collateral Analyst Sr",
+   "company": "the huntington national bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Commercial & Scientific Analyst/Lead",
+   "company": "kobold metals",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Commercial Analyst Team Lead",
+   "company": "keybank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Commercial Lead, Analytics Product Sales",
+   "company": "nielsen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Competitive Intelligence Analyst Lead – Life Company Annuity Business",
+   "company": "usaa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Counterintelligence/Information Operations Intelligence (CI/IOI) Analyst - Senior",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Credit Analyst - Spring/Summer 2027 - Business Cards & Payments - Hybrid",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Credit Analyst Team Lead - Minneapolis or Portland",
+   "company": "u.s. bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Customer Success Manager - Data & Analytics",
+   "company": "salesforce",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Cyber Analyst Principal - TS/SCI with Polygraph",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Cyber Security Analyst III/Senior",
+   "company": "federal reserve bank of philadelphia",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Cyber Security Analyst Senior",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "DATA ANALYST GCP & LOOKER Senior (H/F)",
+   "company": "devoteam",
+   "expected": "MATCH"
+  },
+  {
+   "title": "DATA ANALYST LEAD",
+   "company": "global channel management",
+   "expected": "MATCH"
+  },
+  {
+   "title": "DATABASE ANALYST PRINCIPAL-Ramstein",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Analysis Manager - Analytics & Transformation",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Analysis Manager - Office of the Chief Data Officer, Central Analytics and Reporting",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Analysis Manager - Strategy and Analytics",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Analyst - Senior",
+   "company": "mindlance",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Analyst / Business Intelligence Specialist  | Data Visualization & Performance Reporting [PCBOCC0024023]",
+   "company": "prosidian consultng",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Analyst II, Business Insights",
+   "company": "garner health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Analyst IV Healthcare Analytics, Medical Economics",
+   "company": "centene",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Analyst, Product (Senior to Staff)",
+   "company": "sanity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Analyst, Senior Specialist",
+   "company": "the vanguard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Analyst-Business Intelligence",
+   "company": "iqvia",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Engineer/Data Analyst | Trailhead Content Activation and Business Outcomes",
+   "company": "salesforce",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Engineering Manager, 3PX Analytics & Insights",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Engineering Systems Engineering Scientist",
+   "company": "dell medical school",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Manager Senior - Data Products - AI and Analytics",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Reporting Analyst Sr or Sr II DOE",
+   "company": "cambia health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Deal Analyst, Team Lead",
+   "company": "*us amr-jones lang lasalle americas",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Decision Science Analyst Senior – Life Company Data and Analytics - Paid Media Performance Analyst – Social & Search",
+   "company": "usaa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Decision Scientist Lead - Cloud Analytics",
+   "company": "salesforce",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Deputy Manager, Analytics & Insights",
+   "company": "zscaler",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Detect & Investig Analyst Lead",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Detection & Investigation Analyst Lead:  EFR/CONTRLS AND EXECUTION",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Digital Solutions Analyst Senior",
+   "company": "geisinger",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Efficiency and Automation Analyst (EAA) – Senior",
+   "company": "cgs federal (contact government services)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Electro-Optical/Infrared Signature Analyst Engineer (Mid-Level or Senior)",
+   "company": "boeing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Electroninc Intelligence (ELINT) Analyst, Sr.  - Clearance Required",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Emerging & Disruptive Technology Analyst (Senior)",
+   "company": "sosi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Employee Success People Consultant Manager - Analytics & Operations",
+   "company": "salesforce",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Engagement Manager Analytics",
+   "company": "fractal",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Engagement Manager, Analytics",
+   "company": "trinity partners",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Engagement Manager, Sales Analytics",
+   "company": "trinity partners",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Engineering Lead - Data & Analytics",
+   "company": "syngenta",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Engineering Manager - Data Science",
+   "company": "salesloft",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Engineering Manager - Data and Analytics, Network Flow and Technologies",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Engineering Manager 2, Real-Time Analytics",
+   "company": "toast",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Engineering Manager, Creator Analytics",
+   "company": "roblox",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Engineering Manager, Data Science, SDK & Cloud Engineering",
+   "company": "adobe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Engineering Manager, Events Analytics Platform",
+   "company": "sentry",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Enrollment & Forecasting Analyst or Senior",
+   "company": "cambia health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Enterprise Data Analyst Senior",
+   "company": "manufacturers and traders trust",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Enterprise Schedule Analyst - Senior Job #891",
+   "company": "allen integrated",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Especialista em Data Analytics - Estatística e Modelagem",
+   "company": "logic",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "FP&A Analyst / Business Controller",
+   "company": "st jude medical s c",
+   "expected": "MATCH"
+  },
+  {
+   "title": "FP&A Financial Analyst, Senior",
+   "company": "mindlance",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Field Exam Analyst - Business Credit",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Finance Analyst Flywheel Input, Worldwide Amazon Business Finance",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Finance Analyst Senior",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Finance Manager - Product Analytics and Insights (x2)",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Finance Manager, Analytics & Reporting , Finance Operations (FOAA)",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Finance Manager, Fulfillment by Amazon - AI Native Finance Analytics & Controls",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Finance Manager, Productivity Reporting and Analytics",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial & Budget Management Analyst (Senior) #815",
+   "company": "allen integrated",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Analyst (Experienced or Senior)",
+   "company": "boeing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Analyst II - Business Partnering",
+   "company": "icr united states usa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Analyst III - Controller Commercial Business Unit",
+   "company": "manufacturers and traders trust",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Analyst III - Treasury Business Unit Controller",
+   "company": "manufacturers and traders trust",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Analyst Lead",
+   "company": "usaa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Analyst Lead - Life Co.",
+   "company": "usaa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Analyst Lead - Technology",
+   "company": "usaa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Analyst Principal",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Analyst Principal - Lunar",
+   "company": "blue origin personnel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Analyst Senior",
+   "company": "intermountain health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Analyst, Business F&S",
+   "company": "stripe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Analyst/ Senior Accountant",
+   "company": "mindlance",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Crimes Analyst Senior",
+   "company": "fifth third bank, national association",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Intelligence Analyst – Senior Consultant",
+   "company": "dovel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Reporting Analyst Senior",
+   "company": "usaa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Systems Analyst II-  Business Systems",
+   "company": "simplisafe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Forensic Scientist Data Review II (NDOT and DOT)",
+   "company": "st jude medical s c",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Fund & Investment Operations Analyst - Corporate Actions, Senior Associate",
+   "company": "the vanguard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Fund & Investment Operations Analyst, Senior Associate",
+   "company": "the vanguard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "GTM AI Manager, Sales Analytics",
+   "company": "zscaler",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Geospatial Scientist, Data Collection and Quality",
+   "company": "ardentmc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Geospatial Scientist, Data Publishing and Cataloging",
+   "company": "ardentmc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Global Senior Sales Incentive Compensation Design Analyst",
+   "company": "agilent",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Global Warranty Business and Client Operations Analyst -",
+   "company": "aig pc global",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Group Manager-Analytics",
+   "company": "wns",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Hard Deep Buried Target (HDBT) Analyst (Senior)",
+   "company": "sosi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Head of Manager Selection Analytics",
+   "company": "mio partners",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Help Desk Analyst -Sr-App Support",
+   "company": "it professionals",
+   "expected": "MATCH"
+  },
+  {
+   "title": "IT Systems Analyst Sr. - .Net/Mobile",
+   "company": "north star staffing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Imagery Analyst - Senior",
+   "company": "grvty",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Imagery Analyst-Senior Job#486",
+   "company": "allen integrated",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Imagery Analyst-Senior Job#645",
+   "company": "allen integrated",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Imagery Intelligence (IMINT) Analyst - Senior",
+   "company": "sosi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Immediate hire_Business Systems analyst(Business Intelligence, SSRS exp)_w2 only",
+   "company": "it professionals",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Implementation Analyst Sr (GOV) - Treasury Management Client Care",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Indirect Lending Quantitative Risk Analyst Lead",
+   "company": "manufacturers and traders trust",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Info. Security Analyst Principal",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Information Management Analyst Lead",
+   "company": "usaa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Information Security Analyst Advisor (Azure Security Senior Engineer)",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Information Security Analyst Senior",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Intelligence Analyst Trainers – Senior",
+   "company": "cgs federal (contact government services)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Intelligence Exploitation Analyst – Senior",
+   "company": "cgs federal (contact government services)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Intermediate Credit Analyst Team Lead",
+   "company": "citi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "International Trade Services Analyst Sr",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Investment Analyst Senior",
+   "company": "usaa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Investment Management Product Manager (Product Analytics & Technology)",
+   "company": "the vanguard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "JAPAC Business Analytics and Market Insights Senior Manager",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead - Advanced Analytics, Gurgaon",
+   "company": "airbnb",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead AI Analytics Engineer, Trust & Safety",
+   "company": "grabjobs",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Advanced Analytics - Gurgaon",
+   "company": "airbnb",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Analytics & Visualization Consultant",
+   "company": "piedmont natural gas",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Analytics Consultant (Alteryx/Knime)",
+   "company": "phdata",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Analytics Consultant 2026- COL",
+   "company": "aimpoint digital",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Analytics Consultant 2026- US",
+   "company": "aimpoint digital",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Analytics Consultant, Real World Data Insights (Post-sale)",
+   "company": "healthverity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Analytics Consultant, Real World Data Insights (Pre-sale)",
+   "company": "healthverity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Analytics Developer",
+   "company": "newyork-presbyterian hospital",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Analytics Engineer ",
+   "company": "wealth",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Analytics Engineer - Data Modeling & Quality",
+   "company": "arcadia.io",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Analytics Engineer – Enterprise Data & AI",
+   "company": "zoox",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Cyber Defense Forensics Analyst",
+   "company": "revolutional",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Cyber Threat Intelligence Analyst",
+   "company": "u.s. bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Data Engineer - Enterprise Data & Analytics - Remote",
+   "company": "mayo clinic",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Developer Advocate, SQL & Analytics Workloads",
+   "company": "snowflake",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Director - Retail Analytics Technical Product",
+   "company": "caremark, l.l.c.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Director, Business Analytics - Caremark",
+   "company": "caremark, l.l.c.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead EBS Federal Financials Analyst 1",
+   "company": "i360technologies",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Electro-Optical/Infrared Signature Analyst Engineer",
+   "company": "boeing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Engineer - Device Level Analytics",
+   "company": "general motors (gm)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Financial Accounting and Reporting Analyst",
+   "company": "highmark health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Generative AI Analyst - English (US)",
+   "company": "welo global",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Information Security Operations Analyst",
+   "company": "mastercard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Institutional Services Automation Quality Control Analyst",
+   "company": "manufacturers and traders trust",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Manager/Associate Director, Strategy & Analytics (Bangkok-based, Relocation Provided)",
+   "company": "agoda",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead People Analytics Partner",
+   "company": "klaviyo",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Quantitative Analytics Associate",
+   "company": "keybank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Risk and Compliance Analyst",
+   "company": "highmark health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead SAP Customer Master Data & Analytics",
+   "company": "abbvie",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Scientist – Image Analytics",
+   "company": "ge precision healthcare",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Security Operations Center (SOC) Analyst",
+   "company": "live nation entertainment",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Technology Product Manager, Clinical Decision Support Adoption & Engagement Analytics",
+   "company": "wolters kluwer dxg u.s.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead, Advanced Analytics, Community Support",
+   "company": "airbnb",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead, Advanced Analytics, Hosting Services (Brazil) ",
+   "company": "airbnb",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead, Advanced Analytics, Hosting Services (Mexico)",
+   "company": "airbnb",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead, Advanced Analytics, Payments",
+   "company": "airbnb",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead, Analytics & Insights, Nursing Workforce & Outcomes",
+   "company": "vizient",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead, Analytics and Insights",
+   "company": "vizient",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead, Big Data Analytics & Engineering",
+   "company": "mastercard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead, Channels and Audit Analytics",
+   "company": "moniepoint",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead, Commerce & Growth Product Analytics",
+   "company": "nbcuniversal",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead, Customer Strategy Analytics & Applied AI",
+   "company": "owner",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lifecycle Acquisition Analyst (Senior) #811",
+   "company": "allen integrated",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lifecycle Acquisition Analyst (Senior) #812",
+   "company": "allen integrated",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Loan Program Policy and Systems Analyst - Lead",
+   "company": "dovel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Loan Support Analyst Senior - Agency and GSE Servicing - Midland",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Loan Support Analyst Senior - Commercial Mortgage Backed Securities (CMBS) Servicing - Midland",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Loan Support Analyst Senior - Covenant Administration - Midland",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Loan Support Analyst Sr (Asset Backed Finance - Commercial Servicing)",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Loan Support Analyst Sr (Collateral Asset Management - Commercial)",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Loan Support Analyst Sr (Commercial)",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Loan Support Analyst Sr - Commercial Lending - Asset Backed Finance",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Locals Only Urgent Need Senior COBOL Integration Support Analyst",
+   "company": "usm systems",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Logistics Analyst Principal (Hybrid)",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Logistics Analyst Senior",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "MDM Data Mapping  Analyst (Sr Consultant Level)",
+   "company": "datacatalyst",
+   "expected": "MATCH"
+  },
+  {
+   "title": "ML Research Scientist I/II, Multimodal Data Extraction",
+   "company": "lila sciences",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Managed Service Analyst Lead",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager , Online Decision Analytics",
+   "company": "the home depot",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager - Advanced Analytics",
+   "company": "astrana health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager - Deal Analytics",
+   "company": "rsm us llp",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager - Deals Analytics",
+   "company": "unity advisory",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager - Digital Marketing Analytics",
+   "company": "simplisafe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager - Product Data & Analytics",
+   "company": "mastercard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager - Project Controls Analytics & Bid Review",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager - S&G Analyst Development Program Experience Lead",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager Analytics & Metrics - Customer Success",
+   "company": "mastercard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager Business Performance & Customer Insights (Analytics & SAP/OTC Performance Focus)",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager Data Science",
+   "company": "relx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager Data Science, GenAI",
+   "company": "aig pc global",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager Decision Analytics",
+   "company": "the home depot",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager I, Engineering - Applied AI/ML Product Analytics Suite",
+   "company": "datadog",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager I, Engineering - Core Analytics",
+   "company": "datadog",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager III, Data Science - AMZ9890706",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager III, Software Dev, Search Science Data Infra",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager of Business Analytics - Fraud",
+   "company": "koalafi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager of Business Analytics - Non-Prime Installment Loan",
+   "company": "koalafi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager of Data Analytics, Labor",
+   "company": "the home depot",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager of Data Science Production Engineering, Data Engineering & Delivery",
+   "company": "natera",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager of Workforce Development & Operations, Bureau of Center for Population Health Data Science Administration",
+   "company": "city of new york",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, AIVC (Merch Analytics & Assortment)",
+   "company": "the home depot",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Analytics",
+   "company": "nc health affiliates llc dba blue cross nc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Analytics & Metrics",
+   "company": "mastercard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Analytics and Data Enablement",
+   "company": "allstate",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Analytics and Market Research",
+   "company": "abbvie",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Applied Science for Data",
+   "company": "adobe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Brand Analytics",
+   "company": "tapestry",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Business Analytics",
+   "company": "caremark, l.l.c.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Business Intelligence & Analytics",
+   "company": "hunter douglas",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Business Intelligence, FBA Analytics",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Campaign Analytics",
+   "company": "fanduel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Category Analytics - Walmart & Sam's",
+   "company": "the folger coffee",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Channel Operations and Analytics, APAC",
+   "company": "st jude medical s c",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, China Analytics (Delivery team) ",
+   "company": "consumer credit marketing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Clinical Informatics & Analytics, Women’s Health & Genomics",
+   "company": "caremark, l.l.c.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Commercial Insights & Analytics",
+   "company": "bd",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Customer Service Analytics",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Customer Success (Analytics & Insights)",
+   "company": "consumer credit marketing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data & Analytics, In-Store",
+   "company": "doordash",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Analytics",
+   "company": "empower pharmacy",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Analytics - Mobility Strategy (Marketplace)",
+   "company": "grabjobs",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Analytics, Pricing & Yield Management",
+   "company": "xometry",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Engineering, Selling Partner Insights and Analytics ",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Science",
+   "company": "doordash",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Science & Research",
+   "company": "doubleverify",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Science (Marketing)",
+   "company": "gofundme",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Science - AI Foundations",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Science - AI Product",
+   "company": "figma",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Science - Consumer Identity Machine Learning",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Science - Emerging ML",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Science - Model Risk Office",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Science - Model and Script Enhancement (MASE) Compliance",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Science - PULSE Network, Business Intelligence",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Science and Optimization - Retail Bank",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Data Strategy & Analytics, Retail",
+   "company": "kepler",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Digital Insights & Analytics",
+   "company": "t-mobile",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Engineering - Data Integrity & Security Analytics",
+   "company": "gen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Engineering - Data Science",
+   "company": "ltk",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Enterprise Analytics & Reporting",
+   "company": "st jude medical s c",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, FP&A & Analytics Transformation",
+   "company": "nbcuniversal",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Finance Data & Analytics (Hybrid - NYC or Edgewood NY)",
+   "company": "broadridge",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, GPU Accelerated Data Analytics",
+   "company": "nvidia",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Internal Product Analytics",
+   "company": "datadog",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Lead Research Scientist, Training Data (Foundational  Research)",
+   "company": "thomson reuters",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Manufacturing Optimization Analytics",
+   "company": "e.r. squibb & sons,l.l.c.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Marketing Analytics",
+   "company": "mastercard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Marketing Analytics & Measurement",
+   "company": "ovative",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Marketing Analytics - Gastroenterology",
+   "company": "abbvie",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Measurement Analytics",
+   "company": "the new york times",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Observational Health Data Analytics, Epidemiology - Hyderabad",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, PV Analytics Center of Excellence",
+   "company": "e.r. squibb & sons,l.l.c.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Payer Contract Analytics ",
+   "company": "abbvie",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Performance Analytics & AI Development",
+   "company": "*us amr-jones lang lasalle americas",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Pharmacy Operational Analytics",
+   "company": "um corp (enterprise)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Portfolio Management Strategy and Data Analytics",
+   "company": "netflix",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Procurement GBS Analytics",
+   "company": "copeland",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Product Manager – Model Analytics & Forecasting",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Revenue Cycle Analytics",
+   "company": "r1 rcm",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Revenue Forecasting & Analytics",
+   "company": "mntn",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Revenue Optimization & Analytics",
+   "company": "mastercard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Risk Analytics",
+   "company": "extend",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Safety Analytics",
+   "company": "discord",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Sales & Commercial Analytics",
+   "company": "padagis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Strategic Planning & Analytics",
+   "company": "st jude medical s c",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager, Strategy & Analytics – Business Trends & Sourcing Operation",
+   "company": "xometry",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager- FDD & Deals Analytics ",
+   "company": "unity advisory",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager- HR Data Analytics",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager-Pro Finance & Analytics",
+   "company": "the home depot",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Manager/Sr Manager of Clinical Site Budget Analytics",
+   "company": "beone medicines usa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Marketing Enablement Analyst Senior",
+   "company": "usaa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Marketing Manager, Data & Analytics",
+   "company": "bd",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Microsoft 365 System Analyst / Senior Microsoft 365 Administrator (M365 Administrator)",
+   "company": "delan associates",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Multidisciplinary Manager (Data Science) - FDE",
+   "company": "microsoft",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Multiple Positions for an IVR QA Analyst and Lead in Dimondale, MI (Webcam Interview)",
+   "company": "it professionals",
+   "expected": "MATCH"
+  },
+  {
+   "title": "OSINT/PAI Targeting Analyst (Language Enabled) – Senior",
+   "company": "cgs federal (contact government services)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "OSINT/PAI Targeting Analyst – Senior",
+   "company": "cgs federal (contact government services)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Operations Analyst Senior - PNC Wealth Management",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Operations Analyst Senior - Wealth Management",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Operations Analyst Sr",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Operations Analyst Sr - Retail Bank Operations",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Operations Delivery & Control Analyst Senior",
+   "company": "onemain general",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Operations Finance Analyst Principal",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Operations Financial Analyst Sr.",
+   "company": "blue origin personnel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Oracle Database Analyst Sr Principal",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Oracle IT Analyst Lead",
+   "company": "copeland",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Oracle PeopleSoft Functional Analyst- OTC Lead",
+   "company": "mindlance",
+   "expected": "MATCH"
+  },
+  {
+   "title": "P-8 Systems Engineering Support Analyst (Mid-Level or Senior)",
+   "company": "boeing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "PGIM - Manager, Data Management & Analytics (Hybrid)",
+   "company": "prudential ins co of america",
+   "expected": "MATCH"
+  },
+  {
+   "title": "PM Especialista de Produtos II (Plataforma Analytics Global)",
+   "company": "experian",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Payments Tech - QA Testing Analyst - Senior",
+   "company": "the huntington national bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Payroll Analyst Senior",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "People Analytics Analyst & Business Partner",
+   "company": "stripe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "PeopleSoft analyst - Senior ( Contract )",
+   "company": "system canada",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Platform Technical Analyst (Senior)",
+   "company": "merck",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Policy Analyst - Senior",
+   "company": "grvty",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Portfolio Analytics & Strategy Analyst Senior - Community Development Banking",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Portfolio Analytics & Strategy Analyst Senior - Decision Science",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Portfolio Analytics & Strategy Analyst Sr",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Portfolio Analytics and Strategy Analyst Senior -  Enterprise Fraud Organization (EFO) - (Tableau, Power BI, SQL, Python, R)",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Position Manager Information Systems, Manufacturing Data Analytics",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Data & Analytics Governance & Quality Analyst",
+   "company": "nc health affiliates llc dba blue cross nc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Disability Management Services Analyst",
+   "company": "uc san francisco",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal EVM Program Control Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Global Analytics and AI Alliance Manager, Data, Analytics and AI ISV Partner Management",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal II, Data Analysis & Staff Data Analyst",
+   "company": "coupang",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal IT Product Manager - Data & Analytics",
+   "company": "palo alto networks",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal IT Product Manager - Data Analytics",
+   "company": "palo alto networks",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal International Trade Compliance Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Price/Cost Proposal Analyst - Level 3",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Product Manager Tech, 3PX Analytics & Insights",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Product Manager, Data Science & Market Research",
+   "company": "microsoft",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Product Operations and Risk Analyst",
+   "company": "circle",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Program Cost Control Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Program Cost Control Analyst (SkillBridge)",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Program Cost and Schedule Control Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Program Cost and Schedule Control Analyst (18205 / 19486)",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Program Planning and Scheduling Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Risk Manager, Analytics and Insights",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Scientist - Data Pipeline Engineer",
+   "company": "adobe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Scientist Data Science",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Scientist – Data Insights & Hypothesis Design",
+   "company": "tempus",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Scientist – Inflammation Human Data & Computational Biology",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Scientist, DSCS Digital Technologies–Laboratory Automation, Semantic Technologies & Scientific Data Integration",
+   "company": "merck",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Scientist, DSCS Digital Technologies–Laboratory Automation, Time Series Data Strategy (Hybrid)",
+   "company": "merck",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Scientist, Data Science",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Scientist, Data Science (Data Products, Integration & Analysis)",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Scientist, Data Science (Translational Knowledge Engineering)",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Scientist, Data Science - Digital Media",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Scientist, Data Science – R&D DDSAI - Therapeutics Development & Supply (TDS)",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Security Governance, Risk & Compliance Analyst",
+   "company": "cargurus",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Technical Marketing Engineer, Analyst Relations (Cortex Cloud)",
+   "company": "palo alto networks",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Technical Program Manager - Analytics",
+   "company": "oracle",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal or Senior Principal Program Cost & Schedule Control Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal or Senior Principal Program Cost and Schedule Control Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal or Sr Principal International Trade Compliance Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal or Sr. Principal Program Cost & Schedule Control Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal or Sr. Principal Program Cost and Schedule Control Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal or Sr. Principal Program Planning and Scheduling Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal, Product Mgr - Tech, Advanced Analytics",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal/ Sr Principal Program Cost Schedule Control Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal/Sr. Principal Program Cost and Schedule Control Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal/Sr. Principal Property Asset Mgmt Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal/Sr. Program Planning and Scheduling Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Product Analyst - Lead Generation Suite",
+   "company": "highlevel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Product Manager (FTC), Cross Border Science and Analytics",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Product Manager - Data & Analytics",
+   "company": "trevipay",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Product Manager III, AI Analytics Products",
+   "company": "expedia",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Product Manager L6, Data Platform - Analytics Experience",
+   "company": "netflix",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Product Manager, Agent Analytics and Optimization",
+   "company": "conviva",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Product Manager, FAS Digital & Analytics",
+   "company": "the vanguard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Product Manager, ROW SHARP (Rest of World Supply Chain Analytics, Research & Product)",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Product Marketing Manager - AI & Analytics",
+   "company": "esri",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Product Marketing Manager, Tech, AWS Analytics",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Product Operations Analyst, AWS Business Product Operations",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Product Technical Support Analyst Senior",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Production Support Analyst Lead",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Production Support Analyst Senior",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Program Analyst Principal",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Program Analyst Senior",
+   "company": "advocate aurora health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Program Analyst – Sr.",
+   "company": "ibility",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Program Execution Analyst Senior",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Program Manager - Supply Chain Analytics",
+   "company": "western digital",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Program Manager with Strong Financial Modeling, Insights and Analytics Skills",
+   "company": "artemis connection",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Program Manager – Analytics",
+   "company": "ibility",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Program Manager, Sales Strategy & Analytics",
+   "company": "highmark health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Project Manager, Analytics",
+   "company": "altamed health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Promotive Only – Technology Analyst/Designer - Senior (1053) - Citywide (166866)",
+   "company": "city and county of san francisco",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Pumps Fluids Analyst Sr – Lunar Permanence",
+   "company": "blue origin personnel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "QA Testing Analyst - Senior",
+   "company": "the huntington national bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "QC Scientist I / Data Review",
+   "company": "thermo fisher scientific",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Quantitative Analytics and Model Development Analyst Senior",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "R&D Data Analysis and Machine Learning Software Engineer (Engineering Scientist Associate)",
+   "company": "dell medical school",
+   "expected": "MATCH"
+  },
+  {
+   "title": "R&D Scientist – Scientific Data Analytics (d/f/m)",
+   "company": "cepheid",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Release Manager Reporting & Analytics",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Revenue Operations Analyst Senior",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Risk Manager II , Strategic Transformation & Escalation Analytics, STEER ",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Risk Manager, Trade Analytics, Global Trade Services",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "S&C Global Network - AI - Resources -  Manager Data Science",
+   "company": "logic",
+   "expected": "MATCH"
+  },
+  {
+   "title": "SAP Analyst - Business Intelligence / Data Warehouse",
+   "company": "system canada",
+   "expected": "MATCH"
+  },
+  {
+   "title": "SAP Human Capital Management Functional Analyst - Sr.",
+   "company": "mindlance",
+   "expected": "MATCH"
+  },
+  {
+   "title": "SAP Plant Maintenance Functional Analyst - Sr.",
+   "company": "mindlance",
+   "expected": "MATCH"
+  },
+  {
+   "title": "SENIOR DOCUMENT CONTROL CHANGE ANALYST (Fixed Term: 12 months)",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "SOC Analyst (Shift Lead) (f/m/d)",
+   "company": "cepheid",
+   "expected": "MATCH"
+  },
+  {
+   "title": "SOC Analyst Shift Lead",
+   "company": "dovel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sales Manager, Analytics & Activation",
+   "company": "consumer credit marketing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Scientist - Data Reviewer - Bioanalytical LCMS Assay Services - M - F Second Shift",
+   "company": "thermo fisher scientific",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Scientist II / Senior ML Scientist, Data-Efficient Learning for Drug Discovery",
+   "company": "lila sciences",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Scientist LC/GC Data Interpretation, Medical Device",
+   "company": "eurofins",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Scientist – Digital Discovery: Biological Data Systems & Machine Learning",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Scientist, Data Review",
+   "company": "eurofins",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Scientist: Data Review",
+   "company": "eurofins",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Security Analyst, Senior and Staff (CSOC - Cyber Security Operations Center)",
+   "company": "coupang",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior AI Engineer - Da Nang (Paradox)",
+   "company": "workday",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior AI Financial Operations Analyst",
+   "company": "vizient",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior AI Solutions Analyst",
+   "company": "micron",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Agiloft Configurations & Process Analyst",
+   "company": "beone medicines usa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior All-Source Intelligence Analyst",
+   "company": "trm",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Applied Scientist, Amazon Leo Data Science Platform",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Applied Scientist, Data Processing Agents Science",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Applied Threat Intelligence Analyst - Microsoft Security Threat Response",
+   "company": "microsoft",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Associate – Epic Clinical Analyst",
+   "company": "rsm us llp",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Associate, Sales Operations & Pipeline Analyst",
+   "company": "rsm us llp",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Billing & A/R Analyst",
+   "company": "garner health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Building Automation Systems Analyst",
+   "company": "uc san francisco",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Business Intelligence and Reporting Analyst",
+   "company": "td bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior C&SCM Implementation & Continuous Improvement Analyst (Six Sigma Specialist)",
+   "company": "prosidian consultng",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior CIRT / Threat Intel Analyst",
+   "company": "ihs global",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior COBOL Integration/Support Analyst----------Need Full GC and USC----------Need Locals",
+   "company": "usm systems",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Child Safety Intelligence Analyst",
+   "company": "roblox",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Clinical & Population Health Analyst",
+   "company": "highmark health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Commercial Credit Risk Analyst",
+   "company": "expedia",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Commercial Middle Market Credit Analyst",
+   "company": "fifth third bank, national association",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Compliance Governance & Operations Analyst",
+   "company": "td bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Consultant, Federal Financial Program Analyst",
+   "company": "dovel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Corporate FP&A Analyst",
+   "company": "lambda",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Corporate Financial Planning & Strategy Analyst",
+   "company": "checkr",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Credit Model Development Analyst – Consumer Portfolio (Hybrid - see description for potential locations)",
+   "company": "manufacturers and traders trust",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Cyber Threat Intelligence (CTI) Analyst",
+   "company": "live nation entertainment",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Cyber Threat Intelligence Analyst",
+   "company": "trm",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Cyber-Security Operations Analyst, Product AppSec",
+   "company": "veeam software",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior D365 F&O Solutions Analyst ",
+   "company": "axon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Data Quaity support II (Video Content Analyst / Strategist)",
+   "company": "nielsen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Data Quality and Governance Analyst / Data Governance Business Partner",
+   "company": "*us amr-jones lang lasalle americas",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Data Quality and Governance Analyst – Assistant Vice President",
+   "company": "citi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Demand Planning, Staff Analyst",
+   "company": "cepheid",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Developer and Network Analyst",
+   "company": "hcc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior ESG Regulatory Change Analyst",
+   "company": "the vanguard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Emerging Markets (EM) Corporate Credit Analyst",
+   "company": "the vanguard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Executive Strategic Operations Analyst",
+   "company": "manufacturers and traders trust",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior FOIA & Privacy Act Analyst  | FOIA Administration Support [USA005010]",
+   "company": "prosidian consultng",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior FP&A Systems Analyst",
+   "company": "american health staffing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Facilities Outsourced Vendor Analyst ",
+   "company": "western digital",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Federal Budget Execution Analyst",
+   "company": "dovel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Finance Cloud Applications Analyst - EPM",
+   "company": "highmark health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Financial Crime Risk Analyst – Sanctions (US)",
+   "company": "td bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Financial Operations Audit Analyst",
+   "company": "risk strategies consulting",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Financial Planning & Analysis Analyst",
+   "company": "fannie mae",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Fixed Income Credit Analyst - PNC Capital Advisors",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Foreign Military Sales (FMS) Program Analyst",
+   "company": "redhorse",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Global Analytics and AI Alliance Manager, Data, Analytics and AI ISV Partner Management",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Healthcare Payer Performance Analyst",
+   "company": "dovel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior IT Service Management ServiceNow Analyst",
+   "company": "team member",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior IT Service Quality Analyst",
+   "company": "experian",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Information Security Operations Analyst",
+   "company": "mastercard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Institutional Services Automation Quality Control Analyst (Bonds, Cash, Trading)",
+   "company": "manufacturers and traders trust",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Institutional Services Automation Quality Control Analyst (Payments)",
+   "company": "manufacturers and traders trust",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Internal Controls & Process Analyst",
+   "company": "workday",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Inventory and Cost Analyst",
+   "company": "irhythm",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Invoice to Cash Analyst (Front Office)",
+   "company": "stryker",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Leave & Accomodations Global Process Delivery Analyst",
+   "company": "nike",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Low Observables (LO) RCS Analyst",
+   "company": "boeing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager - Data Science",
+   "company": "dentsu",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager Data Science - Ecosystem ",
+   "company": "canva",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager R&D Quality Analytics & Portfolio Insights",
+   "company": "beone medicines usa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager of Data Science Production Engineering, DevOps",
+   "company": "natera",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager – Marketing AI & Innovation Analytics",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Business Insights and Analytics",
+   "company": "air",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Business Intelligence and Analytics",
+   "company": "abbvie",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Clinical Engineering & Data Analytics- Dental Solutions",
+   "company": "solventum",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Customer Resiliency Strategy and Analytics",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Analysis - People Analytics",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science",
+   "company": "sofi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science ",
+   "company": "trm",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science & Operation Analytics",
+   "company": "xometry",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science (Brazil)",
+   "company": "trm",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science - AI Foundations",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science - AI Foundations, Specialist Models",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science - Acrobat & Express",
+   "company": "adobe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science - Anti-Money Laundering Modeling and Advanced Data Insights",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science - Cash Flow Underwriting",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science - Forecasting",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science - Model Risk Office",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science - Online",
+   "company": "the home depot",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science - Styling Algorithms",
+   "company": "stitch fix",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science - US Card (Partnerships Customer Management)",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science - US Card (Upmarket Segments)",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science and Analytics, Prime Video Personalization & Analytics",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science and Machine Learning",
+   "company": "crunchyroll",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Data Science, Bank Operations",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Development to Launch Analytics",
+   "company": "e.r. squibb & sons,l.l.c.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Energy Forecasting & Advanced Analytics",
+   "company": "ge vernova",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, GTM Data Science",
+   "company": "adobe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, GTM Intelligence and Analytics",
+   "company": "zillow",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Infrastructure Data Science",
+   "company": "databricks",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Market Research and Analytics ",
+   "company": "abbvie",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Market Research and Analytics - Oncology",
+   "company": "abbvie",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Neuroscience, Oncology & Eye Care Access, Reimbursement & Fulfillment Analytics",
+   "company": "abbvie",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Oncology Payer and Channel Analytics",
+   "company": "abbvie",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Operations Transformation – Business Performance and Data Science",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Product Data Science",
+   "company": "snowflake",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Product Data Science & Analytics",
+   "company": "tripadvisor",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Product Data Science & Experimentation",
+   "company": "tripadvisor",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Product Data Science - Fleet Optimization and Orchestration",
+   "company": "waymo",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Product Data Science - Operations & Intelligence",
+   "company": "waymo",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, R&D Data, Data Science, and AI – Digital Health for Neuropsychiatry",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Strategic Finance & Business Analytics, Polymarket US",
+   "company": "polymarket",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Supply Chain Product Analytics",
+   "company": "wonder",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Wealth Solutions Strategy and Analytics",
+   "company": "mercer advisors",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager, Workforce Planning Strategy & Analytics",
+   "company": "servicetitan",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Manager- AI Search Analytics ",
+   "company": "palm bay international",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Marketing Channel Insights Data Analyst",
+   "company": "crate and barrel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Missile Defense Architecture Engineer/Analyst",
+   "company": "nou systems",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior NPN Program Operations Analyst",
+   "company": "nvidia",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior OT Cybersecurity Risk Analyst",
+   "company": "delan associates",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Operational Due Diligence Analyst (Vice President/Senior Vice President)",
+   "company": "bny",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Operations & Supplier Testing Analyst",
+   "company": "sofi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior People Analytics & Systems Analyst",
+   "company": "sonatype",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior People Technology (HRIS) Analyst",
+   "company": "veolia north america",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Policy and Program Analyst (NCS) - Mayor's Office of Employment Development",
+   "company": "mayor and city council of baltimore",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Population Risk Performance Analyst (Value-Based Care)",
+   "company": "nc health affiliates llc dba blue cross nc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Principal AI Product Manager - GTM Analytics",
+   "company": "palo alto networks",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Principal Financial and Staff Action Analyst",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Principal Price/Cost Proposal Analyst - Level 4",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Principal Program Cost Control Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Principal Scientist, Data Science RWE",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Privacy & AI Governance Analyst (Americas)",
+   "company": "consumer credit marketing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Product Data Operations Engineering Systems Analyst",
+   "company": "nvidia",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Product Manager - User and Lifecycle Analytics",
+   "company": "contentsquare",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Product Manager, Cross Border Science and Analytics",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Product Manager, Funds Middle Office – Core Middle Office & Investment Analytics - Services",
+   "company": "citi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Product Safety Assurance Analyst - Perishables, Product Safety Assurance Team, Worldwide Grocery Stores (WWGS), Whole Foods Market NA",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Program Manager, Whole Foods Market Promotions Analytics",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Project Controls Cost Analyst, Project & Development Services",
+   "company": "cushman & wakefield",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Quality Engineer - Multiport Da Vinci",
+   "company": "intuitive",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Quantitative Equity Research Analyst, AI Platform",
+   "company": "versant media",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Regulatory Implementation and Assurance Analyst",
+   "company": "highmark health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Revenue Cycle Operations Analyst",
+   "company": "twin health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Risk Specialist, Compliance Governance Training Analyst",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Risk and Compliance Analyst",
+   "company": "highmark health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Robotic Control engineer (Systems Analyst)",
+   "company": "intuitive",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior SAP BASIS & Authorization Technical Analyst",
+   "company": "the qode",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Sales Operations & Strategy Analyst",
+   "company": "rubrik",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Sales Operations Reporting & Insights Analyst (Remote)",
+   "company": "ezcater",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Scientist - NGS Bioinformatics (Data Standardization & Platform Integration)",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Scientist Data Science (f/m/d)",
+   "company": "cepheid",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Scientist I- Preclinical Safety Data System Owner",
+   "company": "abbvie",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Scientist II, Data Solutions - Sales",
+   "company": "tempus",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Scientist | Bioinformatics & Data Analysis",
+   "company": "thermo fisher scientific",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Scientist – Digital Discovery: AI-assisted Antibody Discovery & Data",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Scientist – Scientific Data & ML Enablement",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Scientist, Synthetic Data Generation",
+   "company": "nvidia",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Security Incident Response Analyst",
+   "company": "ouro",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Security Monitoring and Response Analyst",
+   "company": "mastercard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Security Third Party Risk (TPRM) Analyst",
+   "company": "onetrust",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Security and Privacy Analyst (Japanese Speaker)",
+   "company": "avepoint",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Signals Intelligence (SIGINT) Analyst/ PF – Linguist",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Software Development Engineer (Back-end) - Paradox - Da Nang",
+   "company": "workday",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Software Engineer, Core Experiences - Da Nang, Vietnam",
+   "company": "speechify",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Software Engineer, Windows/Desktop Applications - Da Nang, Vietnam",
+   "company": "speechify",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Software Quality Assurance Analyst",
+   "company": "wolters kluwer dxg u.s.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Specialist Financial Crime Compliance Data Analyst",
+   "company": "bny",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Specialist, IWM Portfolio Analyst",
+   "company": "bny",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Specialist, IWM Portfolio Analyst - BNY Wealth",
+   "company": "bny",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Specialist, Production Services Application Support Analyst",
+   "company": "bny",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Specialist, Production Services Infrastructure Support Analyst",
+   "company": "bny",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Staff II - Fraud Analytics and Knowledge Transfer Lead (Consulting Manager)",
+   "company": "dovel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Strategy and Planning Analyst",
+   "company": "skydio",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Supply Chain Planning Analyst",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Supply Chain Solutions Analyst",
+   "company": "delan associates",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Systems Configurator, SAP Functional Analyst",
+   "company": "general motors (gm)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Tax and Compliance Analyst (Payroll)",
+   "company": "twilio",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Technical Product Manager, Data Engineering & Data Science Solutions",
+   "company": "ihs global",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Technology Governance, Risk & Compliance (GRC) Analyst ",
+   "company": "fanduel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Workday People Insights Analyst",
+   "company": "nc health affiliates llc dba blue cross nc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior/Lead Digital Analytics & CDP Consultant",
+   "company": "dentsu",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Signals Intelligence (SIGINT) Analyst/Target Analyst Reporter -  Senior",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Software Engineer / Quality Assurance Analyst - Senior - #883",
+   "company": "allen integrated",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Software Engineer / Quality Assurance Analyst – Senior (Top Secret with agreement to obtain CI Poly)",
+   "company": "north point",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Solutions Design IT Specialist (SAP Business Objects Technical Support Analyst)",
+   "company": "td bank",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sourcing Analyst - Senior",
+   "company": "mindlance",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sourcing Analyst Senior",
+   "company": "fis",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Associate - Digital AI Product Analyst",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Associate IS Prog Analyst",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Associate IS Sys Analyst – Learning Management Systems",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Associate PLM Systems Analyst",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr HR Technology Integrations Analyst",
+   "company": "woodward",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Manager IC, FinOps & AI Enablement — Analytics Team (Remote - Eligible)",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Manager IC, Merchant & Advertiser Data Marts — Analytics Team (Remote-Eligible)",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Manager Research Science, Last Mile Science and Analytics",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Manager, Data Science",
+   "company": "caremark, l.l.c.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Manager, Data Science & AI, R2L",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Principal Engineer - Mass Properties Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Principal Program Cost Schedule Control Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Principal Program Cost and Schedule Control Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Sales Strategy and Operations Manager, Central StratOps, GTM and Analytics",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Scientist - Business Owner, Data Automation",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Software Development Engineer - Da Nang (Paradox)",
+   "company": "workday",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Sr Staff Threat Intelligence Analyst",
+   "company": "nbcuniversal",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Technical Service Desk Analyst -Level 2",
+   "company": "unisys",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. AI Integration Analyst",
+   "company": "st jude medical s c",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Applied Scientist, AppStar Data Analytics & Engineering",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Associate IS Bus Sys Analyst – Learning Management Systems",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Associate, Capital Markets & Risk - Systems Analyst",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Classified Cyber Assurance Analyst",
+   "company": "spacex",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Computer Scientist (Data Platform Engineer)",
+   "company": "adobe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Director, TA Lead - Trial Analytics, Insights, and Planning (TAIP)",
+   "company": "e.r. squibb & sons,l.l.c.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Financial Planning & Analysis (FP&A) Analyst (Remote Eligible)",
+   "company": "sierra nevada",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Fleet Operations & Purchasing Analyst",
+   "company": "the home depot",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Functional SAP Production Analyst (PP/QM).   -----------------US Citizen, Green Card, EAD or H1b",
+   "company": "usm systems",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Health Plan Operations Analyst",
+   "company": "aledade",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Manager - S&G Analyst Development Program Lead",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Manager Data Science - Gen AI and Content Systems",
+   "company": "relx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Manager, APEX - Field Planning & Analytics, Immunology  ",
+   "company": "abbvie",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Manager, Clinical Trial Risk Analyst",
+   "company": "e.r. squibb & sons,l.l.c.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Manager, Data Science (Remote, GBR)",
+   "company": "crowdstrike",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Mgr. BIE, Last-Mile Ops, AOP (Analytics Ops & Programs)",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Payroll Project Coordinator and Analyst",
+   "company": "mindlance",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Principal Program Cost and Schedule Control Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Principal Program Planning and Scheduling Analyst",
+   "company": "highgate hotels corporate office tx",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Professional Fee Coder - Analyst III (F/T) - (Sign-On Bonus eligible)",
+   "company": "uc san francisco",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. QA/UAT Analyst",
+   "company": "cushman & wakefield",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Research IT Security Risk and Compliance Analyst - Computing Services",
+   "company": "carnegie mellon university",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Revenue Strategy & Operations Analyst",
+   "company": "rippling",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Taleo Peoplesoft Functional Analyst",
+   "company": "it professionals",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Technical Revenue Accounting Analyst",
+   "company": "adobe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Threat Hunting Intelligence Analyst (Remote, East/Central)",
+   "company": "crowdstrike",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Threat Hunting Intelligence Analyst II",
+   "company": "crowdstrike",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr.Business Analyst [L5] (Retail PM Business Insights)",
+   "company": "coupang internal",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr/Staff AI Product Owner (I4.0 Analyst), SMART MFG & AI",
+   "company": "micron",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Staff Applied Scientist - 3D Synthetic Data",
+   "company": "adobe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Staff Engineering Product Manager, Analytics - Query Language & Planning (Hybrid)",
+   "company": "cisco",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Staff Product Marketing Manager, AI & Analytics",
+   "company": "justworks",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Staff Technical Program Manager, Data Science",
+   "company": "pinterest",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Staff Technical Program Manager, Monetization Data Science",
+   "company": "pinterest",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Staffing and Scheduling Apps Analyst Sr",
+   "company": "advocate aurora health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Strategic Financial Analyst (GTM/Sales Business Partner)",
+   "company": "benchling",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Strategic Lead, Forecasting and Metrics Analytics",
+   "company": "the vanguard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Strategic Sourcing Analyst Senior",
+   "company": "advocate aurora health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Strategy Analyst Lead – Business Development",
+   "company": "payjoy",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sub-System Lead Engineer OR Senior Sub-System Lead Engineer (Chassis Data & Analytics)",
+   "company": "general motors (gm)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Supply Chain Management Analyst (Associate, Experienced, & Senior)",
+   "company": "boeing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Systems Integration Analyst (Experienced or Lead)",
+   "company": "boeing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "TEM Scientist – Automation & Data Workflows",
+   "company": "eurofins",
+   "expected": "MATCH"
+  },
+  {
+   "title": "TSS Data Analyst Senior",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Talent and Learning Management Platform IT Analyst / Lead",
+   "company": "sandisk",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Tax Analyst Sr (Commercial Equipment Finance)",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Tech Solution Center Analyst Lead",
+   "company": "pnc",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Technical Lead (Deputy) for IBM Planning Analytics & Cognos Analytics",
+   "company": "eurofins",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Technical Manager, Product Analytics",
+   "company": "ibotta",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Technical Product Manager - AI & Data Analytics",
+   "company": "workwave",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Technical Product Manager, Data and Analytics",
+   "company": "hagerty",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Technical Project Manager, Data Analytics",
+   "company": "dev",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Techno Functional Analyst Mid/Senior (AX ERP)",
+   "company": "arrow electronics",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Techno Functional Analyst Mid/Senior (Business Central)",
+   "company": "arrow electronics",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Thermal Analyst Sr. - ACE",
+   "company": "blue origin personnel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Trade Analyst Model Development Technical Lead",
+   "company": "usm systems",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Treasury Analyst Senior",
+   "company": "onemain general",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Tribe Manager Microsoft - Data & Analytics ",
+   "company": "devoteam",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Underwriting Analyst Senior",
+   "company": "pathward",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Vehicle Safety Technical Lead for Advanced Analytics (GPSSC)",
+   "company": "general motors (gm)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "[IT] Manager, Data Platforms & Analytics Technology Service [MedTech]",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Responsable Production (H/F) - Aix-en-Provence (13)",
+   "company": "eurofins",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "RN CVPCU Staff Flex contract, Nights",
+   "company": "team member",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Groundskeeper - The Terrace",
+   "company": "greystar",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "2027-2028 Northwestern Medicine Harrison Administrative Fellowship Program",
+   "company": "northwestern memorial healthcare",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Administrative Assistant (Administrative Support Assistant III) - TripleTree",
+   "company": "capital one",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Agent Travaux Canalisations (H/F)",
+   "company": "veolia north america",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Automotive Testing_Senior Engineer_Pune",
+   "company": "arrow electronics",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Stock Associate, Full Time, Cherry Creek - West Elm",
+   "company": "williams-sonoma",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Sr. Engineer Cloud Security",
+   "company": "mattel",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Expression of Interest: Business Development Representative (Supporting Taiwan)",
+   "company": "workday",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Logistics & Operations Specialist",
+   "company": "arrow electronics",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Healthcare Compliance Admin",
+   "company": "covista",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Design Sales Specialist/Home Stylist, Part Time Flex, Cherry Hill - Pottery Barn",
+   "company": "williams-sonoma",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Junior Product Photographer (k/m/x)",
+   "company": "auto1",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Associate Staff Engineer, PHP Lavavel",
+   "company": "nagarro",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Sr. Siteminder_10 yrs exp_SSO, OpenToken, OAUTH, RSA exp_w2",
+   "company": "it professionals",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "(Junior) Sales Representative (m/w/d) Surgical Technologies – Region Ost",
+   "company": "stryker",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Dealer Services Sales Rep 3",
+   "company": "u.s. bank",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "AI Services Lead - Client Services (Private Equity)",
+   "company": "phdata",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Lead Software Engineer, Full Stack (TypeScript, Vue.js, Node.js, AWS)",
+   "company": "capital one",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Content Management Analyst- Fixed Assets",
+   "company": "wolters kluwer dxg u.s.",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Data Analyst, Third Party Carrier Procurement",
+   "company": "amazon",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Gestor Comercial - Automóvel ",
+   "company": "auto1",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Genesys Voice Network Engineer",
+   "company": "unisys",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Lead Data Architect (eDV)",
+   "company": "aker systems",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Functional Analyst ",
+   "company": "eurofins",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Staff Software Engineer - Detection and Response Platform",
+   "company": "verkada",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Facilities Coordinator - Operations",
+   "company": "*us amr-jones lang lasalle americas",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Citizens Banker - Bilingual - Arabic Required",
+   "company": "citizens",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Ingénieur Service Itinérant (d/f/m)",
+   "company": "cepheid",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Lead Primary Care Physician (FM or IM)",
+   "company": "the wonderful",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Maintenance Technician - Avidor Omaha",
+   "company": "greystar",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Ontario Reign - Stage Manager",
+   "company": "aeg worldwide",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Software Engineer, Windows/Desktop Applications - Chattanooga, TN, USA",
+   "company": "speechify",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Stage Communication – Stratégie événementielle & coordination (Adopt AI)",
+   "company": "artefact",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Partner Account Manager (Mid-Enterprise), Northern Europe",
+   "company": "klaviyo",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Financial Crime Risk Investigation Support Officer II (5283)",
+   "company": "td bank",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Commercial Strategy Manager (INDG)",
+   "company": "bloomberg industry",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Community Manager - Killeen, Texas",
+   "company": "greystar",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Internal Medicine Physician-Consultative Practice",
+   "company": "mayo clinic",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "CDL B Route Driver",
+   "company": "sound",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Vendor, Financial & Workforce Planning Analyst",
+   "company": "the vanguard",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Manager - Software Engineering",
+   "company": "ge precision healthcare",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "MD, Asset Based Lending",
+   "company": "fifth third bank, national association",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Business Development Lead, Digital Agency ",
+   "company": "current",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Customer Support Specialist, German (Weekend Shift)",
+   "company": "klaviyo",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Nearshore Sector | ServiceNow Developer ",
+   "company": "devoteam",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Design and Construction Project Manager",
+   "company": "the pennsylvania state university",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Sr. Account Executive - Public Sector Finland",
+   "company": "salesforce",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Segment Producer - Breaking News, MS NOW",
+   "company": "versant media",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Software Engineer, AI-Native Platform (Remote)",
+   "company": "ezcater",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "National Channel Business Manager",
+   "company": "palo alto networks",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Pharmaberater m/w/d Kardiologie, Pneumologie",
+   "company": "iqvia",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Tax Manager - Ultra High Net Worth",
+   "company": "rsm us llp",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Stationary Engineer - Grand Rapids",
+   "company": "general motors (gm)",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Aprediz SENA Clinical Trials",
+   "company": "merck",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Sr. Gas & Chemical Engineer, FAC Construction",
+   "company": "micron",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "eCOA Technical Consultant I",
+   "company": "suvoda",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Territory Manager (OH, Massillon)",
+   "company": "charlie health outreach",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Manager, Technical Account Management",
+   "company": "rippling",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "CSR/Teller- Royal Oak - Main Street, MI - Full Time",
+   "company": "fifth third bank, national association",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Manufacturing Scientist - Production",
+   "company": "cepheid",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Claims Vendor Consultant Auto Repair",
+   "company": "allstate",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Alpheratz Project - Thai (Thailand) Translation Quality Reviewer",
+   "company": "welo global",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Registered Nurse Medical Surgical Part Time",
+   "company": "team member",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Sales Associate / Key Sales / Seasonal Opportunities - Banter by Piercing Pagoda - Midland Park Mall - Midland, TX",
+   "company": "signet jewelers",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Associate Surgical Account Manager/Surgical Account Manager - California",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Part Time Research Support - Neuroscience and Experimental Therapeutics",
+   "company": "the pennsylvania state university",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Agile Product Owner Senior",
+   "company": "fis",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "People Business Partnerships Director ",
+   "company": "crunchyroll",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Sales Exec Lead - Trading Solution",
+   "company": "fis",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Sentinel Specialty Systems Engineering HSI HFE Section Manager  2- 19362",
+   "company": "highgate hotels corporate office tx",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Assistant Coach, Track and Field/Cross Country, Penn State Behrend",
+   "company": "the pennsylvania state university",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Assistant Director, Start Abroad Programs",
+   "company": "um corp (enterprise)",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Account Executive, Nordics",
+   "company": "crowdstrike",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Linux Architect--------------Need GC and USC",
+   "company": "usm systems",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Specialist, Access Stewardship - Data Product, Access, Privacy & Compliance",
+   "company": "merck",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Principal Product Manager - Dynamics 365 Sales",
+   "company": "microsoft",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "PeopleSoft Developer (HCM)",
+   "company": "it professionals",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Hive+Python Engineer with Bigdata exp",
+   "company": "usm systems",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Liquid Labs - Research Engineer",
+   "company": "liquid ai",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Director of Strategy & Operations ",
+   "company": "via.com",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Sales Development - LATAM",
+   "company": "elevenlabs",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Performance Management Training Course Instructor",
+   "company": "prosidian consultng",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "(Asst.) Customer Service Officer",
+   "company": "avery dennison",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Technicien.ne Chimiste F/H",
+   "company": "veolia north america",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Assistant Community Manager - Creekside at Highlands Ranch",
+   "company": "greystar",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "SAP Functional Consultant",
+   "company": "tessera labs",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Alabang Support Roles - Training / Workforce / Operations (Executive, Team Leader and/or Manager)",
+   "company": "wns",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Principal Design Engineer",
+   "company": "crusoe",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Software Engineering - Core Software Engineering - Software Engineering PMTS-2",
+   "company": "salesforce",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Test Technician II",
+   "company": "thermo fisher scientific",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Sr. CDTL",
+   "company": "thermo fisher scientific",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Staff Machine Learning Manager ",
+   "company": "inmobi",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Personal Banker I - South Holland and surrounding areas",
+   "company": "fifth third bank, national association",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Compensation & Benefits Specialist",
+   "company": "henry schein",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Software Engineer, Core Experiences - Montreal, Canada",
+   "company": "speechify",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Manager – Data Engineering",
+   "company": "aig pc global",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Sales Team Lead – Commercial (Mid-Market Accounts)",
+   "company": "esri",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Mulesoft Senior Technical Consultant",
+   "company": "salesforce",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Lead Data Analyst ",
+   "company": "parachute health",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Associate, Data Scientist -  Bank Operations Data Science",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Fraud Operations Issue Management Sr. Lead Analyst C14 -BELFAST",
+   "company": "citi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Analyst - Infrastructure & Project Finance , New York or Toronto",
+   "company": "ihs global",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Data Analyst, Bureau of Hepatitis, HIV, and STI",
+   "company": "city of new york",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Data Analyst, Customer Operations",
+   "company": "scribd",
+   "expected": "MATCH"
+  },
+  {
+   "title": "HIH - Accounting Lead Analyst",
+   "company": "cigna health & life ins.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Principal Data Scientist - LLM Agents (Cortex)",
+   "company": "palo alto networks",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Scientist Mid",
+   "company": "general dynamics information",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Analyst (Hybrid/Toronto Based)",
+   "company": "agoda",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Analyst (Taiwan)",
+   "company": "coupang",
+   "expected": "MATCH"
+  },
+  {
+   "title": "SR ANALYST DECISION ANALYSTICS",
+   "company": "the home depot",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Analyst – Telecommunications, Media, Technology and Entertainment, Paris, Frankfurt or Madrid",
+   "company": "ihs global",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Analyst Bio Statistician, Clinical Research",
+   "company": "stryker",
+   "expected": "MATCH"
+  },
+  {
+   "title": "GBS Transformation Senior Analyst",
+   "company": "general motors (gm)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "People Operations Senior Analyst (Mexico)",
+   "company": "dandy",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Associate Business analyst",
+   "company": "global channel management",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Scientist - Staff or Senior (United Kingdom)",
+   "company": "kobold metals",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Operations Senior Analyst",
+   "company": "solarwinds",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Analyst Growth Marketing- Google Ads",
+   "company": "rue la la",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Science Manager, Rider Experience ",
+   "company": "lyft",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Applied Data Scientist - Personalization (applied ML, PyTorch, ML Ops)",
+   "company": "target",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Demand Planning Data Scientist",
+   "company": "agilent",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Account Payable Senior Analyst (Bangkok Based, Relocation Provided)",
+   "company": "agoda",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Technical Analytics Manager",
+   "company": "seer interactive",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior/Staff Data Scientist - Measurement, Experimentation & Causal Inference",
+   "company": "sony interactive entertainment",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Epic Senior Analyst, Ambulatory/ Bones",
+   "company": "um corp (enterprise)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Doradca ds. Produktów Biologicznych – region Północno-Centralny",
+   "company": "syngenta",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Business Analyst, Post Sales",
+   "company": "servicetitan",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Analyst, Finance Transformation - Process - Central",
+   "company": "um corp (enterprise)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Analyst, Local SEO (Listings)",
+   "company": "the home depot",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Geographic Legal Counsel Sr Analyst with Czech/Slovak",
+   "company": "logic",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Analyst, Credit Analytics",
+   "company": "onemain general",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr Analyst, Pro Merchandising - Trades",
+   "company": "the home depot",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Bayesian Data Scientist",
+   "company": "morse",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Science Manager",
+   "company": "amgen",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Analyst, Global Expansion Strategy",
+   "company": "lyft",
+   "expected": "MATCH"
+  },
+  {
+   "title": "SOX 404 Senior Analyst - Compliance",
+   "company": "ethicon endo surgery services l.p. legal entity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Staff Data Scientist,",
+   "company": "salesforce",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Data Scientist (5 to 8 Years)",
+   "company": "fractal",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Data Scientist, GTM Data Science",
+   "company": "simplisafe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Science Manager - GTM Sales",
+   "company": "canva",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Scientist, LM Simulations Engineering, AMZL Simulations & Analytics Engineering",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "JD Edwards Business Analyst- Full time position",
+   "company": "sa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Reporting Data Scientist",
+   "company": "luster national",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Staff Data Scientist ",
+   "company": "robots and pencils",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Analyst I, Automation, Reporting and Tech sciences (ARTS)",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Commercial Credit Senior Analyst - CRE",
+   "company": "manufacturers and traders trust",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Healthcare Business Analyst",
+   "company": "arete",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Member of Technical Staff (Data Scientist, Evals)",
+   "company": "perplexity",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Analyst, Corporate Audit",
+   "company": "caremark, l.l.c.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Analyst, Strategic Delivery",
+   "company": "simplisafe",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Talent Intelligence & Analytics Manager",
+   "company": "mercor (poland)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Green Card or Citizens Only Urgent Need Business Analyst",
+   "company": "usm systems",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Data Scientist (Integrity)",
+   "company": "grabjobs",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Scientist, Portfolio Optimization",
+   "company": "formation bio",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Analyst, Financial Systems: Oracle GL and Financial Close",
+   "company": "alignment healthcare",
+   "expected": "MATCH"
+  },
+  {
+   "title": "(GOVERNMENT OF ONTARIO) looking for Business Analyst Level 3",
+   "company": "system canada",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Doradca ds. Produktów Biologicznych – region Małopolska/Podkarpacie",
+   "company": "syngenta",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Financial Analytics Manager",
+   "company": "risk strategies consulting",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Analyst III - AMZ9898258",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Staff Data Scientist, Finance & Business Ops",
+   "company": "pinterest",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data reporting Senior Analyst _Assistant Vice President",
+   "company": "citi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Scientist - Network Strategy",
+   "company": "the home depot",
+   "expected": "MATCH"
+  },
+  {
+   "title": "IT Business Analyst/Business Systems Analyst/Data Analyst (Multiple Positions at Multiple Locations)",
+   "company": "it professionals",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Product Control Senior Analyst",
+   "company": "citi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Analyst (Experience with Oregon Health Authority- OHA)",
+   "company": "sa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Tax Senior Analyst, Foreign Compliance and Reporting",
+   "company": "okta",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Financial Systems Advisory - Senior Analyst",
+   "company": "continental casualty",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Scientist, Labs, SCOT Forecasting and Labs",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead Data Scientist, IS Supply Chain & Operations Analytics",
+   "company": "the folger coffee",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Salesforce Developer OR Salesforce Business Analyst",
+   "company": "usm systems",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Operations Senior Analyst - HIH - Evernorth",
+   "company": "cigna health & life ins.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Analyst/POPM",
+   "company": "mattel",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Analyst Engineer/ SSE",
+   "company": "icr united states usa",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Analyst, Sales Enablement, Services",
+   "company": "mastercard",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Starszy Specjalista / Starsza Specjalistka ds. deklaracji celnych",
+   "company": "signet testing laboratories",
+   "expected": "NO_MATCH"
+  },
+  {
+   "title": "Senior Analyst, Pricing (Bangkok Based, relocation provided)",
+   "company": "agoda",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Data Analyst - BI Transportation",
+   "company": "the home depot",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Scientist, Region Flexibility",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Staff AI Data Scientist",
+   "company": "verily",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Analyst - Sovereign Ratings, New York",
+   "company": "ihs global",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Principal Associate, Data Scientist - Card Finance Innovation Team",
+   "company": "capital one",
+   "expected": "MATCH"
+  },
+  {
+   "title": "SR Business Analyst with EMV Chip Card",
+   "company": "usm systems",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Analyst , NCC- Hercules",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Analyst - Decision Platform, RBS",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Analyst, Retail Media Strategy & Activation",
+   "company": "kepler",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Analyst, Product & Pricing Operations",
+   "company": "salesforce",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Equity and Deferred Compensation Sr. Analyst / AVP",
+   "company": "citi",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Scientist II - AMZ27596.1",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Staff Data Scientist",
+   "company": "toast",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Analyst II, Relay Product Excellence",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Analyst, Data for Analytics and Machine Learning",
+   "company": "forrester research, inc. (us)",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Analyst, US Commercialization Decision Intelligence & KDA Solutions",
+   "company": "e.r. squibb & sons,l.l.c.",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Data Scientist III, Supply Chain Optimization Technologies (SCOT), Inbound Planning Science",
+   "company": "amazon",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Lead, Data Scientist",
+   "company": "consumer credit marketing",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Locals Only Urgent Need Requirement Business Analyst",
+   "company": "usm systems",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Senior Analyst, SEC Reporting & Technical Accounting",
+   "company": "figma",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Sr. Analyst, Hire to Retire Ops - HR Data",
+   "company": "t-mobile",
+   "expected": "MATCH"
+  },
+  {
+   "title": "Business Analyst II, Manager",
+   "company": "mindlance",
+   "expected": "MATCH"
+  },
+  {
+   "title": "EM, Analytics",
+   "company": "fixture",
+   "expected": "MATCH"
+  }
+ ]
+}

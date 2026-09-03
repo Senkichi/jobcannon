@@ -187,15 +187,23 @@ def test_tight_gap_excludes_unrelated_local_filename_near_private():
     underscore-privacy describing THIS repo's own sibling files, not a
     cross-repo reference — sitting a few words from an unrelated `.py`
     filename. An earlier version of this detector (single wide proximity
-    window for every artifact type) matched it. These three real sentences
+    window for every artifact type) matched it. These real sentences
     from the tree, plus that one, must NOT match on their own; if a future
     change collapses the tight/noun gap split back into one budget, this is
     what would go red (the other 10 tests would stay green, since none of
     them exercises this specific ambiguity).
+
+    ``_title_match.py`` was dropped from this list by Ledger L-0015 (migration
+    completeness audit): its former "Extracted from ``ats_platforms.py`` ..."
+    near-miss sentence is still present, but the file now ALSO carries a
+    genuine ``PORTED from ...`` marker (line 1), so it correctly IS
+    provenance-bearing today — asserting the negative here would fight a
+    true positive, not guard a false one. ``_run_html.py`` below still
+    carries the same "Extracted from ..." phrasing with no genuine marker,
+    so the ambiguity this test targets stays covered.
     """
     found = dpp.find_provenance_files(REPO_ROOT)
     for path in (
-        "jobcannon/engine/ats_platforms/_title_match.py",
         "jobcannon/engine/stale_detector.py",
         "jobcannon/engine/ats_scanner/_run_html.py",
     ):
