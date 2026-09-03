@@ -22,16 +22,19 @@ import pytest
 from jobcannon.db._direct_link import set_direct_url
 
 # PORT-SEAM: db_conn/postgres_test_dsn/requires_postgres imported directly
-# from tests.host.conftest per the codebase's established cross-directory
-# fixture-import convention (tests.fixtures, tests.helpers.ats_session) --
-# no root tests/conftest.py added.
+# from tests.host.conftest -- no root tests/conftest.py exists to make
+# tests/host/'s fixtures visible outside that subtree, so importing them
+# into this module's namespace is what makes pytest discover them here.
+# db_conn is then re-requested by name in a local fixture below (F811 is a
+# pyflakes false positive for this idiom: the "redefinition" is a distinct
+# function scope, not a real shadow).
 from tests.host.conftest import db_conn, postgres_test_dsn, requires_postgres  # noqa: F401
 
 pytestmark = requires_postgres
 
 
 @pytest.fixture()
-def conn(db_conn):
+def conn(db_conn):  # noqa: F811
     # PORT-SEAM: migrated_db_path (sqlite3, hand-rolled jobs table) replaced
     # with db_conn (Postgres) against the real postings/companies schema --
     # jobs -> postings, adds the company_id FK postings requires.

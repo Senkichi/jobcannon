@@ -35,15 +35,19 @@ import pytest
 from jobcannon.db._company_attribution import AttributionCollisionError, set_company_attribution
 
 # PORT-SEAM: db_conn/postgres_test_dsn/requires_postgres imported directly
-# from tests.host.conftest per the codebase's established cross-directory
-# fixture-import convention -- no root tests/conftest.py added.
+# from tests.host.conftest -- no root tests/conftest.py exists to make
+# tests/host/'s fixtures visible outside that subtree, so importing them
+# into this module's namespace is what makes pytest discover them here.
+# db_conn is then re-requested by name in a local fixture below (F811 is a
+# pyflakes false positive for this idiom: the "redefinition" is a distinct
+# function scope, not a real shadow).
 from tests.host.conftest import db_conn, postgres_test_dsn, requires_postgres  # noqa: F401
 
 pytestmark = requires_postgres
 
 
 @pytest.fixture()
-def migrated_db_mem(db_conn):
+def migrated_db_mem(db_conn):  # noqa: F811
     return db_conn
 
 
@@ -228,9 +232,9 @@ class TestSetCompanyAttributionCollision:
         loser_id = _insert_company(conn, name="Loser Corp")
 
         with pytest.raises(AttributionCollisionError) as exc_info:
-            set_company_attribution(
-                conn, loser_id, ats_platform="greenhouse", ats_slug="ownerslug"
-            )
+            # PORT-SEAM: reflowed onto one line by ruff format (was split across
+            # 3 lines in private) -- no semantic change.
+            set_company_attribution(conn, loser_id, ats_platform="greenhouse", ats_slug="ownerslug")
 
         assert exc_info.value.owner_id == owner_id
         assert exc_info.value.owner_name == "Owner Corp"
@@ -246,7 +250,11 @@ class TestSetCompanyAttributionCollision:
         # own valid non-colliding pair instead; also given a distinct name
         # (companies.name is UNIQUE on this host).
         loser_id = _insert_company(
-            conn, name="Loser Corp 2", ats_probe_status="hit", ats_platform="workday", ats_slug="loser-slug"
+            conn,
+            name="Loser Corp 2",
+            ats_probe_status="hit",
+            ats_platform="workday",
+            ats_slug="loser-slug",
         )
 
         with pytest.raises(AttributionCollisionError):
@@ -254,7 +262,9 @@ class TestSetCompanyAttributionCollision:
 
         # Loser's row is unchanged — no commit on the collision path.
         row = _fetch_company(conn, loser_id)
-        assert row["ats_platform"] == "workday"  # PORT-SEAM: reflects the loser's own seeded ats fields (see above)
+        assert (
+            row["ats_platform"] == "workday"
+        )  # PORT-SEAM: reflects the loser's own seeded ats fields (see above)
         assert row["ats_slug"] == "loser-slug"
         assert row["ats_probe_status"] == "hit"
 

@@ -28,8 +28,12 @@ import pytest
 from jobcannon.db._jd_full import set_jd_full
 
 # PORT-SEAM: db_conn/postgres_test_dsn/requires_postgres imported directly
-# from tests.host.conftest per the codebase's established cross-directory
-# fixture-import convention -- no root tests/conftest.py added.
+# from tests.host.conftest -- no root tests/conftest.py exists to make
+# tests/host/'s fixtures visible outside that subtree, so importing them
+# into this module's namespace is what makes pytest discover them here.
+# db_conn is then re-requested by name in a local fixture below (F811 is a
+# pyflakes false positive for this idiom: the "redefinition" is a distinct
+# function scope, not a real shadow).
 from tests.host.conftest import db_conn, postgres_test_dsn, requires_postgres  # noqa: F401
 
 pytestmark = requires_postgres
@@ -51,8 +55,7 @@ def _insert_job(conn: Any, dedup_key: str) -> None:
         "INSERT INTO companies (name) VALUES (%s) RETURNING id", (dedup_key,)
     ).fetchone()["id"]
     conn.execute(
-        "INSERT INTO postings (dedup_key, company_id, title, company) "
-        "VALUES (%s, %s, %s, %s)",
+        "INSERT INTO postings (dedup_key, company_id, title, company) VALUES (%s, %s, %s, %s)",
         (dedup_key, company_id, "Test Job", "TestCo"),
     )
 
@@ -69,7 +72,7 @@ def _read_jd(conn: Any, dedup_key: str) -> str | None:
 
 
 @pytest.fixture()
-def db(db_conn) -> Iterator[tuple[None, Any]]:
+def db(db_conn) -> Iterator[tuple[None, Any]]:  # noqa: F811
     # PORT-SEAM: migrated_db_path/sqlite3.connect replaced with the shared
     # Postgres db_conn fixture (tests/host/conftest.py); the (path, conn)
     # tuple shape is preserved so every test body's `_, conn = db` stays

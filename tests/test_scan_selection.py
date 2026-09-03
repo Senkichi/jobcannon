@@ -70,7 +70,9 @@ def test_record_selection_batch_inserts_rows():
 
 def test_record_selection_batch_empty_is_noop():
     conn = _ledger_conn()
-    assert record_selection_batch(conn, "run-1", []) == 0  # PORT-SEAM: "ats_scan" job_id arg dropped
+    assert (
+        record_selection_batch(conn, "run-1", []) == 0
+    )  # PORT-SEAM: "ats_scan" job_id arg dropped
     assert conn.execute("SELECT count(*) FROM scan_selection_log").fetchone()[0] == 0
 
 

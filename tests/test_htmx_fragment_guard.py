@@ -11,7 +11,9 @@ idiom present on some fragment routes and silently missing from ~15 others;
 from __future__ import annotations
 
 import pytest
-from flask import Flask, url_for
+from flask import (
+    Flask,
+)  # PORT-SEAM: url_for dropped -- only used by the two tests below dropped for the private app/url_map surface
 
 from jobcannon.web._htmx import htmx_fragment
 
