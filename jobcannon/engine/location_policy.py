@@ -4,7 +4,8 @@
 Computes a versioned, fingerprinted ``LocationPolicy`` verdict from structured
 location facts, candidate config, and target-market geography.  This module is
 a pure-computation foundation; downstream issues wire it into scoring and
-persistence.
+persistence. (# PORT-SEAM: "target-market" genericizes the private repo's
+"Bay Area" phrasing throughout this module -- see the paragraph below.)
 
 Genericized at port time (Ledger L-0196): the private repo's owner-specific
 target market (hardcoded ``region_code == "CA"``, a 291-city Bay Area seed
@@ -31,12 +32,12 @@ from typing import Any
 
 from jobcannon.engine.location_canonical import normalize_workplace_type
 
-# -- PORT-SEAM: config helpers below replace job_finder.config (hop1 DIES).
+# PORT-SEAM: config helpers below replace job_finder.config (hop1 DIES).
 # Genuinely host-agnostic pure functions (_normalize_target_locations,
 # _drop_key_recursive, get_remote_eligible_countries) are carried verbatim;
 # get_location_policy_config/_hash are extended with the target-market keys
 # documented in the module docstring above so the owner-specific gate becomes
-# tenant-configurable instead of hardcoded. --
+# tenant-configurable instead of hardcoded.
 
 DEFAULT_REMOTE_ELIGIBLE_COUNTRIES: frozenset[str] = frozenset({"US"})
 DEFAULT_LOCATION_POLICY_MAX_RADIUS_MILES = 50
@@ -196,11 +197,11 @@ def get_location_policy_config_hash(config: dict) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-# -- PORT-SEAM: generic geography-tier matching, factored out of Ledger
+# PORT-SEAM: generic geography-tier matching, factored out of Ledger
 # L-0149 (job_finder/web/bay_area_geography.py, DIES). The 291-city Bay Area
 # seed list does NOT carry (owner-specific); the matching LOGIC below is
 # host-agnostic and fully portable — ``BAY_AREA_CITIES`` ships empty, so
-# tiering is driven entirely by each tenant's own ``extra_cities`` config. --
+# tiering is driven entirely by each tenant's own ``extra_cities`` config.
 
 _ZIP_RE = re.compile(r"\b\d{5}(-\d{4})?\b\s*$")
 # US state/Canadian province full names and 2-letter abbreviations, for
@@ -208,33 +209,146 @@ _ZIP_RE = re.compile(r"\b\d{5}(-\d{4})?\b\s*$")
 # generic (no owner-specific data) — carried verbatim from Ledger L-0149.
 _STATE_NAME_ALIASES: frozenset[str] = frozenset(
     {
-        "california", "new york", "new jersey", "florida", "texas", "illinois",
-        "pennsylvania", "ohio", "georgia", "north carolina", "michigan", "arizona",
-        "massachusetts", "tennessee", "indiana", "missouri", "maryland", "wisconsin",
-        "colorado", "minnesota", "south carolina", "alabama", "louisiana", "kentucky",
-        "oregon", "oklahoma", "connecticut", "utah", "iowa", "nevada", "arkansas",
-        "mississippi", "kansas", "new mexico", "nebraska", "west virginia", "idaho",
-        "hawaii", "new hampshire", "maine", "montana", "rhode island", "delaware",
-        "south dakota", "north dakota", "alaska", "vermont", "wyoming",
-        "ontario", "quebec", "british columbia", "alberta", "manitoba", "saskatchewan",
-        "nova scotia", "new brunswick", "newfoundland and labrador",
-        "prince edward island", "northwest territories", "nunavut", "yukon",
+        "california",
+        "new york",
+        "new jersey",
+        "florida",
+        "texas",
+        "illinois",
+        "pennsylvania",
+        "ohio",
+        "georgia",
+        "north carolina",
+        "michigan",
+        "arizona",
+        "massachusetts",
+        "tennessee",
+        "indiana",
+        "missouri",
+        "maryland",
+        "wisconsin",
+        "colorado",
+        "minnesota",
+        "south carolina",
+        "alabama",
+        "louisiana",
+        "kentucky",
+        "oregon",
+        "oklahoma",
+        "connecticut",
+        "utah",
+        "iowa",
+        "nevada",
+        "arkansas",
+        "mississippi",
+        "kansas",
+        "new mexico",
+        "nebraska",
+        "west virginia",
+        "idaho",
+        "hawaii",
+        "new hampshire",
+        "maine",
+        "montana",
+        "rhode island",
+        "delaware",
+        "south dakota",
+        "north dakota",
+        "alaska",
+        "vermont",
+        "wyoming",
+        "ontario",
+        "quebec",
+        "british columbia",
+        "alberta",
+        "manitoba",
+        "saskatchewan",
+        "nova scotia",
+        "new brunswick",
+        "newfoundland and labrador",
+        "prince edward island",
+        "northwest territories",
+        "nunavut",
+        "yukon",
     }
 )
-_STATE_ABBREVIATIONS: frozenset[str] = frozenset(
+_STATE_ABBREVIATIONS: frozenset[str] = frozenset(  # PORT-SEAM: host-agnostic, carried verbatim
     {
-        "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi", "id", "il",
-        "in", "ia", "ks", "ky", "la", "me", "md", "ma", "mi", "mn", "ms", "mo", "mt",
-        "ne", "nv", "nh", "nj", "nm", "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri",
-        "sc", "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy", "dc", "pr",
-        "gu", "vi", "as", "mp",
-        "ab", "bc", "mb", "nb", "nl", "ns", "nt", "nu", "on", "pe", "qc", "sk", "yt",
+        "al",
+        "ak",
+        "az",
+        "ar",
+        "ca",
+        "co",
+        "ct",
+        "de",
+        "fl",
+        "ga",
+        "hi",
+        "id",
+        "il",
+        "in",
+        "ia",
+        "ks",
+        "ky",
+        "la",
+        "me",
+        "md",
+        "ma",
+        "mi",
+        "mn",
+        "ms",
+        "mo",
+        "mt",
+        "ne",
+        "nv",
+        "nh",
+        "nj",
+        "nm",
+        "ny",
+        "nc",
+        "nd",
+        "oh",
+        "ok",
+        "or",
+        "pa",
+        "ri",
+        "sc",
+        "sd",
+        "tn",
+        "tx",
+        "ut",
+        "vt",
+        "va",
+        "wa",
+        "wv",
+        "wi",
+        "wy",
+        "dc",
+        "pr",
+        "gu",
+        "vi",
+        "as",
+        "mp",
+        "ab",
+        "bc",
+        "mb",
+        "nb",
+        "nl",
+        "ns",
+        "nt",
+        "nu",
+        "on",
+        "pe",
+        "qc",
+        "sk",
+        "yt",
     }
 )
 # Empty by design (Ledger L-0149, DIES): the private repo's 291-city Bay Area
 # seed does not carry. Tenants supply their own target-metro cities via
 # ``config["profile"]["location_policy"]["bay_area_cities"]`` (extra_cities).
-BAY_AREA_CITIES: frozenset[str] = frozenset()
+BAY_AREA_CITIES: frozenset[str] = frozenset()  # PORT-SEAM: empty by design, Ledger L-0149 DIES
 
 
 def normalize_city(s: str | None) -> str:
@@ -293,6 +407,7 @@ def classify_geography(city: str, primary_city: str | None, extra_cities: frozen
     if city_norm and (city_norm in BAY_AREA_CITIES or city_norm in extra_cities):
         return "metro"
     return "outside_target"
+
 
 # Country name / 2-letter code -> ISO-3166-1 alpha-2.
 _COUNTRY_NAME_TO_CODE: dict[str, str] = {
@@ -597,15 +712,15 @@ def _title_case_city(name: str) -> str:
     return " ".join(part.capitalize() for part in name.split())
 
 
-def _detect_primary_city(
+def _detect_primary_city(  # PORT-SEAM: ``fallback`` replaces the private
     target_locations: list, extra_cities: frozenset[str], fallback: str | None = None
 ) -> str | None:
     """Return the first target_location matching the tenant's target-metro set.
 
     Strips state/zip, drops the ``"Remote"`` sentinel, and falls back to
-    # PORT-SEAM: ``fallback`` (config ``primary_city_fallback``) replaces the
-    # private repo's hardcoded ``"San Francisco"`` default — None when unset.
-    ``fallback`` when no target matches.
+    ``fallback`` when no target matches.  # PORT-SEAM: ``fallback`` (config
+    ``primary_city_fallback``) replaces the private repo's hardcoded
+    ``"San Francisco"`` default -- None when the tenant leaves it unset.
     """
     for target in target_locations or []:
         if not target:
@@ -615,7 +730,7 @@ def _detect_primary_city(
             continue
         if is_bay_area_city(candidate, extra_cities):
             return _title_case_city(candidate)
-    return fallback
+    return fallback  # PORT-SEAM: None default (no owner-specific city fallback)
 
 
 def _normalize_location(loc: Any, fallback_workplace_type: str | None = None) -> dict[str, Any]:
@@ -770,7 +885,7 @@ def _classify_presence(
     workplace_class: str,
     primary_city: str | None,
     extra_cities: frozenset[str],
-    target_country_code: str = DEFAULT_TARGET_COUNTRY_CODE,
+    target_country_code: str = DEFAULT_TARGET_COUNTRY_CODE,  # PORT-SEAM: see docstring below
     target_region_code: str | None = None,
 ) -> dict[str, Any]:
     """Classify a single HYBRID or ONSITE location.
@@ -785,7 +900,7 @@ def _classify_presence(
     region_code = loc.get("region_code")
     city = loc.get("city")
 
-    if country_code is not None and country_code != target_country_code:
+    if country_code is not None and country_code != target_country_code:  # PORT-SEAM:
         return _verdict_fields(
             workplace_class=workplace_class,
             geography_tier="outside_target",
@@ -798,7 +913,11 @@ def _classify_presence(
             evidence=[_evidence(loc, workplace_class, "outside_target")],
         )
 
-    if target_region_code is not None and region_code is not None and region_code != target_region_code:
+    if (  # PORT-SEAM: None target_region_code skips the region gate entirely
+        target_region_code is not None
+        and region_code is not None
+        and region_code != target_region_code
+    ):
         return _verdict_fields(
             workplace_class=workplace_class,
             geography_tier="outside_target",
@@ -876,7 +995,7 @@ def _evaluate_single(
     extra_cities: frozenset[str],
     home_country: str | None,
     primary_city: str | None,
-    target_country_code: str = DEFAULT_TARGET_COUNTRY_CODE,
+    target_country_code: str = DEFAULT_TARGET_COUNTRY_CODE,  # PORT-SEAM: threaded through
     target_region_code: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate one location set (a posting or the row-level set)."""
@@ -911,7 +1030,7 @@ def _evaluate_single(
         if wt == "REMOTE":
             candidate = _classify_remote(loc, remote_eligible, home_country, primary_city)
         elif wt in ("HYBRID", "ONSITE"):
-            candidate = _classify_presence(
+            candidate = _classify_presence(  # PORT-SEAM: pass-through, see def above
                 loc, wt.lower(), primary_city, extra_cities, target_country_code, target_region_code
             )
         else:
@@ -1179,11 +1298,11 @@ def compute_location_policy(
     remote_eligible = get_remote_eligible_countries(cfg)
     lp_config = get_location_policy_config(cfg)
     extra_cities = lp_config["bay_area_cities"]
-    target_country_code = lp_config["target_country_code"]
+    target_country_code = lp_config["target_country_code"]  # PORT-SEAM: tenant config, see above
     target_region_code = lp_config["target_region_code"]
     home_country = _norm_code(profile.get("home_country"))
     target_locations = profile.get("target_locations") or []
-    primary_city = _detect_primary_city(
+    primary_city = _detect_primary_city(  # PORT-SEAM: primary_city_fallback, see def above
         target_locations, extra_cities, lp_config["primary_city_fallback"]
     )
 
@@ -1205,7 +1324,7 @@ def compute_location_policy(
                 p_wt = getattr(posting, "workplace_type", workplace_type)
                 p_pcc = getattr(posting, "primary_country_code", primary_country_code)
 
-            fields = _evaluate_single(
+            fields = _evaluate_single(  # PORT-SEAM: target_country_code/region_code pass-through
                 p_locs,
                 p_wt,
                 p_pcc,
@@ -1213,7 +1332,7 @@ def compute_location_policy(
                 extra_cities,
                 home_country,
                 primary_city,
-                target_country_code,
+                target_country_code,  # PORT-SEAM: tenant target country/region
                 target_region_code,
             )
             candidates.append(fields)
@@ -1233,7 +1352,7 @@ def compute_location_policy(
             )
         best_fields = max(candidates, key=lambda c: (c["sort_order"], c["rank"]))
     else:
-        best_fields = _evaluate_single(
+        best_fields = _evaluate_single(  # PORT-SEAM: target_country_code/region_code pass-through
             locations_structured,
             workplace_type,
             primary_country_code,
@@ -1241,7 +1360,7 @@ def compute_location_policy(
             extra_cities,
             home_country,
             primary_city,
-            target_country_code,
+            target_country_code,  # PORT-SEAM: tenant target country/region
             target_region_code,
         )
 
