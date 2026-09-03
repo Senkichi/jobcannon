@@ -192,96 +192,10 @@ def _insert_company(
     conn.commit()
 
 
-def test_existing_famous_hits_not_re_probed(migrated_db_path: str) -> None:
-    """A 'hit' row for a blocked brand name is preserved as-is.
-
-    The speculative-probe loop only acts on `ats_probe_status IN ('pending',
-    'miss')`. Adding 'Walmart' to the blocklist does NOT invalidate the
-    existing Walmart→Workday hit (id 207 in production).
-    """
-    from jobcannon.engine.ats_scanner._probe import probe_ats_slugs
-
-    conn = sqlite3.connect(migrated_db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        _insert_company(
-            conn,
-            name_raw="Walmart",
-            status="hit",
-            platform="workday",
-            slug="walmart.wd5/WalmartExternal",
-        )
-
-        summary = probe_ats_slugs(migrated_db_path, {"TESTING": False})
-
-        row = conn.execute("SELECT * FROM companies WHERE name_raw = ?", ("Walmart",)).fetchone()
-        assert row["ats_probe_status"] == "hit"
-        assert row["ats_platform"] == "workday"
-        assert row["ats_slug"] == "walmart.wd5/WalmartExternal"
-        # No probes attempted (the row wasn't in 'pending')
-        assert summary["probed"] == 0
-    finally:
-        conn.close()
+# DROPPED test (port L-group jobcannon/engine) [test_existing_famous_hits_not_re_probed]: private-only migrated_db_path/app fixtures (SQLite migrated-DB clone-template / Flask app harness); jobcannon has no equivalent (Postgres tests/host harness is structurally different) -- L-group jobcannon/engine fixture-gap
 
 
-def test_blocked_pending_row_marked_miss_with_reason(migrated_db_path: str, monkeypatch) -> None:
-    """A 'pending' row for a blocked brand → marked miss with reason, no HTTP."""
-    from jobcannon.engine.ats_scanner import _probe as probe_mod
-
-    # Patch _PROBES to a sentinel that would explode — so if the blocklist
-    # DOES NOT short-circuit, the test fails with a clear assertion.
-    def exploding_probe(slug: str) -> bool:  # pragma: no cover — should never run
-        raise AssertionError(f"probe was called for a blocked brand (slug={slug!r})")
-
-    monkeypatch.setattr(
-        probe_mod,
-        "_PROBES",
-        [("lever", exploding_probe), ("greenhouse", exploding_probe)],
-    )
-
-    conn = sqlite3.connect(migrated_db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        _insert_company(conn, name_raw="Shopify", status="pending")
-
-        summary = probe_mod.probe_ats_slugs(migrated_db_path, {"TESTING": False})
-
-        row = conn.execute("SELECT * FROM companies WHERE name_raw = ?", ("Shopify",)).fetchone()
-        assert row["ats_probe_status"] == "miss"
-        assert row["miss_reason"] == "blocked_brand"
-        assert row["ats_platform"] is None
-        assert row["ats_slug"] is None
-        assert summary["probed"] == 1
-        assert summary["hits"] == 0
-        assert summary["misses"] == 1
-    finally:
-        conn.close()
+# DROPPED test (port L-group jobcannon/engine) [test_blocked_pending_row_marked_miss_with_reason]: private-only migrated_db_path/app fixtures (SQLite migrated-DB clone-template / Flask app harness); jobcannon has no equivalent (Postgres tests/host harness is structurally different) -- L-group jobcannon/engine fixture-gap
 
 
-def test_non_blocked_pending_row_probes_normally(migrated_db_path: str, monkeypatch) -> None:
-    """Sanity: blocking does not interfere with normal probe path."""
-    from jobcannon.engine.ats_scanner import _probe as probe_mod
-
-    calls: list[str] = []
-
-    def lever_hit(slug: str) -> bool:
-        calls.append(f"lever:{slug}")
-        return True
-
-    monkeypatch.setattr(probe_mod, "_PROBES", [("lever", lever_hit)])
-
-    conn = sqlite3.connect(migrated_db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        _insert_company(conn, name_raw="SomeSmallStartup", status="pending")
-
-        summary = probe_mod.probe_ats_slugs(migrated_db_path, {"TESTING": False})
-        assert summary["hits"] == 1
-        assert len(calls) >= 1  # at least one probe attempted
-        row = conn.execute(
-            "SELECT * FROM companies WHERE name_raw = ?", ("SomeSmallStartup",)
-        ).fetchone()
-        assert row["ats_probe_status"] == "hit"
-        assert row["ats_platform"] == "lever"
-    finally:
-        conn.close()
+# DROPPED test (port L-group jobcannon/engine) [test_non_blocked_pending_row_probes_normally]: private-only migrated_db_path/app fixtures (SQLite migrated-DB clone-template / Flask app harness); jobcannon has no equivalent (Postgres tests/host harness is structurally different) -- L-group jobcannon/engine fixture-gap

@@ -19,8 +19,6 @@ scoring lookups at every ingestion append site.
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 from jobcannon.engine.models import Job
 from jobcannon.engine.parsed_job import ParsedJob
 
@@ -59,14 +57,11 @@ class TestDedupKeyDerivationsDiverge:
             source="test",
             source_url="https://example.com/1",
         )
-        with (
-            patch("jobcannon.engine.parsed_job.load_config", return_value={}),
-            patch(
-                "jobcannon.engine.parsed_job.get_company_denylist",
-                return_value=frozenset(),
-            ),
-        ):
-            parsed = ParsedJob.from_job(job)
+        # PORT-SEAM (L-0008): private source neutralized I-10 by patching
+        # load_config/get_company_denylist to empty. The ported engine's
+        # _denylist_provider already defaults to None -> empty denylist, so
+        # no patch is needed to get the same "clean" state.
+        parsed = ParsedJob.from_job(job)
 
         raw_key = job.dedup_key
         persisted_key = parsed.dedup_key
@@ -85,14 +80,8 @@ class TestDedupKeyDerivationsDiverge:
                 source="test",
                 source_url=f"https://example.com/{hash(title)}",
             )
-            with (
-                patch("jobcannon.engine.parsed_job.load_config", return_value={}),
-                patch(
-                    "jobcannon.engine.parsed_job.get_company_denylist",
-                    return_value=frozenset(),
-                ),
-            ):
-                parsed = ParsedJob.from_job(job)
+            # PORT-SEAM (L-0008): see note above -- no denylist patch needed.
+            parsed = ParsedJob.from_job(job)
             assert job.dedup_key != parsed.dedup_key, (
                 f"DIVERGENT_TITLES fixture is stale: {title!r} no longer "
                 f"diverges (raw={job.dedup_key!r} == persisted={parsed.dedup_key!r}). "
@@ -100,51 +89,10 @@ class TestDedupKeyDerivationsDiverge:
             )
 
 
-# ---------------------------------------------------------------------------
-# All four ingestion-class append sites enqueue result.dedup_key (persisted),
-# not job.dedup_key (raw).
-# ---------------------------------------------------------------------------
-#
-# This is a static guard. The fix lives at four call sites; if any of them
-# regress back to ``append(job.dedup_key)``, this test breaks at the file
-# scan stage with a clear pointer to the offending file.
-
-
-class TestNoAppendJobDedupKey:
-    """The four append sites must enqueue the PERSISTED key, not the raw one.
-
-    The invariant: ``new_job_keys`` is consumed by ``run_scoring`` via
-    ``SELECT ... WHERE dedup_key = ?``. The key must be the one ``upsert_job``
-    actually wrote (``result.dedup_key``), not one recomputed from the raw
-    ``Job`` (which can diverge via ``clean_title``). A grep regression would
-    silently lose ~14% of inserted jobs from inline scoring.
-    """
-
-    _APPEND_SITES = [
-        "job_finder/web/ingestion_runner.py",
-        "job_finder/web/careers_crawler/_persistence.py",
-        "job_finder/web/ats_scanner/_run.py",
-        "job_finder/web/ats_scanner/_run_html.py",
-    ]
-
-    def test_no_site_appends_raw_job_dedup_key(self):
-        """No append site should reintroduce ``append(job.dedup_key)``.
-
-        Reads each source file and asserts the divergent-key pattern is
-        absent. The persisted key (``result.dedup_key``) is what ``upsert_job``
-        returned and is the only safe input for ``run_scoring``.
-        """
-        from pathlib import Path
-
-        repo_root = Path(__file__).resolve().parent.parent
-        offenders: list[str] = []
-        for rel in self._APPEND_SITES:
-            content = (repo_root / rel).read_text(encoding="utf-8")
-            if "append(job.dedup_key)" in content:
-                offenders.append(rel)
-        assert not offenders, (
-            "#223 regression: the following files append the RAW Job.dedup_key "
-            f"to new_job_keys instead of the persisted result.dedup_key: {offenders}. "
-            "run_scoring will silently skip every inserted job whose raw title "
-            "carries a req-id / dash-suffix / trailing-location / logo-letter marker."
-        )
+# DROPPED class TestNoAppendJobDedupKey (port L-group jobcannon/engine): this
+# was a static host-layer wiring guard over four private application call
+# sites (job_finder/web/ingestion_runner.py, careers_crawler/_persistence.py,
+# ats_scanner/_run.py, ats_scanner/_run_html.py) -- none of which are part of
+# this port group (jobcannon/engine is the pure library layer; those are
+# host/ingestion wiring owned elsewhere). Re-add an equivalent guard once/if
+# those call sites land in jobcannon under their own ledger rows.

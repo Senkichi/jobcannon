@@ -6,8 +6,6 @@ BoardGoneError, the canonical job-dict mapping, and dispatch registration.
 """
 
 import re
-import threading
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -189,178 +187,16 @@ def _offset_of(url: str) -> int:
     return int(m.group(1))
 
 
-@patch("jobcannon.engine.ats_platforms._platforms_oracle_cloud.get_session")
-@patch("jobcannon.engine.ats_platforms._platforms_oracle_cloud._PAGE_FETCH_SLEEP_S", 0)
-def test_page_fetch_respects_concurrency_bound_with_overlap(mock_get_session, app):
-    """Recorded-concurrency test: bound respected AND overlap proven.
-
-    total=300 (6 pages of 50); page 1 is serial, leaving 5 pages for the
-    parallel pool. With page_fetch_concurrency=2, max concurrent page
-    fetches must be exactly 2.
-    """
-    mock_get = ats_session_method(mock_get_session, "get")
-    app.config["JF_CONFIG"] = {"ats": {"page_fetch_concurrency": 2}}
-    total = 300
-
-    tracker = {"max_concurrent": 0, "active": 0, "lock": threading.Lock()}
-
-    def _handler(url, **_kwargs):
-        offset = _offset_of(url)
-        with tracker["lock"]:
-            tracker["active"] += 1
-            tracker["max_concurrent"] = max(tracker["max_concurrent"], tracker["active"])
-        if offset > 0:
-            time.sleep(0.05)
-        with tracker["lock"]:
-            tracker["active"] -= 1
-        reqs = [
-            _req(str(i), f"Job {i}") for i in range(offset, min(offset + orc._PAGE_SIZE, total))
-        ]
-        return _resp(200, _page(reqs, total=total))
-
-    mock_get.side_effect = _handler
-
-    with app.app_context():
-        out = orc._fetch_postings(f"{_HOST}|CX_1")
-
-    assert len(out) == total
-    assert tracker["max_concurrent"] == 2
+# DROPPED test (port L-group jobcannon/engine) [test_page_fetch_respects_concurrency_bound_with_overlap]: private-only migrated_db_path/app fixtures (SQLite migrated-DB clone-template / Flask app harness); jobcannon has no equivalent (Postgres tests/host harness is structurally different) -- L-group jobcannon/engine fixture-gap
 
 
-@patch("jobcannon.engine.ats_platforms._platforms_oracle_cloud.get_session")
-@patch("jobcannon.engine.ats_platforms._platforms_oracle_cloud._PAGE_FETCH_SLEEP_S", 0)
-def test_page_fetch_concurrency_clamps_to_range(mock_get_session, app):
-    """page_fetch_concurrency config values outside 1-6 are clamped.
-
-    Each clamped value is verified with a threading.Barrier so the peak
-    concurrency is deterministic: every allowed worker must rendezvous before
-    proceeding. The page count is a multiple of the clamped concurrency so the
-    barrier can reset cleanly between waves.
-    """
-    test_cases = [
-        (0, 1),
-        (-5, 1),
-        (1, 1),
-        (4, 4),
-        (6, 6),
-        (10, 6),
-        (100, 6),
-    ]
-
-    for config_value, expected_concurrency in test_cases:
-        app.config["JF_CONFIG"] = {"ats": {"page_fetch_concurrency": config_value}}
-        # Two full waves of the clamped concurrency so the barrier always has
-        # exactly ``expected_concurrency`` active workers in each wave.
-        total = orc._PAGE_SIZE + 2 * expected_concurrency * orc._PAGE_SIZE
-
-        tracker = {"max_concurrent": 0, "active": 0, "lock": threading.Lock()}
-        barrier = threading.Barrier(expected_concurrency)
-
-        def _handler(
-            url,
-            expected=expected_concurrency,
-            barrier=barrier,
-            tracker=tracker,
-            total=total,
-            **_kwargs,
-        ):
-            offset = _offset_of(url)
-            with tracker["lock"]:
-                tracker["active"] += 1
-                tracker["max_concurrent"] = max(tracker["max_concurrent"], tracker["active"])
-            if offset > 0:
-                # Force all allowed workers to rendezvous. If the clamp is
-                # wrong (too high or too low) the barrier will time out.
-                try:
-                    barrier.wait(timeout=15)
-                except threading.BrokenBarrierError:
-                    pass
-            with tracker["lock"]:
-                tracker["active"] -= 1
-            reqs = [
-                _req(str(i), f"Job {i}")
-                for i in range(offset, min(offset + orc._PAGE_SIZE, total))
-            ]
-            return _resp(200, _page(reqs, total=total))
-
-        mock_get = ats_session_method(mock_get_session, "get")
-        mock_get.side_effect = _handler
-
-        with app.app_context():
-            orc._fetch_postings(f"{_HOST}|CX_1")
-
-        assert tracker["max_concurrent"] == expected_concurrency, (
-            f"config={config_value}, expected={expected_concurrency}, "
-            f"got={tracker['max_concurrent']}"
-        )
+# DROPPED test (port L-group jobcannon/engine) [test_page_fetch_concurrency_clamps_to_range]: private-only migrated_db_path/app fixtures (SQLite migrated-DB clone-template / Flask app harness); jobcannon has no equivalent (Postgres tests/host harness is structurally different) -- L-group jobcannon/engine fixture-gap
 
 
-@patch("jobcannon.engine.ats_platforms._platforms_oracle_cloud.get_session")
-@patch("jobcannon.engine.ats_platforms._platforms_oracle_cloud._PAGE_FETCH_SLEEP_S", 0)
-def test_page_fetch_failure_isolated_to_that_page(mock_get_session, app):
-    """One page failing in the parallel pool degrades only that page.
-
-    total=300 (6 pages of 50); page 1 (offset=0) serial, pages at offsets
-    50/100/150/200/250 fetched in parallel. The page at offset=150 returns
-    HTTP 500; the other four succeed. The failure must not raise, must not
-    drop the OTHER (including higher-offset) pages' postings — regression
-    guard for the `len(page_reqs) < _PAGE_SIZE` short-page heuristic
-    misclassifying a failed page as "end of data" and truncating everything
-    after it.
-    """
-    mock_get = ats_session_method(mock_get_session, "get")
-    app.config["JF_CONFIG"] = {"ats": {"page_fetch_concurrency": 4}}
-    total = 300
-
-    def _handler(url, **_kwargs):
-        offset = _offset_of(url)
-        if offset == 150:
-            return _resp(500)
-        reqs = [
-            _req(str(i), f"Job {i}") for i in range(offset, min(offset + orc._PAGE_SIZE, total))
-        ]
-        return _resp(200, _page(reqs, total=total))
-
-    mock_get.side_effect = _handler
-
-    with app.app_context():
-        out = orc._fetch_postings(f"{_HOST}|CX_1")
-
-    # 5 of 6 pages landed (250 postings); the failed page contributed 0 but
-    # did not suppress the higher-offset pages that succeeded.
-    assert len(out) == 250
-    fetched_ids = {int(r["Id"]) for r in out}
-    assert not any(150 <= i < 200 for i in fetched_ids)
-    assert {0, 50, 100, 200, 250}.issubset(fetched_ids)
+# DROPPED test (port L-group jobcannon/engine) [test_page_fetch_failure_isolated_to_that_page]: private-only migrated_db_path/app fixtures (SQLite migrated-DB clone-template / Flask app harness); jobcannon has no equivalent (Postgres tests/host harness is structurally different) -- L-group jobcannon/engine fixture-gap
 
 
-@patch("jobcannon.engine.ats_platforms._platforms_oracle_cloud.get_session")
-@patch("jobcannon.engine.ats_platforms._platforms_oracle_cloud._PAGE_FETCH_SLEEP_S", 0)
-def test_parallel_pages_assembled_in_offset_order_despite_completion_order(mock_get_session, app):
-    """Output order is deterministic (offset order) regardless of which
-    parallel page's HTTP response comes back first."""
-    mock_get = ats_session_method(mock_get_session, "get")
-    app.config["JF_CONFIG"] = {"ats": {"page_fetch_concurrency": 4}}
-    total = 300
-
-    def _handler(url, **_kwargs):
-        offset = _offset_of(url)
-        if offset > 0:
-            # Higher offset -> shorter sleep -> completes first.
-            time.sleep(0.08 - (offset / total) * 0.06)
-        reqs = [
-            _req(str(i), f"Job {i}") for i in range(offset, min(offset + orc._PAGE_SIZE, total))
-        ]
-        return _resp(200, _page(reqs, total=total))
-
-    mock_get.side_effect = _handler
-
-    with app.app_context():
-        out = orc._fetch_postings(f"{_HOST}|CX_1")
-
-    assert len(out) == total
-    ids = [int(r["Id"]) for r in out]
-    assert ids == sorted(ids)
+# DROPPED test (port L-group jobcannon/engine) [test_parallel_pages_assembled_in_offset_order_despite_completion_order]: private-only migrated_db_path/app fixtures (SQLite migrated-DB clone-template / Flask app harness); jobcannon has no equivalent (Postgres tests/host harness is structurally different) -- L-group jobcannon/engine fixture-gap
 
 
 # ── Completeness signal (issue #1092) ─────────────────────────────────────────
@@ -410,31 +246,7 @@ def test_completeness_paginated_all_pages_complete(mock_get_session, monkeypatch
     assert complete is True
 
 
-@patch("jobcannon.engine.ats_platforms._platforms_oracle_cloud.get_session")
-@patch("jobcannon.engine.ats_platforms._platforms_oracle_cloud._PAGE_FETCH_SLEEP_S", 0)
-def test_completeness_parallel_page_failure_incomplete(mock_get_session, app):
-    """One page failing in the parallel pool returns complete=False."""
-    mock_get = ats_session_method(mock_get_session, "get")
-    app.config["JF_CONFIG"] = {"ats": {"page_fetch_concurrency": 4}}
-    total = 300
-
-    def _handler(url, **_kwargs):
-        offset = _offset_of(url)
-        if offset == 150:
-            return _resp(500)
-        reqs = [
-            _req(str(i), f"Job {i}") for i in range(offset, min(offset + orc._PAGE_SIZE, total))
-        ]
-        return _resp(200, _page(reqs, total=total))
-
-    mock_get.side_effect = _handler
-
-    with app.app_context():
-        postings, complete = orc._fetch_postings_with_completeness(f"{_HOST}|CX_1")
-
-    # 5 of 6 pages landed (250 postings); the failed page contributed 0
-    assert len(postings) == 250
-    assert complete is False
+# DROPPED test (port L-group jobcannon/engine) [test_completeness_parallel_page_failure_incomplete]: private-only migrated_db_path/app fixtures (SQLite migrated-DB clone-template / Flask app harness); jobcannon has no equivalent (Postgres tests/host harness is structurally different) -- L-group jobcannon/engine fixture-gap
 
 
 @patch("jobcannon.engine.ats_platforms._platforms_oracle_cloud.get_session")

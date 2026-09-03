@@ -7,13 +7,20 @@ Coverage per acceptance criteria:
   - from_job() routing verified for each failure class.
 
 Patch surface:
-  - jobcannon.engine.parsed_job.load_config   → returns {}
-  - jobcannon.engine.parsed_job.get_company_denylist → returns controlled frozenset
+  - PORT-SEAM (L-0008): the private source read the denylist via
+    load_config()/get_company_denylist() (job_finder.config, app-level);
+    the ported engine takes an injected provider instead
+    (jobcannon.engine.parsed_job.set_denylist_provider). No provider
+    registered => empty denylist => the I-10 check passes everything, which
+    is exactly the "clean" state the old load_config/get_company_denylist
+    mocks used to produce -- so _clean_patches() below is a no-op context
+    manager, and the positive I-10 cases register a provider directly
+    instead of mocking a symbol that no longer exists.
 """
 
 from __future__ import annotations
 
-from unittest.mock import patch
+import contextlib
 
 import pytest
 
@@ -26,6 +33,7 @@ from jobcannon.engine.parsed_job import (
     UnresolvedParsedJob,
     _has_title_cross_field_bleed,
     _is_jd_junk,
+    set_denylist_provider,
 )
 from jobcannon.engine.location_canonical import JobLocation
 
@@ -68,29 +76,35 @@ def _make_location(city: str = "New York", country_code: str = "US") -> JobLocat
     )
 
 
-# Patch context: no-op load_config + empty denylist
-_CLEAN_DENYLIST_CTX = [
-    patch("jobcannon.engine.parsed_job.load_config", return_value={}),
-    patch(
-        "jobcannon.engine.parsed_job.get_company_denylist",
-        return_value=frozenset(),
-    ),
-]
-
-
 def _clean_patches():
-    """Stack of patches that disable I-10 so other validators can be tested."""
-    import contextlib
+    """No-op context that keeps I-10 disabled so other validators can be tested.
+
+    PORT-SEAM (L-0008): _denylist_provider defaults to None, which
+    from_job() already reads as an empty denylist -- the exact "clean"
+    state the private load_config/get_company_denylist mocks used to
+    force. Nothing to patch; kept as a context manager so every existing
+    `with _clean_patches():` callsite is unchanged.
+    """
 
     @contextlib.contextmanager
     def ctx():
-        with (
-            patch("jobcannon.engine.parsed_job.load_config", return_value={}),
-            patch("jobcannon.engine.parsed_job.get_company_denylist", return_value=frozenset()),
-        ):
-            yield
+        yield
 
     return ctx()
+
+
+@contextlib.contextmanager
+def _denylisted_as(*names: str):
+    """PORT-SEAM (L-0008): register a scoped denylist provider for the I-10
+    positive-match tests, in place of the private repo's
+    `patch("...get_company_denylist", return_value=...)`. Always resets the
+    provider to None on exit so denylist state never leaks between tests.
+    """
+    try:
+        set_denylist_provider(lambda: frozenset(names))
+        yield
+    finally:
+        set_denylist_provider(None)
 
 
 # ---------------------------------------------------------------------------
@@ -234,39 +248,21 @@ class TestI10CompanyDenylist:
         legal-entity tokens, yielding 'fake'.
         """
         job = _make_job(company="Fake Company LLC")
-        with (
-            patch("jobcannon.engine.parsed_job.load_config", return_value={}),
-            patch(
-                "jobcannon.engine.parsed_job.get_company_denylist",
-                return_value=frozenset({"fake"}),
-            ),
-        ):
+        with _denylisted_as("fake"):
             with pytest.raises(DenylistedCompanyError):
                 ParsedJob.from_job(job)
 
     def test_from_job_denylist_check_is_case_insensitive(self):
         """Denylist comparison is case-insensitive (normalize_company lowercases)."""
         job = _make_job(company="FAKE COMPANY LLC")
-        with (
-            patch("jobcannon.engine.parsed_job.load_config", return_value={}),
-            patch(
-                "jobcannon.engine.parsed_job.get_company_denylist",
-                return_value=frozenset({"fake"}),
-            ),
-        ):
+        with _denylisted_as("fake"):
             with pytest.raises(DenylistedCompanyError):
                 ParsedJob.from_job(job)
 
     def test_from_job_denylist_matches_suffix_variant(self):
         """#213: a suffix-free denylist entry rejects a company stored WITH a suffix."""
         job = _make_job(company="Fake Company Inc")
-        with (
-            patch("jobcannon.engine.parsed_job.load_config", return_value={}),
-            patch(
-                "jobcannon.engine.parsed_job.get_company_denylist",
-                return_value=frozenset({"fake"}),
-            ),
-        ):
+        with _denylisted_as("fake"):
             with pytest.raises(DenylistedCompanyError):
                 ParsedJob.from_job(job)
 
@@ -532,9 +528,7 @@ class TestI15SalaryImplausible:
         """Implausible observation + NULL canonical pair → salary_implausible."""
         job = _make_job()  # salary_min / salary_max default None
         with _clean_patches():
-            result = ParsedJob.from_job(
-                job, source_meta={"salary_observation": _implausible_obs()}
-            )
+            result = ParsedJob.from_job(job, source_meta={"salary_observation": _implausible_obs()})
         assert isinstance(result, UnresolvedParsedJob)
         assert "salary_implausible" in result.unresolved_reasons
 
@@ -542,9 +536,7 @@ class TestI15SalaryImplausible:
         """The quarantined observation survives on salary_observations (D-1/D-12)."""
         job = _make_job()
         with _clean_patches():
-            result = ParsedJob.from_job(
-                job, source_meta={"salary_observation": _implausible_obs()}
-            )
+            result = ParsedJob.from_job(job, source_meta={"salary_observation": _implausible_obs()})
         assert len(result.salary_observations) == 1
         assert result.salary_observations[0]["resolution"] == "implausible"
         assert result.salary_min is None and result.salary_max is None
@@ -585,9 +577,7 @@ class TestI15SalaryImplausible:
         job.salary_min = 130_000  # capture site DID resolve a value this sighting
         job.salary_max = 160_000
         with _clean_patches():
-            result = ParsedJob.from_job(
-                job, source_meta={"salary_observation": _implausible_obs()}
-            )
+            result = ParsedJob.from_job(job, source_meta={"salary_observation": _implausible_obs()})
         assert isinstance(result, ParsedJob)
         assert "salary_implausible" not in result.unresolved_reasons
 

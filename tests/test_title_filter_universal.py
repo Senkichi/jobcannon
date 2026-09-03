@@ -17,8 +17,6 @@ Callsite shapes exercised:
 from __future__ import annotations
 
 import contextlib
-import sqlite3
-from unittest.mock import patch
 
 from jobcannon.engine.models import Job
 from jobcannon.engine.parsed_job import ParsedJob, UnresolvedParsedJob
@@ -41,12 +39,15 @@ def _make_job(title: str, source: str = "careers_crawl") -> Job:
 
 @contextlib.contextmanager
 def _clean_patches():
-    """Disable I-10 (company denylist) so other validators can be exercised."""
-    with (
-        patch("jobcannon.engine.parsed_job.load_config", return_value={}),
-        patch("jobcannon.engine.parsed_job.get_company_denylist", return_value=frozenset()),
-    ):
-        yield
+    """No-op: I-10 (company denylist) is already disabled by default.
+
+    PORT-SEAM (L-0008): private source neutralized I-10 by patching
+    load_config/get_company_denylist to empty. The ported engine's
+    _denylist_provider defaults to None -> empty denylist, so no patch is
+    needed to reach the same "clean" state. Kept as a context manager so
+    every existing `with _clean_patches():` callsite is unchanged.
+    """
+    yield
 
 
 # ---------------------------------------------------------------------------
@@ -170,8 +171,6 @@ class TestTitleFilterUniversalBlobs:
 # ---------------------------------------------------------------------------
 # Caller boundary: Job → ParsedJob.from_job → upsert_job → unresolved_reasons
 # ---------------------------------------------------------------------------
-
-
 
 
 # ---------------------------------------------------------------------------

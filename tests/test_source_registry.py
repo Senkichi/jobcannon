@@ -4,9 +4,6 @@ docs/superpowers/specs/2026-07-08-job-listing-verification-design.md)."""
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
-
-import yaml
 
 from jobcannon.engine.source_registry import (
     UNVERIFIABLE_EVIDENCE_CEILING,
@@ -129,18 +126,12 @@ class TestIsOpaqueRedirectSource:
         conn.close()
 
 
-class TestConfigExampleRegistryLoads:
-    """Guards against the registry module and the shipped example config drifting."""
-
-    def test_config_example_yaml_registry_matches_jooble(self):
-        repo_root = Path(__file__).parent.parent
-        text = (repo_root / "config.example.yaml").read_text(encoding="utf-8")
-        config = yaml.safe_load(text)
-        assert is_opaque_redirect_url("https://jooble.org/away/1", config)
-        assert is_opaque_redirect_source(
-            {"sources": ["portal_jooble"], "source_urls": ["https://jooble.org/away/1"]},
-            config,
-        )
+# DROPPED class TestConfigExampleRegistryLoads (port L-group jobcannon/engine):
+# guarded the source_registry module against drift from a shipped
+# config.example.yaml -- an app-level config template. jobcannon/engine is
+# the pure library layer and ships no config.example.yaml; that artifact
+# belongs to whichever host/app layer eventually consumes source_registry.
+# Re-add an equivalent guard once such a config template exists in jobcannon.
 
 
 class TestUnverifiableEvidenceConstants:
