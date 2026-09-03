@@ -242,7 +242,9 @@ class TestEnrichJobTerminalTier:
             "company_id": None,
         }
 
-    def test_agentic_exhausted_returns_empty(self, _enrich_services):  # PORT-SEAM: ScanServices fixture
+    def test_agentic_exhausted_returns_empty(
+        self, _enrich_services
+    ):  # PORT-SEAM: ScanServices fixture
         from jobcannon.engine.data_enricher import enrich_job
 
         # PORT-SEAM: mocks come from the _enrich_services fixture, not patch()

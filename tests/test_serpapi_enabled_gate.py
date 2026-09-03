@@ -263,7 +263,9 @@ class TestSerpApiEnabledGate:
         """When disabled, no scoring_costs row should be written for serpapi."""
         config = {"sources": {"serpapi": {"enabled": False}}}
 
-        _install_services(search_serpapi=MagicMock())  # PORT-SEAM: ScanServices override, not patch()
+        _install_services(
+            search_serpapi=MagicMock()
+        )  # PORT-SEAM: ScanServices override, not patch()
         enrich_job(sparse_job, serpapi_key="FAKE_KEY", conn=mem_conn, config=config)
 
         count = mem_conn.execute(
@@ -361,7 +363,9 @@ class TestSerpApiDailyCap:
         config = {"sources": {"serpapi": {"enabled": True}}}
         before = _serpapi_daily_calls_used(mem_conn)
 
-        _install_services(search_serpapi=MagicMock(return_value=(None, [])))  # PORT-SEAM: ScanServices override
+        _install_services(
+            search_serpapi=MagicMock(return_value=(None, []))
+        )  # PORT-SEAM: ScanServices override
         enrich_job(sparse_job, serpapi_key="KEY", conn=mem_conn, config=config)
 
         after = _serpapi_daily_calls_used(mem_conn)
@@ -372,7 +376,9 @@ class TestSerpApiDailyCap:
         config = {"sources": {"serpapi": {"enabled": False}}}
         before = _serpapi_daily_calls_used(mem_conn)
 
-        _install_services(search_serpapi=MagicMock())  # PORT-SEAM: ScanServices override, not patch()
+        _install_services(
+            search_serpapi=MagicMock()
+        )  # PORT-SEAM: ScanServices override, not patch()
         enrich_job(sparse_job, serpapi_key="KEY", conn=mem_conn, config=config)
 
         after = _serpapi_daily_calls_used(mem_conn)
@@ -413,9 +419,7 @@ class TestSerpApiRateLimitCooldown:
         # double (see module docstring), not patch() + the private VendorAccountError
         _install_services(
             search_serpapi=MagicMock(
-                side_effect=_FakeVendorAccountError(
-                    "SerpAPI rate limit exceeded (429)", code="429"
-                )
+                side_effect=_FakeVendorAccountError("SerpAPI rate limit exceeded (429)", code="429")
             )
         )
         enrich_job(sparse_job, serpapi_key="KEY", conn=mem_conn, config=config)
