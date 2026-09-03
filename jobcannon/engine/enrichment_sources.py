@@ -61,7 +61,9 @@ def merge_apply_urls(conn: Any, dedup_key: str, apply_urls: list) -> None:
         # bypass. upsert_job set-unions source_urls against the existing list and
         # returns kind="touched" (no canonical change), leaving scoring,
         # pipeline_status and unresolved_reasons untouched.
-        from jobcannon.engine.services import get_services  # PORT-SEAM: upsert_job routed through ScanServices (host DB write path)
+        from jobcannon.engine.services import (
+            get_services,
+        )  # PORT-SEAM: upsert_job routed through ScanServices (host DB write path)
         from jobcannon.engine.parsed_job import ParsedJob
 
         parsed = ParsedJob(

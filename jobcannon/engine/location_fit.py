@@ -89,7 +89,7 @@ def _remote_in_country(loc: dict[str, Any], country_code: str) -> bool:
     """True iff the location is REMOTE and restricted to ``country_code``."""
     return _norm(loc.get("workplace_type")) == "remote" and _norm(
         loc.get("country_code")
-    ) == _norm(country_code)
+    ) == _norm(country_code)  # fmt: skip  # PORT-SEAM: wrap pinned to match private source; ruff would otherwise re-wrap and false-flag fidelity-diff
 
 
 def _remote_outside_country(loc: dict[str, Any], country_code: str) -> bool:

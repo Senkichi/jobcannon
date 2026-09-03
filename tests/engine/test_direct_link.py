@@ -114,9 +114,7 @@ def test_canonical_apply_url_recognizes_company_careers_host():
 
 def test_canonical_apply_url_matches_careers_host_subdomain():
     """A posting on a subdomain of the company careers host is canonical."""
-    assert is_canonical_apply_url(
-        "https://careers.acme.com/job/1", company_careers_host="acme.com"
-    )
+    assert is_canonical_apply_url("https://careers.acme.com/job/1", company_careers_host="acme.com")
     assert is_canonical_apply_url("https://acme.com/job/1", company_careers_host="acme.com")
 
 
@@ -328,9 +326,7 @@ def test_primary_posting_location_disambiguates_multi_location_board():
     lon = dict(
         _posting("Data Scientist", src="https://jobs.lever.co/acme/2"), location="London, UK"
     )
-    posting, url, confidence = resolve_primary_posting(
-        [nyc, lon], "Data Scientist", "New York, NY"
-    )
+    posting, url, confidence = resolve_primary_posting([nyc, lon], "Data Scientist", "New York, NY")
     assert posting is nyc
     assert url == "https://jobs.lever.co/acme/1"
     assert confidence == "strict"

@@ -4,8 +4,7 @@
 Computes a versioned, fingerprinted ``LocationPolicy`` verdict from structured
 location facts, candidate config, and target-market geography.  This module is
 a pure-computation foundation; downstream issues wire it into scoring and
-persistence. (# PORT-SEAM: "target-market" genericizes the private repo's
-"Bay Area" phrasing throughout this module -- see the paragraph below.)
+persistence.  # PORT-SEAM: "target-market" genericizes the private repo's "Bay Area" phrasing (see paragraph below)
 
 Genericized at port time (Ledger L-0196): the private repo's owner-specific
 target market (hardcoded ``region_code == "CA"``, a 291-city Bay Area seed
@@ -718,9 +717,11 @@ def _detect_primary_city(  # PORT-SEAM: ``fallback`` replaces the private
     """Return the first target_location matching the tenant's target-metro set.
 
     Strips state/zip, drops the ``"Remote"`` sentinel, and falls back to
-    ``fallback`` when no target matches.  # PORT-SEAM: ``fallback`` (config
-    ``primary_city_fallback``) replaces the private repo's hardcoded
-    ``"San Francisco"`` default -- None when the tenant leaves it unset.
+    ``fallback`` when no target matches.
+
+    # PORT-SEAM: ``fallback`` (config ``primary_city_fallback``) replaces the
+    # private repo's hardcoded ``"San Francisco"`` default -- None when the
+    # tenant leaves it unset.
     """
     for target in target_locations or []:
         if not target:

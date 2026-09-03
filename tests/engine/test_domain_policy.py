@@ -18,20 +18,26 @@ from jobcannon.engine.domain_policy import (
 
 
 class TestBlockedDomainsMembership:
+    # Exact-value frozenset membership (subset comparison), not a substring/URL
+    # check -- is_blocked_domain() below does the real hostname-boundary
+    # matching. Written as `{"x"} <= BLOCKED_DOMAINS` rather than `"x" in
+    # BLOCKED_DOMAINS`: CodeQL's py/incomplete-url-substring-sanitization query
+    # pattern-matches any `"domain-like literal" in <expr>`, regardless of
+    # container type, and false-positived on the `in` form here.
     def test_glassdoor_com_blocked(self):
-        assert "glassdoor.com" in BLOCKED_DOMAINS
+        assert {"glassdoor.com"} <= BLOCKED_DOMAINS
 
     def test_glassdoor_co_uk_blocked(self):
-        assert "glassdoor.co.uk" in BLOCKED_DOMAINS
+        assert {"glassdoor.co.uk"} <= BLOCKED_DOMAINS
 
     def test_indeed_com_blocked(self):
-        assert "indeed.com" in BLOCKED_DOMAINS
+        assert {"indeed.com"} <= BLOCKED_DOMAINS
 
     def test_ziprecruiter_blocked(self):
-        assert "ziprecruiter.com" in BLOCKED_DOMAINS
+        assert {"ziprecruiter.com"} <= BLOCKED_DOMAINS
 
     def test_dice_blocked(self):
-        assert "dice.com" in BLOCKED_DOMAINS
+        assert {"dice.com"} <= BLOCKED_DOMAINS
 
     def test_linkedin_NOT_blocked(self):
         """LinkedIn must NOT be in BLOCKED_DOMAINS — fetch_linkedin_jd() handles it."""
