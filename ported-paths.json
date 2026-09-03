@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-03T09:24:06Z",
+  "generated_at": "2026-09-03T09:42:38Z",
   "roots": [
     "engine",
     "db",
@@ -704,6 +704,10 @@
           "text": "# PORTED from job_finder/web/location_fit.py @ 6fd9f9b31c6a32c7262de3619d247008425e2cde (private job-cannon). Ledger L-0195."
         },
         {
+          "line": 92,
+          "text": ") == _norm(country_code)  # fmt: skip  # PORT-SEAM: wrap pinned to match private source; ruff would otherwise re-wrap and false-flag fidelity-diff"
+        },
+        {
           "line": 450,
           "text": "# (mirror job_finder/db/_jobs.py:468-469)"
         }
@@ -719,42 +723,42 @@
         },
         {
           "line": 7,
-          "text": "persistence. (# PORT-SEAM: \"target-market\" genericizes the private repo's"
+          "text": "persistence.  # PORT-SEAM: \"target-market\" genericizes the private repo's \"Bay Area\" phrasing (see paragraph below)"
         },
         {
-          "line": 10,
+          "line": 9,
           "text": "Genericized at port time (Ledger L-0196): the private repo's owner-specific"
         },
         {
-          "line": 13,
+          "line": 12,
           "text": "seed list is Ledger L-0149 (DIES, ``job_finder/web/bay_area_geography.py``,"
         },
         {
-          "line": 35,
+          "line": 34,
           "text": "# PORT-SEAM: config helpers below replace job_finder.config (hop1 DIES)."
         },
         {
-          "line": 45,
+          "line": 44,
           "text": "# Generic default target country; unlike the private repo's hardcoded"
         },
         {
-          "line": 89,
+          "line": 88,
           "text": "verbatim (``None`` when absent — no private-repo hardcoded default)."
         },
         {
-          "line": 201,
+          "line": 200,
           "text": "# L-0149 (job_finder/web/bay_area_geography.py, DIES). The 291-city Bay Area"
         },
         {
-          "line": 348,
+          "line": 347,
           "text": "# Empty by design (Ledger L-0149, DIES): the private repo's 291-city Bay Area"
         },
         {
-          "line": 722,
-          "text": "``primary_city_fallback``) replaces the private repo's hardcoded"
+          "line": 723,
+          "text": "# private repo's hardcoded ``\"San Francisco\"`` default -- None when the"
         },
         {
-          "line": 894,
+          "line": 895,
           "text": "# get_location_policy_config) replace the private repo's hardcoded"
         }
       ]
