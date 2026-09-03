@@ -509,7 +509,9 @@ def set_source_id_if_free(
     # PORT-SEAM: docstring adapted for postings.source_id / no I-11 partial
     # unique index on this host -- see the pre-write-check note below.
     """
-    raw = conn.raw if hasattr(conn, "raw") else conn  # PORT-SEAM: EngineCompatConnection unwrap, matches upsert_job
+    raw = (
+        conn.raw if hasattr(conn, "raw") else conn
+    )  # PORT-SEAM: EngineCompatConnection unwrap, matches upsert_job
     if not source_id or company_id is None or not dedup_key:
         return False
     source_id = str(source_id)
@@ -517,7 +519,9 @@ def set_source_id_if_free(
     row = raw.execute(  # PORT-SEAM: sqlite3 `?` placeholders -> psycopg `%s`; jobs -> postings
         "SELECT source_id FROM postings WHERE dedup_key = %s", (dedup_key,)
     ).fetchone()
-    if row is None or row["source_id"]:  # PORT-SEAM: row[0] (sqlite3 positional) -> row["source_id"] (psycopg dict_row)
+    if (
+        row is None or row["source_id"]
+    ):  # PORT-SEAM: row[0] (sqlite3 positional) -> row["source_id"] (psycopg dict_row)
         return False
 
     holder = raw.execute(  # PORT-SEAM: jobs -> postings; `?` -> `%s`
@@ -591,7 +595,9 @@ def get_job(conn: Any, dedup_key: str) -> dict | None:
     return dict(row) if row is not None else None
 
 
-def load_job_context(conn: Any, dedup_key: str) -> dict | None:  # PORT-SEAM: sqlite3.Connection -> Any
+def load_job_context(
+    conn: Any, dedup_key: str
+) -> dict | None:  # PORT-SEAM: sqlite3.Connection -> Any
     """Load the standard job context bundle.
 
     Shared helper for expand, rescore, paste_jd, and save_jd routes.
