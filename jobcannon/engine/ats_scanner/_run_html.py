@@ -17,7 +17,9 @@ import time
 
 from jobcannon.engine.json_utils import utc_now_iso
 from jobcannon.engine.ats_registry import NON_SCANNABLE_PLATFORMS
-from jobcannon.engine.services import get_services  # PORT-SEAM: seam kept; private drops it for a direct careers_scraper import (L-0019)
+from jobcannon.engine.services import (
+    get_services,
+)  # PORT-SEAM: seam kept; private drops it for a direct careers_scraper import (L-0019)
 
 logger = logging.getLogger(__name__)
 
@@ -199,12 +201,14 @@ def _scan_one_company_via_html(
         # before any fetch, so no rows are upserted. That gate is the single
         # point of enforcement for the careers_page write path; re-checking the
         # same predicate here on the same careers_url would be a no-op.
-        scraped_jobs, skipped_title_filter = svc.scrape_careers_page(  # PORT-SEAM: seam call (L-0019)
-            careers_url,
-            target_titles,
-            title_exclusions,
-            conn=conn,
-            config=config,
+        scraped_jobs, skipped_title_filter = (
+            svc.scrape_careers_page(  # PORT-SEAM: seam call (L-0019)
+                careers_url,
+                target_titles,
+                title_exclusions,
+                conn=conn,
+                config=config,
+            )
         )
 
         company_html_found = len(scraped_jobs)
@@ -236,7 +240,9 @@ def _scan_one_company_via_html(
                         # Denylist (I-10) or result-count tile (I-14, #211):
                         # both hard-dropped.
                         continue
-                    result = svc.upsert_job(html_conn, parsed, company_id=miss_company_id)  # PORT-SEAM: seam call (L-0019)
+                    result = svc.upsert_job(
+                        html_conn, parsed, company_id=miss_company_id
+                    )  # PORT-SEAM: seam call (L-0019)
                     if result.kind == "inserted":
                         summary["jobs_new"] += 1
                         # PORT-SEAM: company_html_new += 1 deferred with record_scan_outcome
@@ -245,7 +251,9 @@ def _scan_one_company_via_html(
                     summary["html_scraped"] += 1
                 except Exception as job_err:
                     error_msg = f"{miss_company_name} HTML job error: {job_err}"
-                    summary["errors"].append(error_msg)  # PORT-SEAM: _record_scan_error deferred (L-0019; needs _run.py's WI-05 row)
+                    summary["errors"].append(
+                        error_msg
+                    )  # PORT-SEAM: _record_scan_error deferred (L-0019; needs _run.py's WI-05 row)
                     logger.warning("ATS HTML fallback job error: %s", error_msg)
 
         # Step 4: Log company scan

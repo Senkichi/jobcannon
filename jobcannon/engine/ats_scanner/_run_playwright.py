@@ -41,7 +41,9 @@ from jobcannon.engine.ats_platforms._platforms_icims import PlaywrightPlatformSc
 from jobcannon.engine.ats_prober import _handle_scan_error, _is_transient_error
 from jobcannon.engine.ats_registry import PLAYWRIGHT_PLATFORMS
 from jobcannon.engine.ats_registry import PLAYWRIGHT_SCANNERS as _PLAYWRIGHT_SCANNERS
-from jobcannon.engine.services import get_services  # PORT-SEAM: seam kept; private drops it for a direct careers_crawler/db_helpers import (L-0020)
+from jobcannon.engine.services import (
+    get_services,
+)  # PORT-SEAM: seam kept; private drops it for a direct careers_crawler/db_helpers import (L-0020)
 
 logger = logging.getLogger(__name__)
 
@@ -354,16 +356,16 @@ def _scan_one_company_via_playwright(
 
     except Exception as company_err:
         error_msg = f"{company_name}: {company_err}"
-        summary["errors"].append(error_msg)  # PORT-SEAM: _record_scan_error deferred (L-0020; needs _run.py's WI-05 row)
+        summary["errors"].append(
+            error_msg
+        )  # PORT-SEAM: _record_scan_error deferred (L-0020; needs _run.py's WI-05 row)
         logger.error("ATS scan (playwright) error for '%s': %s", company_name, company_err)
 
         if _is_transient_error(company_err):
             try:
                 _handle_scan_error(conn, company_id, company_name, str(company_err), now)
             except Exception as retry_err:
-                logger.warning(
-                    "Failed to update retry state for '%s': %s", company_name, retry_err
-                )
+                logger.warning("Failed to update retry state for '%s': %s", company_name, retry_err)
 
         try:
             # PORT-SEAM: record_scan_outcome(error=..., failure_reason=...)

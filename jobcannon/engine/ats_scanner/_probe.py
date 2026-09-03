@@ -19,6 +19,7 @@ from jobcannon.engine.ats_detection import (
     extract_ats_from_url_best,
     probe_hit_consistent_or_dead_url,
 )
+
 # PORT-SEAM: ats_identity_reconcile doesn't port (Flask/db coupled);
 # svc.identity_reconcile_settings below is the ScanServices hook (L-0018).
 from jobcannon.engine.ats_prober import (
@@ -29,11 +30,13 @@ from jobcannon.engine.ats_prober import (
     _probe_pinpoint,
     _probe_teamtailor,
 )
+
 # PORT-SEAM: ats_slug_challenge doesn't port (Flask/db coupled);
 # svc.resolve_slug_collision / svc.owner_identity_passes below are the
 # ScanServices hooks; TRIGGER_PREFIX_CAREERS_URL is re-homed as a module
 # constant since it's a plain string, not a callable (L-0018).
 from jobcannon.engine.brand_blocklist import is_blocked_brand
+
 # PORT-SEAM: seam kept; private drops it for a direct db_helpers connection (L-0018)
 from jobcannon.engine.services import get_services
 
@@ -340,7 +343,9 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
         return {"probed": 0, "hits": 0, "misses": 0, "collision_reset": 0}
 
     summary = {"probed": 0, "hits": 0, "misses": 0, "collision_reset": 0}
-    svc = get_services()  # PORT-SEAM: seam kept; private drops it for a direct db_helpers connection (L-0018)
+    svc = (
+        get_services()
+    )  # PORT-SEAM: seam kept; private drops it for a direct db_helpers connection (L-0018)
 
     with svc.connection_factory() as conn:
         settings = _slug_probe_settings(config)
@@ -549,7 +554,8 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
                     # silently diverge from every other write site's logic.
                     is_provisional = (
                         0
-                        if (  # PORT-SEAM: L-0018
+                        # PORT-SEAM: L-0018
+                        if (
                             svc.owner_identity_passes is not None
                             and svc.owner_identity_passes(
                                 company_name_norm, company_name, trigger, fp_slug
@@ -750,7 +756,8 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
                 # common case; only a genuine name/slug divergence marks it.
                 is_provisional = (
                     0
-                    if (  # PORT-SEAM: L-0018
+                    # PORT-SEAM: L-0018
+                    if (
                         svc.owner_identity_passes is not None
                         and svc.owner_identity_passes(
                             company_name_norm, company_name, None, hit_slug

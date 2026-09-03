@@ -46,6 +46,7 @@ from jobcannon.engine.ats_detection import (  # noqa: F401
     extract_ats_from_url_best,
     extract_ats_from_urls,
 )
+
 # PORT-SEAM: `reconcile_company_ats` stays behind ScanServices
 # (svc.reconcile_company_ats), not a top-level import (L-0450).
 from jobcannon.engine.ats_platforms import (  # noqa: F401
