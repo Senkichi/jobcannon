@@ -9,6 +9,20 @@ and any other failure is wrapped in CompanyUpsertError — never a silent None.
 The malformed-name predicate is isalnum()-based like the private original
 (Unicode-aware, and accepts digit-only names that isalpha() would reject).
 
+Recorded divergence (Ledger L-0011, ats_company.py drift since Wave-1
+baseline): four private-side commits landed after this module's baseline
+(#1913 merged-loser resolution, #1881 company_state_history, #1867
+normalizer v2, #1869 scan_enabled split). None of that is reflected here.
+Two gaps specifically: (1) company_state_history — the private repo now
+appends an audit-trail row on certain state transitions; this module writes
+`companies` in place with no equivalent history table. (2) merge-survivor
+resolution (#1913) — the private repo's merged-loser handling picks a
+surviving row across duplicate companies; this module's collision path
+(above) only handles the ats_platform/ats_slug UNIQUE case, not a general
+merge. Both are unaddressed scope, not intentional non-ports — a future
+row should close them, matching the intentional Phase-2 deferral recorded
+just below.
+
 Row access note: all internal row reads use STRING keys only (never
 positional). This function is called both through the pooled
 connection_factory (HybridRow — supports both access styles) and directly
