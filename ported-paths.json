@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-03T08:57:56Z",
+  "generated_at": "2026-09-03T09:06:59Z",
   "roots": [
     "engine",
     "db",
@@ -642,6 +642,24 @@
         {
           "line": 1,
           "text": "# PORTED from job_finder/web/scoring_prompts/__init__.py @ cc4150c8d7ea711c1bb5f15266379b675e90c298 (private job-cannon). Ledger L-0458."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/scoring_prompts/registry.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/scoring_prompts/registry.py @ 07cdef9c3c2d93f8c38170affa344e27f7f2c133 (private job-cannon). Ledger L-0057."
+        },
+        {
+          "line": 14,
+          "text": "# fail-fast check that raises job_finder.config.ConfigError at two host"
+        },
+        {
+          "line": 29,
+          "text": "# PORT-SEAM: job_finder.config.ConfigError not carried -- see the module"
         }
       ]
     },
