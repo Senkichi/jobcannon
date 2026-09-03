@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-03T09:06:59Z",
+  "generated_at": "2026-09-03T09:42:38Z",
   "roots": [
     "engine",
     "db",
@@ -22,11 +22,19 @@
           "text": "The malformed-name predicate is isalnum()-based like the private original"
         },
         {
+          "line": 16,
+          "text": "Two gaps specifically: (1) company_state_history — the private repo now"
+        },
+        {
           "line": 19,
+          "text": "resolution (#1913) — the private repo's merged-loser handling picks a"
+        },
+        {
+          "line": 33,
           "text": "Recorded divergence (Wave-1, name-collision scope ruling): the private"
         },
         {
-          "line": 20,
+          "line": 34,
           "text": "original's full name-normalization + denylist identity work is Phase-2"
         }
       ]
@@ -490,6 +498,36 @@
       ]
     },
     {
+      "path": "jobcannon/engine/direct_link.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/direct_link.py @ c6e37b72c6706e6f547c63d0a697b9ef645c2dff (private job-cannon). Ledger L-0176."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/domain_policy.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/domain_policy.py @ 263634cd9339885990d2510e476ad6679b675cf7 (private job-cannon). Ledger L-0177."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/enrichment_sources.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/enrichment_sources.py @ 6b00b39bb73bc9ddabf2ce20404b0521d4a587f1 (private job-cannon). Ledger L-0048."
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/enrichment_states.py",
       "root": "engine",
       "markers": [
@@ -508,6 +546,36 @@
       ]
     },
     {
+      "path": "jobcannon/engine/exclusion_filter.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/exclusion_filter.py @ 099531b7ede7c2a86c148b00c35d7dabf0a879d1 (private job-cannon). Ledger L-0179."
+        },
+        {
+          "line": 11,
+          "text": "# PORT-SEAM: relocated from job_finder.config (DIES) — a hardcoded default"
+        },
+        {
+          "line": 22,
+          "text": "# PORT-SEAM: relocated from job_finder.config (DIES) — a hardcoded default"
+        },
+        {
+          "line": 77,
+          "text": "re-evaluation hooks (job_finder.db._jobs.upsert_job and"
+        },
+        {
+          "line": 221,
+          "text": "# set_jd_full's docstring (job_finder/db/_jd_full.py) for the write-time"
+        },
+        {
+          "line": 222,
+          "text": "# stamping and scoring_precheck's docstring (job_finder/web/job_scorer.py)"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/extraction_health.py",
       "root": "engine",
       "markers": [
@@ -522,6 +590,26 @@
       ]
     },
     {
+      "path": "jobcannon/engine/identity_evidence.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/identity_evidence.py @ b3a892fcba95531152bbc660293225795aae8020 (private job-cannon). Ledger L-0049."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/inflight_guard.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/inflight_guard.py @ 406907bfecc5378e4bdcf1b931db151da50f640b (private job-cannon). Ledger L-0187."
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/jd_content_contract.py",
       "root": "engine",
       "markers": [
@@ -532,6 +620,16 @@
         {
           "line": 897,
           "text": "# re-homed from job_finder/db/_jd_full.py (plan Task 1 Step 6 amendment):"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/jd_display.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/jd_display.py @ 65e5ce021068b70a2369ac279c75395a078e1013 (private job-cannon). Ledger L-0190."
         }
       ]
     },
@@ -574,6 +672,108 @@
       ]
     },
     {
+      "path": "jobcannon/engine/legitimacy_scanner.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/legitimacy_scanner.py @ e95b3e27a020f4dc60eedae4735e073ca0ddd6e4 (private job-cannon). Ledger L-0191."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/llm_refusal_guard.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/llm_refusal_guard.py @ 65e5ce021068b70a2369ac279c75395a078e1013 (private job-cannon). Ledger L-0475."
+        },
+        {
+          "line": 33,
+          "text": "# convention in job_finder.db._jd_content_contract for the same category of"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/location_fit.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/location_fit.py @ 6fd9f9b31c6a32c7262de3619d247008425e2cde (private job-cannon). Ledger L-0195."
+        },
+        {
+          "line": 92,
+          "text": ") == _norm(country_code)  # fmt: skip  # PORT-SEAM: wrap pinned to match private source; ruff would otherwise re-wrap and false-flag fidelity-diff"
+        },
+        {
+          "line": 450,
+          "text": "# (mirror job_finder/db/_jobs.py:468-469)"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/location_policy.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/location_policy.py @ 80f7668ed61d9da522cba64bd79c1232bb80f36f (private job-cannon). Ledger L-0196."
+        },
+        {
+          "line": 7,
+          "text": "persistence.  # PORT-SEAM: \"target-market\" genericizes the private repo's \"Bay Area\" phrasing (see paragraph below)"
+        },
+        {
+          "line": 9,
+          "text": "Genericized at port time (Ledger L-0196): the private repo's owner-specific"
+        },
+        {
+          "line": 12,
+          "text": "seed list is Ledger L-0149 (DIES, ``job_finder/web/bay_area_geography.py``,"
+        },
+        {
+          "line": 34,
+          "text": "# PORT-SEAM: config helpers below replace job_finder.config (hop1 DIES)."
+        },
+        {
+          "line": 44,
+          "text": "# Generic default target country; unlike the private repo's hardcoded"
+        },
+        {
+          "line": 88,
+          "text": "verbatim (``None`` when absent — no private-repo hardcoded default)."
+        },
+        {
+          "line": 200,
+          "text": "# L-0149 (job_finder/web/bay_area_geography.py, DIES). The 291-city Bay Area"
+        },
+        {
+          "line": 347,
+          "text": "# Empty by design (Ledger L-0149, DIES): the private repo's 291-city Bay Area"
+        },
+        {
+          "line": 723,
+          "text": "# private repo's hardcoded ``\"San Francisco\"`` default -- None when the"
+        },
+        {
+          "line": 895,
+          "text": "# get_location_policy_config) replace the private repo's hardcoded"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/log_throttle.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/log_throttle.py @ ebb9f865b13b6304615b0ba11e5e39750151de1b (private job-cannon). Ledger L-0197."
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/normalizers.py",
       "root": "engine",
       "markers": [
@@ -592,12 +792,42 @@
       ]
     },
     {
+      "path": "jobcannon/engine/opaque_redirect_candidates.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/opaque_redirect_candidates.py @ c3ee3350643d5530c2ac869b40a1f671c0f32552 (private job-cannon). Ledger L-0219."
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/parsed_job.py",
       "root": "engine",
       "markers": [
         {
           "line": 91,
           "text": "# Host-injectable denylist seam. The private repo read this from config.yaml"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/primary_source_merge.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/primary_source_merge.py @ 099531b7ede7c2a86c148b00c35d7dabf0a879d1 (private job-cannon). Ledger L-0228."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/profile_schema.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/profile_schema.py @ c82b924bf60c9059bb3b4ed29db48d8fc9ddcba8 (private job-cannon). Ledger L-0231."
         }
       ]
     },
@@ -716,7 +946,11 @@
           "text": "#   replaces job_finder.config.JD_STORAGE_MAX_CHARS"
         },
         {
-          "line": 99,
+          "line": 86,
+          "text": "#   matches job_finder.db._jobs.set_source_id_if_free(conn, dedup_key,"
+        },
+        {
+          "line": 104,
           "text": "#   Whole-scan runtime budget in seconds. Replaces the private repo's"
         }
       ]
@@ -752,6 +986,16 @@
         {
           "line": 123,
           "text": "# Parity with the private deployment's job-level runtime cap for the ATS"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/web/_htmx.py",
+      "root": "web",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/_htmx.py @ b1aa40239b89327d2d0abdf38dd5cfd4f53698e3 (private job-cannon). Ledger L-0123."
         }
       ]
     }
