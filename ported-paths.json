@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-03T08:09:31Z",
+  "generated_at": "2026-09-03T08:57:56Z",
   "roots": [
     "engine",
     "db",
@@ -608,6 +608,30 @@
         {
           "line": 3,
           "text": "The private source reads scan-tuning knobs from Flask's app config"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/scoring/__init__.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/scoring/__init__.py @ ebb9f865b13b6304615b0ba11e5e39750151de1b (private job-cannon). Ledger L-0473."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/scoring/scorer.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/scoring/scorer.py @ ebb9f865b13b6304615b0ba11e5e39750151de1b (private job-cannon). Ledger L-0473."
+        },
+        {
+          "line": 11,
+          "text": "DEFAULT_MIN_SCORE_THRESHOLD = 40  # PORT-SEAM: job_finder.config is out of scope; inline the default"
         }
       ]
     },
