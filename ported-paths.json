@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-31T02:59:33Z",
+  "generated_at": "2026-09-03T07:31:10Z",
   "roots": [
     "engine",
     "db",
@@ -530,6 +530,48 @@
         {
           "line": 91,
           "text": "# Host-injectable denylist seam. The private repo read this from config.yaml"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/providers/cerebras_provider.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/providers/cerebras_provider.py @ 9d57537f2f7100239181d34d0515cba342c83237 (private job-cannon). Ledger L-0235."
+        },
+        {
+          "line": 26,
+          "text": "from job_finder.secrets import get_secret"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/providers/gemini_provider.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/providers/gemini_provider.py @ 9678c44c5d667d8a1d587c2d1f92b9df4056ead9 (private job-cannon). Ledger L-0239."
+        },
+        {
+          "line": 44,
+          "text": "from job_finder.secrets import get_secret"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/providers/groq_provider.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/providers/groq_provider.py @ 9d57537f2f7100239181d34d0515cba342c83237 (private job-cannon). Ledger L-0240."
+        },
+        {
+          "line": 25,
+          "text": "from job_finder.secrets import get_secret"
         }
       ]
     },
