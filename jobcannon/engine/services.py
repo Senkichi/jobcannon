@@ -82,6 +82,11 @@ class ScanServices:
     #     promote_ats_scheduler_batch / reconcile_company_ats.
     owner_identity_passes: Callable[..., Any] | None = None
     resolve_slug_collision: Callable[..., Any] | None = None
+    set_source_id_if_free: Callable[..., Any] | None = None
+    #   matches job_finder.db._jobs.set_source_id_if_free(conn, dedup_key,
+    #   company_id, source_id) -> None; guarded single-writer for the
+    #   (company_id, source_id) partial-unique slot (I-11). None => the
+    #   primary-posting merge skips the source_id backfill.
     #   ^ matches ats_slug_challenge's owner_identity_passes /
     #     resolve_slug_collision (the third ats_slug_challenge symbol,
     #     TRIGGER_PREFIX_CAREERS_URL, is a plain string constant, not a
