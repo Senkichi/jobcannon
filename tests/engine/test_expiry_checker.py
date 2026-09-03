@@ -117,6 +117,7 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlsplit
 
 import pytest
 import requests
@@ -656,7 +657,10 @@ class TestCheckAtsApi:
         mock_get.return_value = MagicMock(status_code=404)
         result = _check_ats_api("acme", "12345", "greenhouse")
         assert result == EXPIRED
-        assert "boards-api.greenhouse.io" in mock_get.call_args[0][0]
+        # PORT-SEAM: codeql py/incomplete-url-substring-sanitization -- parsed
+        # hostname check, not a substring `in` check (matches #259's fix
+        # pattern for platform_extractor.py / _platforms_icims.py).
+        assert urlsplit(mock_get.call_args[0][0]).hostname == "boards-api.greenhouse.io"
 
     @patch("jobcannon.engine.expiry_checker.requests.get")
     def test_network_error_returns_inconclusive(self, mock_get):
