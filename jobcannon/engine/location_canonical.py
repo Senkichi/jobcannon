@@ -24,6 +24,7 @@ on read for forward-compat.
 from __future__ import annotations
 
 import json
+
 # PORT-SEAM: is_dataclass added for from_list's default-serializer helper below
 # (an earlier port-wave addition, not in the private source's import list).
 from dataclasses import asdict, dataclass, is_dataclass

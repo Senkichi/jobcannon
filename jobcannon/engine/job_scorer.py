@@ -36,12 +36,16 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass
-from typing import Any, Callable  # PORT-SEAM: call_model is an injected callable, not an engine-owned dispatcher import
+from typing import (
+    Any,
+    Callable,
+)  # PORT-SEAM: call_model is an injected callable, not an engine-owned dispatcher import
 
 from jobcannon.engine.constants import SUB_SCORE_KEYS
 from jobcannon.engine.classification import JobAssessment
 from jobcannon.engine.classification import _TERMINAL_ENRICHMENT_TIERS, COMP_FIT_NEUTRAL
 from jobcannon.engine.jd_content_contract import JD_CONTENT_VERSION, JdVerdict
+
 # PORT-SEAM: call_model is injected via score_job's `call_model` param below — was
 # `from jobcannon.engine.model_provider import call_model` (job_finder.web.model_provider.call_model
 # in the private repo); the engine has no provider/dispatcher of its own (module docstring).
@@ -580,7 +584,9 @@ def score_job(
     config: dict,
     candidate_context: str,
     *,
-    call_model: Callable[..., Any],  # PORT-SEAM: injected model-dispatch callable (was model_provider.call_model)
+    call_model: Callable[
+        ..., Any
+    ],  # PORT-SEAM: injected model-dispatch callable (was model_provider.call_model)
     location_policy: object | None = None,
     timeout: float | None = None,
 ) -> ScoringResult:

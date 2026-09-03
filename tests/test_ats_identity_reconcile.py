@@ -2,12 +2,10 @@
 
 import sqlite3
 from datetime import datetime
-from unittest.mock import patch
 
 import pytest
 
 from jobcannon.engine.ats_detection import (
-    ATS_EXTRACTOR_VERSION,
     aggregate_ats_candidates_from_job_bundles,
     extract_ats_from_url_best,
 )
@@ -93,10 +91,6 @@ def seeded_pending_company(migrated_db_path):
     return migrated_db_path, int(cid)
 
 
-
-
-
-
 def _seed_scan_disabled_miss(db_path: str) -> int:
     """Insert a frozen custom-miss company (scan_enabled=0) with a careers_url.
 
@@ -118,8 +112,6 @@ def _seed_scan_disabled_miss(db_path: str) -> int:
     conn.commit()
     conn.close()
     return int(cid)
-
-
 
 
 def _seed_promote_batch_companies(
@@ -175,12 +167,6 @@ def _seed_promote_batch_companies(
     return never_ids, prior_ids
 
 
-
-
-
-
-
-
 def _seed_company_with_job(
     db_path,
     *,
@@ -226,9 +212,3 @@ _GATE_CONFIG = {
         }
     }
 }
-
-
-
-
-
-

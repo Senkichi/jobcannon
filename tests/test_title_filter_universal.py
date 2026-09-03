@@ -17,9 +17,16 @@ Callsite shapes exercised:
 from __future__ import annotations
 
 import contextlib
+import json
+from pathlib import Path
 
+import pytest
+
+from jobcannon.engine.ats_platforms import TITLE_MATCH_VERSION, _title_matches
 from jobcannon.engine.models import Job
 from jobcannon.engine.parsed_job import ParsedJob, UnresolvedParsedJob
+
+_GOLDEN_PATH = Path(__file__).parent / "fixtures" / "title_match_golden.json"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -176,17 +183,6 @@ class TestTitleFilterUniversalBlobs:
 # ---------------------------------------------------------------------------
 # WI-10 (#1834): order-insensitive title matching (TITLE_MATCH_VERSION 2)
 # ---------------------------------------------------------------------------
-import json
-from pathlib import Path
-
-import pytest
-
-from jobcannon.engine.ats_platforms import (
-    TITLE_MATCH_VERSION,
-    _title_matches,
-)
-
-_GOLDEN_PATH = Path(__file__).parent / "fixtures" / "title_match_golden.json"
 
 
 def _load_golden() -> dict:

@@ -19,9 +19,7 @@ class _Resp:
 
 
 def test_returns_fast_response():
-    resp = fetch_with_deadline(
-        "http://x", total_deadline_s=5, getter=lambda url, **kw: _Resp("hi")
-    )
+    resp = fetch_with_deadline("http://x", total_deadline_s=5, getter=lambda url, **kw: _Resp("hi"))
     assert resp.text == "hi"
     assert resp.status_code == 200
 

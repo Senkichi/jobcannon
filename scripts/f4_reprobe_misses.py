@@ -38,7 +38,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 # Monkey-patch requests.get BEFORE importing ats_prober so that prober calls
 # go through our status-capturing wrapper. Thread-safe via threading.local().
-import requests
+import requests  # noqa: E402
 
 _thread_status: threading.local = threading.local()
 _original_get = requests.get
@@ -53,11 +53,11 @@ def _capturing_get(*args, **kwargs):  # type: ignore[no-untyped-def]
 
 requests.get = _capturing_get  # type: ignore[assignment]
 
-from jobcannon.engine.ats_detection import (
+from jobcannon.engine.ats_detection import (  # noqa: E402
     derive_slug_candidates,
     probe_hit_consistent_or_dead_url,
 )
-from jobcannon.engine.ats_prober import (
+from jobcannon.engine.ats_prober import (  # noqa: E402
     _probe_ashby,
     _probe_bamboohr,
     _probe_breezy,
@@ -69,7 +69,7 @@ from jobcannon.engine.ats_prober import (
     _probe_recruitee,
     _probe_teamtailor,
 )
-from jobcannon.engine.brand_blocklist import is_blocked_brand
+from jobcannon.engine.brand_blocklist import is_blocked_brand  # noqa: E402
 
 _PROBES: list[tuple[str, Callable[[str], bool]]] = [
     ("lever", _probe_lever),

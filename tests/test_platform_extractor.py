@@ -10,8 +10,7 @@ Covers:
 - run_enrichment_backfill drives the inline (single-browser) agentic pass
 """
 
-import inspect
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from jobcannon.engine.platform_extractor import (
     detect_platform,
@@ -157,21 +156,11 @@ class TestExtractCleanJd:
 # ---------------------------------------------------------------------------
 
 
-
-
 # ---------------------------------------------------------------------------
 # Architecture invariant: enrich_job never launches Playwright per-row
 # ---------------------------------------------------------------------------
 
 
-
-
-
-
 # ---------------------------------------------------------------------------
 # _run_inline_agentic_pass — gating, limit, best-effort
 # ---------------------------------------------------------------------------
-
-
-
-

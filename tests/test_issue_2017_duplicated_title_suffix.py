@@ -27,8 +27,6 @@ the single-point-of-enforcement normalizer for new rows.
 
 from __future__ import annotations
 
-import json
-
 from jobcannon.engine.normalizers import collapse_duplicated_suffix, derive_dedup_key
 
 # ---------------------------------------------------------------------------
@@ -156,5 +154,3 @@ def _insert_job(
         (dedup_key, title, "Amazon", reasons, classification, jd, scoring_model),
     )
     conn.commit()
-
-

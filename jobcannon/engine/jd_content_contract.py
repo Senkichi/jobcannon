@@ -955,6 +955,26 @@ def _ambiguous_widening_signal(stripped: str, low: str, title: str | None) -> st
     return None
 
 
+# PORT-SEAM (L-0004): the private source this file was carried from (job_finder/db/
+# _jd_content_contract.py @ 3aaa360) no longer defines a standalone
+# ``has_recognizable_jd_shape`` -- its positive-shape check was inlined directly into
+# ``classify_jd_content`` below. But this public jobcannon.engine module is a shared
+# library boundary: jobcannon/host/structural_axes/jd_quality.py imports
+# ``has_recognizable_jd_shape`` from here (pre-dating this port), so dropping it breaks
+# that host-layer consumer even though it is faithful to the private source's current
+# shape. Restored as a thin wrapper around ``_JD_POSITIVE_RE``, mirroring the origin/main
+# docstring's stated intent ("single point of enforcement... so callers outside this
+# module never duplicate the regex") and kept in sync with the inline check
+# ``classify_jd_content`` performs.
+def has_recognizable_jd_shape(text: str | None) -> bool:
+    """Public: does text contain a recognizable JD section signal
+    (responsibilities/qualifications/'what you'll do'/...)?
+    """
+    if not text:
+        return False
+    return bool(_JD_POSITIVE_RE.search(text.lower()))
+
+
 def classify_jd_content(
     jd_full: str | None,
     title: str | None = None,
@@ -1021,7 +1041,7 @@ def classify_jd_content(
     if widen is not None:
         return JdContentResult(JdVerdict.AMBIGUOUS, None, widen)
 
-    has_shape = bool(_JD_POSITIVE_RE.search(low))
+    has_shape = has_recognizable_jd_shape(low)
     substantial = len(stripped) >= _CLEAN_MIN_CHARS
 
     ground_tokens = significant_tokens(title) if title else significant_tokens(company or "")

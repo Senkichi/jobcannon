@@ -56,8 +56,7 @@ class TestStripSiteCodePrefixBorderlineCasesNotAutoStripped:
 
     def test_no_leading_zero_not_stripped(self):
         assert (
-            strip_site_code_prefix("3010 HYDRIL USA DISTRIBUTION")
-            == "3010 HYDRIL USA DISTRIBUTION"
+            strip_site_code_prefix("3010 HYDRIL USA DISTRIBUTION") == "3010 HYDRIL USA DISTRIBUTION"
         )
 
     def test_short_digit_token_not_stripped(self):

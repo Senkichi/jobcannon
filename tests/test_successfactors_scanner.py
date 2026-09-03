@@ -83,9 +83,7 @@ class TestUrlDetection:
 class TestFixtureParsing:
     def test_parse_real_fixture_extracts_at_least_two_jobs(self):
         """The real Swiss Re fixture has 2 jobs (truncated from 309)."""
-        fixture_path = (
-            Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
-        )
+        fixture_path = Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
         content = fixture_path.read_bytes()
 
         import defusedxml.ElementTree as ET
@@ -96,9 +94,7 @@ class TestFixtureParsing:
 
     def test_first_job_title_and_req_id_extracted(self):
         """First job in fixture: (Senior) Aktuar/in & Client Manager/in L&H, ReqId 137248."""
-        fixture_path = (
-            Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
-        )
+        fixture_path = Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
         content = fixture_path.read_bytes()
 
         import defusedxml.ElementTree as ET
@@ -123,9 +119,7 @@ class TestFixtureParsing:
 
     def test_facet_resolution_by_label(self):
         """Facets resolved by label text, not element index."""
-        fixture_path = (
-            Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
-        )
+        fixture_path = Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
         content = fixture_path.read_bytes()
 
         import defusedxml.ElementTree as ET
@@ -158,9 +152,7 @@ class TestFixtureParsing:
 class TestSuccessFactorsScanner:
     def test_fetch_postings_from_fixture(self):
         """Parse the real fixture and extract jobs."""
-        fixture_path = (
-            Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
-        )
+        fixture_path = Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
         content = fixture_path.read_bytes()
 
         with patch(

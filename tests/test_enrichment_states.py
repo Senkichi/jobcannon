@@ -177,7 +177,3 @@ def test_all_enrichment_tier_sql_literals_are_enum_members():
 # ---------------------------------------------------------------------------
 # Consumers agree with the single source of truth
 # ---------------------------------------------------------------------------
-
-
-
-

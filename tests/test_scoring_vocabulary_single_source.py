@@ -14,13 +14,7 @@ list ever changes, this test forces a conscious reconciliation with the freeze.
 
 from __future__ import annotations
 
-from jobcannon.engine.constants import CLASSIFICATIONS, SUB_SCORE_KEYS
-
-
-
-
-
-
+from jobcannon.engine.constants import SUB_SCORE_KEYS
 
 
 def test_frozen_v3_schema_axes_pinned_to_canonical():

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import re
+
 # PORT-SEAM: urlsplit added for detect_platform's host-boundary match below
 # (an earlier port-wave hardening — the private source used a plain substring
 # check, which false-positives on hosts like "notlinkedin.com").

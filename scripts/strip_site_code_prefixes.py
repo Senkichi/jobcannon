@@ -125,9 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     if skipped:
         print(f"\nSkipped {len(skipped)} row(s) due to name collision (no merge performed):")
         for cid, raw, cleaned, (other_id, other_raw) in skipped:
-            print(
-                f"  id={cid}: '{raw}' -> '{cleaned}' collides with id={other_id} ('{other_raw}')"
-            )
+            print(f"  id={cid}: '{raw}' -> '{cleaned}' collides with id={other_id} ('{other_raw}')")
 
     if not to_update:
         print("\nNo rows to update after collision check.")
