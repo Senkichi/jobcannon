@@ -1026,14 +1026,42 @@ def _module_level_platform_literals(path: pathlib.Path, platform_names: frozense
 
 # Debt ledger for a hand-copied literal that is a genuine leak but is
 # intentionally out of THIS guard's scope. Empty on the private HEAD this was
-# carried from; kept empty here too -- a future entry needs its own issue.
-_KNOWN_LEGACY_OFFENDERS: dict[tuple[str, str], str] = {}
+# carried from; new entries here are public-repo-specific (discovered when
+# this guard first ran against the full public tree in PR #286 round 2).
+_KNOWN_LEGACY_OFFENDERS: dict[tuple[str, str], str] = {
+    ("analyses/corpus_honesty/extract.py", "ATS_CONFIRMED_LABELS"): (
+        "26 of 28 entries ARE live ats_registry.PLATFORMS keys (case-"
+        "insensitively) -- this is a deliberately frozen corpus-honesty "
+        "label snapshot (module docstring: 'this repo cannot import the "
+        "private pipeline's code, so the taxonomy here is a verified "
+        "point-in-time snapshot, not a live import'), not a mirror meant to "
+        "track the live registry, so it is intentionally decoupled even "
+        "though it overlaps heavily by construction. It cannot be exactly "
+        "reproduced from a live import today regardless: 2 entries "
+        "('Microsoft Careers', 'Oracle Cloud') are human-readable display "
+        "names ats_registry.PlatformSpec has no field for (display_name is "
+        "None on every checked spec) -- adding one is real, out-of-scope "
+        "production surface for this ats_scanner port. Filed as debt: #290."
+    ),
+}
 
 
 def _other_worktree_roots(repo_root: pathlib.Path) -> list[pathlib.Path]:
-    """Every git worktree registered against this repo except repo_root itself,
-    derived from `git worktree list --porcelain` rather than a hardcoded
-    directory-name convention."""
+    """Every git worktree registered against this repo except repo_root itself
+    and any worktree that is an ANCESTOR of repo_root, derived from
+    `git worktree list --porcelain` rather than a hardcoded directory-name
+    convention.
+
+    The ancestor exclusion matters because repo_root may itself be a worktree
+    nested inside another registered worktree's own directory tree -- e.g.
+    this repo's own convention of checking out `.worktrees/<name>` inside the
+    main checkout. `git worktree list` reports the main checkout as just
+    another worktree, so without this guard it would end up in the returned
+    list; the caller then treats every returned root as "skip this whole
+    subtree", and since the main checkout is an ancestor of repo_root, that
+    silently skips repo_root's own files too -- collapsing the scan to zero
+    files whenever this guard runs from inside a nested worktree.
+    """
     proc = subprocess.run(
         ["git", "worktree", "list", "--porcelain"],
         cwd=repo_root,
@@ -1045,8 +1073,9 @@ def _other_worktree_roots(repo_root: pathlib.Path) -> list[pathlib.Path]:
     for line in proc.stdout.splitlines():
         if line.startswith("worktree "):
             path = pathlib.Path(line[len("worktree ") :]).resolve()
-            if path != repo_root:
-                roots.append(path)
+            if path == repo_root or path in repo_root.parents:
+                continue
+            roots.append(path)
     return roots
 
 
