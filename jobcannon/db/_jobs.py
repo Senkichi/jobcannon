@@ -113,6 +113,7 @@ so retrying against fresher data changes nothing about what gets written.
 
 from __future__ import annotations
 
+import logging  # PORT-SEAM: added for L-0070's set_source_id_if_free (private used the same module-level logger for this warning path)
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -122,6 +123,8 @@ from psycopg.types.json import Jsonb
 from jobcannon.db.pool import commit_unless_nested
 from jobcannon.engine.jd_content_contract import JD_CONTENT_REASON_CODES
 from jobcannon.engine.parsed_job import ParsedJob, UnresolvedParsedJob
+
+_logger = logging.getLogger(__name__)
 
 _PRECISION_RANK = {"exact": 3, "approximate": 2, "proxy": 1}
 
@@ -464,3 +467,151 @@ def _loc_dict(loc: Any) -> dict:
     from dataclasses import asdict, is_dataclass
 
     return asdict(loc) if is_dataclass(loc) else dict(loc)
+
+
+# PORTED from job_finder/db/_jobs.py @ b1f69f3e10a452cc498527f830959b852108f5e9
+# (private job-cannon). Ledger L-0070 -- the 5 auxiliary write/read helpers
+# named in that row's seam. Of those, set_source_id_if_free / get_job /
+# load_job_context land below; set_postings and set_location_policy_columns
+# are deferred (not dropped) -- see notes at the bottom of this block.
+#
+# PORT-SEAM: set_source_id_if_free's IntegrityError backstop has no schema
+# analog here. Private's UPDATE relies on the I-11 partial UNIQUE index on
+# (company_id, source_id) to make a lost-race double-write raise; this host's
+# only index on that pair (m0001, idx_postings_company_source) is a plain
+# non-unique btree, so a race that slips past the pre-write SELECT commits
+# silently instead of raising. The pre-write SELECT check and warning-log
+# path are ported as-is (still closes the common case); the except clause is
+# kept as defensive dead code documenting the divergence rather than removed,
+# since a future unique index would reactivate it for free.
+def set_source_id_if_free(
+    conn: Any,  # PORT-SEAM: sqlite3.Connection -> Any (raw psycopg or EngineCompatConnection, matches upsert_job's signature)
+    dedup_key: str,
+    company_id: int | None,
+    source_id: str | None,
+) -> bool:
+    """Write ``source_id`` when the row has none and the (company_id, source_id)
+    pair is free.
+
+    Sanctioned single-writer for ``postings.source_id`` outside ingestion --
+    the ``upsert_job`` UPDATE branch deliberately never touches source_id
+    (see that function's docstring), so a strict-matched primary posting
+    (primary_source_merge, when ported) routes its platform-stable posting
+    id through here.
+    # PORT-SEAM: jobs.source_id -> postings.source_id; primary_source_merge
+    # is not yet ported on this host.
+
+    Returns False without writing when source_id/company_id is missing, the
+    row is absent or already carries a source_id, or another row already
+    holds (company_id, source_id) -- that twin means the ATS scanner already
+    ingested the same posting under a drifted title; it is logged as a
+    retroactive-dedup candidate, never raised.
+    # PORT-SEAM: docstring adapted for postings.source_id / no I-11 partial
+    # unique index on this host -- see the pre-write-check note below.
+    """
+    raw = (
+        conn.raw if hasattr(conn, "raw") else conn
+    )  # PORT-SEAM: EngineCompatConnection unwrap, matches upsert_job
+    if not source_id or company_id is None or not dedup_key:
+        return False
+    source_id = str(source_id)
+
+    row = raw.execute(  # PORT-SEAM: sqlite3 `?` placeholders -> psycopg `%s`; jobs -> postings
+        "SELECT source_id FROM postings WHERE dedup_key = %s", (dedup_key,)
+    ).fetchone()
+    if (
+        row is None or row["source_id"]
+    ):  # PORT-SEAM: row[0] (sqlite3 positional) -> row["source_id"] (psycopg dict_row)
+        return False
+
+    holder = raw.execute(  # PORT-SEAM: jobs -> postings; `?` -> `%s`
+        "SELECT dedup_key FROM postings WHERE company_id = %s AND source_id = %s "
+        "AND dedup_key != %s",
+        (company_id, source_id, dedup_key),
+    ).fetchone()
+    if holder is not None:
+        _logger.warning(
+            "source_id %s (company_id=%s) already held by %s -- same posting "  # PORT-SEAM: em dash -> ASCII double-hyphen (log text only, matches this file's existing style)
+            "under a drifted title; skipping (retroactive-dedup candidate)",
+            source_id,
+            company_id,
+            holder["dedup_key"],  # PORT-SEAM: holder[0] -> holder["dedup_key"] (psycopg dict_row)
+        )
+        return False
+
+    # PORT-SEAM: no schema-level backstop for this UPDATE -- see the module
+    # note above this function for why the except clause below is kept as
+    # documented dead code rather than removed.
+    try:
+        with raw.transaction():  # PORT-SEAM: sqlite3 conn.execute/commit -> raw.transaction()+commit_unless_nested (matches upsert_job's own transaction pattern)
+            raw.execute(
+                "UPDATE postings SET source_id = %s WHERE dedup_key = %s",
+                (source_id, dedup_key),
+            )
+        commit_unless_nested(raw)
+    except Exception as exc:  # pragma: no cover -- PORT-SEAM: sqlite3.IntegrityError -> Exception (no schema backstop, see note above)
+        _logger.warning("source_id write rejected for %s: %s", dedup_key, exc)
+        return False
+    return True
+
+
+# PORT-SEAM: set_postings (private's sanctioned single-writer for the
+# jobs.postings JSON rollup column, previously here between
+# set_source_id_if_free and get_job) is deferred, not ported. This host's
+# `postings` table is a flat one-row-per-job-entity model (see m0001) with
+# no analog of private's separate per-source postings sub-entity list or the
+# jobs.postings JSON column that rolls it up -- there is no column to write.
+# L-0075 (job_finder/db/_postings.py, this same ledger) is escalated OPEN
+# for exactly this dedup-identity/sub-entity architecture question; landing
+# set_postings here ahead of that resolution would invent a target shape
+# this PR cannot validate. Revisit once L-0075 lands.
+
+# PORT-SEAM: set_location_policy_columns is deferred, not ported. It writes
+# location_policy_version / _input_fingerprint / _verdict / _sort_order /
+# _rank / _eligible -- six columns this host does not have. This PR's own
+# _assessment_writer.py and _feed.py already scope location_policy_* out
+# (see their PORT-SEAM notes and m0015_postings_scoring_tuple.py's
+# docstring); adding six new columns for a single writer function here,
+# inconsistent with those already-landed decisions, is out of scope for this
+# port group. Revisit alongside a location-policy migration.
+
+
+def get_job(conn: Any, dedup_key: str) -> dict | None:
+    """Return a single job (posting) by dedup_key, or None if not found.
+
+    Args:
+        conn: Open connection (raw psycopg or EngineCompatConnection).
+        # PORT-SEAM: sqlite3.Connection -> Any (this host's connection duck type)
+        dedup_key: The job's primary key.
+
+    Returns:
+        Job as dict with all columns, or None if not found.
+    """
+    raw = conn.raw if hasattr(conn, "raw") else conn  # PORT-SEAM: EngineCompatConnection unwrap
+    row = raw.execute(
+        "SELECT * FROM postings WHERE dedup_key = %s",  # PORT-SEAM: JOBS_ALL_COLUMNS projection -> SELECT *; jobs -> postings; `?` -> `%s`
+        (dedup_key,),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def load_job_context(
+    conn: Any, dedup_key: str
+) -> dict | None:  # PORT-SEAM: sqlite3.Connection -> Any
+    """Load the standard job context bundle.
+
+    Shared helper for expand, rescore, paste_jd, and save_jd routes.
+
+    Args:
+        conn: Open connection (raw psycopg or EngineCompatConnection).
+        # PORT-SEAM: sqlite3.Connection -> Any (see get_job above)
+        dedup_key: The job's primary key.
+
+    Returns:
+        Dict with key 'job', or None if job not found.
+    """
+    job = get_job(conn, dedup_key)
+    if job is None:
+        return None
+
+    return {"job": job}

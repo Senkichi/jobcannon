@@ -39,6 +39,30 @@ SELECT list, so the identical fragment works whether or not `fs` is present
 in the FROM clause. That is what makes
 `test_anonymous_and_authed_shapes_return_identical_columns` true by
 construction instead of by coincidence.
+
+`_SORTS`'s non-default tokens (ledger L-0076, private source:
+``job_finder/db/_queries.py``'s ``get_filtered_jobs`` allowlist @
+b1f69f3e10a452cc498527f830959b852108f5e9) port only the subset of private's
+``allowed_sort_cols`` that has a direct, already-selected host column behind
+it: ``title``/``company`` (NOT NULL text columns), ``location`` (nullable,
+NULLS LAST), ``salary_min``/``salary_max`` (nullable, NULLS LAST), and
+``recency`` (``COALESCE(posted_date, first_seen)``, private's own
+best-known-posting-date expression, #365 equivalent). Private's
+``score``/``classification``/``classification_rank``/``sub_score_sum``/
+``location_rank`` tokens are NOT ported: m0015's own docstring already
+documents that this host has no ``classification_rank``/``sub_score_sum``
+materialized columns and no ``location_policy_*`` columns (no
+``LocationPolicy`` concept exists anywhere in ``jobcannon``) -- there is no
+column for those tokens to sort on. ``pipeline_status``/``flagged_at`` are
+also NOT ported: ``flagged_at`` has no host column (no
+``persist_job_notes``/``set_job_flag`` write path was ported either, see
+``jobcannon/db/_persistence.py``'s L-0073 docstring), and a
+``pipeline_status``-keyed sort would need ``ps`` joined on the anonymous
+branch too, breaking the anonymous/authed column-parity invariant this
+module's tests enforce. Each new token also fixes one direction (matching
+its natural browse order) rather than porting private's separate
+``sort_dir`` ASC/DESC toggle parameter -- an ASC/DESC UI control is a
+follow-on product decision, not part of this row's allowlist-pattern port.
 """
 
 from __future__ import annotations
@@ -55,6 +79,15 @@ FEED_PAGE_MAX = 25
 # authenticated query shapes.
 _SORTS: dict[str, str] = {
     "default": "rank_score DESC NULLS LAST, last_seen DESC NULLS LAST, id DESC",
+    # PORT-SEAM: L-0076 -- ported subset of private's allowed_sort_cols with
+    # a direct host column behind it, see module docstring for the full
+    # scoping rationale (what was and was not ported, and why).
+    "title": "p.title ASC, id DESC",
+    "company": "p.company ASC, id DESC",
+    "location": "p.location ASC NULLS LAST, id DESC",
+    "salary_min": "p.salary_min DESC NULLS LAST, id DESC",
+    "salary_max": "p.salary_max DESC NULLS LAST, id DESC",
+    "recency": "COALESCE(p.posted_date, p.first_seen) DESC, id DESC",
 }
 
 # Column order is fixed here and mirrored by the anonymous branch so both
