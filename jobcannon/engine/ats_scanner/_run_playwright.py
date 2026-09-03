@@ -365,7 +365,13 @@ def _scan_one_company_via_playwright(
             try:
                 _handle_scan_error(conn, company_id, company_name, str(company_err), now)
             except Exception as retry_err:
-                logger.warning("Failed to update retry state for '%s': %s", company_name, retry_err)
+                # PORT-SEAM: wrap preserved byte-exact for fidelity diff (L-0020)
+                # fmt: off
+                logger.warning(
+                    "Failed to update retry state for '%s': %s", company_name, retry_err
+                )
+                # fmt: on
+                # PORT-SEAM: end fmt guard (L-0020)
 
         try:
             # PORT-SEAM: record_scan_outcome(error=..., failure_reason=...)
