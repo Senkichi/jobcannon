@@ -3,7 +3,8 @@
 # PORT-SEAM: header rewritten from private's one-line "Sanctioned direct_url
 # write paths." summary to carry the port provenance instead.
 
-set_direct_url is the ONLY writer for postings.direct_url / direct_url_confidence (jobcannon/db/migrations/m0017),  # PORT-SEAM: jobs.direct_url -> postings.direct_url; m0017 is this host's migration for these columns
+set_direct_url is the ONLY writer for postings.direct_url / direct_url_confidence (jobcannon/db/migrations/m0017),
+# PORT-SEAM: jobs.direct_url -> postings.direct_url; m0017 is this host's migration for these columns
 with no-downgrade precedence (highest wins, ties do not overwrite):
     strict  — overwrites a NULL or an existing 'loose' link (upgrade); never
               overwrites an existing 'strict' link (stable).

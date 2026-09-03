@@ -271,6 +271,7 @@ def get_surfaced_concentration(conn: Any) -> dict:
     ).fetchall()
     employer_counts = [row["cnt"] for row in employer_rows]
     employer_total = sum(employer_counts)
+
     employer_metrics = {
         "hhi": _normalized_hhi(employer_counts),
         "entropy": None,
@@ -291,6 +292,7 @@ def get_surfaced_concentration(conn: Any) -> dict:
     ).fetchall()
     platform_counts = [row["cnt"] for row in platform_rows]
     platform_total = sum(platform_counts)
+
     platform_metrics = {
         "hhi": _normalized_hhi(platform_counts),
         "entropy": None,
@@ -356,6 +358,7 @@ def get_off_platform_miss_log(conn: Any, fit_floor: float | None = None) -> dict
         "unreachable_scan_disabled": 0,
     }
     cases = []
+
     for row in rows:
         dedup_key = row["dedup_key"]
         company = row["company"]
