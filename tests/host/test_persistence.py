@@ -8,6 +8,8 @@ they have no tests here either.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from jobcannon.db._persistence import log_run, persist_job_expiry_state
 from tests.host.conftest import requires_postgres
 
@@ -76,11 +78,16 @@ def test_persist_expiry_state_live_refreshes_last_seen_and_clears_stale(db_conn)
     persist_job_expiry_state(conn, dedup_key, "live", "2026-09-01T12:00:00+00:00")
 
     row = db_conn.execute(
-        "SELECT expiry_status, expiry_checked_at, is_stale FROM postings WHERE dedup_key = %s",
+        "SELECT expiry_status, expiry_checked_at, last_seen, is_stale FROM postings WHERE dedup_key = %s",
         (dedup_key,),
     ).fetchone()
     assert row["expiry_status"] == "live"
-    assert row["expiry_checked_at"] is not None
+    # Value assertion, not just existence: psycopg parses the tz-aware ISO
+    # string directly (no normalize_iso_string_to_naive_utc step, see the
+    # module's PORT-SEAM note) -- confirm the stored instant round-trips to
+    # the exact wall-clock moment passed in, not merely "some non-null value".
+    assert row["expiry_checked_at"] == datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
+    assert row["last_seen"] == datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
     assert row["is_stale"] is False
 
 
@@ -95,7 +102,7 @@ def test_persist_expiry_state_expired_sets_status_and_checked_at(db_conn):
         (dedup_key,),
     ).fetchone()
     assert row["expiry_status"] == "expired"
-    assert row["expiry_checked_at"] is not None
+    assert row["expiry_checked_at"] == datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def test_persist_expiry_state_inconclusive_does_not_advance_checked_at(db_conn):

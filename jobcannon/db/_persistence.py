@@ -78,7 +78,8 @@ def log_run(
     raw = conn.raw if hasattr(conn, "raw") else conn
     with raw.transaction():
         raw.execute(
-            'INSERT INTO runs ("timestamp", source, jobs_fetched, jobs_new, jobs_scored, metadata) '
+            # PORT-SEAM: run_at avoids a reserved-word column name (timestamp), matching m0001's created_at/last_seen naming convention
+            "INSERT INTO runs (run_at, source, jobs_fetched, jobs_new, jobs_scored, metadata) "
             "VALUES (now(), %s, %s, %s, %s, %s)",  # PORT-SEAM: now() server-side timestamp + %s placeholders replace private's utc_now_iso() bind param + sqlite3 ?
             (
                 source,

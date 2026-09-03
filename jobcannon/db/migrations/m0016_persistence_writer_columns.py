@@ -36,7 +36,7 @@ MIGRATION = Migration(
         """
         CREATE TABLE IF NOT EXISTS runs (
             id            bigserial PRIMARY KEY,
-            "timestamp"   timestamptz NOT NULL DEFAULT now(),
+            run_at        timestamptz NOT NULL DEFAULT now(),
             source        text NOT NULL,
             jobs_fetched  integer NOT NULL DEFAULT 0,
             jobs_new      integer NOT NULL DEFAULT 0,
@@ -44,7 +44,7 @@ MIGRATION = Migration(
             metadata      jsonb NOT NULL DEFAULT '{}'
         )
         """,
-        'CREATE INDEX IF NOT EXISTS idx_runs_timestamp ON runs("timestamp")',
+        "CREATE INDEX IF NOT EXISTS idx_runs_run_at ON runs(run_at)",
         "ALTER TABLE postings ADD COLUMN IF NOT EXISTS expiry_checked_at timestamptz",
     ],
 )
