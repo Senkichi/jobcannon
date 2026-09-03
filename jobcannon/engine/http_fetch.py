@@ -5,7 +5,8 @@
 on total request time: a server that trickles one byte every ``timeout``-minus-
 epsilon seconds keeps the read alive indefinitely. This was observed wedging a
 live ATS scan's Phase-C HTML fallback on a single slow careers host for 90+
-minutes — the scan thread blocked forever inside ``requests.get``
+minutes — the scan thread blocked forever inside ``requests.get`` (# PORT-SEAM:
+private-tracker issue-number citation dropped per repo convention)
 while the rest of the app kept heartbeating, never writing the completion row.
 
 ``fetch_with_deadline`` runs the GET on a daemon worker thread and abandons it
@@ -38,6 +39,9 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TOTAL_DEADLINE_S = 30.0
 
 
+# PORT-SEAM: private source defines FetchDeadlineError(Exception) plainly;
+# this engine-side version subclasses requests.exceptions.Timeout instead (an
+# earlier port-wave enhancement) so it slots into existing Timeout handlers.
 class FetchDeadlineError(requests.exceptions.Timeout):
     """A fetch exceeded its hard total wall-clock deadline and was abandoned.
 

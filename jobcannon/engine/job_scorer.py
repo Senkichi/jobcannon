@@ -13,6 +13,8 @@ part of this engine port. Whichever PR does that wiring must also ship a
 jd_adjudicated_version writer (or an equivalent resolution) per #183 —
 enforced by tests/test_scoring_precheck_wiring_guard.py, an AST guard that
 fails CI if scoring is ever wired outside jobcannon/engine/ without one.
+(# PORT-SEAM: module docstring reworded for the engine boundary — see the
+call_model Arg below for the actual seam.)
 
 Routes through an injected call_model(tier="score", ...) callable (see the
 score_job Args below) per CONTEXT D-09. The engine does NOT instantiate its
@@ -628,7 +630,7 @@ def score_job(
         call_model: REQUIRED keyword-only model-dispatch callable, matching
             the private repo's ``model_provider.call_model`` signature
             (tier, system, messages, conn, config, output_schema, job_id,
-            purpose, max_tokens, timeout). PORT-SEAM: the engine has no
+            purpose, max_tokens, timeout). # PORT-SEAM: the engine has no
             provider of its own; the host supplies this.
         location_policy: Optional LocationPolicy verdict computed pre-LLM by
             the orchestrator (issue #1214). When present, a per-job policy

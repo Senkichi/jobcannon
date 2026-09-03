@@ -121,6 +121,8 @@ _TRAILING_COUNTRY_RE = re.compile(
 # California" collapses with "San Jose, CA". DC included; US territories
 # excluded (Puerto Rico / Guam appear rarely; can be added if needed).
 _US_STATE_NAME_TO_CODE = {
+    # PORT-SEAM: reformatted one-entry-per-line (ruff format on this repo's
+    # line length) — same 51 entries below, no content change.
     "alabama": "AL",
     "alaska": "AK",
     "arizona": "AZ",

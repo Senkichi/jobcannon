@@ -2,7 +2,8 @@
 """Single normalization point for salary observations (Data Integrity Overhaul P1.1).
 
 This is the **foundation layer** of the salary capture -> normalize -> reconcile
-architecture. It owns:
+architecture. It owns: (# PORT-SEAM: private-tracker issue/PR citations dropped
+per repo convention throughout this docstring.)
 
   * ``SalaryObservation`` — a lossless value object recording what a single source
     asserted about pay, with unit/currency/provenance metadata (design rule D-1).
@@ -11,12 +12,14 @@ architecture. It owns:
   * ``normalize_observation`` — the single pure function that converts an observation
     into canonical annualized-USD form via an explicit **salvage ladder** (D-3).
 
-Design constraints (binding):
+Design constraints (binding): (# PORT-SEAM: reworded for the engine boundary
+  — was job_finder.web-specific in the private source.)
 
   * **Engine-pure: no imports from any host layer** (enforced by
     ``tests/engine/test_boundary.py``). This module is a leaf dependency that the
     capture sites (ATS scanners, SERP/feed sources, email parsers) and the existing
-    ``salary_extractor`` will delegate to in follow-on work. It must
+    ``salary_extractor`` will delegate to in follow-on work (# PORT-SEAM:
+    private-tracker PR citations dropped per repo convention). It must
     stay importable without pulling in Flask/app state.
   * **Pure functions, no I/O.** The only side effect permitted is the module logger.
   * **Immutability.** Both dataclasses are ``frozen``; functions return new objects.
@@ -76,11 +79,15 @@ _ANNUALIZE_FACTORS: dict[str, int] = {
 
 # Valid source periods an observation may carry.
 VALID_PERIODS: frozenset[str] = frozenset(_ANNUALIZE_FACTORS)
+# PORT-SEAM: private source also defines VALID_PROVENANCES = frozenset(PROVENANCE_RANK)
+# here; unused outside a doc comment, superseded by referencing PROVENANCE_RANK.keys()
+# directly (see the provenance docstring below).
 
 # m081 CHECK allowlist for the salary_period column. weekly/daily collapse to
 # 'unknown' in the column; their true period lives in the observation log.
 _COLUMN_PERIODS: frozenset[str] = frozenset({"annual", "hourly", "monthly", "unknown"})
-
+# PORT-SEAM: RESOLVED_RESOLUTIONS below is an engine-side addition from an
+# earlier port wave — not in the private source at this row's declared SHA.
 # Resolution codes that mean the salvage ladder produced a usable canonical pair.
 # A capture site writes the canonical (min, max) ONLY for these; any other code
 # ('implausible'/'empty') yields a NULL pair with the observation retained (D-3).
@@ -158,6 +165,7 @@ class SalaryObservation:
         period: Source period the posting stated. One of ``VALID_PERIODS``.
         currency: Source currency (ISO-ish code). Recorded, never converted.
         provenance: Writer class, one of the ``PROVENANCE_RANK`` keys; drives trust ranking.
+            (# PORT-SEAM: reworded from ``VALID_PROVENANCES``, dropped above.)
         raw_text: Verbatim source string/JSON fragment, retained for healing + debug.
     """
 
@@ -456,6 +464,10 @@ def _finalize(obs: SalaryObservation, values: list[int], hypothesis: str) -> Nor
     )
 
 
+# PORT-SEAM: observation_to_dict/salary_capture_fields below are an engine-side
+# addition from an earlier port wave (not a 1:1 mechanical copy of this module
+# at this row's declared SHA) — capture-site convenience wrappers around the
+# normalizer, with no host-layer dependency.
 # ---------------------------------------------------------------------------
 # Capture-site convenience (P1.4)
 # ---------------------------------------------------------------------------

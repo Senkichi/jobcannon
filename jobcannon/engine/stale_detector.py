@@ -54,9 +54,14 @@ composition — it matters that (1) runs before (2) inside the same
 transaction.
 """
 
+# PORT-SEAM: copy/os/pathlib/yaml (private's on-disk config refresh) are not
+# needed — see the disk-refresh PORT-SEAM note below.
 import logging
+# PORT-SEAM: os (private's on-disk config refresh) is not needed here.
 from datetime import UTC, datetime, timedelta
 
+# PORT-SEAM: pathlib.Path + yaml (private's on-disk config refresh) are not
+# needed — see the disk-refresh PORT-SEAM note below.
 from jobcannon.engine.json_utils import utc_now_iso
 # PORT-SEAM: DB access routes through ScanServices.connection_factory, replacing
 # job_finder.web.db_helpers.standalone_connection (host owns connection lifecycle).
@@ -135,6 +140,8 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
                 visibility policy (opaque-only sources, never corroborated,
                 grace-period-gated branch match or hard-ceiling backstop).
     """
+    # PORT-SEAM: private source refreshes opaque_redirect_sources from disk
+    # here (#1513); not ported — see the module-level PORT-SEAM note above.
     staleness_cfg = (config or {}).get("staleness", {})
     stale_days = staleness_cfg.get("stale_threshold_days", _STALE_THRESHOLD_DAYS)
     archive_days = staleness_cfg.get("archive_threshold_days", _ARCHIVE_THRESHOLD_DAYS)

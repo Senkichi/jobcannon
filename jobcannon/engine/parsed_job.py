@@ -74,6 +74,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Callable
 
+# PORT-SEAM: private source imports get_company_denylist/load_config from
+# job_finder.config (app-level). Denylist and runtime config are injected here.
 from jobcannon.engine.jd_content_contract import jd_content_reject
 from jobcannon.engine.normalizers import (
     collapse_duplicated_suffix,
@@ -93,9 +95,9 @@ from jobcannon.engine.url_canonical import canonicalize_url
 if TYPE_CHECKING:
     from jobcannon.engine.models import Job
 
-# Host-injectable denylist seam. The private repo read this from config.yaml
-# (get_company_denylist); the engine takes an injected provider instead.
-# No provider registered => empty denylist => the check passes everything.
+# PORT-SEAM: host-injectable denylist seam. The private repo read this from
+# config.yaml (get_company_denylist); the engine takes an injected provider
+# instead. No provider registered => empty denylist => the check passes everything.
 _denylist_provider: Callable[[], frozenset[str]] | None = None
 
 
@@ -381,6 +383,9 @@ class ParsedJob:
         # entry of "Virtual Vocations" rejects a stored brand of
         # "Virtual Vocations Inc" — both normalize to "virtual vocations".
         # get_company_denylist returns already-normalized entries.
+        # PORT-SEAM: private source resolves the denylist via load_config() +
+        # get_company_denylist(config); the engine reads it from the injected
+        # provider set by set_denylist_provider() instead.
         denylist = _denylist_provider() if _denylist_provider is not None else frozenset()
         if normalize_company(job.company) in denylist:
             raise DenylistedCompanyError(f"Company {job.company!r} is in the configured denylist")
@@ -409,6 +414,9 @@ class ParsedJob:
         # synchronous ingest path. The row is still written; jd_full is cleared so
         # enrichment re-fetches a clean body and the score never sees the garbage.
         if clean_jd_full is not None:
+            # PORT-SEAM: private source passes the live app config dict; the
+            # engine reads jobcannon.engine.runtime_config's injected snapshot
+            # instead (no config.yaml access inside the engine boundary).
             _jd_rej = jd_content_reject(clean_jd_full, cleaned_title, dict(get_runtime_config()))
             if _jd_rej is not None:
                 unresolved_reasons.append(_jd_rej[0])

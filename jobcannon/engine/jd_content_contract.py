@@ -62,6 +62,8 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
+# PORT-SEAM: private source imports get_jd_full_thresholds from job_finder.config
+# (app-level, not portable). The resolver is inlined below instead of imported.
 from jobcannon.engine.normalizers import (
     TITLE_STOPWORDS,
     body_mentions_any_stem,
@@ -296,10 +298,10 @@ _REQUIREMENT_HEADER_RE = re.compile(
 # A body below this floor, or ending in a trailing ellipsis/…, is treated as a
 # truncated snippet and routed back to enrichment.
 #
-# ADAPTATION (declared in the port record): upstream these defaults and the
-# resolver live in the app-level config module. The engine cannot import that
-# layer (boundary: pure engine, no host config), and this contract module is
-# the only engine consumer, so the resolver is inlined here verbatim.
+# PORT-SEAM: upstream these defaults and the resolver live in the app-level
+# config module. The engine cannot import that layer (boundary: pure engine,
+# no host config), and this contract module is the only engine consumer, so
+# the resolver is inlined here verbatim.
 DEFAULT_JD_FULL_MIN_CHARS = 200
 DEFAULT_JD_FULL_REJECT_TRAILING_ELLIPSIS = True
 

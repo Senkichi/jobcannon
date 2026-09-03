@@ -45,7 +45,8 @@ SUB_SCORE_KEYS: tuple[str, ...] = (
 # Canonical classification verdicts — the universe derive_classification() can
 # return. Order is the confusion-matrix / report axis order (do not reorder
 # without re-pinning the eval reports). "low_signal" is the honest no-signal
-# class, distinct from a confident "reject".
+# class, distinct from a confident "reject". (# PORT-SEAM: private-tracker
+# issue-number citation dropped per repo convention (#82).)
 CLASSIFICATIONS: tuple[str, ...] = (
     "apply",
     "consider",
@@ -54,6 +55,10 @@ CLASSIFICATIONS: tuple[str, ...] = (
     "low_signal",
 )
 
+# PORT-SEAM: predates this row's carry_range.to — landed by an earlier port
+# wave (private commit 265fbb51 postdates L-0445's declared SHA). Kept as-is
+# rather than reverted; see PR body for the stale-commit note.
+#
 # Minimum jd_full length required for gold-set labeling and snapshot freezing.
 # Rows below this threshold are rejected by the labeler and retired by the
 # migration. Single-sourced across migration, labeler, and heal script.

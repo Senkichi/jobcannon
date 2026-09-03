@@ -10,7 +10,11 @@ a single flat constant the way domain_policy.BLOCKED_DOMAINS does.
 Also implements the liveness-gating attribute for sources (verification.gated_sources
 in config.yaml). Jobs where ALL sources are gated AND expiry_status IS NOT 'live'
 are hidden from the main listing query. A job with ANY non-gated source is never
-gated (corroboration wins).
+gated (corroboration wins). (# PORT-SEAM: this paragraph, __all__, and
+gated_sources_from_config/is_gated_source/first_source_url/
+is_opaque_redirect_host below are an engine-side addition from an earlier
+port wave — no host-layer dependency; pure functions over an injected config
+dict.)
 
 No DB, no network — pure functions over a job dict/Row and a config dict.
 """
@@ -21,6 +25,7 @@ from urllib.parse import urlparse
 
 from jobcannon.engine.json_utils import safe_json_load
 
+# PORT-SEAM: __all__ is an engine-side addition — the private source has none.
 __all__ = [
     "UNVERIFIABLE_EVIDENCE_CEILING",
     "UNVERIFIABLE_EVIDENCE_CONFIRMED",
@@ -39,6 +44,9 @@ def _registry(config: dict) -> list[dict]:
     return (config.get("verification") or {}).get("opaque_redirect_sources") or []
 
 
+# PORT-SEAM: gated_sources_from_config and is_gated_source below are an
+# engine-side addition from an earlier port wave — not in the private source
+# at this row's declared SHA; pure functions over an injected config dict.
 def gated_sources_from_config(config: dict) -> list[str]:
     """Return the list of gated source tags from config.
 
@@ -106,6 +114,8 @@ def _as_str_list(job_row, key: str) -> list[str]:
     return [v for v in value if isinstance(v, str) and v]
 
 
+# PORT-SEAM: first_source_url below is an engine-side addition from an
+# earlier port wave — not in the private source at this row's declared SHA.
 def first_source_url(job_row) -> str | None:
     """Return the first non-empty URL in job_row's source_urls, or None."""
     source_urls = _as_str_list(job_row, "source_urls")
@@ -140,6 +150,8 @@ def is_opaque_redirect_url(url: str | None, config: dict) -> bool:
     return False
 
 
+# PORT-SEAM: is_opaque_redirect_host below is an engine-side addition from an
+# earlier port wave — not in the private source at this row's declared SHA.
 def is_opaque_redirect_host(host: str | None, config: dict | None) -> bool:
     """True if host (exact or subdomain) matches any registry `domain` entry.
 

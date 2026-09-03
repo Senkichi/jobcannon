@@ -34,6 +34,9 @@ from __future__ import annotations
 
 import logging
 import re
+# PORT-SEAM: urlsplit added for detect_platform's host-boundary match below
+# (an earlier port-wave hardening — the private source used a plain substring
+# check, which false-positives on hosts like "notlinkedin.com").
 from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
@@ -72,6 +75,9 @@ def detect_platform(url: str | None) -> str | None:
     """
     if not url:
         return None
+    # PORT-SEAM: host-boundary match via urlsplit — private source did
+    # `"linkedin.com" in url.lower() and "/jobs/" in url.lower()` (substring,
+    # false-positives on e.g. "notlinkedin.com/jobs/").
     parts = urlsplit(url.lower())
     host = parts.hostname or ""
     if (host == "linkedin.com" or host.endswith(".linkedin.com")) and "/jobs/" in parts.path:

@@ -5,7 +5,8 @@ The speculative-probe loop (`ats_scanner._probe.probe_ats_slugs`) derives
 slug candidates from a company's `name_raw` and queries every supported ATS
 API for each candidate. The private source additionally drove this from a
 one-off `scripts/f4_reprobe_misses.py` drain script, not carried into this
-port. For famous brand-name slugs (`shopify`, `walmart`, `canva`, ...) this
+port. (# PORT-SEAM: docstring reworded — the drain script is a one-off,
+private-only utility.) For famous brand-name slugs (`shopify`, `walmart`, `canva`, ...) this
 produces brand-collision false positives where a *different*, smaller
 company has registered that slug on a small ATS (BambooHR, Recruitee,
 Pinpoint, ...).
@@ -168,6 +169,7 @@ def is_blocked_brand(name: str | None) -> bool:
     Used by the speculative-probe loop (`ats_scanner._probe.probe_ats_slugs`,
     `ats_prober.probe_single_company`; also the private source's one-off
     `scripts/f4_reprobe_misses.py` drain script, not carried into this port)
+    (# PORT-SEAM: docstring reworded to note the dropped drain script.)
     to skip companies whose name collides with a known famous brand. See
     module docstring for the cohort-bias rationale.
 
