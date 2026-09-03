@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-03T11:18:24Z",
+  "generated_at": "2026-09-03T11:39:53Z",
   "roots": [
     "engine",
     "db",
@@ -406,7 +406,11 @@
       "root": "engine",
       "markers": [
         {
-          "line": 19,
+          "line": 1,
+          "text": "# PORTED from job_finder/web/ats_scanner/__init__.py @ a03521500442af0751d73ccb5737f2950d5ad06c (private job-cannon). Ledger L-0450."
+        },
+        {
+          "line": 20,
           "text": "the private source they were static top-level imports; in the engine both"
         }
       ]
@@ -416,15 +420,23 @@
       "root": "engine",
       "markers": [
         {
-          "line": 34,
-          "text": "# Re-homed from the private repo's ats_slug_challenge.py: a plain string"
+          "line": 1,
+          "text": "# PORTED from job_finder/web/ats_scanner/_probe.py @ b24cf4a6b434f96154144ee087acbae766b4e255 (private job-cannon). Ledger L-0018."
         },
         {
-          "line": 156,
+          "line": 45,
+          "text": "# PORT-SEAM: re-homed from the private repo's ats_slug_challenge.py -- a"
+        },
+        {
+          "line": 62,
+          "text": "# (job_finder/web/ats_identity_reconcile.reconcile_company_ats privately),"
+        },
+        {
+          "line": 169,
           "text": "host-supplied ``ScanServices`` fields (the private source's"
         },
         {
-          "line": 519,
+          "line": 683,
           "text": "# job_finder/web/brand_blocklist.py for the rationale and seed list."
         }
       ]
@@ -448,12 +460,36 @@
       ]
     },
     {
+      "path": "jobcannon/engine/ats_scanner/_run_html.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/ats_scanner/_run_html.py @ 4c65f020a404de6504a21593875685db99d3cd65 (private job-cannon). Ledger L-0019."
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/ats_scanner/_run_playwright.py",
       "root": "engine",
       "markers": [
         {
-          "line": 214,
-          "text": "# private repo resolved this via careers_crawler's PEP-562 __getattr__"
+          "line": 1,
+          "text": "# PORTED from job_finder/web/ats_scanner/_run_playwright.py @ 4c65f020a404de6504a21593875685db99d3cd65 (private job-cannon). Ledger L-0020."
+        },
+        {
+          "line": 35,
+          "text": "# private-only job_finder.db helpers with no ScanServices equivalent yet;"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/ats_scanner/_upsert.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/ats_scanner/_upsert.py @ 4348fc77093fa44e7be4e29a97ded6bed7d9ced3 (private job-cannon). Ledger L-0021."
         }
       ]
     },
