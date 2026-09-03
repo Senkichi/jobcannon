@@ -153,6 +153,7 @@ _TITLE_LOCATION_BLEED_RE = re.compile(
 # ---------------------------------------------------------------------------
 # Phase 46.03: junk-detection logic now lives in jobcannon.engine.jd_content_contract;
 # `_is_jd_junk` is re-exported at the top of this module (see import block above).
+# (# PORT-SEAM: reworded from the private source's file-path reference — no jobcannon.engine module maps to job_finder.db._jd_full 1:1.)
 
 # ---------------------------------------------------------------------------
 # I-09 helper: cross-field title/locations_raw bleed
@@ -207,6 +208,7 @@ class ParsedJob:
     # strip_workplace_tokens (#264), which returns None when the scraped
     # string was ONLY a workplace token ("Remote" -> None). db/_jobs.py
     # already treats "" and None as equivalent (``parsed.location or None``).
+    # PORT-SEAM: type widened (was `str`) to carry strip_workplace_tokens' None-vs-"" contract.
     location: str | None = ""
     locations_raw: list[str] = field(default_factory=list)
     locations_structured: list[JobLocation] = field(default_factory=list)
@@ -480,7 +482,9 @@ class ParsedJob:
             # validator (no raise, no unresolved_reasons entry) — a silent
             # cleanup, so it isn't numbered alongside I-07..I-18 above. See
             # strip_workplace_tokens() for the None-vs-"" return contract.
-            "location": strip_workplace_tokens(job.location),
+            "location": strip_workplace_tokens(
+                job.location
+            ),  # PORT-SEAM: #264 integration restored (origin/main-only; not in this row's private carry)
             "locations_raw": locations_raw,
             "locations_structured": locations_structured,
             "workplace_type": workplace_type,
@@ -550,6 +554,7 @@ class UnresolvedParsedJob:
     # str | None — see ParsedJob.location for the strip_workplace_tokens
     # (#264) None-vs-"" contract; identical here since from_job() builds both
     # variants from the same common_kwargs.
+    # PORT-SEAM: type widened (was `str`) to carry strip_workplace_tokens' None-vs-"" contract.
     location: str | None = ""
     locations_raw: list[str] = field(default_factory=list)
     locations_structured: list[JobLocation] = field(default_factory=list)

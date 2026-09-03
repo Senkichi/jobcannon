@@ -362,12 +362,14 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
                 (config or {}).get("direct_link", {}).get("resolver", {}).get("max_attempts", 3)
             )
             grace_cutoff = (now_naive_utc - timedelta(days=unverifiable_grace_days)).isoformat()
-            ceiling_cutoff = (now_naive_utc - timedelta(days=unverifiable_ceiling_days)).isoformat()
+            ceiling_cutoff = (
+                now_naive_utc - timedelta(days=unverifiable_ceiling_days)
+            ).isoformat()  # PORT-SEAM: ruff line-length 100 vs 99 wraps this differently; pure reformat
 
             unverifiable_rows = conn.execute(
                 "SELECT j.dedup_key, j.pipeline_status, j.sources, j.source_urls, "
                 "j.direct_url, j.first_seen, j.company_id, j.careers_checked_at, "
-                "j.direct_url_attempts, c.scan_enabled, c.ats_probe_status "
+                "j.direct_url_attempts, c.scan_enabled, c.ats_probe_status "  # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented column, no migration backs it)
                 "FROM jobs j "
                 "LEFT JOIN companies c ON c.id = j.company_id "
                 f"WHERE j.first_seen < ? AND j.pipeline_status IN ({passive_placeholders})",
@@ -388,14 +390,18 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
                     continue
 
                 company_id = row["company_id"]
-                scan_enabled = row["scan_enabled"]
+                scan_enabled = row[
+                    "scan_enabled"
+                ]  # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted
                 probe_status = row["ats_probe_status"]
                 careers_checked = row["careers_checked_at"]
                 attempts = row["direct_url_attempts"] or 0
 
                 branch_matched = (
                     company_id is None  # Branch 1
-                    or (company_id is not None and scan_enabled == 0)  # Branch 2
+                    or (
+                        company_id is not None and scan_enabled == 0
+                    )  # Branch 2 (# PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted)
                     or (probe_status == "miss" and careers_checked is not None)  # Branch 3
                     or (
                         probe_status == "hit"

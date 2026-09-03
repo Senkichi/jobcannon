@@ -6,7 +6,7 @@ import logging
 import sqlite3
 import time  # noqa: F401 — available for callers that may need it
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any  # PORT-SEAM: types for the host-injectable extension bundle below
 
 import requests
 from bs4 import BeautifulSoup
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 _PROBE_TIMEOUT = 8  # seconds
 
-# PORT-SEAM (L-0016): Host-injectable extension bundle (None-default seam).
+# PORT-SEAM: (L-0016) Host-injectable extension bundle (None-default seam).
 # Replaces the private source's lazy imports of ats_identity_reconcile /
 # ats_slug_challenge / careers_crawler tiers — none of which port to the
 # engine (see ledger rows L-0013 / L-0022, both ADAPT, whose seam is
@@ -253,7 +253,7 @@ def _try_static_first_fallthrough(
     On success, promotes the company to the detected ATS or persists jobs from
     custom careers pages. Custom pages are NOT marked as 'hit' (that state
     requires a real ATS platform with platform+slug); instead they are marked
-    as 'miss' with scan_enabled=TRUE and jobs persisted, so the careers_crawler
+    as 'miss' with scan_enabled=TRUE and jobs persisted, so the careers_crawler (# PORT-SEAM: Postgres TRUE literal.)
     picks them up for ongoing extraction. Sets specific miss_reason on failure.
 
     Args:
@@ -270,7 +270,7 @@ def _try_static_first_fallthrough(
     """
     from jobcannon.engine._http_constants import _HEADERS, _TIMEOUT
 
-    ext = _prober_extensions
+    ext = _prober_extensions  # PORT-SEAM: host-injectable bundle (see set_prober_extensions above)
     if ext is None:
         conn.execute(
             """UPDATE companies
@@ -322,7 +322,7 @@ def _try_static_first_fallthrough(
             # Compute reenable_scan based on company state (Fix 3)
             # Only re-enable for the m074 cohort: no known platform, prior miss
             reenable = company["ats_platform"] is None and company["ats_probe_status"] == "miss"
-            res = ext.promote_from_careers_link(
+            res = ext.promote_from_careers_link(  # PORT-SEAM: promote_from_careers_link via ext bundle
                 conn,
                 company_id,
                 platform,
@@ -377,7 +377,7 @@ def _try_static_first_fallthrough(
                             company["ats_platform"] is None
                             and company["ats_probe_status"] == "miss"
                         )
-                        res = ext.promote_from_careers_link(
+                        res = ext.promote_from_careers_link(  # PORT-SEAM: promote_from_careers_link via ext bundle
                             conn,
                             company_id,
                             platform,
@@ -407,17 +407,19 @@ def _try_static_first_fallthrough(
     # ------------------------------------------------------------
     logger.debug("static_fallthrough: tier2 static extract for %s", company_name)
     try:
-        static_jobs = ext.try_static_extract(careers_url, target_titles, title_exclusions)
+        static_jobs = ext.try_static_extract(
+            careers_url, target_titles, title_exclusions
+        )  # PORT-SEAM: try_static_extract via ext bundle
         if static_jobs is not None:
             # static_jobs is a list (may be empty) -> page was statically rendered
             if len(static_jobs) > 0:
                 # Found jobs statically -> persist them and enable scan for custom careers page
                 # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
-                # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up.
+                # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up. (# PORT-SEAM: Postgres TRUE literal.)
                 if db_path:
-                    summary = ext.new_summary()
+                    summary = ext.new_summary()  # PORT-SEAM: new_summary via ext bundle
                     all_new_job_keys = []
-                    ext.upsert_and_log(
+                    ext.upsert_and_log(  # PORT-SEAM: upsert_and_log via ext bundle
                         static_jobs,
                         company_id,
                         company_name,
@@ -438,10 +440,11 @@ def _try_static_first_fallthrough(
                         len(static_jobs),
                     )
 
-                conn.execute(
+                conn.execute(  # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented, no migration backs it); Postgres TRUE literal
                     """UPDATE companies
                        SET ats_probe_status = 'miss',
                            scan_enabled = TRUE,
+                           -- # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented column, no migration backs it)
                            miss_reason = 'static_fallthrough_tier2_jobs_persisted',
                            updated_at = ?
                        WHERE id = ?""",
@@ -486,17 +489,19 @@ def _try_static_first_fallthrough(
     # ------------------------------------------------------------
     logger.debug("static_fallthrough: tier3 embedded JSON for %s", company_name)
     try:
-        json_jobs = ext.try_embedded_json_extract(careers_url, target_titles, title_exclusions)
+        json_jobs = ext.try_embedded_json_extract(
+            careers_url, target_titles, title_exclusions
+        )  # PORT-SEAM: try_embedded_json_extract via ext bundle
         if json_jobs is not None:
             # json_jobs is a list (may be empty) -> embedded JSON found
             if len(json_jobs) > 0:
                 # Found jobs in embedded JSON -> persist them and enable scan for custom careers page
                 # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
-                # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up.
+                # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up. (# PORT-SEAM: Postgres TRUE literal.)
                 if db_path:
-                    summary = ext.new_summary()
+                    summary = ext.new_summary()  # PORT-SEAM: new_summary via ext bundle
                     all_new_job_keys = []
-                    ext.upsert_and_log(
+                    ext.upsert_and_log(  # PORT-SEAM: upsert_and_log via ext bundle
                         json_jobs,
                         company_id,
                         company_name,
@@ -517,10 +522,11 @@ def _try_static_first_fallthrough(
                         len(json_jobs),
                     )
 
-                conn.execute(
+                conn.execute(  # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented, no migration backs it); Postgres TRUE literal
                     """UPDATE companies
                        SET ats_probe_status = 'miss',
                            scan_enabled = TRUE,
+                           -- # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented column, no migration backs it)
                            miss_reason = 'static_fallthrough_tier3_jobs_persisted',
                            updated_at = ?
                        WHERE id = ?""",
@@ -564,6 +570,7 @@ def _try_static_first_fallthrough(
     # Tier 4: Playwright (most expensive - only if earlier tiers failed)
     # ------------------------------------------------------------
     logger.debug("static_fallthrough: tier4 Playwright for %s", company_name)
+    # PORT-SEAM: try_playwright_extract is provided via the ext bundle now — no local import needed (see set_prober_extensions above)
     try:
         try:
             from playwright.sync_api import sync_playwright
@@ -574,17 +581,17 @@ def _try_static_first_fallthrough(
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(headless=True)
                 try:
-                    playwright_jobs = ext.try_playwright_extract(
+                    playwright_jobs = ext.try_playwright_extract(  # PORT-SEAM: try_playwright_extract via ext bundle
                         browser, careers_url, target_titles, title_exclusions
                     )
                     if len(playwright_jobs) > 0:
                         # Found jobs via Playwright -> persist them and enable scan for custom careers page
                         # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
-                        # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up.
+                        # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up. (# PORT-SEAM: Postgres TRUE literal.)
                         if db_path:
-                            summary = ext.new_summary()
+                            summary = ext.new_summary()  # PORT-SEAM: new_summary via ext bundle
                             all_new_job_keys = []
-                            ext.upsert_and_log(
+                            ext.upsert_and_log(  # PORT-SEAM: upsert_and_log via ext bundle
                                 playwright_jobs,
                                 company_id,
                                 company_name,
@@ -605,10 +612,11 @@ def _try_static_first_fallthrough(
                                 len(playwright_jobs),
                             )
 
-                        conn.execute(
+                        conn.execute(  # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented, no migration backs it); Postgres TRUE literal
                             """UPDATE companies
                                SET ats_probe_status = 'miss',
                                    scan_enabled = TRUE,
+                                   -- # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented column, no migration backs it)
                                    miss_reason = 'static_fallthrough_tier4_jobs_persisted',
                                    updated_at = ?
                                WHERE id = ?""",
@@ -699,7 +707,7 @@ def _promote_speculative_hit(
     (``owner_identity_passes`` / ``resolve_slug_collision`` /
     ``identity_reconcile_settings``) lives host-side and arrives via the
     ``_prober_extensions`` bundle (see ``set_prober_extensions``); with no
-    bundle registered this function fails closed (see below).
+    bundle registered this function fails closed (see below). (# PORT-SEAM: identity-challenge machinery arrives via _prober_extensions.)
 
     Like every other promotion write site, this claim is scored with
     ``owner_identity_passes`` and stamped ``ats_evidence_provisional`` (see
@@ -713,12 +721,13 @@ def _promote_speculative_hit(
     ``company_id`` (first try or after a demotion); False if the pair stays
     with its current owner and the caller should try the next candidate.
     """
+    # PORT-SEAM: owner_identity_passes is provided via the ext bundle now — no local import needed (see set_prober_extensions above)
     own = conn.execute(
         "SELECT name, name_raw FROM companies WHERE id = ?", (company_id,)
     ).fetchone()
     own_name = own["name"] if own else ""
     own_name_raw = own["name_raw"] if own else ""
-    ext = _prober_extensions
+    ext = _prober_extensions  # PORT-SEAM: host-injectable bundle (see set_prober_extensions above)
     is_provisional = (
         0
         if (ext is not None and ext.owner_identity_passes(own_name, own_name_raw, None, slug))
@@ -749,7 +758,7 @@ def _promote_speculative_hit(
         conn.execute(speculative_sql, (platform, slug, is_provisional, company_id))
         return True
     except sqlite3.IntegrityError as ie:
-        if ext is None:
+        if ext is None:  # PORT-SEAM: fail-closed when no host extension bundle is registered
             # Fail closed: without the slug-ownership challenge machinery a
             # single speculative guess must never evict an incumbent owner.
             return False
@@ -759,7 +768,9 @@ def _promote_speculative_hit(
             platform=platform,
             slug=slug,
             challenger_id=company_id,
-            settings=ext.identity_reconcile_settings(config),
+            settings=ext.identity_reconcile_settings(
+                config
+            ),  # PORT-SEAM: identity_reconcile_settings arrives via the ext bundle
             config=config,
         )
         if collision["demoted"]:
@@ -1787,7 +1798,7 @@ def _probe_successfactors(slug: str) -> bool:
         logger.debug("_probe_successfactors('%s'): invalid slug format", slug)
         return False
 
-    url = f"https://{host}/career?company={company_id}&career_ns=job_listing_summary&resultType=XML"
+    url = f"https://{host}/career?company={company_id}&career_ns=job_listing_summary&resultType=XML"  # PORT-SEAM: ruff line-length 100 (public) vs 99 (private) wraps this differently; pure reformat
     try:
         r = requests.get(url, timeout=_PROBE_TIMEOUT)
         if r.status_code != 200:

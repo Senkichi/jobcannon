@@ -604,7 +604,9 @@ _URL_DETECTION_PATTERNS: list[
     # Order 2: Workday API
     (
         "workday",
-        re.compile(r"https?://([^/]+)\.myworkdayjobs\.com/wday/cxs/[^/]+/([^/?#]+)", re.IGNORECASE),
+        re.compile(
+            r"https?://([^/]+)\.myworkdayjobs\.com/wday/cxs/[^/]+/([^/?#]+)", re.IGNORECASE
+        ),  # PORT-SEAM: ruff line-length 100 (public) vs 99 (private) wraps this differently; pure reformat
         _SPECIFICITY_API,
         _extract_slug_workday_api,
     ),
@@ -1080,5 +1082,7 @@ def is_direct_ats_platform(platform_key: str) -> bool:
         True if the platform is a direct ATS platform, False otherwise.
     """
     return (
-        platform_key in SCANNABLE_TARGET_PLATFORMS and platform_key not in KEYWORD_ADAPTER_PLATFORMS
+        platform_key in SCANNABLE_TARGET_PLATFORMS
+        and platform_key
+        not in KEYWORD_ADAPTER_PLATFORMS  # PORT-SEAM: ruff line-length 100 vs 99 wraps this differently; pure reformat
     )

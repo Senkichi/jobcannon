@@ -955,7 +955,7 @@ def _ambiguous_widening_signal(stripped: str, low: str, title: str | None) -> st
     return None
 
 
-# PORT-SEAM (L-0004): the private source this file was carried from (job_finder/db/
+# PORT-SEAM: (L-0004) the private source this file was carried from (job_finder/db/
 # _jd_content_contract.py @ 3aaa360) no longer defines a standalone
 # ``has_recognizable_jd_shape`` -- its positive-shape check was inlined directly into
 # ``classify_jd_content`` below. But this public jobcannon.engine module is a shared
@@ -1041,7 +1041,9 @@ def classify_jd_content(
     if widen is not None:
         return JdContentResult(JdVerdict.AMBIGUOUS, None, widen)
 
-    has_shape = has_recognizable_jd_shape(low)
+    has_shape = has_recognizable_jd_shape(
+        low
+    )  # PORT-SEAM: routed through the restored wrapper (see above)
     substantial = len(stripped) >= _CLEAN_MIN_CHARS
 
     ground_tokens = significant_tokens(title) if title else significant_tokens(company or "")

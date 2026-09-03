@@ -4,13 +4,15 @@
 Pure rule logic. No DB side-effects. In the private repo this module lived at
 `job_finder/db/_classification.py` and was re-exported via `job_finder/db/__init__.py`
 for callers that persist assessments; here it is the canonical home, imported
-directly as `jobcannon.engine.classification`.
+directly as `jobcannon.engine.classification`. (# PORT-SEAM: module docstring reworded for the public repo as canonical home; no logic change.)
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Collection
+from collections.abc import (
+    Collection,
+)  # PORT-SEAM: (L-0003) supports excluded_axes: Collection[str] (origin/main-only param; not in private carry)
 from dataclasses import dataclass
 
 from jobcannon.engine.constants import SUB_SCORE_KEYS as _SUB_SCORE_KEYS
@@ -30,7 +32,7 @@ from jobcannon.engine.enrichment_states import LOW_SIGNAL_TERMINAL
 # membership tests against raw enrichment_tier strings are unchanged).
 _TERMINAL_ENRICHMENT_TIERS: frozenset[str] = frozenset(LOW_SIGNAL_TERMINAL)
 
-# Positive-evidence thresholds for the "apply" verdict. On the 1-5
+# Positive-evidence thresholds for the "apply" verdict. On the 1-5  # PORT-SEAM: issue-number citation stripped (docs hygiene, see #82/#96)
 # ordinal scale, 3 means "neutral / couldn't tell" — the *absence of weakness*,
 # not the *presence of strength*. "apply" (the strongest positive class, the one
 # the user acts on) must require affirmative fit evidence: a minimum mean AND a
@@ -51,7 +53,7 @@ _STRONG_AXIS_FLOOR: int = 4
 # never contributes to them; the flat-neutral tell instead reads the RAW
 # pre-substitution vector, so a marker can neither manufacture an all-3s
 # vector nor suppress the tell on a genuinely flat one.
-_EXCLUDED_AXIS_MARKER: int = 3
+_EXCLUDED_AXIS_MARKER: int = 3  # PORT-SEAM: (L-0003) excluded_axes feature is origin/main-only (PR #27); not in this row's private carry
 
 # Neutral midpoint of the 1-5 ordinal scale. ``comp_fit`` is forced to this
 # value when a row carries no parsed compensation signal (issue #1969):
@@ -73,12 +75,12 @@ COMP_FIT_NEUTRAL: int = 3
 # column, its migration, and the redrive sweep) has no public counterpart yet —
 # this port carries only the version constant itself, so a future hosted
 # persistence layer has a stable value to stamp and this module's own history
-# of its rule is recorded in one place.
+# of its rule is recorded in one place. (# PORT-SEAM: docs reworded -- private DB column not yet ported; docs hygiene, see #82/#96.)
 #
 # Version history:
 #   1 — the rule as ported: low_signal branch + positive-evidence "apply" gate
 #       + location-policy effective_location_fit. Bump to 2 (3, ...) on the
-#       NEXT rule change that can invalidate stored verdicts.
+#       NEXT rule change that can invalidate stored verdicts.  # PORT-SEAM: issue-number citation stripped (docs hygiene, see #82/#96)
 CLASSIFICATION_RULE_VERSION: int = 1
 
 
@@ -144,18 +146,18 @@ def effective_sub_scores(
     helper is ported ahead of that writer so any future consumer that
     re-derives classification from stored sub-scores consults the stored
     location-policy verdict — skipping that consultation systematically
-    disagrees with the stored classification for every policy-adjusted row.
+    disagrees with the stored classification for every policy-adjusted row. (# PORT-SEAM: docstring reworded for schema without sub_scores_json yet; docs hygiene.)
 
     This helper is that consultation. Call it on the parsed ``sub_scores`` dict
     plus the raw serialized verdict before passing the result to
-    ``derive_classification``. When no verdict is stored (None, empty,
+    ``derive_classification``. When no verdict is stored (None, empty,  # PORT-SEAM: docs hygiene reword, see #82/#96
     malformed, or missing/invalid ``effective_location_fit``) the original dict
     is returned unchanged — the no-policy case classifies identically either way.
 
     Args:
         sub_scores: parsed ``sub_scores_json`` dict (the raw LLM sub-scores).
         location_policy_verdict_json: serialized location-policy verdict JSON
-            string, or None when the row has no stored verdict.
+            string, or None when the row has no stored verdict.  # PORT-SEAM: docs hygiene reword, see #82/#96
 
     Returns:
         A new dict with ``location_fit`` replaced by the verdict's
@@ -184,7 +186,7 @@ class JobAssessment:
           resume_priority_skills (each a list[str]); serialized to the reused
           fit_analysis column per D-08.
       provider: cascade-attribution string (e.g., "ollama", "anthropic") or None.
-      degenerate: quality-floor flag. True only when EVERY provider
+      degenerate: quality-floor flag. True only when EVERY provider  # PORT-SEAM: issue-number citation stripped (docs hygiene, see #82/#96)
           in the cascade returned a no-signal (uniform axes + empty rationale)
           assessment, so the dispatcher accepted one flagged rather than
           raising. derive_classification routes a degenerate assessment to
@@ -216,13 +218,15 @@ def derive_classification(
     apply_min_strong_axes: int = DEFAULT_APPLY_MIN_STRONG_AXES,
     *,
     degenerate: bool = False,
-    excluded_axes: Collection[str] = (),
+    excluded_axes: Collection[
+        str
+    ] = (),  # PORT-SEAM: (L-0003) origin/main-only param (PR #27); not in this row's private carry
 ) -> str:
     """Python-derived 5-way classification — NOT LLM-emitted (CONTEXT D-06, anti-pattern 3).
 
-    Rule precedence (per spec D-2.5):
+    Rule precedence (per spec D-2.5):  # PORT-SEAM: issue-number citation stripped (docs hygiene, see #82/#96)
       1. legitimacy_note truthy            -> "reject"
-      2. degenerate                        -> "low_signal"
+      2. degenerate                        -> "low_signal"  # PORT-SEAM: issue-number citation stripped (docs hygiene)
       3. enrichment exhausted + short jd   -> "low_signal"
       4. flat-neutral vector (all == 3)    -> "low_signal"
       5. any sub-score == 1                -> "reject"
@@ -230,7 +234,7 @@ def derive_classification(
       7. all sub-scores >= 2               -> "consider"
       8. otherwise                         -> "skip"
 
-    The ``degenerate`` branch handles the all-providers-degenerate
+    The ``degenerate`` branch handles the all-providers-degenerate  # PORT-SEAM: issue-number citation stripped (docs hygiene)
     case: when every provider in the cascade returned a uniform no-signal axis
     vector, the dispatcher accepts one flagged ``degenerate=True``. Such a
     vector carries no real signal, so it must NOT be allowed to classify as
@@ -246,14 +250,14 @@ def derive_classification(
     text cannot be confidently rejected on rubric outputs (the 1 itself may be
     a hallucination from the model scoring against an empty prompt).
 
-    The flat-neutral branch (3) is branch (C): on the 1-5
+    The flat-neutral branch (3) is branch (C): on the 1-5  # PORT-SEAM: issue-number citation stripped (docs hygiene, see #82/#96)
     scale 3 means "couldn't tell", so a vector that is degenerate at the neutral
     midpoint (all six axes present AND all == 3) is a strong tell the model did
     not discriminate. It is surfaced as low_signal honestly, independent of JD
     length and enrichment_tier — which also covers the agentic-tier cohort that
-    the exact-string enrichment match in branch 2 misses.
+    the exact-string enrichment match in branch 2 misses.  # PORT-SEAM: issue-number citation stripped (docs hygiene)
 
-    The "apply" branch (5) is branch (B): "apply" is the strongest
+    The "apply" branch (5) is branch (B): "apply" is the strongest  # PORT-SEAM: issue-number citation stripped (docs hygiene)
     positive class (the one the user acts on) and must require the *presence of
     strength*, not merely the *absence of weakness*. It fires only when no axis
     is weak (all >= 3), at least ``apply_min_strong_axes`` axes are strong
@@ -262,7 +266,7 @@ def derive_classification(
     and near-neutral vectors like {4,3,3,3,3,3} fall through to "consider".
 
     Partial-vector defense (couples with ``_coerce_assessment``'s fail-closed
-    coercion in ``job_scorer.py``): the domain guard below requires all
+    coercion in ``job_scorer.py``): the domain guard below requires all  # PORT-SEAM: docs hygiene reword, see #82/#96
     six canonical keys before any sub-score branch runs, so a vector missing an
     axis raises ValueError rather than reaching "apply" over a partial dict.
 
@@ -290,7 +294,7 @@ def derive_classification(
         apply_min_strong_axes: minimum count of strong axes (>= 4) for an
             "apply" verdict. Configurable via scoring.apply_min_strong_axes
             (default 3).
-        degenerate: flag from JobAssessment.degenerate. True only
+        degenerate: flag from JobAssessment.degenerate. True only  # PORT-SEAM: issue-number citation stripped (docs hygiene)
             when the cascade quality floor accepted an all-providers-degenerate
             result. Routes to low_signal (no-signal vector, never apply).
         excluded_axes: axis names (a strict subset of the six canonical keys)
@@ -311,7 +315,7 @@ def derive_classification(
             _STRONG_AXIS_FLOOR) are deliberately NOT recalibrated for the
             smaller divisor. Raw values of excluded axes are still validated
             (garbage is rejected even in an excluded slot). Excluding every
-            axis raises ValueError — nothing would remain to classify on.
+            axis raises ValueError — nothing would remain to classify on.  # PORT-SEAM: (L-0003) excluded_axes param docs -- origin/main-only (PR #27)
 
     Returns:
         One of "reject", "low_signal", "apply", "consider", "skip".
@@ -367,7 +371,7 @@ def derive_classification(
             raise ValueError("excluded_axes cannot name all six axes — nothing left to classify")
         sub_scores = {**sub_scores, **dict.fromkeys(_excluded, _EXCLUDED_AXIS_MARKER)}
 
-    # Branch (C): flat-neutral vector -> low_signal. All six axes
+    # Branch (C): flat-neutral vector -> low_signal. All six axes  # PORT-SEAM: (L-0003) axis-exclusion substitution block is origin/main-only (PR #27); not in this row's private carry
     # at the neutral midpoint means the model did not discriminate; surface it
     # honestly rather than promoting it. Runs before the any-axis-1 reject and
     # the apply branch; independent of JD length / enrichment_tier. The tell
@@ -382,26 +386,34 @@ def derive_classification(
         return "low_signal"
 
     # Reads the substituted vector: an excluded slot holds the neutral marker,
-    # never a raw 1, so this can only fire from a non-excluded axis.
+    # never a raw 1, so this can only fire from a non-excluded axis.  # PORT-SEAM: (L-0003) axis-exclusion tell/reject logic is origin/main-only (PR #27)
     _values = list(sub_scores.values())
+    # PORT-SEAM: (L-0003) is_non_degenerate_low_signal() call removed here -- superseded
+    # by the raw-vector flat-neutral check above; no separate helper call needed.
     if any(v == 1 for v in _values):
         return "reject"
 
-    # Branch (B): "apply" requires affirmative fit evidence, not
+    # Branch (B): "apply" requires affirmative fit evidence, not  # PORT-SEAM: issue-number citation stripped (docs hygiene)
     # merely the absence of weakness. No weak axis (all >= 3), enough strong
     # axes (>= 4), AND a mean at or above the floor. Computed over NON-excluded
     # axes only: a substituted exclusion marker never contributes to the
     # strong-axis count or the mean.
     _included = [v for k, v in sub_scores.items() if k not in _excluded]
     _strong_axes = sum(1 for v in _included if v >= _STRONG_AXIS_FLOOR)
-    _mean = sum(_included) / len(_included)
+    _mean = (
+        sum(_included) / len(_included)
+    )  # PORT-SEAM: (L-0003) mean computed over non-excluded axes only (origin/main-only exclusion feature, PR #27)
     if (
-        all(v >= 3 for v in _included)
+        all(
+            v >= 3 for v in _included
+        )  # PORT-SEAM: (L-0003) iterates non-excluded axes only (origin/main-only feature, PR #27)
         and _strong_axes >= apply_min_strong_axes
         and _mean >= apply_mean_floor
     ):
         return "apply"
 
-    if all(v >= 2 for v in _included):
+    if all(
+        v >= 2 for v in _included
+    ):  # PORT-SEAM: (L-0003) iterates non-excluded axes only (origin/main-only feature, PR #27)
         return "consider"
     return "skip"
