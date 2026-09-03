@@ -34,7 +34,20 @@ equivalent (out of this PR's scope):
 Neither ``ats_reconciler`` nor ``expiry_checker`` is imported at module level
 here — both source-file imports are dropped entirely so a bare import of an
 unported module can't break collection of the rest of the file.
+
+PR #286 (L-0018 carried_files) adds the ``verify_live_detail``/``ProbeOutcome``
+dispatcher-coverage tests below (carried from the private repo's later state
+at L-0018's carry_range.to, b24cf4a) — this file predates the private
+``ats_registry`` split into swallowing (``verify_live``) vs raising
+(``verify_live_detail``) probe variants, so those tests were absent even
+though ``ats_registry.py`` itself (PR #288, L-0017) already implements the
+contract. Their absence is what let PR #286's round-1 review ship an
+``AttributeError`` on the live dispatch path undetected.
 """
+
+import ast
+import pathlib
+import subprocess
 
 import pytest
 
@@ -44,6 +57,9 @@ from jobcannon.engine.ats_scanner import _probe, _run_playwright
 
 PLATFORMS = ats_registry.PLATFORMS
 PROBE_PLATFORMS = sorted(n for n, s in PLATFORMS.items() if s.probe_attr is not None)
+RAISING_PROBE_PLATFORMS = sorted(
+    n for n, s in PLATFORMS.items() if s.probe_raising_attr is not None
+)
 IDENTITY_PROBE_PLATFORMS = sorted(
     n for n, s in PLATFORMS.items() if s.identity_probe_attr is not None
 )
@@ -652,3 +668,467 @@ class TestDetectGreenhousePostingId:
 
         assert detect_greenhouse_posting_id("https://www.amazon.jobs/en/jobs/3133798/x") is None
         assert detect_greenhouse_posting_id("") is None
+
+
+# --------------------------------------------------------------------------- #
+# Dispatcher-coverage guards for verify_live_detail (L-0018 carry, #1928).     #
+# verify_live collapses transient/blocked/permanent failures into a single    #
+# False for batch callers; verify_live_detail restores those distinctions for #
+# retry-aware callers. Carried from the private repo's later state (b24cf4a)  #
+# now that ats_registry.py itself (PR #288, L-0017) implements the contract.  #
+# --------------------------------------------------------------------------- #
+def test_every_probe_raising_attr_resolves():
+    """Each spec.probe_raising_attr names a real, callable ats_prober function.
+    A typo'd attr would dispatch uncaught through verify_live_detail (the
+    raising path has no broad except inside the probe) and abort the manual
+    retry route."""
+    for name in RAISING_PROBE_PLATFORMS:
+        attr = PLATFORMS[name].probe_raising_attr
+        assert attr is not None
+        assert hasattr(ats_prober, attr), f"{name}: ats_prober.{attr} does not exist"
+        assert callable(getattr(ats_prober, attr)), f"{name}: ats_prober.{attr} not callable"
+
+
+@pytest.mark.parametrize("name", RAISING_PROBE_PLATFORMS)
+def test_verify_live_detail_dispatches_raising_variant(name, monkeypatch):
+    """verify_live_detail must dispatch to the raising variant (probe_raising_attr)
+    for platforms that declare one -- NOT the swallowing probe_attr. Patching the
+    raising attr must take effect; patching the swallowing attr must NOT."""
+    raising_attr = PLATFORMS[name].probe_raising_attr
+    swallowing_attr = PLATFORMS[name].probe_attr
+    monkeypatch.setattr(ats_prober, swallowing_attr, lambda slug: True)
+    monkeypatch.setattr(
+        ats_prober,
+        raising_attr,
+        lambda slug: ats_prober.ProbeHttpResult(hit=False, status_code=404),
+    )
+    assert ats_registry.verify_live_detail(name, "any-slug") is ats_registry.ProbeOutcome.MISS, (
+        f"{name}: verify_live_detail should dispatch to raising variant {raising_attr}, "
+        f"not swallowing {swallowing_attr}"
+    )
+    monkeypatch.setattr(ats_prober, swallowing_attr, lambda slug: False)
+    monkeypatch.setattr(
+        ats_prober,
+        raising_attr,
+        lambda slug: ats_prober.ProbeHttpResult(hit=True, status_code=200),
+    )
+    assert ats_registry.verify_live_detail(name, "any-slug") is ats_registry.ProbeOutcome.HIT
+
+
+@pytest.mark.parametrize("name", RAISING_PROBE_PLATFORMS)
+def test_verify_live_detail_classifies_transient(name, monkeypatch):
+    """verify_live_detail must classify a Timeout from the raising variant as
+    ProbeOutcome.TRANSIENT."""
+    import requests
+
+    raising_attr = PLATFORMS[name].probe_raising_attr
+    monkeypatch.setattr(
+        ats_prober,
+        raising_attr,
+        lambda slug: (_ for _ in ()).throw(requests.exceptions.Timeout("timed out")),
+    )
+    assert ats_registry.verify_live_detail(name, "any-slug") is ats_registry.ProbeOutcome.TRANSIENT
+
+
+@pytest.mark.parametrize("name", RAISING_PROBE_PLATFORMS)
+@pytest.mark.parametrize("status_code", [503, 429])
+def test_verify_live_detail_classifies_transient_status_code(name, status_code, monkeypatch):
+    """verify_live_detail must classify a 429/5xx STATUS CODE from the raising
+    variant as ProbeOutcome.TRANSIENT -- not just a raised Timeout/ConnectionError."""
+    raising_attr = PLATFORMS[name].probe_raising_attr
+    monkeypatch.setattr(
+        ats_prober,
+        raising_attr,
+        lambda slug: ats_prober.ProbeHttpResult(hit=False, status_code=status_code),
+    )
+    assert ats_registry.verify_live_detail(name, "any-slug") is ats_registry.ProbeOutcome.TRANSIENT
+
+
+@pytest.mark.parametrize("name", RAISING_PROBE_PLATFORMS)
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_verify_live_detail_classifies_blocked(name, status_code, monkeypatch):
+    """A non-transient, non-404/410 status (401/403 -- the probe reached a real
+    response but was denied) classifies as ProbeOutcome.BLOCKED, distinct from
+    both TRANSIENT (retryable) and MISS (slug genuinely doesn't resolve)."""
+    raising_attr = PLATFORMS[name].probe_raising_attr
+    monkeypatch.setattr(
+        ats_prober,
+        raising_attr,
+        lambda slug: ats_prober.ProbeHttpResult(hit=False, status_code=status_code),
+    )
+    assert ats_registry.verify_live_detail(name, "any-slug") is ats_registry.ProbeOutcome.BLOCKED
+
+
+@pytest.mark.parametrize("name", RAISING_PROBE_PLATFORMS)
+def test_verify_live_detail_200_non_hit_is_miss_not_blocked(name, monkeypatch):
+    """A 200 response that isn't a hit (e.g. Lever/SmartRecruiters' empty-postings
+    case) must classify as MISS, not BLOCKED."""
+    raising_attr = PLATFORMS[name].probe_raising_attr
+    monkeypatch.setattr(
+        ats_prober,
+        raising_attr,
+        lambda slug: ats_prober.ProbeHttpResult(hit=False, status_code=200),
+    )
+    assert ats_registry.verify_live_detail(name, "any-slug") is ats_registry.ProbeOutcome.MISS
+
+
+@pytest.mark.parametrize("name", sorted(set(PROBE_PLATFORMS) - set(RAISING_PROBE_PLATFORMS)))
+def test_verify_live_detail_falls_back_to_verify_live(name, monkeypatch):
+    """Platforms WITHOUT a probe_raising_attr fall back to the bool verify_live
+    (HIT or MISS, never TRANSIENT)."""
+    attr = PLATFORMS[name].probe_attr
+    monkeypatch.setattr(ats_prober, attr, lambda slug: True)
+    assert ats_registry.verify_live_detail(name, "any-slug") is ats_registry.ProbeOutcome.HIT
+    monkeypatch.setattr(ats_prober, attr, lambda slug: False)
+    assert ats_registry.verify_live_detail(name, "any-slug") is ats_registry.ProbeOutcome.MISS
+
+
+@pytest.mark.parametrize("name", PROBE_PLATFORMS)
+def test_probe_single_company_dispatches_each_probe_platform(name, monkeypatch, tmp_path):
+    """probe_single_company must reach every platform with a probe_attr via
+    ats_registry.verify_live_detail. The old if/elif chain omitted phenom,
+    oracle_cloud, ultipro (and others) -- no code path could move those
+    companies to 'hit' (#1928). Uses the public tests/engine ScanServices
+    schema fixture (create_scan_schema) in place of the private
+    migrated_db_path fixture (150-migration template DB, no engine
+    equivalent) -- schema-equivalent for the columns this test touches."""
+    import sqlite3
+    from datetime import datetime
+
+    from jobcannon.engine.ats_prober import probe_single_company
+    from tests.engine.helpers.ats_scan_services import create_scan_schema
+
+    db_path = str(tmp_path / "probe_single.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    create_scan_schema(conn)
+    now = datetime.now().isoformat()
+    cursor = conn.execute(
+        """INSERT INTO companies
+           (name, name_raw, ats_platform, ats_slug, ats_probe_status,
+            created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'error', ?, ?)""",
+        (name.lower(), name, name, "test-slug", now, now),
+    )
+    company_id = cursor.lastrowid
+    conn.commit()
+
+    monkeypatch.setattr(
+        ats_registry, "verify_live_detail", lambda platform, slug: ats_registry.ProbeOutcome.HIT
+    )
+    result = probe_single_company(company_id, conn, {"TESTING": False})
+    assert result["status"] == "hit", (
+        f"{name}: probe_single_company should dispatch to verify_live_detail and return hit, got {result}"
+    )
+    row = conn.execute(
+        "SELECT ats_probe_status FROM companies WHERE id = ?", (company_id,)
+    ).fetchone()
+    assert row["ats_probe_status"] == "hit", f"{name}: status not updated to hit"
+    conn.close()
+
+
+@pytest.mark.skip(
+    reason=(
+        "probe_ats_slugs unconditionally reads/writes companies.ats_probe_attempted_at "
+        "(jobcannon/engine/ats_scanner/_probe.py:292-293,410,449,478,...). That column "
+        "is a documented, pre-existing gap on the hosted schema (jobcannon/db/compat.py "
+        "'is the only remaining run_ats_scan-adjacent column gap ... probe_ats_slugs is "
+        "a separate scan orchestrator ... and is not exercised by this PR' -- written "
+        "before L-0018, unrelated to this port). The engine-test companies schema "
+        "(tests/engine/helpers/ats_scan_services.py:create_scan_schema) mirrors the "
+        "hosted schema and correctly lacks it too, so this dispatcher-coverage test "
+        "cannot run end-to-end until that migration lands as its own row. Its sibling, "
+        "test_probe_single_company_dispatches_each_probe_platform (probe_single_company "
+        "does not touch ats_probe_attempted_at), carries the same #1928 dispatch-"
+        "coverage guarantee and passes."
+    )
+)
+@pytest.mark.parametrize("name", PROBE_PLATFORMS)
+def test_probe_ats_slugs_direct_dispatch_each_probe_platform(name, monkeypatch, tmp_path):
+    """probe_ats_slugs's direct-dispatch branch must reach every platform with a
+    probe_attr via ats_registry.verify_live_detail. Without this branch, a pending row
+    with a known platform gets re-clobbered to miss every sweep because the
+    speculative ladder excludes that platform (#1928)."""
+    import sqlite3
+    from datetime import datetime
+
+    from jobcannon.engine import services
+    from jobcannon.engine.ats_scanner import probe_ats_slugs
+    from tests.engine.helpers.ats_scan_services import create_scan_schema, make_scan_services
+
+    db_path = str(tmp_path / "probe_slugs.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    create_scan_schema(conn)
+    now = datetime.now().isoformat()
+    conn.execute(
+        """INSERT INTO companies
+           (name, name_raw, ats_platform, ats_slug, ats_probe_status,
+            created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'pending', ?, ?)""",
+        (name.lower(), name, name, "test-slug", now, now),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(
+        ats_registry, "verify_live_detail", lambda platform, slug: ats_registry.ProbeOutcome.HIT
+    )
+    services.set_services(make_scan_services(db_path))
+    try:
+        result = probe_ats_slugs(
+            db_path, config={"ats": {"slug_probe": {"collision_retry_enabled": False}}}
+        )
+    finally:
+        services.clear_services()
+    assert result["hits"] == 1, (
+        f"{name}: probe_ats_slugs should direct-dispatch to verify_live_detail and "
+        f"record a hit, got {result}"
+    )
+
+
+def test_ats_rectification_metrics_ats_direct_derived_from_registry():
+    """The M1 ``ats_direct`` cohort in scripts/ats_rectification_metrics.py must
+    be the registry-derived POSTING_ID_PLATFORMS, NOT a hand-copied literal
+    (#1871)."""
+    from scripts.ats_rectification_metrics import ATS_DIRECT
+
+    assert (
+        ATS_DIRECT is ats_registry.POSTING_ID_PLATFORMS
+        or frozenset(ats_registry.POSTING_ID_PLATFORMS) == ATS_DIRECT
+    ), "scripts/ats_rectification_metrics.py ATS_DIRECT must equal the registry view"
+    assert frozenset({"greenhouse", "lever", "ashby", "smartrecruiters", "workday"}) == ATS_DIRECT
+
+
+def test_posting_id_platforms_derivation():
+    """POSTING_ID_PLATFORMS = platforms with a posting_id_pattern. STRICT subset
+    of RECONCILABLE_PLATFORMS: successfactors/adp are reconcilable via batch
+    set-diff but expose no single-posting URL shape."""
+    assert (
+        frozenset(n for n, s in PLATFORMS.items() if s.posting_id_pattern is not None)
+        == ats_registry.POSTING_ID_PLATFORMS
+    )
+    assert (
+        frozenset({"greenhouse", "lever", "ashby", "smartrecruiters", "workday"})
+        == ats_registry.POSTING_ID_PLATFORMS
+    )
+    assert ats_registry.POSTING_ID_PLATFORMS < ats_registry.RECONCILABLE_PLATFORMS, (
+        "POSTING_ID_PLATFORMS must be a strict subset of RECONCILABLE_PLATFORMS "
+        "(successfactors/adp are reconcilable but lack a posting_id_pattern)"
+    )
+    assert "successfactors" in ats_registry.RECONCILABLE_PLATFORMS
+    assert "adp" in ats_registry.RECONCILABLE_PLATFORMS
+
+
+def test_host_shape_only_extractor_set_sentinel():
+    from jobcannon.engine.ats_registry import _HOST_SHAPE_ONLY_EXTRACTORS, _extract_slug_phenom
+
+    assert _HOST_SHAPE_ONLY_EXTRACTORS, "host-shape-only set must never be empty"
+    assert _extract_slug_phenom in _HOST_SHAPE_ONLY_EXTRACTORS, (
+        "phenom's careers-subdomain extractor is the canonical host-shape-only "
+        "pattern; its removal from _HOST_SHAPE_ONLY_EXTRACTORS would let a bare "
+        "hostname shape count as strong identity evidence again (#1899)"
+    )
+
+
+def test_url_match_is_host_shape_only_direct():
+    from jobcannon.engine.ats_registry import url_match_is_host_shape_only
+
+    assert url_match_is_host_shape_only("https://careers.example.com/us/en") is True
+    assert url_match_is_host_shape_only("https://boards.greenhouse.io/acme") is False
+    assert url_match_is_host_shape_only("https://example.com/about") is False
+    assert url_match_is_host_shape_only("") is False
+
+
+def test_resolve_url_match_direct():
+    from jobcannon.engine.ats_registry import resolve_url_match
+
+    got = resolve_url_match("https://boards.greenhouse.io/acme")
+    assert got is not None
+    platform, slug, specificity, host_shape_only = got
+    assert (platform, slug, host_shape_only) == ("greenhouse", "acme", False)
+    assert specificity > 0
+
+    got = resolve_url_match("https://careers.example.com/us/en")
+    assert got is not None
+    assert got[0] == "phenom"
+    assert got[3] is True
+
+    assert resolve_url_match("https://example.com/about") is None
+    assert resolve_url_match("") is None
+    assert resolve_url_match(None) is None  # type: ignore[arg-type]
+
+
+def _registry_derived_platform_frozensets() -> dict[str, frozenset]:
+    """Every module-level ``frozenset[str]`` on ``ats_registry`` that looks like
+    a platform-name view (>=3 members drawn from the registry's own platform
+    keys). A hand-copied literal elsewhere that is byte-equal to one of these
+    is "provably pinned", not a fresh leak."""
+    platform_names = frozenset(ats_registry.PLATFORMS.keys())
+    views = {}
+    for attr_name in dir(ats_registry):
+        value = getattr(ats_registry, attr_name)
+        if isinstance(value, frozenset) and all(isinstance(v, str) for v in value):
+            if len(platform_names.intersection(value)) >= 3:
+                views[attr_name] = value
+    return views
+
+
+def _module_level_platform_literals(path: pathlib.Path, platform_names: frozenset[str]):
+    """Yield (lineno, target_name, values) for each MODULE-LEVEL assignment
+    whose RHS is a set/list/tuple literal (bare, or the sole argument to a
+    frozenset(...)/set(...)/list(...)/tuple(...) call) containing >=3 string
+    constants that match a registry platform name."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (SyntaxError, UnicodeDecodeError):
+        return
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            target_name = node.targets[0].id
+            value_node = node.value
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.value is not None
+        ):
+            target_name = node.target.id
+            value_node = node.value
+        else:
+            continue
+
+        literal = value_node
+        if (
+            isinstance(literal, ast.Call)
+            and isinstance(literal.func, ast.Name)
+            and literal.func.id in {"frozenset", "set", "list", "tuple"}
+        ):
+            if literal.args and isinstance(literal.args[0], (ast.Set, ast.List, ast.Tuple)):
+                literal = literal.args[0]
+            else:
+                continue
+        if not isinstance(literal, (ast.Set, ast.List, ast.Tuple)):
+            continue
+
+        values = [
+            elt.value
+            for elt in literal.elts
+            if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+        ]
+        matches = platform_names.intersection(v.lower() for v in values)
+        if len(matches) >= 3:
+            yield node.lineno, target_name, frozenset(values)
+
+
+# Debt ledger for a hand-copied literal that is a genuine leak but is
+# intentionally out of THIS guard's scope. Empty on the private HEAD this was
+# carried from; new entries here are public-repo-specific (discovered when
+# this guard first ran against the full public tree in PR #286 round 2).
+_KNOWN_LEGACY_OFFENDERS: dict[tuple[str, str], str] = {
+    ("analyses/corpus_honesty/extract.py", "ATS_CONFIRMED_LABELS"): (
+        "26 of 28 entries ARE live ats_registry.PLATFORMS keys (case-"
+        "insensitively) -- this is a deliberately frozen corpus-honesty "
+        "label snapshot (module docstring: 'this repo cannot import the "
+        "private pipeline's code, so the taxonomy here is a verified "
+        "point-in-time snapshot, not a live import'), not a mirror meant to "
+        "track the live registry, so it is intentionally decoupled even "
+        "though it overlaps heavily by construction. It cannot be exactly "
+        "reproduced from a live import today regardless: 2 entries "
+        "('Microsoft Careers', 'Oracle Cloud') are human-readable display "
+        "names ats_registry.PlatformSpec has no field for (display_name is "
+        "None on every checked spec) -- adding one is real, out-of-scope "
+        "production surface for this ats_scanner port. Filed as debt: #290."
+    ),
+}
+
+
+def _other_worktree_roots(repo_root: pathlib.Path) -> list[pathlib.Path]:
+    """Every git worktree registered against this repo except repo_root itself
+    and any worktree that is an ANCESTOR of repo_root, derived from
+    `git worktree list --porcelain` rather than a hardcoded directory-name
+    convention.
+
+    The ancestor exclusion matters because repo_root may itself be a worktree
+    nested inside another registered worktree's own directory tree -- e.g.
+    this repo's own convention of checking out `.worktrees/<name>` inside the
+    main checkout. `git worktree list` reports the main checkout as just
+    another worktree, so without this guard it would end up in the returned
+    list; the caller then treats every returned root as "skip this whole
+    subtree", and since the main checkout is an ancestor of repo_root, that
+    silently skips repo_root's own files too -- collapsing the scan to zero
+    files whenever this guard runs from inside a nested worktree.
+    """
+    proc = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    roots = []
+    for line in proc.stdout.splitlines():
+        if line.startswith("worktree "):
+            path = pathlib.Path(line[len("worktree ") :]).resolve()
+            if path == repo_root or path in repo_root.parents:
+                continue
+            roots.append(path)
+    return roots
+
+
+def test_no_hand_copied_platform_sets():
+    """No module outside ats_registry.py/tests/migrations hand-copies a
+    platform-name set/frozenset/list/tuple literal -- the bug class behind
+    #1836/#1837/#1838/#1871. A literal is allowed only if it is byte-equal to
+    a live ats_registry-derived view or is an explicitly ledgered,
+    issue-linked debt entry."""
+    repo_root = pathlib.Path(ats_registry.__file__).resolve().parents[2]
+    platform_names = frozenset(ats_registry.PLATFORMS.keys())
+    registry_views = _registry_derived_platform_frozensets()
+    ats_registry_rel = (
+        pathlib.Path(ats_registry.__file__).resolve().relative_to(repo_root).as_posix()
+    )
+
+    offenders: list[str] = []
+    seen_ledger_keys: set[tuple[str, str]] = set()
+    other_worktrees = _other_worktree_roots(repo_root)
+
+    for path in repo_root.rglob("*.py"):
+        resolved = path.resolve()
+        if any(resolved == root or root in resolved.parents for root in other_worktrees):
+            continue
+        rel = path.relative_to(repo_root).as_posix()
+        if any(part in {".venv", ".git", ".claude", ".var"} for part in pathlib.Path(rel).parts):
+            continue
+        if rel.startswith("tests/") or "/tests/" in rel:
+            continue
+        if "/migrations/" in rel or rel.startswith("migrations/"):
+            continue
+        if rel.startswith(".planning/archive/"):
+            continue
+        if rel == ats_registry_rel:
+            continue
+
+        for lineno, target_name, values in _module_level_platform_literals(path, platform_names):
+            if values in registry_views.values():
+                continue  # provably pinned to a live registry view
+            ledger_key = (rel, target_name)
+            if ledger_key in _KNOWN_LEGACY_OFFENDERS:
+                seen_ledger_keys.add(ledger_key)
+                continue
+            offenders.append(f"{rel}:{lineno} {target_name} = {sorted(values)}")
+
+    assert not offenders, (
+        "Hand-copied platform-name literal(s) found outside ats_registry.py -- "
+        "import the derived view from jobcannon.engine.ats_registry instead, or "
+        "if the exact set of members is a deliberate legacy exception, add a "
+        "parity test pinning it (or a ledgered, issue-linked debt entry):\n" + "\n".join(offenders)
+    )
+
+    stale_ledger = set(_KNOWN_LEGACY_OFFENDERS) - seen_ledger_keys
+    assert not stale_ledger, (
+        f"_KNOWN_LEGACY_OFFENDERS entries no longer offend -- remove them: {stale_ledger}"
+    )

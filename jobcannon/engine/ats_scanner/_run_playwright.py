@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/ats_scanner/_run_playwright.py @ 4c65f020a404de6504a21593875685db99d3cd65 (private job-cannon). Ledger L-0020.
 """Playwright-class ATS scan path — JS-rendered, no-public-API boards (iCIMS).
 
 Parallel architecture to the requests-based ``PlatformScanner`` registry
@@ -30,12 +31,19 @@ import logging
 import sqlite3
 import time
 
+# PORT-SEAM: bump_empty_scan_counter/record_scan_outcome (WI-06/WI-13) are
+# private-only job_finder.db helpers with no ScanServices equivalent yet;
+# deferred pending a ScanServices addition (out of this row's scope, needs
+# coordinated services.py + _run.py work) -- see the deferred-call comments
+# below (L-0020, same carve-out as the L-0019 sibling).
 from jobcannon.engine.json_utils import utc_now_iso
 from jobcannon.engine.ats_platforms._platforms_icims import PlaywrightPlatformScanner
 from jobcannon.engine.ats_prober import _handle_scan_error, _is_transient_error
 from jobcannon.engine.ats_registry import PLAYWRIGHT_PLATFORMS
 from jobcannon.engine.ats_registry import PLAYWRIGHT_SCANNERS as _PLAYWRIGHT_SCANNERS
-from jobcannon.engine.services import get_services
+from jobcannon.engine.services import (
+    get_services,
+)  # PORT-SEAM: seam kept; private drops it for a direct careers_crawler/db_helpers import (L-0020)
 
 logger = logging.getLogger(__name__)
 
@@ -121,12 +129,12 @@ def run_playwright_platform_scan(
 def _playwright_phase_query(company_names: list[str] | None = None) -> str:
     """SQL for the Playwright phase cohort (mirrors Phase A's status gate).
 
-    Written in SQLite dialect on purpose — see _dormancy_gate_clause's
-    docstring in _run.py for why: this engine module is DB-agnostic, and
-    jobcannon/db/compat.py's engine_sql_to_host() is the sole Postgres-
-    translation seam (rewrites datetime('now') -> now() for the hosted path;
-    tests/engine/test_run_playwright.py exercises this query directly against
-    bare SQLite with no translation).
+    # PORT-SEAM: private WI-03 (#1828) removes the high-score-history gate
+    # outright. The public `_run.py` caller (out of this row's scope) still
+    # passes `high_score_threshold` positionally into every Phase A2 call, so
+    # dropping the parameter here would be a call-site TypeError. Keep the
+    # neutralized-to-TRUE `_high_score_history_clause` call (see its
+    # docstring in _run.py) until `_run.py`'s own WI-03 row lands (L-0020).
     """
     from jobcannon.engine.ats_scanner._run import _high_score_history_clause
 
@@ -140,27 +148,27 @@ def _playwright_phase_query(company_names: list[str] | None = None) -> str:
            FROM companies
            WHERE ats_platform IN ({quoted})
              AND (
-                 (ats_probe_status = 'hit' AND scan_enabled = TRUE)
+                 (ats_probe_status = 'hit' AND scan_enabled = TRUE) -- # PORT-SEAM: ats_scan_enabled rename deferred (L-0021 sibling; not yet landed)
                  OR
-                 (ats_probe_status = 'error' AND scan_enabled = TRUE
+                 (ats_probe_status = 'error' AND scan_enabled = TRUE  -- # PORT-SEAM: ats_scan_enabled rename deferred (L-0020)
                   AND (retry_after IS NULL OR retry_after < datetime('now')))
              )
-             AND {_high_score_history_clause("last_scanned_at")}
+             AND {_high_score_history_clause("last_scanned_at")} -- # PORT-SEAM: merged_into_id omitted (L-0020 carve-out; column absent from public schema)
              {company_filter}"""
 
 
 def count_playwright_eligible(
-    conn: sqlite3.Connection, threshold: int, company_names: list[str] | None = None
+    conn: sqlite3.Connection,
+    threshold: int,  # PORT-SEAM: L-0020, see docstring
+    company_names: list[str] | None = None,
 ) -> int:
     """Count Playwright-phase companies subject to the high-score gate.
 
     `threshold` is accepted for call-site parity but no longer bound:
     _high_score_history_clause is neutralized to TRUE (zero params) in this
-    hosted port — see its docstring in _run.py.
+    hosted port — see its docstring in _run.py. # PORT-SEAM: L-0020
     """
-    params: list = []
-    if company_names:
-        params.extend(company_names)
+    params = list(company_names) if company_names else []
 
     row = conn.execute(
         _playwright_phase_query(company_names).replace(
@@ -179,10 +187,11 @@ def _run_playwright_scan(
     title_exclusions: list,
     summary: dict,
     all_new_job_keys: list,
-    high_score_threshold: int,
+    high_score_threshold: int,  # PORT-SEAM: kept for call-site parity (L-0020; see _playwright_phase_query)
     tracker=None,
     company_names: list[str] | None = None,
     deadline_monotonic: float | None = None,
+    run_id: str | None = None,
 ) -> None:
     """Phase A2: scan Playwright-class companies (iCIMS) under one browser.
 
@@ -192,15 +201,13 @@ def _run_playwright_scan(
 
     `high_score_threshold` is accepted for call-site parity but no longer
     bound: _high_score_history_clause is neutralized to TRUE (zero params)
-    in this hosted port — see its docstring in _run.py.
+    in this hosted port — see its docstring in _run.py. # PORT-SEAM: L-0020
 
     ``deadline_monotonic`` is the scan-wide soft deadline shared
     with Phases A and C; when set, the phase stops starting new companies once
     it passes. The already-open browser is still closed in ``finally``.
     """
-    params: list = []
-    if company_names:
-        params.extend(company_names)
+    params = list(company_names) if company_names else []
 
     companies = conn.execute(_playwright_phase_query(company_names), tuple(params)).fetchall()
     if not companies:
@@ -210,14 +217,13 @@ def _run_playwright_scan(
         config.get("ats", {}).get("icims_max_load_more_clicks", _DEFAULT_MAX_LOAD_MORE)
     )
 
-    # Playwright is an optional heavy dependency (see module docstring). The
-    # private repo resolved this via careers_crawler's PEP-562 __getattr__
-    # hook; the engine's careers_crawler package ports only _title_contract/
-    # _title_filters (Task 1) and has no such hook, so importing it directly
-    # here (matching ats_prober.py's static_fallthrough tier4 pattern) is the
-    # only correct form.
+    # PORT-SEAM: private resolves this via careers_crawler's PEP-562
+    # __getattr__ hook; the public careers_crawler package ports only
+    # _title_contract/_title_filters and has no such hook, so importing
+    # playwright directly here (matching ats_prober.py's static_fallthrough
+    # tier4 pattern) is the correct public form (L-0020).
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.sync_api import sync_playwright  # PORT-SEAM: L-0020, see comment above
     except ImportError as exc:
         logger.warning("Playwright not installed — skipping iCIMS scan phase: %s", exc)
         return
@@ -241,6 +247,7 @@ def _run_playwright_scan(
                     summary,
                     all_new_job_keys,
                     max_load_more,
+                    run_id=run_id,
                 )
                 scanned += 1
                 if tracker is not None:
@@ -272,6 +279,7 @@ def _scan_one_company_via_playwright(
     summary: dict,
     all_new_job_keys: list,
     max_load_more: int,
+    run_id: str | None = None,
 ) -> None:
     """Render + scan a single Playwright-class company; upsert + log + retry-track.
 
@@ -281,6 +289,7 @@ def _scan_one_company_via_playwright(
     """
     from jobcannon.engine.ats_scanner._run import _upsert_one_ats_api_job
 
+    # PORT-SEAM: svc resolved per-call via get_services() (L-0020).
     svc = get_services()
     company_id = company["id"]
     company_name = company["name_raw"]
@@ -310,7 +319,10 @@ def _scan_one_company_via_playwright(
         company_jobs_found = len(job_dicts)
         summary["jobs_discovered"] += company_jobs_found
 
-        with svc.connection_factory() as scan_conn:
+        # PORT-SEAM: company_jobs_new / record_scan_outcome (WI-07/WI-13,
+        # L-0020) tracking deferred -- keeps the prior company_scan_log
+        # INSERT below.
+        with svc.connection_factory() as scan_conn:  # PORT-SEAM: seam (L-0020)
             for job_dict in job_dicts:
                 _upsert_one_ats_api_job(
                     conn,
@@ -323,6 +335,7 @@ def _scan_one_company_via_playwright(
                     ats_platform=platform,
                 )
 
+        # PORT-SEAM: L-0020 (record_scan_outcome deferred, see above)
         conn.execute(
             """INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, skipped_title_filter)
                VALUES (?, ?, ?, ?)""",
@@ -335,21 +348,35 @@ def _scan_one_company_via_playwright(
                WHERE id = ?""",
             (now, company_jobs_found, company_id),
         )
+        # PORT-SEAM: bump_empty_scan_counter (#1823, WI-06) deferred with
+        # record_scan_outcome above -- consecutive_empty_scans stays
+        # unmaintained on this path until that hook lands (L-0020).
         conn.commit()
         summary["companies_scanned"] += 1
 
     except Exception as company_err:
         error_msg = f"{company_name}: {company_err}"
-        summary["errors"].append(error_msg)
+        summary["errors"].append(
+            error_msg
+        )  # PORT-SEAM: _record_scan_error deferred (L-0020; needs _run.py's WI-05 row)
         logger.error("ATS scan (playwright) error for '%s': %s", company_name, company_err)
 
         if _is_transient_error(company_err):
             try:
                 _handle_scan_error(conn, company_id, company_name, str(company_err), now)
             except Exception as retry_err:
-                logger.warning("Failed to update retry state for '%s': %s", company_name, retry_err)
+                # PORT-SEAM: wrap preserved byte-exact for fidelity diff (L-0020)
+                # fmt: off
+                logger.warning(
+                    "Failed to update retry state for '%s': %s", company_name, retry_err
+                )
+                # fmt: on
+                # PORT-SEAM: end fmt guard (L-0020)
 
         try:
+            # PORT-SEAM: record_scan_outcome(error=..., failure_reason=...)
+            # deferred (see module import note) -- keeps the prior
+            # company_scan_log error-row INSERT (L-0020).
             conn.execute(
                 """INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, error)
                    VALUES (?, ?, 0, ?)""",

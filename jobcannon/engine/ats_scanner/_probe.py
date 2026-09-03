@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/ats_scanner/_probe.py @ b24cf4a6b434f96154144ee087acbae766b4e255 (private job-cannon). Ledger L-0018.
 """Speculative ATS-API slug probing for companies with pending probe_status.
 
 Extracted from ats_scanner/__init__.py during S7c (portfolio cleanup).
@@ -18,6 +19,9 @@ from jobcannon.engine.ats_detection import (
     extract_ats_from_url_best,
     probe_hit_consistent_or_dead_url,
 )
+
+# PORT-SEAM: ats_identity_reconcile doesn't port (Flask/db coupled);
+# svc.identity_reconcile_settings below is the ScanServices hook (L-0018).
 from jobcannon.engine.ats_prober import (
     _probe_ashby,
     _probe_greenhouse,
@@ -26,16 +30,21 @@ from jobcannon.engine.ats_prober import (
     _probe_pinpoint,
     _probe_teamtailor,
 )
+
+# PORT-SEAM: ats_slug_challenge doesn't port (Flask/db coupled);
+# svc.resolve_slug_collision / svc.owner_identity_passes below are the
+# ScanServices hooks; TRIGGER_PREFIX_CAREERS_URL is re-homed as a module
+# constant since it's a plain string, not a callable (L-0018).
 from jobcannon.engine.brand_blocklist import is_blocked_brand
+
+# PORT-SEAM: seam kept; private drops it for a direct db_helpers connection (L-0018)
 from jobcannon.engine.services import get_services
 
 logger = logging.getLogger(__name__)
 
-# Re-homed from the private repo's ats_slug_challenge.py: a plain string
-# constant (not a callable), so it is copied verbatim here rather than routed
-# through ScanServices. Owner-anchored trigger prefix for careers_url-derived
-# fast-path hits — see the _prober_extensions bundle docstring in
-# jobcannon.engine.ats_prober for the sibling careers_link: prefix.
+# PORT-SEAM: re-homed from the private repo's ats_slug_challenge.py -- a
+# plain string constant (not a callable), so it is copied verbatim here
+# rather than routed through ScanServices (L-0018).
 TRIGGER_PREFIX_CAREERS_URL = "careers_url:"
 
 # Platforms excluded from the speculative ladder due to a 100% false-positive
@@ -49,9 +58,13 @@ TRIGGER_PREFIX_CAREERS_URL = "careers_url:"
 # some but not all of the cohort.
 #
 # These platforms can still be PROMOTED via the evidence-based reconcile path
-# (``services.reconcile_company_ats``, see engine/services.py), which requires
-# corroborating job-URL evidence before writing `hit`. The per-platform probe
-# functions remain available and are used by reconcile's _verify_live step.
+# PORT-SEAM: svc.reconcile_company_ats -- ScanServices hook (L-0018).
+# (job_finder/web/ats_identity_reconcile.reconcile_company_ats privately),
+# which requires corroborating job-URL evidence before writing `hit`. The
+# per-platform probe functions remain available and are used by reconcile's
+# _verify_live step.
+#
+# This was the corollary of the v2 audit at .planning/ATS-COVERAGE-AUDIT-2026-05-27.md.
 _FP_PRONE_PLATFORMS: frozenset[str] = frozenset({"bamboohr", "personio", "recruitee", "breezy"})
 
 # (platform, probe_fn) pairs. Ordering matches the historical ladder:
@@ -154,12 +167,13 @@ def _resolve_collision(
     UNIQUE(ats_platform, ats_slug) collision as a permanent miss for this
     company. ``resolve_slug_collision`` / ``identity_reconcile_settings`` are
     host-supplied ``ScanServices`` fields (the private source's
-    ``ats_slug_challenge`` / ``ats_identity_reconcile`` imports don't port —
-    see the Task 3 ScanServices seam). With either hook unset this fails
-    closed: a single speculative guess must never evict an incumbent owner
-    without the identity-verification machinery to back it.
+    ``ats_slug_challenge`` / ``ats_identity_reconcile`` imports don't port).
+    With either hook unset this fails closed: a single speculative guess must
+    never evict an incumbent owner without the identity-verification
+    machinery to back it.
+    # PORT-SEAM: L-0018.
     """
-    svc = get_services()
+    svc = get_services()  # PORT-SEAM: L-0018
     if svc.resolve_slug_collision is None or svc.identity_reconcile_settings is None:
         logger.info(
             "_resolve_collision: slug-challenge services not configured — "
@@ -178,7 +192,7 @@ def _resolve_collision(
         platform=platform,
         slug=slug,
         challenger_id=company_id,
-        settings=svc.identity_reconcile_settings(config),
+        settings=svc.identity_reconcile_settings(config),  # PORT-SEAM: L-0018
         config=config,
     )
 
@@ -264,9 +278,9 @@ def _reset_stale_collision_misses(conn: sqlite3.Connection, cooldown_hours: int)
 
     Only commits when a row actually changed. A no-op commit here would count
     as an extra ``commit()`` call on shared per-run connections, which would
-    have tripped the private test suite's ``TestDemotionPromotionAtomicity``
-    invariant (exactly one commit per atomic demote+promote unit; that test
-    was not carried into this port) even though this sweep touched nothing.
+    trip the ``TestDemotionPromotionAtomicity`` invariant in
+    ``test_ats_bypass_writer_challenge.py`` (exactly one commit per atomic
+    demote+promote unit) even though this sweep touched nothing.
     """
     cutoff = (datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=cooldown_hours)).isoformat()
     cur = conn.execute(
@@ -329,7 +343,9 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
         return {"probed": 0, "hits": 0, "misses": 0, "collision_reset": 0}
 
     summary = {"probed": 0, "hits": 0, "misses": 0, "collision_reset": 0}
-    svc = get_services()
+    svc = (
+        get_services()
+    )  # PORT-SEAM: seam kept; private drops it for a direct db_helpers connection (L-0018)
 
     with svc.connection_factory() as conn:
         settings = _slug_probe_settings(config)
@@ -348,8 +364,11 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
 
         # Only probe companies with pending status
         pending = conn.execute(
-            "SELECT id, name, name_raw, careers_url FROM companies "
+            "SELECT id, name, name_raw, careers_url, ats_platform, ats_slug "
+            "FROM companies "
             "WHERE ats_probe_status = 'pending'"
+            # PORT-SEAM: merged_into_id IS NULL omitted (L-0018 carve-out;
+            # column absent from public schema until its own row lands)
         ).fetchall()
 
         for company in pending:
@@ -357,7 +376,151 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
             company_name = company["name_raw"]
             company_name_norm = company["name"] or ""
             careers_url = company["careers_url"]
+            existing_platform = company["ats_platform"]
+            existing_slug = company["ats_slug"]
             now = utc_now_iso()
+
+            # Direct-dispatch (#1928): a pending row that already carries a
+            # known ats_platform + ats_slug (typically set by the update-slug
+            # admin route, which resets status to 'pending') must be probed
+            # via that platform's registered probe_attr — NOT re-run through
+            # the speculative ladder. The ladder excludes phenom,
+            # oracle_cloud, ultipro (and others), so without this branch a
+            # pending row with one of those platforms gets re-clobbered to
+            # 'miss' every sweep and its platform's own probe is never
+            # called. Dispatching straight to the registry makes every
+            # PlatformSpec with a probe reachable from the batch path.
+            if existing_platform and existing_slug:
+                # PORT-SEAM: mechanical rewrite misses `from X import Y`
+                # submodule imports (only `X.Y.` attribute paths); hand-fixed
+                # here (L-0018; port_rewrite.py gap filed as a follow-up).
+                from jobcannon.engine import ats_registry
+
+                spec = ats_registry.PLATFORMS.get(existing_platform)
+                if spec is not None and spec.probe_attr is not None:
+                    outcome = ats_registry.verify_live_detail(existing_platform, existing_slug)
+                    if outcome is ats_registry.ProbeOutcome.HIT:
+                        # Hit — keep the existing platform/slug; clear
+                        # evidence columns (this is a direct probe, not an
+                        # evidence-based promotion) so the NULL-means-
+                        # speculative invariant is preserved.
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'hit',
+                                   ats_probe_attempted_at = ?,
+                                   ats_evidence_trigger = NULL,
+                                   ats_evidence_extractor_version = NULL,
+                                   ats_evidence_unique_url_count = NULL,
+                                   ats_evidence_job_count = NULL,
+                                   ats_evidence_reconciled_at = NULL,
+                                   ats_evidence_provisional = NULL,
+                                   consecutive_empty_scans = 0,
+                                   updated_at = ?
+                               WHERE id = ?""",
+                            (now, now, company_id),
+                        )
+                        conn.commit()
+                        summary["hits"] += 1
+                        summary["probed"] += 1
+                        logger.info(
+                            "probe_ats_slugs: %s (id=%d) -> hit %s/%s via direct-dispatch",
+                            company_name,
+                            company_id,
+                            existing_platform,
+                            existing_slug,
+                        )
+                        continue
+                    elif outcome is ats_registry.ProbeOutcome.TRANSIENT:
+                        # Transient network failure (timeout / connection
+                        # error on a raising-variant platform). The batch
+                        # path has no error→pending reset sweep (unlike
+                        # probe_single_company's retry-with-backoff), so this
+                        # is a terminal miss on this sweep — but labeled
+                        # 'probe_transient' (NOT 'platform_slug_404') so an
+                        # operator can tell a maybe-transient failure apart
+                        # from a definitive 404. The company can be re-probed
+                        # via the manual Retry route (probe_single_company),
+                        # which DOES have retry-with-backoff for these
+                        # platforms. See the #1928 rework review.
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'miss',
+                                   miss_reason = 'probe_transient',
+                                   ats_probe_attempted_at = ?,
+                                   updated_at = ?
+                               WHERE id = ?""",
+                            (now, now, company_id),
+                        )
+                        conn.commit()
+                        summary["misses"] += 1
+                        summary["probed"] += 1
+                        logger.info(
+                            "probe_ats_slugs: %s (id=%d) -> miss %s/%s via "
+                            "direct-dispatch (probe_transient)",
+                            company_name,
+                            company_id,
+                            existing_platform,
+                            existing_slug,
+                        )
+                        continue
+                    elif outcome is ats_registry.ProbeOutcome.BLOCKED:
+                        # Probe reached a real response but got a
+                        # non-transient, non-404/410 status (401/403) — the
+                        # slug exists but access was denied. Mark as miss with
+                        # the same reason probe_single_company uses for this
+                        # outcome, so an operator can tell "doesn't exist"
+                        # apart from "exists but blocked" from the batch sweep
+                        # too (#1928 rework review fold-in).
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'miss',
+                                   miss_reason = 'platform_slug_blocked',
+                                   ats_probe_attempted_at = ?,
+                                   updated_at = ?
+                               WHERE id = ?""",
+                            (now, now, company_id),
+                        )
+                        conn.commit()
+                        summary["misses"] += 1
+                        summary["probed"] += 1
+                        logger.info(
+                            "probe_ats_slugs: %s (id=%d) -> miss %s/%s via "
+                            "direct-dispatch (platform_slug_blocked)",
+                            company_name,
+                            company_id,
+                            existing_platform,
+                            existing_slug,
+                        )
+                        continue
+                    else:
+                        # outcome is MISS — the known platform's probe
+                        # returned False, so the slug doesn't resolve to a
+                        # live board. Mark as miss with the same reason
+                        # probe_single_company uses for this outcome.
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'miss',
+                                   miss_reason = 'platform_slug_404',
+                                   ats_probe_attempted_at = ?,
+                                   updated_at = ?
+                               WHERE id = ?""",
+                            (now, now, company_id),
+                        )
+                        conn.commit()
+                        summary["misses"] += 1
+                        summary["probed"] += 1
+                        logger.info(
+                            "probe_ats_slugs: %s (id=%d) -> miss %s/%s via "
+                            "direct-dispatch (platform_slug_404)",
+                            company_name,
+                            company_id,
+                            existing_platform,
+                            existing_slug,
+                        )
+                        continue
+                # Platform has no probe_attr (keyword adapter / non_scannable
+                # stub) — fall through to the B2 fast-path / speculative
+                # ladder below, which is the pre-#1928 behavior for such rows.
 
             # B2 — careers_url hostname fast-path. If careers_url unambiguously
             # identifies an ATS (e.g. https://jobs.ashbyhq.com/{slug},
@@ -391,6 +554,7 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
                     # silently diverge from every other write site's logic.
                     is_provisional = (
                         0
+                        # PORT-SEAM: L-0018
                         if (
                             svc.owner_identity_passes is not None
                             and svc.owner_identity_passes(
@@ -592,6 +756,7 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
                 # common case; only a genuine name/slug divergence marks it.
                 is_provisional = (
                     0
+                    # PORT-SEAM: L-0018
                     if (
                         svc.owner_identity_passes is not None
                         and svc.owner_identity_passes(

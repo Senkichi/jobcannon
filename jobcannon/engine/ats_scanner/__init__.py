@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/ats_scanner/__init__.py @ a03521500442af0751d73ccb5737f2950d5ad06c (private job-cannon). Ledger L-0450.
 """ATS (Applicant Tracking System) scanner and company registry package.
 
 The package's first-party concerns live in private sibling modules:
@@ -20,6 +21,8 @@ the private source they were static top-level imports; in the engine both
 are host-supplied `ScanServices` fields (`svc.upsert_company`,
 `svc.reconcile_company_ats`), resolved per-call via `get_services()`
 rather than bound at import time (see `services.py`).
+# PORT-SEAM: ledger L-0450 -- this file needs no source change; the row's
+# substance is the carried concurrency/deadline tests below.
 
 Architecture:
 - Thread-safe: probe_ats_slugs() and run_ats_scan() open their own
@@ -35,12 +38,17 @@ ATS URL patterns:
 - Ashby:        jobs.ashbyhq.com/{slug}/...        (case-sensitive slug)
 """
 
+# PORT-SEAM: `upsert_company` stays behind ScanServices (svc.upsert_company),
+# not a top-level import (see module docstring; L-0450).
 from jobcannon.engine.ats_detection import (  # noqa: F401
     ATS_EXTRACTOR_VERSION,
     derive_slug_candidates,
     extract_ats_from_url_best,
     extract_ats_from_urls,
 )
+
+# PORT-SEAM: `reconcile_company_ats` stays behind ScanServices
+# (svc.reconcile_company_ats), not a top-level import (L-0450).
 from jobcannon.engine.ats_platforms import (  # noqa: F401
     _title_matches,
     scan_ashby,

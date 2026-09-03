@@ -27,6 +27,52 @@ replaced by ``ScanServices.connection_factory`` (host-injected), and the
 latter two are ``ScanServices.find_careers_url`` / ``.scrape_careers_page``
 optional hooks (also host-injected, not module-level names in
 jobcannon.engine.ats_scanner._run_html — see its module docstring).
+
+PR #286 round 2 adds ``test_scanner_exception_recorded_as_error_row`` below
+(WI-06 carry, adapted to the minimal schema's error/jobs_found-only
+company_scan_log columns).
+
+19 of the private repo's other tests are intentionally NOT carried — each
+exercises a feature genuinely absent from this engine-native port (not a
+copy-paste omission):
+
+- **Priority-tier / selection-ledger / run_id (11 tests)**:
+  ``test_bounded_revisit_promotes_stale_company``,
+  ``test_count_phase_a_eligible_ignores_relevance``,
+  ``test_phase_a_never_excludes_hit_company_by_relevance``,
+  ``test_priority_joins_on_company_id_not_name``,
+  ``test_priority_tier_apply_consider_first``,
+  ``test_priority_tier_bootstrap_no_scored_jobs_is_tier_one``,
+  ``test_priority_tier_ordering_zero_one_two_by_value``,
+  ``test_run_ats_api_scan_production_order_follows_priority_tier``,
+  ``test_scan_log_rows_carry_run_id``,
+  ``test_selection_ledger_deadline_flip_only_for_unreached``,
+  ``test_selection_ledger_rows_partition_base_set``. These need the
+  ``scan_selection_log`` table, a ``run_id`` column, and the tier-CASE
+  selector — none of which exist anywhere in ``jobcannon/engine/ats_scanner``
+  (verified by grep: zero references). This is host-owned scan-orchestration
+  state, out of this port's carry_range.
+- **``phases`` param (2 tests)**: ``test_run_ats_scan_phases_param_skips_playwright_and_html``,
+  ``test_run_ats_scan_render_phases_skip_api``. Public ``run_ats_scan`` has no
+  ``phases`` kwarg (WI-01 not ported).
+- **Title-outcome capture (3 tests)**: ``test_title_outcomes_pruned``,
+  ``test_title_outcomes_recorded_for_relevant_company_only``,
+  ``test_title_outcomes_serial_path_records_all_dispositions``. WI-09's
+  ``prune_title_outcomes``/title-outcome persistence has no engine
+  equivalent (verified by grep: zero references).
+- **ats_scan_enabled split (1 test)**: ``test_ats_demotion_does_not_disable_careers_scan``.
+  Needs the WI-13 (#1869) ``ats_scan_enabled``/``scan_enabled`` dual-write
+  split column; the minimal companies schema (create_scan_schema) only has
+  the single legacy ``scan_enabled`` column.
+- **careers_scraper blocklist gate (1 test)**: ``test_scrape_careers_page_rejects_blocklisted_aggregator_host``.
+  Needs ``careers_scraper.py``'s ``_is_blocklisted_scrape_host``, a module
+  with no engine port — ``scrape_careers_page`` itself is a host-injected
+  ``ScanServices`` hook here, not an engine module-level function to test
+  directly.
+- **standalone_connection pragma (1 test, pre-existing note above)**:
+  ``test_standalone_connection_synchronous_pragma`` — already documented as
+  not portable (private repo's ``db_helpers.standalone_connection`` replaced
+  by the ``ScanServices.connection_factory`` seam).
 """
 
 from __future__ import annotations
@@ -741,3 +787,57 @@ def test_phase_a_stalest_first_order(ats_scan_db_path):
             )
 
     assert scanned_names == ["never_co", "oldest_co", "middle_co", "recent_co"]
+
+
+def test_scanner_exception_recorded_as_error_row(ats_scan_db_path):
+    """WI-06 (L-0019 carry, adapted): a scanner exception lands as a
+    company_scan_log error row. Patches run_platform_scan to raise; the
+    serial per-company driver's except-Exception handler must (1) append to
+    summary["errors"] and (2) write a single company_scan_log row with
+    jobs_found=0 and a non-empty error message.
+
+    Adapted from the private repo's richer assertion set: the engine's
+    minimal company_scan_log schema (tests/engine/helpers/ats_scan_services.py)
+    has no failure_reason/source columns -- those are host-side schema
+    enrichments not carried by this port -- so this version asserts only on
+    the columns the ported _scan_one_company_via_ats_api actually writes
+    (jobcannon/engine/ats_scanner/_run.py's except-Exception block)."""
+    from jobcannon.engine.ats_scanner._run import _scan_one_company_via_ats_api
+
+    company_id = _insert_company(ats_scan_db_path)
+    with open_connection(ats_scan_db_path) as conn:
+        company = {
+            "id": company_id,
+            "name_raw": "AshbyCo",
+            "ats_platform": "ashby",
+            "ats_slug": "AshbyCo",
+        }
+        summary = {"companies_scanned": 0, "jobs_discovered": 0, "jobs_new": 0, "errors": []}
+        all_new_keys: list[str] = []
+
+        with patch(
+            "jobcannon.engine.ats_scanner._run.run_platform_scan",
+            side_effect=RuntimeError("boom: scanner blew up"),
+        ):
+            _scan_one_company_via_ats_api(
+                conn,
+                ats_scan_db_path,
+                company,
+                ["Engineer"],
+                [],
+                summary,
+                all_new_keys,
+            )
+
+        assert summary["errors"], "expected a company-level error in summary['errors']"
+        assert any("boom: scanner blew up" in e for e in summary["errors"])
+        assert summary["companies_scanned"] == 0
+
+        rows = conn.execute(
+            "SELECT jobs_found, error FROM company_scan_log WHERE company_id = ?",
+            (company_id,),
+        ).fetchall()
+
+    assert len(rows) == 1, f"expected exactly one scan-log row, got {len(rows)}"
+    assert rows[0]["jobs_found"] == 0
+    assert rows[0]["error"] and "boom: scanner blew up" in rows[0]["error"]
