@@ -109,7 +109,7 @@ import atexit
 import logging
 import os
 
-from jobcannon.db import _companies, _jd_full, _jobs
+from jobcannon.db import _companies, _direct_link, _jd_full, _jobs
 from jobcannon.db import pool as pool_mod
 from jobcannon.engine import extraction_health, runtime_config, services
 from jobcannon.host import posthog_admin, posthog_client, task_app
@@ -159,6 +159,8 @@ def build_scan_services(host_config: HostConfig) -> services.ScanServices:
         upsert_job=_jobs.upsert_job,
         set_jd_full=_jd_full.set_jd_full,
         upsert_company=_companies.upsert_company,
+        set_direct_url=_direct_link.set_direct_url,
+        stamp_direct_url_checks=_direct_link.stamp_direct_url_checks,
         # Deliberately the SAME object runtime_config.set_config_provider below
         # hands back (not a copy) — one source of truth, so the services
         # snapshot and the live provider can never drift apart.
