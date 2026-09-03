@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-03T10:40:55Z",
+  "generated_at": "2026-09-03T11:18:24Z",
   "roots": [
     "engine",
     "db",
@@ -494,11 +494,11 @@
           "text": "`job_finder/db/_classification.py` and was re-exported via `job_finder/db/__init__.py`"
         },
         {
-          "line": 68,
+          "line": 70,
           "text": "# that can invalidate already-derived verdicts. In the private original,"
         },
         {
-          "line": 139,
+          "line": 141,
           "text": "in the private original, the assessment writer"
         }
       ]
@@ -727,7 +727,7 @@
         },
         {
           "line": 958,
-          "text": "# PORT-SEAM (L-0004): the private source this file was carried from (job_finder/db/"
+          "text": "# PORT-SEAM: (L-0004) the private source this file was carried from (job_finder/db/"
         },
         {
           "line": 964,
@@ -978,11 +978,15 @@
           "text": "# PORT-SEAM: host-injectable denylist seam. The private repo read this from"
         },
         {
-          "line": 392,
+          "line": 156,
+          "text": "# (# PORT-SEAM: reworded from the private source's file-path reference — no jobcannon.engine module maps to job_finder.db._jd_full 1:1.)"
+        },
+        {
+          "line": 394,
           "text": "# PORT-SEAM: private source resolves the denylist via load_config() +"
         },
         {
-          "line": 423,
+          "line": 425,
           "text": "# PORT-SEAM: private source passes the live app config dict; the"
         }
       ]
