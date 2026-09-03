@@ -11,9 +11,10 @@ bookkeeping. This migration adds the three columns private's writer pair
 needs; the sibling PR's ``_direct_link.py`` is the write side.
 
 - ``direct_url_confidence`` -- CHECK-constrained to ('strict','loose'),
-  matching private's ``_VALID_CONFIDENCE`` tuple (single-sourced by the
-  writer's own validation, not duplicated as a bare CHECK list -- see
-  ``_direct_link.py``'s module docstring for why the CHECK still exists).
+  matching private's ``_VALID_CONFIDENCE`` tuple. Private validates this set
+  in Python only (no CHECK); this port adds the CHECK as a deliberate
+  boundary backstop -- fail-closed at the DB layer even if a future caller
+  bypasses ``_direct_link.py``'s writer functions.
 - ``direct_url_checked_at`` -- timestamptz, same shape as private's
   ``jobs.direct_url_checked_at`` (m092 there).
 - ``direct_url_attempts`` -- integer NOT NULL DEFAULT 0, same shape as

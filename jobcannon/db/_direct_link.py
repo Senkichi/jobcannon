@@ -3,17 +3,13 @@
 # PORT-SEAM: header rewritten from private's one-line "Sanctioned direct_url
 # write paths." summary to carry the port provenance instead.
 
-``set_direct_url`` is the ONLY writer for ``postings.direct_url`` /
-``direct_url_confidence`` (jobcannon/db/migrations/m0017), with no-downgrade
-precedence (highest wins, ties do not overwrite):
-    strict  -- overwrites a NULL or an existing 'loose' link (upgrade); never
-               overwrites an existing 'strict' link (stable).
-    loose   -- fills a NULL slot only; never overwrites any existing link.
-    # PORT-SEAM: em-dashes and bare quoting reformatted to double-hyphen /
-    # double-backtick RST-ish styling to match this module's other
-    # docstrings; no semantic change.
+set_direct_url is the ONLY writer for postings.direct_url / direct_url_confidence (jobcannon/db/migrations/m0017),  # PORT-SEAM: jobs.direct_url -> postings.direct_url; m0017 is this host's migration for these columns
+with no-downgrade precedence (highest wins, ties do not overwrite):
+    strict  — overwrites a NULL or an existing 'loose' link (upgrade); never
+              overwrites an existing 'strict' link (stable).
+    loose   — fills a NULL slot only; never overwrites any existing link.
 
-Empty URL or a confidence outside ``_VALID_CONFIDENCE`` is a no-op.  # PORT-SEAM: private wrote the literal {'strict','loose'} set inline here; this port names the module constant instead.
+Empty URL or a confidence outside {'strict','loose'} is a no-op.
 
 ``stamp_direct_url_checks`` is the ONLY writer for the m0017 resolution-state
 columns (``direct_url_checked_at`` / ``direct_url_attempts``). Attempts are
@@ -92,9 +88,7 @@ def set_direct_url(
     if not url or confidence not in _VALID_CONFIDENCE:
         return False
 
-    raw = (
-        conn.raw if hasattr(conn, "raw") else conn
-    )  # PORT-SEAM: unwrap pooled connection, matching _jobs.py/_persistence.py dispatch
+    raw = conn.raw if hasattr(conn, "raw") else conn
 
     row = raw.execute(
         "SELECT direct_url_confidence FROM postings WHERE dedup_key = %s",  # PORT-SEAM: jobs -> postings, ? -> %s (psycopg paramstyle)
@@ -128,7 +122,8 @@ def stamp_direct_url_checks(
     dedup_keys: list[str],
     # PORT-SEAM: private's now_iso: str param dropped -- server-side now() used instead (see docstring below)
 ) -> None:
-    """Record one resolution attempt for each given posting (single writer, m0017).  # PORT-SEAM: job -> posting; private's m092 -> this host's m0017
+    """Record one resolution attempt for each given posting (single writer, m0017).
+    # PORT-SEAM: job -> posting; private's m092 -> this host's m0017
 
     Sets direct_url_checked_at (server-side ``now()``) and increments
     direct_url_attempts. Called by the primary-source resolver after a
@@ -152,9 +147,7 @@ def stamp_direct_url_checks(
     if not dedup_keys:
         return
 
-    raw = (
-        conn.raw if hasattr(conn, "raw") else conn
-    )  # PORT-SEAM: unwrap pooled connection, matching set_direct_url's dispatch
+    raw = conn.raw if hasattr(conn, "raw") else conn
 
     with raw.transaction():
         raw.execute(
@@ -163,4 +156,4 @@ def stamp_direct_url_checks(
             "WHERE dedup_key = ANY(%s)",  # PORT-SEAM: single ANY(%s) UPDATE replaces private's conn.executemany loop
             (dedup_keys,),
         )
-    commit_unless_nested(raw)  # PORT-SEAM: replaces private's bare conn.commit()
+    commit_unless_nested(raw)
