@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/dedup_normalizer.py @ 65e5ce021068b70a2369ac279c75395a078e1013 (private job-cannon). Ledger L-0452.
 """Smart deduplication normalization for job dedup keys.
 
 Provides normalization functions that collapse common formatting variations so
@@ -12,10 +13,18 @@ Design decisions:
 - Title abbreviations (Sr. -> Senior, Jr. -> Junior, etc.) are expanded.
 - Title level suffixes (IC5, Level 3) are stripped — they are formatting noise.
 
-Note: the private repo's ``run_retroactive_dedup`` (and its DB-merge helpers
-``_merge_job_data`` / ``_merge_descriptions`` / etc.) are NOT ported here — see
-the descope note at the bottom of this file.
+# PORT-SEAM: the private repo's ``run_retroactive_dedup`` (and its DB-merge
+# helpers ``_merge_job_data`` / ``_merge_descriptions`` / etc., plus the
+# json/logging/sqlite3 imports and ALLOWED_FK_TABLES / _STATUS_PRECEDENCE
+# constants they alone used) are NOT ported here — this is a host-database
+# migration operation, out of scope for a pure engine module. See the descope
+# note at the bottom of this file.
 """
+
+# PORT-SEAM: private source's json/logging/sqlite3 imports, jobcannon.engine
+# .json_utils import, module logger, and ALLOWED_FK_TABLES (SQL injection
+# guard for _update_fk_tables) lived here — dropped with run_retroactive_dedup
+# below, their only consumers.
 
 # ---------------------------------------------------------------------------
 # Title abbreviation expansion + level-suffix stripping previously lived here as
@@ -24,6 +33,9 @@ the descope note at the bottom of this file.
 # delegates to ``jobcannon.engine.normalizers`` (the single source of truth), so the
 # regexes moved out with it.
 # ---------------------------------------------------------------------------
+
+# PORT-SEAM: private source's _STATUS_PRECEDENCE dict lived here — dropped
+# with run_retroactive_dedup / _merge_pipeline_status below, its only consumer.
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -43,6 +55,7 @@ def normalize_company(company: str) -> str:
     dedup-correctness hole (architectural-debt-B, canonical-field ownership). See
     the cross-copy parity assertions in the private repo's
     tests/test_dedup_normalizer.py (ported subset: tests/engine/test_dedup_normalizer.py).
+    (# PORT-SEAM: docstring reworded — "web layer" -> "engine purity boundary".)
 
     Args:
         company: Raw company name string.
@@ -66,6 +79,7 @@ def normalize_title(title: str) -> str:
     dedup_key derivation in only one path. Both modules live inside the engine
     purity boundary (``tests/engine/test_boundary.py``), so ``derive_dedup_key``
     here computes the exact same key as ``Job.dedup_key`` and the upsert path.
+    (# PORT-SEAM: docstring reworded — "web layer" -> "engine purity boundary".)
 
     Args:
         title: Raw job title string.
@@ -80,10 +94,13 @@ def normalize_title(title: str) -> str:
 
 def derive_dedup_key(company: str, title: str) -> str:
     """Derive the current-version dedup_key using this module's delegating normalizers.
+    (# PORT-SEAM: reworded — was "web-layer normalizers" in the private source.)
 
-    Sibling of ``jobcannon.engine.normalizers.derive_dedup_key``. Both
+    Sibling of ``jobcannon.engine.normalizers.derive_dedup_key``. (# PORT-SEAM:
+    reworded — was "Web-layer twin of".) Both
     ``normalize_company`` and ``normalize_title`` now delegate directly to the
-    foundation copies (the single source of truth), so this function produces
+    foundation copies (the single source of truth — # PORT-SEAM: was "so the
+    merge engine produces"), so this function produces
     the same key as ``Job.dedup_key`` and the upsert path. See D-8 and
     ``NORMALIZER_VERSION`` in ``jobcannon.engine.normalizers``.
 
@@ -113,4 +130,4 @@ def normalized_dedup_key(company: str, title: str, location: str = "") -> str:
     return Job.normalized_dedup_key(company, title, location)
 
 
-# run_retroactive_dedup and DB-merge helpers deliberately not ported (see plan Task 1 Step 7c)
+# PORT-SEAM: run_retroactive_dedup and DB-merge helpers deliberately not ported (see plan Task 1 Step 7c)

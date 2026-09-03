@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/platform_extractor.py @ 929e3ad49398f23c4b9e44904f7aeddc62bf6fda (private job-cannon). Ledger L-0457.
 """Single chokepoint: turn a job-posting URL + raw HTML into clean ``jd_full``.
 
 JD Extraction Layer 2, step 2 ("platform-scoped + chrome strip"). This is the
@@ -33,6 +34,10 @@ from __future__ import annotations
 
 import logging
 import re
+
+# PORT-SEAM: urlsplit added for detect_platform's host-boundary match below
+# (an earlier port-wave hardening — the private source used a plain substring
+# check, which false-positives on hosts like "notlinkedin.com").
 from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
@@ -71,6 +76,9 @@ def detect_platform(url: str | None) -> str | None:
     """
     if not url:
         return None
+    # PORT-SEAM: host-boundary match via urlsplit — private source did
+    # `"linkedin.com" in url.lower() and "/jobs/" in url.lower()` (substring,
+    # false-positives on e.g. "notlinkedin.com/jobs/").
     parts = urlsplit(url.lower())
     host = parts.hostname or ""
     if (host == "linkedin.com" or host.endswith(".linkedin.com")) and "/jobs/" in parts.path:

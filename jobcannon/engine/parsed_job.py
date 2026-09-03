@@ -1,3 +1,4 @@
+# PORTED from job_finder/parsed_job.py @ 6a2af961fbffb78564ce8783277d916d60ad0906 (private job-cannon). Ledger L-0008.
 """
 ParsedJob and UnresolvedParsedJob — typed contracts for parser-owned job data.
 
@@ -20,7 +21,7 @@ Invariants enforced here:
     I-10  company not in configured denylist → raises DenylistedCompanyError
     I-13  jd_full either NULL or above content-density floor → UnresolvedParsedJob
           (reason="jd_full_junk") with jd_full=None; other fields preserved
-    I-14  title is not a result-count / category-landing tile → raises
+    I-14  title is not a result-count / category-landing tile (#211) → raises
           ListingTileError (hard drop; a count tile is not a posting)
     I-15  salary not implausible (P1.6, D-3/D-9) → UnresolvedParsedJob
           (reason="salary_implausible") when a source supplied a salary
@@ -62,6 +63,8 @@ entries), and ``jd_full_offsite`` / ``jd_full_expired`` (I-18). ``data_enricher`
 additionally manages ``location_missing``, clears ``salary_implausible`` once a
 later pass resolves a plausible salary, and clears the I-18 jd-content codes once
 a clean body is re-fetched.
+
+Reference: .planning/specs/2026-05-29-ingestion-contract-enforcement.md §8
 """
 
 from __future__ import annotations
@@ -71,9 +74,18 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Callable
 
+# PORT-SEAM: private source imports get_company_denylist/load_config from
+# job_finder.config (app-level). Denylist and runtime config are injected here.
+# `_is_jd_junk` is re-exported here (Phase 46.03 moved its logic to
+# jobcannon.engine.jd_content_contract) so existing
+# ``from jobcannon.engine.parsed_job import _is_jd_junk`` call sites keep working.
 from jobcannon.engine.jd_content_contract import _is_jd_junk as _is_jd_junk
 from jobcannon.engine.jd_content_contract import jd_content_reject
-from jobcannon.engine.normalizers import derive_dedup_key, normalize_company
+from jobcannon.engine.normalizers import (
+    collapse_duplicated_suffix,
+    derive_dedup_key,
+    normalize_company,
+)
 from jobcannon.engine.careers_crawler._title_contract import title_contract_violation
 from jobcannon.engine.careers_crawler._title_filters import (
     clean_title,
@@ -88,9 +100,9 @@ from jobcannon.engine.url_canonical import canonicalize_url
 if TYPE_CHECKING:
     from jobcannon.engine.models import Job
 
-# Host-injectable denylist seam. The private repo read this from config.yaml
-# (get_company_denylist); the engine takes an injected provider instead.
-# No provider registered => empty denylist => the check passes everything.
+# PORT-SEAM: host-injectable denylist seam. The private repo read this from
+# config.yaml (get_company_denylist); the engine takes an injected provider
+# instead. No provider registered => empty denylist => the check passes everything.
 _denylist_provider: Callable[[], frozenset[str]] | None = None
 
 
@@ -113,7 +125,7 @@ class DenylistedCompanyError(ValueError):
 
 
 class ListingTileError(ValueError):
-    """I-14: title is a result-count / category-landing tile.
+    """I-14 (#211): title is a result-count / category-landing tile.
 
     A count tile ("84 Data Scientist Jobs", "1,200+ openings") is a category
     landing page, not a single applyable posting. Unlike the metadata-blob
@@ -139,11 +151,9 @@ _TITLE_LOCATION_BLEED_RE = re.compile(
 # ---------------------------------------------------------------------------
 # I-13: jd_full content density gate
 # ---------------------------------------------------------------------------
-
-# _is_jd_junk lives in jd_content_contract (imported at module top) and is
-# re-exported under this name here so existing
-# ``from jobcannon.engine.parsed_job import _is_jd_junk`` call sites keep
-# working without changes.
+# Phase 46.03: junk-detection logic now lives in jobcannon.engine.jd_content_contract;
+# `_is_jd_junk` is re-exported at the top of this module (see import block above).
+# (# PORT-SEAM: reworded from the private source's file-path reference — no jobcannon.engine module maps to job_finder.db._jd_full 1:1.)
 
 # ---------------------------------------------------------------------------
 # I-09 helper: cross-field title/locations_raw bleed
@@ -198,6 +208,7 @@ class ParsedJob:
     # strip_workplace_tokens (#264), which returns None when the scraped
     # string was ONLY a workplace token ("Remote" -> None). db/_jobs.py
     # already treats "" and None as equivalent (``parsed.location or None``).
+    # PORT-SEAM: type widened (was `str`) to carry strip_workplace_tokens' None-vs-"" contract.
     location: str | None = ""
     locations_raw: list[str] = field(default_factory=list)
     locations_structured: list[JobLocation] = field(default_factory=list)
@@ -231,7 +242,7 @@ class ParsedJob:
 
     # ── Metadata ────────────────────────────────────────────────────────────
     posted_date: datetime | None = None
-    posted_date_precision: str | None = None  # 'exact' | 'approximate' | 'proxy'
+    posted_date_precision: str | None = None  # 'exact' | 'approximate' | 'proxy' (#363)
 
     # ── Scoring (None at ingest; populated by scorer pipeline) ──────────────
     scoring_provider: str | None = None
@@ -262,7 +273,7 @@ class ParsedJob:
 
         Validator routing (I-07..I-17):
 
-            I-14 (listing tile)             → raises ListingTileError
+            I-14 (listing tile, #211)       → raises ListingTileError
             I-08 (title_metadata_blob)      → UnresolvedParsedJob, does NOT raise
             I-16 (title_invalid_shape /
                   title_non_posting)        → UnresolvedParsedJob, does NOT raise
@@ -321,7 +332,7 @@ class ParsedJob:
         # Both I-08 and is_metadata_blob map to the same reason code
         # 'title_metadata_blob'; the distinction is an implementation detail.
 
-        # I-14: result-count / category-landing tile — HARD DROP.
+        # I-14 (#211): result-count / category-landing tile — HARD DROP.
         # Runs before the flag-only blob checks (and before clean_title, which
         # leaves the leading-count + listing-noun shape intact). A count tile is
         # categorically not a posting and carries zero human-triage value, so we
@@ -341,6 +352,19 @@ class ParsedJob:
             unresolved_reasons.append("title_metadata_blob")
 
         cleaned_title: str = clean_title(raw_title)
+
+        # Issue #2017: collapse a self-duplicated trailing comma-delimited
+        # segment (e.g. Amazon's PRIMAS title where the subtitle appeared
+        # twice). Applied AFTER clean_title (so card-junk / location suffixes
+        # are already stripped) and BEFORE the title contract / I-09 bleed
+        # check / derive_dedup_key, so both the stored title and the dedup key
+        # see the collapsed form. This is an employer-authored doubling (the
+        # Amazon API returned it that way — verified live 2026-09-01), not a
+        # client-side concatenation; the collapse is the single-point-of-
+        # enforcement normalizer for new rows. Existing rows are detected +
+        # reported by the title-hygiene re-sweep (detection only, no re-key —
+        # #1866 owns the standing re-key question).
+        cleaned_title = collapse_duplicated_suffix(cleaned_title)
 
         # I-16: positive title contract (fail-closed). clean_title has already
         # had its chance to REPAIR the title (e.g. strip a trailing
@@ -363,10 +387,13 @@ class ParsedJob:
 
         # I-10: company denylist — raises DenylistedCompanyError.
         # Match on normalize_company (not raw .lower().strip()) so legal-entity
-        # suffix variants and aggregator re-posters fire: a denylist
+        # suffix variants and aggregator re-posters fire (#213): a denylist
         # entry of "Virtual Vocations" rejects a stored brand of
         # "Virtual Vocations Inc" — both normalize to "virtual vocations".
         # get_company_denylist returns already-normalized entries.
+        # PORT-SEAM: private source resolves the denylist via load_config() +
+        # get_company_denylist(config); the engine reads it from the injected
+        # provider set by set_denylist_provider() instead.
         denylist = _denylist_provider() if _denylist_provider is not None else frozenset()
         if normalize_company(job.company) in denylist:
             raise DenylistedCompanyError(f"Company {job.company!r} is in the configured denylist")
@@ -395,6 +422,9 @@ class ParsedJob:
         # synchronous ingest path. The row is still written; jd_full is cleared so
         # enrichment re-fetches a clean body and the score never sees the garbage.
         if clean_jd_full is not None:
+            # PORT-SEAM: private source passes the live app config dict; the
+            # engine reads jobcannon.engine.runtime_config's injected snapshot
+            # instead (no config.yaml access inside the engine boundary).
             _jd_rej = jd_content_reject(clean_jd_full, cleaned_title, dict(get_runtime_config()))
             if _jd_rej is not None:
                 unresolved_reasons.append(_jd_rej[0])
@@ -452,7 +482,9 @@ class ParsedJob:
             # validator (no raise, no unresolved_reasons entry) — a silent
             # cleanup, so it isn't numbered alongside I-07..I-18 above. See
             # strip_workplace_tokens() for the None-vs-"" return contract.
-            "location": strip_workplace_tokens(job.location),
+            "location": strip_workplace_tokens(
+                job.location
+            ),  # PORT-SEAM: #264 integration restored (origin/main-only; not in this row's private carry)
             "locations_raw": locations_raw,
             "locations_structured": locations_structured,
             "workplace_type": workplace_type,
@@ -522,6 +554,7 @@ class UnresolvedParsedJob:
     # str | None — see ParsedJob.location for the strip_workplace_tokens
     # (#264) None-vs-"" contract; identical here since from_job() builds both
     # variants from the same common_kwargs.
+    # PORT-SEAM: type widened (was `str`) to carry strip_workplace_tokens' None-vs-"" contract.
     location: str | None = ""
     locations_raw: list[str] = field(default_factory=list)
     locations_structured: list[JobLocation] = field(default_factory=list)
@@ -549,7 +582,7 @@ class UnresolvedParsedJob:
 
     # ── Metadata ────────────────────────────────────────────────────────────
     posted_date: datetime | None = None
-    posted_date_precision: str | None = None  # 'exact' | 'approximate' | 'proxy'
+    posted_date_precision: str | None = None  # 'exact' | 'approximate' | 'proxy' (#363)
 
     # ── Scoring ─────────────────────────────────────────────────────────────
     scoring_provider: str | None = None

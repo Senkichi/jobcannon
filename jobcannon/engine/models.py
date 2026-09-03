@@ -1,3 +1,4 @@
+# PORTED from job_finder/models.py @ b1f69f3e10a452cc498527f830959b852108f5e9 (private job-cannon). Ledger L-0447.
 """Data models for Job Finder."""
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ class Job:
     salary_observations: list[dict] = field(default_factory=list)
     description: str | None = None
     posted_date: datetime | None = None
+    # PORT-SEAM: private-tracker issue-number citation dropped per repo convention.
     # Provenance of posted_date: 'exact' (ATS/API first-posted
     # timestamp), 'approximate' (relative-string parse), 'proxy' (detection-
     # time stand-in, e.g. an alert email's Date header). None when unset —
@@ -68,6 +70,7 @@ class Job:
 
         self.company = strip_legal_entity_prefix(self.company)
 
+        # PORT-SEAM: private-tracker issue-number citation dropped per repo convention.
         # Coerce posted_date from string → datetime.
         # ATS-API platforms (Lever, Greenhouse, Ashby, SmartRecruiters, …) emit
         # posted_date as an ISO-8601 string; normalise here so every downstream

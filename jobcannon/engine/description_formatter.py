@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/description_formatter.py @ 8225db222f7ca4b592f5858373979fc2c4057a5c (private job-cannon). Ledger L-0034.
 """Jinja2 template filter for rendering job descriptions as structured HTML.
 
 Handles three description formats:
@@ -54,14 +55,14 @@ def strip_html_to_text(text: str) -> str:
     (``salary < $100k and role requires > 5 years``) has no letter/``/``/
     ``!``/``?`` right after the ``<``, so it is never mistaken for a tag
     opener and never fused with an unrelated later ``>`` into one bogus
-    "tag" that swallows everything between (#234) — this protects every
+    "tag" that swallows everything between (#1967) — this protects every
     caller of this function, not just ``html_to_plain_text``.
 
     Conversely, ``<`` immediately followed by a letter is STILL treated as
     a tag opener regardless of what follows (``x<y`` → matches through to
     the next ``>``, however far away), matching how a real browser/HTML
     tokenizer treats ``<`` + ASCII letter as the start of a tag name. This
-    is pre-existing behavior, unchanged by #234 — #234 only narrows which
+    is pre-existing behavior, unchanged by #1967 — #1967 only narrows which
     characters after ``<`` count as a tag-open, it does not touch what
     happens once one is recognized.
     """
@@ -103,7 +104,7 @@ def html_to_plain_text(raw: str) -> str:
     pages, whose recall/precision heuristics are tuned for boilerplate removal,
     not for terse standalone fragments.
 
-    Two input shapes, two orderings (#234 fix) -- discriminated via the same
+    Two input shapes, two orderings (#1967 fix) -- discriminated via the same
     ``_html_tag_re`` detector ``format_description_filter`` already uses:
 
     - **Real HTML** (``_html_tag_re`` finds at least one literal tag): strip
@@ -127,18 +128,14 @@ def html_to_plain_text(raw: str) -> str:
     preserved, but any list/paragraph structure *that body only expressed
     through escaped tags* is not recovered. This is a deliberate choice:
     the alternative (unescaping unconditionally, then stripping) is exactly
-    the fuse-and-swallow failure #234 fixes, so a false-real-HTML
+    the fuse-and-swallow failure #1967 fixes, so a false-real-HTML
     classification loses nothing, while a false-plain-text classification
     on truly mixed content can silently swallow prose.
 
-    Prior to the #234 fix this function unconditionally unescaped first for
-    both shapes, matching the private original's ``html_to_plain_text``
-    (``job_finder/web/description_formatter.py``, READ-ONLY reference) --
-    which carries the identical bug (verified: same
-    ``strip_html_to_text(_html.unescape(raw))`` body). This is a deliberate,
-    Wave-4-scoped divergence from that file rather than a byte-identical
-    port; a private-repo port-back issue is being filed separately to bring
-    the fix upstream. See PR #232 / issue #234.
+    Ported from the public mirror's identical fix (Senkichi/jobcannon#232,
+    tracked there as #234) -- this file had the pre-fix unconditional-
+    unescape-first shape until #1967, matching what the public copy
+    diverged from at the time it was ported.
     """
     if not raw:
         return ""

@@ -173,8 +173,8 @@ def test_manifest_pins_known_provenance_files():
     )
 
     prober_lines = {m["line"] for m in found["jobcannon/engine/ats_prober.py"]}
-    assert 21 in prober_lines, (
-        "expected line 21 (the wrapped 'the private' / 'source's lazy "
+    assert 24 in prober_lines, (
+        "expected line 24 (the wrapped 'the private' / 'source's lazy "
         f"imports' phrase) in ats_prober.py's markers, got lines {sorted(prober_lines)}"
     )
 
@@ -198,15 +198,14 @@ def test_tight_gap_excludes_unrelated_local_filename_near_private():
     near-miss sentence is still present, but the file now ALSO carries a
     genuine ``PORTED from ...`` marker (line 1), so it correctly IS
     provenance-bearing today — asserting the negative here would fight a
-    true positive, not guard a false one. ``_run_html.py`` below still
-    carries the same "Extracted from ..." phrasing with no genuine marker,
-    so the ambiguity this test targets stays covered.
+    true positive, not guard a false one. ``stale_detector.py`` was dropped
+    from this list the same way by Ledger L-0039 (same audit): it now also
+    carries a genuine ``PORTED from ...`` marker (line 1). ``_run_html.py``
+    below still carries the "Extracted from ..." phrasing with no genuine
+    marker, so the ambiguity this test targets stays covered.
     """
     found = dpp.find_provenance_files(REPO_ROOT)
-    for path in (
-        "jobcannon/engine/stale_detector.py",
-        "jobcannon/engine/ats_scanner/_run_html.py",
-    ):
+    for path in ("jobcannon/engine/ats_scanner/_run_html.py",):
         assert path not in found, f"{path} should not be provenance-bearing"
 
 

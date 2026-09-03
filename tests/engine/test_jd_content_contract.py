@@ -606,13 +606,15 @@ def test_empty_jd_is_not_rejected():
 # ---------------------------------------------------------------------------
 
 
-def test_jd_content_version_is_8():
+def test_jd_content_version_is_9():
     # LITERAL pin: the F7 port of company_absent (#1813), short-token company
     # stems (#1892), and AMBIGUOUS-widening signals (#1814) bumps the
     # watermark 5 -> 8 (see the module docstring's numbering-divergence note
-    # for why this port does not reuse private's own 5/6/6 integers). A drift
-    # here silently re-arms (or fails to re-arm) the corpus re-sweep.
-    assert JD_CONTENT_VERSION == 8
+    # for why this port does not reuse private's own 5/6/6 integers). L-0004's
+    # empty_requirements_header AMBIGUOUS-widening signal (#1952) bumps it
+    # 8 -> 9. A drift here silently re-arms (or fails to re-arm) the corpus
+    # re-sweep.
+    assert JD_CONTENT_VERSION == 9
 
 
 def test_reason_code_registry_set_equality():

@@ -1,10 +1,12 @@
+# PORTED from job_finder/web/ats_prober.py @ b24cf4a6b434f96154144ee087acbae766b4e255 (private job-cannon). Ledger L-0016.
 """Single-company ATS probing with retry, backoff, and error handling."""
 
+import dataclasses
 import logging
 import sqlite3
 import time  # noqa: F401 — available for callers that may need it
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any  # PORT-SEAM: types for the host-injectable extension bundle below
 
 import requests
 from bs4 import BeautifulSoup
@@ -18,15 +20,21 @@ logger = logging.getLogger(__name__)
 
 _PROBE_TIMEOUT = 8  # seconds
 
-# Host-injectable extension bundle (None-default seam). Replaces the private
-# source's lazy imports of ats_identity_reconcile / ats_slug_challenge /
-# careers_crawler tiers — none of which port to the engine. Duck-typed: any
-# object exposing the nine callables below (same signatures as the private
+# PORT-SEAM: (L-0016) Host-injectable extension bundle (None-default seam).
+# Replaces the private source's lazy imports of ats_identity_reconcile /
+# ats_slug_challenge / careers_crawler tiers — none of which port to the
+# engine (see ledger rows L-0013 / L-0022, both ADAPT, whose seam is
+# ScanServices, not standalone engine modules). Duck-typed: any object
+# exposing the nine callables below (same signatures as the private
 # functions they stand in for). With no bundle registered, the static-first
 # fall-through records a miss ("static_fallthrough_unavailable") and
 # speculative slug promotion FAILS CLOSED: claims are stamped provisional and
 # a slug collision never demotes the incumbent — promotion without identity
-# verification is how phantom-company pollution happens.
+# verification is how phantom-company pollution happens. The scan-orchestration
+# entry point (jobcannon.engine.ats_scanner._run.run_ats_scan) propagates
+# services.prober_extensions into set_prober_extensions() automatically
+# (restoring the prior value in a finally) — see services.py's module
+# docstring for the full wiring.
 #   promote_from_careers_link, identity_reconcile_settings,
 #   owner_identity_passes, resolve_slug_collision,
 #   new_summary, try_static_extract, try_embedded_json_extract,
@@ -60,6 +68,26 @@ _TRANSIENT_CODES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
 
 # HTTP status codes that indicate permanent miss (no retry)
 _PERMANENT_MISS_CODES: frozenset[int] = frozenset({404, 410})
+
+
+@dataclasses.dataclass(frozen=True)
+class ProbeHttpResult:
+    """Outcome of a raising-variant HTTP probe (``_probe_*_raising`` /
+    ``_probe_lever_with_result``): whether the response counted as a hit,
+    plus the raw status code.
+
+    The raising variants used to collapse straight to ``bool``
+    (``status_code == 200``), which meant any non-200 response that didn't
+    *raise* (429, 5xx, 401, 403, ...) silently became ``False`` —
+    indistinguishable from a genuine 404. Surfacing ``status_code`` lets
+    :func:`jobcannon.engine.ats_registry.verify_live_detail` run it through the
+    same :func:`_is_transient_error` chokepoint used for exceptions, instead
+    of maintaining a second, status-blind notion of transience.
+    """
+
+    hit: bool
+    status_code: int
+
 
 # ---------------------------------------------------------------------------
 # Retry state machine helpers (DEBT-01 / Phase 14)
@@ -216,7 +244,7 @@ def _try_static_first_fallthrough(
 ) -> dict:
     """Static-first fall-through for companies without a known ATS platform.
 
-    Implements the cheap→expensive ordering:
+    Implements the cheap→expensive ordering per issue #565:
     1. Re-detect known ATS on subdomain (careers_url + discovered links)
     2. Static HTML extract (L1/L4 from careers_crawler)
     3. Embedded-JSON tier (Tier 2.5)
@@ -225,7 +253,7 @@ def _try_static_first_fallthrough(
     On success, promotes the company to the detected ATS or persists jobs from
     custom careers pages. Custom pages are NOT marked as 'hit' (that state
     requires a real ATS platform with platform+slug); instead they are marked
-    as 'miss' with scan_enabled=TRUE and jobs persisted, so the careers_crawler
+    as 'miss' with scan_enabled=TRUE and jobs persisted, so the careers_crawler (# PORT-SEAM: Postgres TRUE literal.)
     picks them up for ongoing extraction. Sets specific miss_reason on failure.
 
     Args:
@@ -240,7 +268,9 @@ def _try_static_first_fallthrough(
         Dict with "status" key: "hit" (promoted to ATS), "miss" (custom page
         with jobs persisted, or all tiers failed), or "error" (transient failure).
     """
-    ext = _prober_extensions
+    from jobcannon.engine._http_constants import _HEADERS, _TIMEOUT
+
+    ext = _prober_extensions  # PORT-SEAM: host-injectable bundle (see set_prober_extensions above)
     if ext is None:
         conn.execute(
             """UPDATE companies
@@ -256,8 +286,6 @@ def _try_static_first_fallthrough(
             company_name,
         )
         return {"status": "miss", "reason": "static_fallthrough_unavailable"}
-
-    from jobcannon.engine._http_constants import _HEADERS, _TIMEOUT
 
     # Extract target titles and exclusions from config for title filtering
     profile_cfg = config.get("profile", {})
@@ -294,7 +322,7 @@ def _try_static_first_fallthrough(
             # Compute reenable_scan based on company state (Fix 3)
             # Only re-enable for the m074 cohort: no known platform, prior miss
             reenable = company["ats_platform"] is None and company["ats_probe_status"] == "miss"
-            res = ext.promote_from_careers_link(
+            res = ext.promote_from_careers_link(  # PORT-SEAM: promote_from_careers_link via ext bundle
                 conn,
                 company_id,
                 platform,
@@ -349,7 +377,7 @@ def _try_static_first_fallthrough(
                             company["ats_platform"] is None
                             and company["ats_probe_status"] == "miss"
                         )
-                        res = ext.promote_from_careers_link(
+                        res = ext.promote_from_careers_link(  # PORT-SEAM: promote_from_careers_link via ext bundle
                             conn,
                             company_id,
                             platform,
@@ -379,17 +407,19 @@ def _try_static_first_fallthrough(
     # ------------------------------------------------------------
     logger.debug("static_fallthrough: tier2 static extract for %s", company_name)
     try:
-        static_jobs = ext.try_static_extract(careers_url, target_titles, title_exclusions)
+        static_jobs = ext.try_static_extract(
+            careers_url, target_titles, title_exclusions
+        )  # PORT-SEAM: try_static_extract via ext bundle
         if static_jobs is not None:
             # static_jobs is a list (may be empty) -> page was statically rendered
             if len(static_jobs) > 0:
                 # Found jobs statically -> persist them and enable scan for custom careers page
                 # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
-                # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up.
+                # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up. (# PORT-SEAM: Postgres TRUE literal.)
                 if db_path:
-                    summary = ext.new_summary()
+                    summary = ext.new_summary()  # PORT-SEAM: new_summary via ext bundle
                     all_new_job_keys = []
-                    ext.upsert_and_log(
+                    ext.upsert_and_log(  # PORT-SEAM: upsert_and_log via ext bundle
                         static_jobs,
                         company_id,
                         company_name,
@@ -410,10 +440,11 @@ def _try_static_first_fallthrough(
                         len(static_jobs),
                     )
 
-                conn.execute(
+                conn.execute(  # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented, no migration backs it); Postgres TRUE literal
                     """UPDATE companies
                        SET ats_probe_status = 'miss',
                            scan_enabled = TRUE,
+                           -- # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented column, no migration backs it)
                            miss_reason = 'static_fallthrough_tier2_jobs_persisted',
                            updated_at = ?
                        WHERE id = ?""",
@@ -458,17 +489,19 @@ def _try_static_first_fallthrough(
     # ------------------------------------------------------------
     logger.debug("static_fallthrough: tier3 embedded JSON for %s", company_name)
     try:
-        json_jobs = ext.try_embedded_json_extract(careers_url, target_titles, title_exclusions)
+        json_jobs = ext.try_embedded_json_extract(
+            careers_url, target_titles, title_exclusions
+        )  # PORT-SEAM: try_embedded_json_extract via ext bundle
         if json_jobs is not None:
             # json_jobs is a list (may be empty) -> embedded JSON found
             if len(json_jobs) > 0:
                 # Found jobs in embedded JSON -> persist them and enable scan for custom careers page
                 # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
-                # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up.
+                # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up. (# PORT-SEAM: Postgres TRUE literal.)
                 if db_path:
-                    summary = ext.new_summary()
+                    summary = ext.new_summary()  # PORT-SEAM: new_summary via ext bundle
                     all_new_job_keys = []
-                    ext.upsert_and_log(
+                    ext.upsert_and_log(  # PORT-SEAM: upsert_and_log via ext bundle
                         json_jobs,
                         company_id,
                         company_name,
@@ -489,10 +522,11 @@ def _try_static_first_fallthrough(
                         len(json_jobs),
                     )
 
-                conn.execute(
+                conn.execute(  # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented, no migration backs it); Postgres TRUE literal
                     """UPDATE companies
                        SET ats_probe_status = 'miss',
                            scan_enabled = TRUE,
+                           -- # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented column, no migration backs it)
                            miss_reason = 'static_fallthrough_tier3_jobs_persisted',
                            updated_at = ?
                        WHERE id = ?""",
@@ -536,6 +570,7 @@ def _try_static_first_fallthrough(
     # Tier 4: Playwright (most expensive - only if earlier tiers failed)
     # ------------------------------------------------------------
     logger.debug("static_fallthrough: tier4 Playwright for %s", company_name)
+    # PORT-SEAM: try_playwright_extract is provided via the ext bundle now — no local import needed (see set_prober_extensions above)
     try:
         try:
             from playwright.sync_api import sync_playwright
@@ -546,17 +581,17 @@ def _try_static_first_fallthrough(
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(headless=True)
                 try:
-                    playwright_jobs = ext.try_playwright_extract(
+                    playwright_jobs = ext.try_playwright_extract(  # PORT-SEAM: try_playwright_extract via ext bundle
                         browser, careers_url, target_titles, title_exclusions
                     )
                     if len(playwright_jobs) > 0:
                         # Found jobs via Playwright -> persist them and enable scan for custom careers page
                         # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
-                        # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up.
+                        # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up. (# PORT-SEAM: Postgres TRUE literal.)
                         if db_path:
-                            summary = ext.new_summary()
+                            summary = ext.new_summary()  # PORT-SEAM: new_summary via ext bundle
                             all_new_job_keys = []
-                            ext.upsert_and_log(
+                            ext.upsert_and_log(  # PORT-SEAM: upsert_and_log via ext bundle
                                 playwright_jobs,
                                 company_id,
                                 company_name,
@@ -577,10 +612,11 @@ def _try_static_first_fallthrough(
                                 len(playwright_jobs),
                             )
 
-                        conn.execute(
+                        conn.execute(  # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented, no migration backs it); Postgres TRUE literal
                             """UPDATE companies
                                SET ats_probe_status = 'miss',
                                    scan_enabled = TRUE,
+                                   -- # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented column, no migration backs it)
                                    miss_reason = 'static_fallthrough_tier4_jobs_persisted',
                                    updated_at = ?
                                WHERE id = ?""",
@@ -671,7 +707,7 @@ def _promote_speculative_hit(
     (``owner_identity_passes`` / ``resolve_slug_collision`` /
     ``identity_reconcile_settings``) lives host-side and arrives via the
     ``_prober_extensions`` bundle (see ``set_prober_extensions``); with no
-    bundle registered this function fails closed (see below).
+    bundle registered this function fails closed (see below). (# PORT-SEAM: identity-challenge machinery arrives via _prober_extensions.)
 
     Like every other promotion write site, this claim is scored with
     ``owner_identity_passes`` and stamped ``ats_evidence_provisional`` (see
@@ -685,12 +721,13 @@ def _promote_speculative_hit(
     ``company_id`` (first try or after a demotion); False if the pair stays
     with its current owner and the caller should try the next candidate.
     """
+    # PORT-SEAM: owner_identity_passes is provided via the ext bundle now — no local import needed (see set_prober_extensions above)
     own = conn.execute(
         "SELECT name, name_raw FROM companies WHERE id = ?", (company_id,)
     ).fetchone()
     own_name = own["name"] if own else ""
     own_name_raw = own["name_raw"] if own else ""
-    ext = _prober_extensions
+    ext = _prober_extensions  # PORT-SEAM: host-injectable bundle (see set_prober_extensions above)
     is_provisional = (
         0
         if (ext is not None and ext.owner_identity_passes(own_name, own_name_raw, None, slug))
@@ -721,7 +758,7 @@ def _promote_speculative_hit(
         conn.execute(speculative_sql, (platform, slug, is_provisional, company_id))
         return True
     except sqlite3.IntegrityError as ie:
-        if ext is None:
+        if ext is None:  # PORT-SEAM: fail-closed when no host extension bundle is registered
             # Fail closed: without the slug-ownership challenge machinery a
             # single speculative guess must never evict an incumbent owner.
             return False
@@ -731,7 +768,9 @@ def _promote_speculative_hit(
             platform=platform,
             slug=slug,
             challenger_id=company_id,
-            settings=ext.identity_reconcile_settings(config),
+            settings=ext.identity_reconcile_settings(
+                config
+            ),  # PORT-SEAM: identity_reconcile_settings arrives via the ext bundle
             config=config,
         )
         if collision["demoted"]:
@@ -789,299 +828,127 @@ def probe_single_company(
     slug = company["ats_slug"]
     company_name = company["name_raw"]
 
-    # If company has a known platform and slug, probe directly via HTTP
-    # (not via scan_lever/scan_greenhouse/scan_ashby which swallow exceptions)
+    # If company has a known platform and slug, probe directly via the
+    # registry-driven dispatch (#1928). The former hand-maintained if/elif
+    # chain over 9 platforms omitted phenom / oracle_cloud / ultipro (and
+    # others) even though their _probe_* functions were implemented — so no
+    # code path could move those companies to 'hit'. Resolving the probe via
+    # ats_registry.PLATFORMS.get(platform).probe_attr makes every PlatformSpec
+    # with a probe reachable, and the completeness test in
+    # test_ats_registry_completeness.py pins dispatcher coverage == registry
+    # coverage so the next platform addition can't silently drift.
+    #
+    # verify_live_detail restores the transient/blocked-vs-permanent
+    # distinctions that the original #1928 refactor collapsed: for platforms
+    # with a probe_raising_attr (lever/greenhouse/ashby/smartrecruiters — the
+    # four that had inline retry-aware HTTP pre-#1928), a Timeout/
+    # ConnectionError OR a 429/5xx status is classified as TRANSIENT and
+    # routed through _handle_scan_error (retry-with-backoff); a non-transient,
+    # non-404/410 status (401/403 — the slug exists but the probe was denied)
+    # is classified as BLOCKED and recorded as a distinct platform_slug_blocked
+    # miss, instead of either collapsing into a permanent platform_slug_404
+    # miss. Platforms without a raising variant fall back to the bool
+    # verify_live (HIT or MISS only) — matching their pre-#1928
+    # swallowing-probe behaviour.
     if platform and slug:
-        try:
-            if platform == "lever":
-                url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
-            elif platform == "greenhouse":
-                url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
-            elif platform == "ashby":
-                url = (
-                    f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true"
-                )
-            elif platform == "smartrecruiters":
-                url = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=1"
-            elif platform == "workday":
-                # Workday uses POST — delegate to dedicated probe function
-                try:
-                    if _probe_workday(slug):
-                        conn.execute(
-                            "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
-                            (company_id,),
-                        )
-                        _reset_retry_state(conn, company_id, now)
-                        logger.info("probe_single_company: %s -> hit (workday)", company_name)
-                        return {"status": "hit", "jobs_found": 0}
-                    else:
-                        # B4: Workday probe returns False when tenant/board
-                        # combination yields no postings — symptomatically the
-                        # same as 404 (slug doesn't resolve to a Workday board).
-                        # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
-                        careers_url = company["careers_url"]
-                        if careers_url:
-                            logger.info(
-                                "probe_single_company: workday slug 404 for %s, trying static-first fallthrough",
-                                company_name,
-                            )
-                            return _try_static_first_fallthrough(
-                                company_id, company_name, careers_url, conn, config, now
-                            )
-                        else:
-                            conn.execute(
-                                """UPDATE companies
-                                   SET ats_probe_status = 'miss',
-                                       miss_reason = 'platform_slug_404'
-                                   WHERE id = ?""",
-                                (company_id,),
-                            )
-                            conn.commit()
-                            return {"status": "miss"}
-                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                    _handle_scan_error(conn, company_id, company_name, str(e), now)
-                    return {"status": "error", "detail": str(e)}
-            elif platform == "icims":
-                # iCIMS is JS-rendered with no public API —
-                # delegate to the requests-light existence probe. A 'hit' here
-                # only confirms the board is live; the Playwright scanner phase
-                # (run_ats_scan) does the actual job extraction.
-                try:
-                    if _probe_icims(slug):
-                        conn.execute(
-                            "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
-                            (company_id,),
-                        )
-                        _reset_retry_state(conn, company_id, now)
-                        logger.info("probe_single_company: %s -> hit (icims)", company_name)
-                        return {"status": "hit", "jobs_found": 0}
-                    # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
-                    careers_url = company["careers_url"]
-                    if careers_url:
-                        logger.info(
-                            "probe_single_company: icims slug 404 for %s, trying static-first fallthrough",
-                            company_name,
-                        )
-                        return _try_static_first_fallthrough(
-                            company_id, company_name, careers_url, conn, config, now
-                        )
-                    else:
-                        conn.execute(
-                            """UPDATE companies
-                               SET ats_probe_status = 'miss',
-                                   miss_reason = 'platform_slug_404'
-                               WHERE id = ?""",
-                            (company_id,),
-                        )
-                        conn.commit()
-                        return {"status": "miss"}
-                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                    _handle_scan_error(conn, company_id, company_name, str(e), now)
-                    return {"status": "error", "detail": str(e)}
-            elif platform == "successfactors":
-                # SuccessFactors XML feed — delegate to the probe function.
-                try:
-                    if _probe_successfactors(slug):
-                        conn.execute(
-                            "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
-                            (company_id,),
-                        )
-                        _reset_retry_state(conn, company_id, now)
-                        logger.info(
-                            "probe_single_company: %s -> hit (successfactors)", company_name
-                        )
-                        return {"status": "hit", "jobs_found": 0}
-                    # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
-                    careers_url = company["careers_url"]
-                    if careers_url:
-                        logger.info(
-                            "probe_single_company: successfactors slug 404 for %s, trying static-first fallthrough",
-                            company_name,
-                        )
-                        return _try_static_first_fallthrough(
-                            company_id, company_name, careers_url, conn, config, now
-                        )
-                    else:
-                        conn.execute(
-                            """UPDATE companies
-                               SET ats_probe_status = 'miss',
-                                   miss_reason = 'platform_slug_404'
-                               WHERE id = ?""",
-                            (company_id,),
-                        )
-                        conn.commit()
-                        return {"status": "miss"}
-                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                    _handle_scan_error(conn, company_id, company_name, str(e), now)
-                    return {"status": "error", "detail": str(e)}
-            elif platform == "adp":
-                # ADP Workforce Now JSON feed — delegate to the probe function.
-                try:
-                    if _probe_adp(slug):
-                        conn.execute(
-                            "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
-                            (company_id,),
-                        )
-                        _reset_retry_state(conn, company_id, now)
-                        logger.info("probe_single_company: %s -> hit (adp)", company_name)
-                        return {"status": "hit", "jobs_found": 0}
-                    # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
-                    careers_url = company["careers_url"]
-                    if careers_url:
-                        logger.info(
-                            "probe_single_company: adp slug 404 for %s, trying static-first fallthrough",
-                            company_name,
-                        )
-                        return _try_static_first_fallthrough(
-                            company_id, company_name, careers_url, conn, config, now
-                        )
-                    else:
-                        conn.execute(
-                            """UPDATE companies
-                               SET ats_probe_status = 'miss',
-                                   miss_reason = 'platform_slug_404'
-                               WHERE id = ?""",
-                            (company_id,),
-                        )
-                        conn.commit()
-                        return {"status": "miss"}
-                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                    _handle_scan_error(conn, company_id, company_name, str(e), now)
-                    return {"status": "error", "detail": str(e)}
-            elif platform == "ibm":
-                # IBM careers API — delegate to the probe function.
-                try:
-                    if _probe_ibm(slug):
-                        conn.execute(
-                            "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
-                            (company_id,),
-                        )
-                        _reset_retry_state(conn, company_id, now)
-                        logger.info("probe_single_company: %s -> hit (ibm)", company_name)
-                        return {"status": "hit", "jobs_found": 0}
-                    # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
-                    careers_url = company["careers_url"]
-                    if careers_url:
-                        logger.info(
-                            "probe_single_company: ibm slug 404 for %s, trying static-first fallthrough",
-                            company_name,
-                        )
-                        return _try_static_first_fallthrough(
-                            company_id, company_name, careers_url, conn, config, now
-                        )
-                    else:
-                        conn.execute(
-                            """UPDATE companies
-                               SET ats_probe_status = 'miss',
-                                   miss_reason = 'platform_slug_404'
-                               WHERE id = ?""",
-                            (company_id,),
-                        )
-                        conn.commit()
-                        return {"status": "miss"}
-                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                    _handle_scan_error(conn, company_id, company_name, str(e), now)
-                    return {"status": "error", "detail": str(e)}
-            else:
-                # B4: platform value is set but not one we know how to probe —
-                # ATS catalog drift (probably the company's platform was
-                # removed from the supported set after being tagged).
-                # Try static-first fallthrough if careers_url exists
-                careers_url = company["careers_url"]
-                if careers_url:
-                    logger.info(
-                        "probe_single_company: unknown platform %s for %s, trying static-first fallthrough",
-                        platform,
-                        company_name,
-                    )
-                    return _try_static_first_fallthrough(
-                        company_id, company_name, careers_url, conn, config, now
-                    )
-                else:
-                    return {
-                        "status": "miss",
-                        "detail": f"unknown platform: {platform}",
-                        "miss_reason": "unknown_platform",
-                    }
+        from jobcannon.engine import ats_registry
 
-            # Let Timeout/ConnectionError propagate — caught below as transient
-            resp = requests.get(url, timeout=_PROBE_TIMEOUT)
-
-            if resp.status_code == 200:
-                # Success: update to hit, reset retry state
+        spec = ats_registry.PLATFORMS.get(platform)
+        if spec is not None and spec.probe_attr is not None:
+            try:
+                outcome = ats_registry.verify_live_detail(platform, slug)
+            except Exception as e:
+                # Non-transient exception from a raising-variant probe (e.g.
+                # JSONDecodeError from a malformed response). verify_live_detail
+                # catches Timeout/ConnectionError itself (→ TRANSIENT), so this
+                # except only sees non-transient failures — treat them as a
+                # generic retryable error, same as the pre-#1928 broad except.
+                logger.warning("probe_single_company: %s unexpected error: %s", company_name, e)
+                _handle_scan_error(conn, company_id, company_name, str(e), now)
+                return {"status": "error", "detail": str(e)}
+            if outcome is ats_registry.ProbeOutcome.HIT:
                 conn.execute(
                     "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
                     (company_id,),
                 )
                 _reset_retry_state(conn, company_id, now)
-                try:
-                    data = resp.json()
-                    jobs_count = len(data) if isinstance(data, list) else 0
-                except Exception:
-                    logger.debug(
-                        "probe jobs_count parse failed for %s", company_name, exc_info=True
-                    )
-                    jobs_count = 0
-                logger.info("probe_single_company: %s -> hit (%d jobs)", company_name, jobs_count)
-                return {"status": "hit", "jobs_found": jobs_count}
-            elif resp.status_code in _PERMANENT_MISS_CODES:
-                # B4: 404/410 -> tenant not found on this platform.
-                # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
-                careers_url = company["careers_url"]
-                if careers_url:
-                    logger.info(
-                        "probe_single_company: platform slug 404 for %s, trying static-first fallthrough",
-                        company_name,
-                    )
-                    return _try_static_first_fallthrough(
-                        company_id, company_name, careers_url, conn, config, now
-                    )
-                else:
-                    conn.execute(
-                        """UPDATE companies
-                           SET ats_probe_status = 'miss',
-                               miss_reason = 'platform_slug_404'
-                           WHERE id = ?""",
-                        (company_id,),
-                    )
-                    conn.commit()
-                    return {"status": "miss"}
-            elif resp.status_code in _TRANSIENT_CODES:
-                detail = f"HTTP {resp.status_code}"
+                logger.info("probe_single_company: %s -> hit (%s)", company_name, platform)
+                return {"status": "hit", "jobs_found": 0}
+            if outcome is ats_registry.ProbeOutcome.TRANSIENT:
+                # Transient network failure (timeout / connection error / 429 /
+                # 5xx on a raising-variant platform). Route through the retry-
+                # with-backoff state machine instead of permanently recording
+                # a platform_slug_404 miss — restores the pre-#1928 behaviour
+                # for lever/greenhouse/ashby/smartrecruiters that the registry
+                # dispatch collapsed (#1928 rework review).
+                detail = f"transient probe failure for {platform}/{slug}"
                 _handle_scan_error(conn, company_id, company_name, detail, now)
                 return {"status": "error", "detail": detail}
-            else:
-                # Other non-200 (403, 401, etc.) — treat as permanent miss.
-                # B4: distinct reason so audits can tell 404 (slug doesn't exist)
-                # apart from 403/blocked (slug exists but probe blocked).
-                # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
-                careers_url = company["careers_url"]
-                if careers_url:
-                    logger.info(
-                        "probe_single_company: platform slug blocked for %s, trying static-first fallthrough",
-                        company_name,
-                    )
-                    return _try_static_first_fallthrough(
-                        company_id, company_name, careers_url, conn, config, now
-                    )
-                else:
-                    conn.execute(
-                        """UPDATE companies
-                           SET ats_probe_status = 'miss',
-                               miss_reason = 'platform_slug_blocked'
+            if outcome is ats_registry.ProbeOutcome.BLOCKED:
+                # Probe reached a real response but got a non-transient,
+                # non-404/410 status (401/403) — the slug exists but access
+                # was denied, as distinct from a slug that doesn't resolve at
+                # all. Restores the pre-#1928 platform_slug_blocked diagnostic
+                # distinction (deleted by the #1928 refactor) so audits can
+                # tell "doesn't exist" apart from "exists but blocked" (#1928
+                # rework review fold-in). Not retried automatically — an
+                # operator can still hit Retry via is_company_retryable's
+                # probeable-slug clause.
+                conn.execute(
+                    """UPDATE companies
+                       SET ats_probe_status = 'miss',
+                           miss_reason = 'platform_slug_blocked'
                        WHERE id = ?""",
-                        (company_id,),
-                    )
-                    conn.commit()
-                    return {"status": "miss"}
-
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            _handle_scan_error(conn, company_id, company_name, str(e), now)
-            return {"status": "error", "detail": str(e)}
-        except Exception as e:
-            logger.warning("probe_single_company: %s unexpected error: %s", company_name, e)
-            _handle_scan_error(conn, company_id, company_name, str(e), now)
-            return {"status": "error", "detail": str(e)}
+                    (company_id,),
+                )
+                conn.commit()
+                logger.info(
+                    "probe_single_company: %s -> blocked (%s/%s)", company_name, platform, slug
+                )
+                return {"status": "miss", "reason": "platform_slug_blocked"}
+            # outcome is MISS — slug doesn't resolve to a live board.
+            # Try static-first fallthrough if careers_url exists (company
+            # may have migrated ATS), same as the pre-#1928 404/410 path.
+            careers_url = company["careers_url"]
+            if careers_url:
+                logger.info(
+                    "probe_single_company: %s slug 404 for %s, trying static-first fallthrough",
+                    platform,
+                    company_name,
+                )
+                return _try_static_first_fallthrough(
+                    company_id, company_name, careers_url, conn, config, now
+                )
+            else:
+                conn.execute(
+                    """UPDATE companies
+                       SET ats_probe_status = 'miss',
+                           miss_reason = 'platform_slug_404'
+                       WHERE id = ?""",
+                    (company_id,),
+                )
+                conn.commit()
+                return {"status": "miss"}
+        else:
+            # Platform value is set but has no registered probe (keyword
+            # adapter, non_scannable stub, or unknown platform). Try
+            # static-first fallthrough if careers_url exists.
+            careers_url = company["careers_url"]
+            if careers_url:
+                logger.info(
+                    "probe_single_company: unknown platform %s for %s, trying static-first fallthrough",
+                    platform,
+                    company_name,
+                )
+                return _try_static_first_fallthrough(
+                    company_id, company_name, careers_url, conn, config, now
+                )
+            else:
+                return {
+                    "status": "miss",
+                    "detail": f"unknown platform: {platform}",
+                    "miss_reason": "unknown_platform",
+                }
 
     else:
         # No platform/slug — try speculative probing via derived slug candidates.
@@ -1112,7 +979,7 @@ def probe_single_company(
         candidates = derive_slug_candidates(company_name)
         for slug_candidate in candidates:
             try:
-                if _probe_lever_with_result(slug_candidate):
+                if _probe_lever_with_result(slug_candidate).hit:
                     if not _promote_speculative_hit(
                         conn, company_id, company_name, "lever", slug_candidate, config
                     ):
@@ -1160,14 +1027,17 @@ def probe_single_company(
             return {"status": "miss", "reason": "speculative_probing_exhausted_no_careers_url"}
 
 
-def _probe_lever_with_result(slug: str) -> bool:
-    """Return True if Lever slug has at least one active posting. Let transient exceptions propagate."""
+def _probe_lever_with_result(slug: str) -> ProbeHttpResult:
+    """Hit if Lever slug has at least one active posting; carries status_code
+    for non-hit classification (see :class:`ProbeHttpResult`). Let transient
+    exceptions propagate."""
     url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
     r = requests.get(url, timeout=_PROBE_TIMEOUT)
+    hit = False
     if r.status_code == 200:
         data = r.json()
-        return isinstance(data, list) and len(data) > 0
-    return False
+        hit = isinstance(data, list) and len(data) > 0
+    return ProbeHttpResult(hit=hit, status_code=r.status_code)
 
 
 def _probe_lever(slug: str) -> bool:
@@ -1214,6 +1084,31 @@ def _probe_greenhouse(slug: str) -> bool:
     except Exception as e:
         logger.debug("_probe_greenhouse('%s') failed: %s", slug, e)
         return False
+
+
+def _probe_greenhouse_raising(slug: str) -> ProbeHttpResult:
+    """Raising variant of :func:`_probe_greenhouse` for retry-aware dispatch.
+
+    Identical HTTP logic but WITHOUT the broad ``except Exception`` — lets
+    ``requests.exceptions.Timeout`` / ``ConnectionError`` propagate, and
+    returns a :class:`ProbeHttpResult` (not a bare bool) so
+    :func:`jobcannon.engine.ats_registry.verify_live_detail` can classify BOTH
+    the raised exceptions and the response status code through the single
+    ``_is_transient_error`` chokepoint: a status-code transient (429/5xx) or a
+    Timeout/ConnectionError both become ``ProbeOutcome.TRANSIENT``, and
+    ``probe_single_company`` routes that through ``_handle_scan_error``
+    (retry-with-backoff) instead of permanently recording a
+    ``platform_slug_404`` miss.
+
+    Pre-#1928 ``probe_single_company`` did this HTTP call inline (not via the
+    swallowing ``_probe_greenhouse``) for exactly this reason; the registry
+    dispatch collapsed the distinction. This raising variant restores it
+    without breaking the batch callers that depend on ``_probe_greenhouse``'s
+    never-raise contract.
+    """
+    url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+    r = requests.get(url, timeout=_PROBE_TIMEOUT)
+    return ProbeHttpResult(hit=r.status_code == 200, status_code=r.status_code)
 
 
 def _probe_identity_greenhouse(slug: str) -> str | None:
@@ -1385,8 +1280,8 @@ def _probe_ibm(slug: str) -> bool:
 def _probe_icims(slug: str) -> bool:
     """Return True if slug resolves to a live iCIMS career portal.
 
-    iCIMS boards are 100% JS-rendered with no public unauthenticated JSON API,
-    so the probe only confirms the board *exists*: an HTTP GET
+    iCIMS boards are 100% JS-rendered with no public unauthenticated JSON API
+    (issue #454), so the probe only confirms the board *exists*: an HTTP GET
     of the portal's ``/jobs/search`` page returning 200 with an iCIMS marker
     in the body. The full JS render + job extraction is the Playwright
     scanner's job (``ats_platforms/_platforms_icims.py``) — keeping the probe
@@ -1444,6 +1339,30 @@ def _probe_smartrecruiters(slug: str) -> bool:
         return False
 
 
+def _probe_smartrecruiters_raising(slug: str) -> ProbeHttpResult:
+    """Raising variant of :func:`_probe_smartrecruiters` for retry-aware dispatch.
+
+    Lets ``requests.exceptions.Timeout`` / ``ConnectionError`` propagate and
+    returns a :class:`ProbeHttpResult` (not a bare bool) so
+    :func:`jobcannon.engine.ats_registry.verify_live_detail` can classify BOTH
+    the raised exceptions and the response status code through the single
+    ``_is_transient_error`` chokepoint. See :func:`_probe_greenhouse_raising`
+    for the full rationale — same pattern, restoring the pre-#1928
+    inline-HTTP retry semantics that the registry dispatch collapsed.
+    """
+    url = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=1"
+    r = requests.get(
+        url,
+        headers={"Accept": "application/json"},
+        timeout=_PROBE_TIMEOUT,
+    )
+    hit = False
+    if r.status_code == 200:
+        data = r.json()
+        hit = data.get("totalFound", 0) > 0
+    return ProbeHttpResult(hit=hit, status_code=r.status_code)
+
+
 def _probe_identity_smartrecruiters(slug: str) -> str | None:
     """Return the company's own display name from the SmartRecruiters Postings API.
 
@@ -1498,6 +1417,21 @@ def _probe_ashby(slug: str) -> bool:
     except Exception as e:
         logger.debug("_probe_ashby('%s') failed: %s", slug, e)
         return False
+
+
+def _probe_ashby_raising(slug: str) -> ProbeHttpResult:
+    """Raising variant of :func:`_probe_ashby` for retry-aware dispatch.
+
+    Lets ``requests.exceptions.Timeout`` / ``ConnectionError`` propagate and
+    returns a :class:`ProbeHttpResult` (not a bare bool) so
+    :func:`jobcannon.engine.ats_registry.verify_live_detail` can classify BOTH
+    the raised exceptions and the response status code through the single
+    ``_is_transient_error`` chokepoint. See :func:`_probe_greenhouse_raising`
+    for the full rationale.
+    """
+    url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}"
+    r = requests.get(url, timeout=_PROBE_TIMEOUT)
+    return ProbeHttpResult(hit=r.status_code == 200, status_code=r.status_code)
 
 
 def _probe_recruitee(slug: str) -> bool:
@@ -1864,7 +1798,7 @@ def _probe_successfactors(slug: str) -> bool:
         logger.debug("_probe_successfactors('%s'): invalid slug format", slug)
         return False
 
-    url = f"https://{host}/career?company={company_id}&career_ns=job_listing_summary&resultType=XML"
+    url = f"https://{host}/career?company={company_id}&career_ns=job_listing_summary&resultType=XML"  # PORT-SEAM: ruff line-length 100 (public) vs 99 (private) wraps this differently; pure reformat
     try:
         r = requests.get(url, timeout=_PROBE_TIMEOUT)
         if r.status_code != 200:

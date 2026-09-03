@@ -1,9 +1,9 @@
+# PORTED from job_finder/normalizers.py @ 6a2af961fbffb78564ce8783277d916d60ad0906 (private job-cannon). Ledger L-0007.
 """Foundation-layer normalization utilities for job dedup keys.
 
-Contains pure normalization functions (no host-layer dependencies) that can be
+Contains pure normalization functions (no web-layer dependencies) that can be
 imported by both jobcannon.engine.models and jobcannon.engine.dedup_normalizer without
-creating an upward dependency out of the engine purity boundary (enforced by
-tests/engine/test_boundary.py).
+creating an upward dependency from the foundation layer into the web layer.
 """
 
 import html
@@ -18,23 +18,20 @@ import re
 # function of other stored data records the version of the function that derived
 # it, and a standing, idempotent re-derivation runs when that version changes.
 #
-# NORMALIZER_VERSION is that version tag. Version 1 is the IMPLICIT original
+# NORMALIZER_VERSION is that version tag. Version 1 is the IMPLICIT pre-#238
 # normalizer (no digit<->letter separator rule). Version 2 is the current
-# algorithm (added the digit<->letter boundary split at line ~249).
+# algorithm (#212/#238 added the digit<->letter boundary split at line ~249).
 #
 # BUMP THIS whenever normalize_company / normalize_title semantics change so
-# that the same (company, title) could map to a different dedup_key. In the
-# private source repo, bumping it re-arms a standing startup hook
-# (`_run_rekey_if_stale` in job_finder/web/migrations/_post_hooks.py) that
-# re-derives every stored row's key under the new version. jobcannon ships no
-# such hook — it is a pure library with no persistence of its own — so an
-# embedding host that persists dedup keys is responsible for re-deriving them
-# on a version bump. The canary test in the private repo's
+# that the same (company, title) could map to a different dedup_key. Bumping it
+# re-arms the standing re-key operation (`_run_rekey_if_stale` in
+# job_finder/web/migrations/_post_hooks.py), which re-derives every row's key
+# under the new version on next startup. The canary test in
 # tests/test_dedup_normalizer.py fails loudly ("normalizer semantics changed --
 # bump NORMALIZER_VERSION") if the functions drift without a bump — this is the
-# enforcement that a once-ever-sentinel gap can never recur.
+# enforcement that #238's once-ever-sentinel gap can never recur.
 #
-# strip_site_code_prefix() below was added but does NOT wire into
+# Issue #1046 added strip_site_code_prefix() below but does NOT wire it into
 # normalize_company() / bump this version — the one-off migration script and
 # its own precision tests exercise the function directly. Wiring a
 # site-code-prefix strip into the live normalization path (and re-arming the
@@ -45,10 +42,44 @@ NORMALIZER_VERSION: int = 2
 
 
 # ---------------------------------------------------------------------------
+# Company-match normalizer version (WI-15 / #1829)
+# ---------------------------------------------------------------------------
+#
+# COMPANY_MATCH_NORMALIZER_VERSION tags `normalize_company_v2`, a MORE
+# aggressive canonicalizer used ONLY for near-duplicate *detection / reporting*
+# (company_resolver.find_duplicate_companies, scripts/company_dedup_report.py).
+# It is deliberately NOT the dedup_key version: `normalize_company_v2` is never
+# on the derive_dedup_key path, so bumping it does NOT re-arm the standing
+# re-key (`_run_rekey_if_stale`) and does NOT mutate any stored dedup_key.
+#
+# This follows the same sanctioned precedent as #1046's strip_site_code_prefix
+# above: a stronger normalization helper can exist beside normalize_company
+# without being wired into the live dedup path or bumping NORMALIZER_VERSION.
+# Moving the fold into the dedup_key path (which WOULD re-key the whole job
+# table) is out of scope for WI-15 and tracked as a follow-up issue.
+COMPANY_MATCH_NORMALIZER_VERSION: int = 2
+
+
+# ---------------------------------------------------------------------------
 # Company name deterministic cleanup regexes
 # ---------------------------------------------------------------------------
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+# --- normalize_company_v2 (detection-only) folds ---------------------------
+# Leading article ("The Home Depot" -> "Home Depot"). Case-insensitive so it
+# works whether applied before or after lowercasing.
+_LEADING_ARTICLE_RE = re.compile(r"^the\s+", re.IGNORECASE)
+# Trademark / copyright glyphs ("BetterSleep™" -> "BetterSleep").
+_TRADEMARK_RE = re.compile(r"[™®©]")
+# Apostrophe family: ASCII ', curly ' ', and backtick/acute ` ´. Stripped
+# entirely (not just word-final "'s") so "Ken's Foods", "Ken`s Foods", and
+# "Kens Foods" all fold together — the live registry contains a backtick twin
+# (id 8168 "ken`s foods" vs id 1324 "ken's foods"), which a literal "'s" strip
+# would miss.
+_APOSTROPHE_FAMILY_RE = re.compile(r"['’‘`´]")
+# Trailing punctuation ("Airwallex-" -> "Airwallex", "Acme," -> "Acme").
+_TRAILING_PUNCT_RE = re.compile(r"[-–—,.\s]+$")
 
 # Leading numeric prefix junk: "1. ", "123) ", "42 - " at start of string.
 # Only stripped when the remainder after the match is non-empty.
@@ -145,7 +176,7 @@ _LEGAL_ENTITY_PREFIX_RE = re.compile(
 )
 
 # ---------------------------------------------------------------------------
-# Site-code prefix detection
+# Site-code prefix detection (Issue #1046)
 #
 # ATS/career-page sources sometimes include internal site/branch/facility codes
 # as a leading prefix: e.g. "0006 MA01-CAMBRIDGE-CROSSING-US4E", "0101 The
@@ -167,7 +198,7 @@ _LEGAL_ENTITY_PREFIX_RE = re.compile(
 # Names with a leading digit token that has NEITHER signal (e.g. "3010 HYDRIL
 # USA DISTRIBUTION", "410 ICR United States USA" — no leading zero, and not
 # letter-prefixed) are intentionally NOT matched here. Those are exactly the
-# borderline cases that need owner review rather than automatic
+# issue's "borderline" cases that need owner review rather than automatic
 # stripping; a broader regex could catch them too, but only at the cost of
 # also catching "3M Company", "84 Lumber", "1st Financial Bank USA", "99 Cents
 # Only Stores", "2020 Companies", "1872 Consulting", and "21 Tech" — the
@@ -221,7 +252,7 @@ def strip_legal_entity_prefix(company: str) -> str:
 
 
 def strip_site_code_prefix(company: str | None) -> str | None:
-    """Strip a leading site-code prefix from a company name.
+    """Strip a leading site-code prefix from a company name (Issue #1046).
 
     ATS/career-page sources sometimes include internal site/branch/facility codes
     as a leading prefix: e.g. "0006 MA01-CAMBRIDGE-CROSSING-US4E", "0101 The
@@ -327,6 +358,56 @@ def normalize_company(company: str) -> str:
     return normalized
 
 
+def normalize_company_v2(company: str) -> str:
+    """Aggressive company-name canonicalizer for near-duplicate DETECTION.
+
+    Builds on ``normalize_company`` (v1) with additional folds that are too
+    lossy for the dedup_key path but correct for grouping registry rows that
+    are the same real employer written differently:
+
+      - leading article ``the`` ("The Home Depot" -> "home depot")
+      - trailing punctuation ("Airwallex-" -> "airwallex")
+      - trademark / copyright glyphs ``™®©`` ("BetterSleep™" -> "bettersleep")
+      - apostrophe-family chars ``' ' ' ` ´`` ("Ken's"/"Ken`s" -> "kens")
+      - whitespace collapse
+
+    v1 is re-applied inside a fixpoint loop so folds that unblock a v1 rule
+    compose correctly — e.g. "Acme, Inc.-" needs the trailing dash removed
+    (a v2 fold) before v1's legal-suffix strip can reach ", inc".
+
+    IMPORTANT: this function is NEVER on the ``derive_dedup_key`` path. It is
+    tagged by ``COMPANY_MATCH_NORMALIZER_VERSION``, not ``NORMALIZER_VERSION``,
+    and is used only by detection/reporting callers. Do not use its output as a
+    display value (always lowercase).
+
+    Args:
+        company: Raw company name string.
+
+    Returns:
+        Aggressively canonicalized, lowercased company name.
+    """
+    normalized = company
+    prev = None
+    while normalized != prev:
+        prev = normalized
+        # Re-apply the full v1 pass (html/tag/prefix/lowercase/suffix strip).
+        normalized = normalize_company(normalized)
+        # Remove trademark glyphs and every apostrophe-family char.
+        normalized = _TRADEMARK_RE.sub("", normalized)
+        normalized = _APOSTROPHE_FAMILY_RE.sub("", normalized)
+        # Strip a leading article, but never to empty.
+        m = _LEADING_ARTICLE_RE.match(normalized)
+        if m and normalized[m.end() :].strip():
+            normalized = normalized[m.end() :]
+        # Strip trailing punctuation/whitespace, but never to empty.
+        stripped = _TRAILING_PUNCT_RE.sub("", normalized)
+        if stripped:
+            normalized = stripped
+        # Collapse any whitespace the folds exposed.
+        normalized = " ".join(normalized.split()).strip()
+    return normalized
+
+
 def normalize_title(title: str) -> str:
     """Normalize a job title for dedup key generation.
 
@@ -356,6 +437,89 @@ def normalize_title(title: str) -> str:
     # Normalize whitespace and lowercase
     normalized = " ".join(normalized.split()).lower()
     return normalized
+
+
+# ---------------------------------------------------------------------------
+# Self-duplicated title-suffix collapse (Issue #2017)
+#
+# An employer's API can return a title whose trailing comma-delimited segment
+# repeats an earlier segment verbatim — e.g. Amazon's search.json returned
+# "Data Scientist, EU Prime and Marketing Analytics & Science (PRIMAS), EU
+# Prime and Marketing Analytics & Science (PRIMAS)" (id_icims 10521285,
+# verified live 2026-09-01). The job_path slug carried the doubling too,
+# confirming it is stored that way in Amazon's system (employer-authored, not
+# a client-side concatenation defect — the Amazon scanner at
+# _platforms_amazon.py:176 takes posting["title"] verbatim with no
+# concatenation).
+#
+# Because derive_dedup_key is a function of the title, the doubling is not
+# cosmetic: the same posting re-scraped with a correctly-constructed title
+# produces a DIFFERENT key and lands as a new row. collapse_duplicated_suffix
+# strips the repeated trailing segment at the ingestion write boundary
+# (ParsedJob.from_job, after clean_title and before derive_dedup_key) so both
+# the stored title and the dedup key are stable.
+#
+# This is NOT wired into normalize_title / NORMALIZER_VERSION — doing so would
+# re-key the whole corpus (out of scope, #1866 owns the standing re-key
+# question). It is a pre-derive_dedup_key step applied to newly ingested rows
+# only. The title-hygiene re-sweep reports existing affected rows (detection +
+# reporting only, no collapse) so the owner can find them without a hand audit.
+# ---------------------------------------------------------------------------
+
+#: Minimum normalized length for a comma-delimited segment to be considered
+#: for the duplicate-suffix collapse. Guards against short-token repeats like
+#: "Analyst, Analyst" (7 chars) or "Data Scientist, Data Scientist" (14 chars)
+#: that could be legitimate (or at least not worth silently rewriting). The
+#: PRIMAS subtitle is ~50 chars, well above this floor.
+_MIN_DUPLICATE_SEGMENT_LEN: int = 15
+
+
+def _normalize_segment(segment: str) -> str:
+    """Case- and whitespace-normalized form of a comma-delimited title segment."""
+    return " ".join(segment.split()).lower()
+
+
+def collapse_duplicated_suffix(title: str) -> str:
+    """Collapse a trailing comma-delimited segment that repeats an earlier one.
+
+    Detects a title whose last comma-delimited segment is a verbatim repeat
+    (case- and whitespace-normalized) of an earlier segment, and removes the
+    duplicate. A minimum-length guard (``_MIN_DUPLICATE_SEGMENT_LEN``) prevents
+    short-token repeats like ``"Analyst, Analyst"`` from being over-matched.
+
+    Only the TRAILING segment is checked — a repeated segment in the middle of
+    the title is not touched (it is not a suffix-doubling pattern). At most one
+    duplicate is removed per call; if the result still has a duplicated suffix,
+    the caller may re-apply (but the observed pattern is a single doubling).
+
+    Examples::
+
+        "Data Scientist, PRIMAS, PRIMAS"  ->  "Data Scientist, PRIMAS"
+        "Data Scientist II, PRIMAS"       ->  "Data Scientist II, PRIMAS"  (no repeat)
+        "Analyst, Analyst"                ->  "Analyst, Analyst"           (too short)
+
+    Args:
+        title: Cleaned job title (post ``clean_title``).
+
+    Returns:
+        Title with a duplicated trailing segment removed, or the original
+        title unchanged if no duplicated suffix was detected.
+    """
+    if not title or "," not in title:
+        return title
+    segments = title.split(",")
+    if len(segments) < 3:
+        # Need at least 3 segments: <head>, <segment>, <segment> — the last
+        # must repeat an earlier one. A 2-segment title ("A, B") has no earlier
+        # segment for B to duplicate (A != B is the normal case).
+        return title
+    last_norm = _normalize_segment(segments[-1])
+    if len(last_norm) < _MIN_DUPLICATE_SEGMENT_LEN:
+        return title
+    for earlier in segments[:-1]:
+        if _normalize_segment(earlier) == last_norm:
+            return ",".join(segments[:-1])
+    return title
 
 
 def derive_dedup_key(company: str, title: str) -> str:
@@ -388,8 +552,7 @@ def derive_dedup_key(company: str, title: str) -> str:
 # THIS job?). Extracted to the foundation layer so the two contracts share ONE
 # stopword set + tokenizer instead of each carrying a private copy (the exact
 # copy-paste the field-contract work is trying to eliminate). Pure functions,
-# no host-layer dependency — safe to import from anywhere inside the engine
-# purity boundary.
+# no web/db dependency — safe to import from either layer.
 # ---------------------------------------------------------------------------
 
 #: Generic title words that carry no matching signal (seniority / level / format).

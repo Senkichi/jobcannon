@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/location_canonical.py @ 6c0ba1bc42d11053e09e1b27da642aac4af53f0c (private job-cannon). Ledger L-0455.
 """Canonical structured location for job postings.
 
 `JobLocation` is the value object the location parser (Layer 2/3) and the
@@ -6,6 +7,8 @@ Field shape mirrors schema.org PostalAddress + LinkedIn workplaceType so
 JSON-LD export comes for free and our internal enum casing matches the
 most-quoted industry source.
 
+# PORT-SEAM: dropped a reference to a private-only planning doc
+# (.planning/SPEC-location-parsing.md), not carried into this port.
 Companion modules:
   - `location_parser.py` — Layer 2 (gazetteer) + Layer 3 (heuristic).
   - `location_normalizer.py` — pre-existing whitespace/placeholder cleanup
@@ -21,6 +24,9 @@ on read for forward-compat.
 from __future__ import annotations
 
 import json
+
+# PORT-SEAM: is_dataclass added for from_list's default-serializer helper below
+# (an earlier port-wave addition, not in the private source's import list).
 from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Literal
 
@@ -178,6 +184,9 @@ def from_json(payload: str | None) -> list[JobLocation]:
     return out
 
 
+# PORT-SEAM: _location_json_default and from_list below are an engine-side
+# addition from an earlier port wave (not in the private source at this row's
+# declared SHA) — no host-layer dependency.
 def _location_json_default(obj: object) -> object:
     """json.dumps default for dataclass values (e.g. ``JobLocation``).
 

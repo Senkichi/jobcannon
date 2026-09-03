@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/scoring_types.py @ 9d063804c86d76dec470dfb221db44fe7e716be3 (private job-cannon). Ledger L-0038.
 """Shared types for the scoring pipeline.
 
 Provides:
@@ -78,3 +79,26 @@ def build_comp_context(job_row: dict) -> str | None:
         if comp_min and comp_max:
             parts.append(f"{currency} {comp_min:,}-{comp_max:,}")
     return "; ".join(parts) if parts else None
+
+
+def has_compensation_signal(job_row: dict) -> bool:
+    """Return True iff the row carries a parsed compensation signal the model sees.
+
+    ``comp_fit`` is a comparison against *stated* compensation. With no stated
+    compensation there is nothing to compare against, so a maximum score is
+    unsupported by construction (issue #1969). This helper is the single
+    detection point for that precondition: it mirrors exactly what
+    ``job_scorer._build_user_message`` shows the model — a ``Salary:`` line when
+    ``salary_min``/``salary_max`` is present, and/or a ``Compensation:`` line
+    when ``build_comp_context`` surfaces ATS-sourced comp (equity / bonus / tier
+    summary). When both are absent the model is scoring ``comp_fit`` against
+    nothing, and ``score_job`` forces the neutral midpoint (3) instead of
+    trusting the model's output.
+
+    This consumes only the signals the existing parser already produces — it
+    does not re-parse the JD prose (the compensation parser itself is explicitly
+    out of scope for #1969).
+    """
+    if job_row.get("salary_min") or job_row.get("salary_max"):
+        return True
+    return build_comp_context(job_row) is not None

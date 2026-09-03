@@ -1,9 +1,12 @@
+# PORTED from job_finder/web/_field_alias.py @ 7491ce38a9c8abe10973e5c443ed113f5996ad42 (private job-cannon). Ledger L-0449.
 """Shared field-alias helpers for JSON job-posting extraction.
 
 Provides the canonical key lists and first-match-wins extractors shared
 across the ATS platform scanners (Greenhouse, Lever, …). In the private
 source these were also shared with a generic careers-page AI navigator
 (``careers_page_interactions.py``) that was not carried into this port.
+# PORT-SEAM: docstring reworded for the engine boundary; see the
+# override-loader seam below for the other private-source divergence.
 
 **Key ordering matters — first-match-wins.**
 Each platform's real key must appear *before* any alias:
@@ -19,7 +22,7 @@ correct position — do not append to the end.
 
 from __future__ import annotations
 
-# Host-injectable override-loader seam (was job_finder.web.autoheal.override_loader).
+# PORT-SEAM: host-injectable override-loader seam (was job_finder.web.autoheal.override_loader).
 # None => no overrides => canonical field-alias behavior (byte-identical per the
 # module contract). Hosts inject an object with the same interface the private
 # repo's autoheal.override_loader module exposes at the two call sites below.
@@ -138,6 +141,9 @@ def find_job_array(data) -> list | None:
     return None
 
 
+# PORT-SEAM: resolve_title/resolve_url/resolve_job_array below are an
+# engine-side addition from an earlier port wave, wrapping the canonical
+# extractors with the override-loader seam above; no host-layer dependency.
 # ---------------------------------------------------------------------------
 # Override-aware resolvers (Phase C / C2 — dormant without an override file)
 # ---------------------------------------------------------------------------

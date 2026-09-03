@@ -1,3 +1,4 @@
+# PORTED from job_finder/enrichment_states.py @ 307c369c0688763a18c6989adb81b229928e20d0 (private job-cannon). Ledger L-0446.
 """Single source of truth for enrichment-tier vocabulary (F1 root-cause fix).
 
 The ``jobs.enrichment_tier`` column records the highest enrichment tier attempted
@@ -9,6 +10,8 @@ bug was exactly such a divergence (legacy/agentic terminal tiers missing from on
 backfill skip-set). This module owns the vocabulary; every caller imports from here.
 
 Two distinct predicates over tiers — they MUST stay distinct:
+(# PORT-SEAM: EXPIRED's writer, the retry/requeue sweep against a hosted LLM
+enricher, is not carried into this port — see the EXPIRED notes below.)
 
   ``TERMINAL`` — "stop re-enriching." A row at one of these tiers is fully drained
       of the enrichment pipeline and is excluded from backfill selection. Includes
@@ -31,6 +34,7 @@ Two distinct predicates over tiers — they MUST stay distinct:
       cooldown-gated requeue against a hosted LLM enricher) has no public
       counterpart yet — see the module docstring note below — so this port carries
       only the vocabulary member and its membership in both predicate sets.
+      (# PORT-SEAM: writer unported, vocabulary-only carry.)
 
 Legacy tiers (``low`` / ``mid`` / ``high``) are enumerated as terminal members.
 They were written by the deleted haiku/sonnet synthesis tiers and renamed by m050;
@@ -55,7 +59,7 @@ class EnrichmentTier(StrEnum):
     agentic_enricher after the agentic tier fails to fetch a JD), EXPIRED (in the
     private original: an AGENTIC_EXHAUSTED row that spent its bounded retry budget
     with no jd_full ever recovered — the writer for this transition is unported,
-    see the module docstring).
+    see the module docstring). (# PORT-SEAM: vocabulary-only carry.)
     Legacy (m050, terminal): LOW / MID / HIGH — left by the deleted synthesis tiers.
     """
 
@@ -77,6 +81,7 @@ class EnrichmentTier(StrEnum):
     # retry against); it is carried as vocabulary so a future hosted enricher
     # has a stable name to write and so TERMINAL/LOW_SIGNAL_TERMINAL match the
     # private rule exactly.
+    # PORT-SEAM: vocabulary-only carry; the writer is not ported.
     EXPIRED = "expired"
 
     # Legacy migration tiers (m050) — terminal, no normalization planned
@@ -121,6 +126,7 @@ TERMINAL: frozenset[EnrichmentTier] = frozenset(
 # enrichment cascade itself exhausted its attempts to fetch a real JD. ONLY these
 # tiers participate in the derive_classification low_signal rule. Kept distinct from
 # TERMINAL on purpose: serpapi/mid stop the backfill but are not
+# (# PORT-SEAM: private-tracker issue-number citation dropped per repo convention.)
 # low_signal. Identical to the historical ``_TERMINAL_ENRICHMENT_TIERS`` frozenset.
 LOW_SIGNAL_TERMINAL: frozenset[EnrichmentTier] = frozenset(
     {

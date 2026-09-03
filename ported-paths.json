@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-03T09:42:38Z",
+  "generated_at": "2026-09-03T11:18:24Z",
   "roots": [
     "engine",
     "db",
@@ -232,24 +232,52 @@
       "root": "engine",
       "markers": [
         {
-          "line": 4,
-          "text": "across the ATS platform scanners (Greenhouse, Lever, …). In the private"
+          "line": 1,
+          "text": "# PORTED from job_finder/web/_field_alias.py @ 7491ce38a9c8abe10973e5c443ed113f5996ad42 (private job-cannon). Ledger L-0449."
         },
         {
           "line": 5,
+          "text": "across the ATS platform scanners (Greenhouse, Lever, …). In the private"
+        },
+        {
+          "line": 6,
           "text": "source these were also shared with a generic careers-page AI navigator"
         },
         {
-          "line": 22,
-          "text": "# Host-injectable override-loader seam (was job_finder.web.autoheal.override_loader)."
-        },
-        {
-          "line": 24,
-          "text": "# module contract). Hosts inject an object with the same interface the private"
+          "line": 9,
+          "text": "# override-loader seam below for the other private-source divergence."
         },
         {
           "line": 25,
+          "text": "# PORT-SEAM: host-injectable override-loader seam (was job_finder.web.autoheal.override_loader)."
+        },
+        {
+          "line": 27,
+          "text": "# module contract). Hosts inject an object with the same interface the private"
+        },
+        {
+          "line": 28,
           "text": "# repo's autoheal.override_loader module exposes at the two call sites below."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/_http_constants.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/_http_constants.py @ 09432fe4bbbbb6fb469ad3a5e75bbc6eaddb604c (private job-cannon). Ledger L-0010."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/ats_detection.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/ats_detection.py @ 9880aa404c8adde81d769cb84a2e8ba1f3c9a043 (private job-cannon). Ledger L-0012."
         }
       ]
     },
@@ -346,20 +374,30 @@
       "root": "engine",
       "markers": [
         {
-          "line": 21,
-          "text": "# Host-injectable extension bundle (None-default seam). Replaces the private"
-        },
-        {
-          "line": 22,
-          "text": "# source's lazy imports of ats_identity_reconcile / ats_slug_challenge /"
+          "line": 1,
+          "text": "# PORTED from job_finder/web/ats_prober.py @ b24cf4a6b434f96154144ee087acbae766b4e255 (private job-cannon). Ledger L-0016."
         },
         {
           "line": 24,
-          "text": "# object exposing the nine callables below (same signatures as the private"
+          "text": "# Replaces the private source's lazy imports of ats_identity_reconcile /"
         },
         {
-          "line": 25,
+          "line": 28,
+          "text": "# exposing the nine callables below (same signatures as the private"
+        },
+        {
+          "line": 29,
           "text": "# functions they stand in for). With no bundle registered, the static-first"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/ats_registry.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/ats_registry.py @ b24cf4a6b434f96154144ee087acbae766b4e255 (private job-cannon). Ledger L-0017."
         }
       ]
     },
@@ -424,12 +462,8 @@
       "root": "engine",
       "markers": [
         {
-          "line": 5,
-          "text": "API for each candidate. The private source additionally drove this from a"
-        },
-        {
-          "line": 168,
-          "text": "`ats_prober.probe_single_company`; also the private source's one-off"
+          "line": 1,
+          "text": "# PORTED from job_finder/web/brand_blocklist.py @ 929e3ad49398f23c4b9e44904f7aeddc62bf6fda (private job-cannon). Ledger L-0451."
         }
       ]
     },
@@ -448,20 +482,34 @@
       "root": "engine",
       "markers": [
         {
-          "line": 3,
-          "text": "Pure rule logic. No DB side-effects. In the private repo this module lived at"
+          "line": 1,
+          "text": "# PORTED from job_finder/db/_classification.py @ 9d063804c86d76dec470dfb221db44fe7e716be3 (private job-cannon). Ledger L-0003."
         },
         {
           "line": 4,
+          "text": "Pure rule logic. No DB side-effects. In the private repo this module lived at"
+        },
+        {
+          "line": 5,
           "text": "`job_finder/db/_classification.py` and was re-exported via `job_finder/db/__init__.py`"
         },
         {
-          "line": 57,
+          "line": 70,
           "text": "# that can invalidate already-derived verdicts. In the private original,"
         },
         {
-          "line": 128,
+          "line": 141,
           "text": "in the private original, the assessment writer"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/constants.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/constants.py @ 5515b02b61de024225470e582d5ca0a4778f8e4b (private job-cannon). Ledger L-0445."
         }
       ]
     },
@@ -470,12 +518,28 @@
       "root": "engine",
       "markers": [
         {
-          "line": 15,
-          "text": "Note: the private repo's ``run_retroactive_dedup`` (and its DB-merge helpers"
+          "line": 1,
+          "text": "# PORTED from job_finder/web/dedup_normalizer.py @ 65e5ce021068b70a2369ac279c75395a078e1013 (private job-cannon). Ledger L-0452."
         },
         {
-          "line": 44,
+          "line": 16,
+          "text": "# PORT-SEAM: the private repo's ``run_retroactive_dedup`` (and its DB-merge"
+        },
+        {
+          "line": 24,
+          "text": "# PORT-SEAM: private source's json/logging/sqlite3 imports, jobcannon.engine"
+        },
+        {
+          "line": 37,
+          "text": "# PORT-SEAM: private source's _STATUS_PRECEDENCE dict lived here — dropped"
+        },
+        {
+          "line": 56,
           "text": "the cross-copy parity assertions in the private repo's"
+        },
+        {
+          "line": 97,
+          "text": "(# PORT-SEAM: reworded — was \"web-layer normalizers\" in the private source.)"
         }
       ]
     },
@@ -484,16 +548,8 @@
       "root": "engine",
       "markers": [
         {
-          "line": 135,
-          "text": "both shapes, matching the private original's ``html_to_plain_text``"
-        },
-        {
-          "line": 136,
-          "text": "(``job_finder/web/description_formatter.py``, READ-ONLY reference) --"
-        },
-        {
-          "line": 140,
-          "text": "port; a private-repo port-back issue is being filed separately to bring"
+          "line": 1,
+          "text": "# PORTED from job_finder/web/description_formatter.py @ 8225db222f7ca4b592f5858373979fc2c4057a5c (private job-cannon). Ledger L-0034."
         }
       ]
     },
@@ -532,15 +588,19 @@
       "root": "engine",
       "markers": [
         {
-          "line": 26,
+          "line": 1,
+          "text": "# PORTED from job_finder/enrichment_states.py @ 307c369c0688763a18c6989adb81b229928e20d0 (private job-cannon). Ledger L-0446."
+        },
+        {
+          "line": 29,
           "text": "kept separate. ``expired`` belongs in this set deliberately: in the private"
         },
         {
-          "line": 27,
+          "line": 30,
           "text": "original it is reached only after a bounded agentic-exhausted retry budget is"
         },
         {
-          "line": 56,
+          "line": 60,
           "text": "private original: an AGENTIC_EXHAUSTED row that spent its bounded retry budget"
         }
       ]
@@ -590,6 +650,30 @@
       ]
     },
     {
+      "path": "jobcannon/engine/html_extract.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/html_extract.py @ 4ffcf87760c3fe2e2ead80bd0b827745094c8b23 (private job-cannon). Ledger L-0453."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/http_fetch.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/http_fetch.py @ 46cbb877bd3ba02f18cee7e5d3a88b2c2f2d8871 (private job-cannon). Ledger L-0454."
+        },
+        {
+          "line": 42,
+          "text": "# PORT-SEAM: private source defines FetchDeadlineError(Exception) plainly;"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/identity_evidence.py",
       "root": "engine",
       "markers": [
@@ -614,12 +698,40 @@
       "root": "engine",
       "markers": [
         {
-          "line": 78,
-          "text": "# private source's version integer for these same three rule changes is 5 (its"
+          "line": 1,
+          "text": "# PORTED from job_finder/db/_jd_content_contract.py @ 3aaa360feac49fcd96e21c52e4fc7295ad6914c4 (private job-cannon). Ledger L-0004."
         },
         {
-          "line": 897,
-          "text": "# re-homed from job_finder/db/_jd_full.py (plan Task 1 Step 6 amendment):"
+          "line": 65,
+          "text": "# PORT-SEAM: private source imports get_jd_full_thresholds from job_finder.config"
+        },
+        {
+          "line": 108,
+          "text": "# PORT-SEAM: the private source re-exports _is_jd_junk from job_finder.db._jd_full"
+        },
+        {
+          "line": 109,
+          "text": "# (parsed_job.py: \"from job_finder.db._jd_full import _is_jd_junk as _is_jd_junk\"),"
+        },
+        {
+          "line": 112,
+          "text": "# design intent but the private ParsedJob.from_job still calls both gates. Inlined"
+        },
+        {
+          "line": 113,
+          "text": "# here (verbatim from job_finder/db/_jd_full.py @ 6a2af961fbffb78564ce8783277d916d60ad0906,"
+        },
+        {
+          "line": 453,
+          "text": "#: ``job_finder.web``); the union with ``TITLE_STOPWORDS`` (already applied by"
+        },
+        {
+          "line": 958,
+          "text": "# PORT-SEAM: (L-0004) the private source this file was carried from (job_finder/db/"
+        },
+        {
+          "line": 964,
+          "text": "# that host-layer consumer even though it is faithful to the private source's current"
         }
       ]
     },
@@ -638,36 +750,46 @@
       "root": "engine",
       "markers": [
         {
-          "line": 10,
+          "line": 1,
+          "text": "# PORTED from job_finder/web/job_scorer.py @ 07cdef9c3c2d93f8c38170affa344e27f7f2c133 (private job-cannon). Ledger L-0035."
+        },
+        {
+          "line": 11,
           "text": "through it; the private repo's Plan 2 orchestrator that did so is not"
         },
         {
-          "line": 19,
+          "line": 22,
           "text": "job_finder.web.model_provider.call_model in the private repo, which"
         },
         {
-          "line": 47,
-          "text": "# Re-homed from the private repo's providers/ollama_provider.py; provider-tuning"
+          "line": 50,
+          "text": "# `from jobcannon.engine.model_provider import call_model` (job_finder.web.model_provider.call_model"
         },
         {
-          "line": 366,
-          "text": "it (private-repo D5, issue #1742). A"
+          "line": 51,
+          "text": "# in the private repo); the engine has no provider/dispatcher of its own (module docstring)."
         },
         {
-          "line": 447,
-          "text": "# the private repo's batch scoring does) gets self-healing for free: a"
+          "line": 61,
+          "text": "# PORT-SEAM: re-homed from the private repo's providers/ollama_provider.py; provider-tuning"
         },
         {
-          "line": 502,
-          "text": "``job_finder.web.model_provider.call_model`` in the private repo, which"
+          "line": 560,
+          "text": "# docstring in job_finder/db/_jd_full.py). A NULL verdict (row predates"
         },
         {
-          "line": 503,
-          "text": "inherited schema retry, cascade fallback, rate limiting, and provider"
-        },
-        {
-          "line": 529,
+          "line": 637,
           "text": "the private repo's ``model_provider.call_model`` signature"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/json_utils.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/json_utils.py @ 8905c4b1177c51df5ac7630f0efdfac51e44a4a6 (private job-cannon). Ledger L-0006."
         }
       ]
     },
@@ -696,6 +818,24 @@
       ]
     },
     {
+      "path": "jobcannon/engine/location_canonical.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/location_canonical.py @ 6c0ba1bc42d11053e09e1b27da642aac4af53f0c (private job-cannon). Ledger L-0455."
+        },
+        {
+          "line": 29,
+          "text": "# (an earlier port-wave addition, not in the private source's import list)."
+        },
+        {
+          "line": 188,
+          "text": "# addition from an earlier port wave (not in the private source at this row's"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/location_fit.py",
       "root": "engine",
       "markers": [
@@ -710,6 +850,16 @@
         {
           "line": 450,
           "text": "# (mirror job_finder/db/_jobs.py:468-469)"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/location_normalizer.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/location_normalizer.py @ efc0c5545f6b16886a859afdbe9d4976dbbdc393 (private job-cannon). Ledger L-0456."
         }
       ]
     },
@@ -774,20 +924,26 @@
       ]
     },
     {
+      "path": "jobcannon/engine/models.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/models.py @ b1f69f3e10a452cc498527f830959b852108f5e9 (private job-cannon). Ledger L-0447."
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/normalizers.py",
       "root": "engine",
       "markers": [
         {
-          "line": 27,
-          "text": "# private source repo, bumping it re-arms a standing startup hook"
+          "line": 1,
+          "text": "# PORTED from job_finder/normalizers.py @ 6a2af961fbffb78564ce8783277d916d60ad0906 (private job-cannon). Ledger L-0007."
         },
         {
           "line": 28,
-          "text": "# (`_run_rekey_if_stale` in job_finder/web/migrations/_post_hooks.py) that"
-        },
-        {
-          "line": 32,
-          "text": "# on a version bump. The canary test in the private repo's"
+          "text": "# job_finder/web/migrations/_post_hooks.py), which re-derives every row's key"
         }
       ]
     },
@@ -806,8 +962,50 @@
       "root": "engine",
       "markers": [
         {
-          "line": 91,
-          "text": "# Host-injectable denylist seam. The private repo read this from config.yaml"
+          "line": 1,
+          "text": "# PORTED from job_finder/parsed_job.py @ 6a2af961fbffb78564ce8783277d916d60ad0906 (private job-cannon). Ledger L-0008."
+        },
+        {
+          "line": 77,
+          "text": "# PORT-SEAM: private source imports get_company_denylist/load_config from"
+        },
+        {
+          "line": 78,
+          "text": "# job_finder.config (app-level). Denylist and runtime config are injected here."
+        },
+        {
+          "line": 103,
+          "text": "# PORT-SEAM: host-injectable denylist seam. The private repo read this from"
+        },
+        {
+          "line": 156,
+          "text": "# (# PORT-SEAM: reworded from the private source's file-path reference — no jobcannon.engine module maps to job_finder.db._jd_full 1:1.)"
+        },
+        {
+          "line": 394,
+          "text": "# PORT-SEAM: private source resolves the denylist via load_config() +"
+        },
+        {
+          "line": 425,
+          "text": "# PORT-SEAM: private source passes the live app config dict; the"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/platform_extractor.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/platform_extractor.py @ 929e3ad49398f23c4b9e44904f7aeddc62bf6fda (private job-cannon). Ledger L-0457."
+        },
+        {
+          "line": 39,
+          "text": "# (an earlier port-wave hardening — the private source used a plain substring"
+        },
+        {
+          "line": 79,
+          "text": "# PORT-SEAM: host-boundary match via urlsplit — private source did"
         }
       ]
     },
@@ -838,6 +1036,28 @@
         {
           "line": 3,
           "text": "The private source reads scan-tuning knobs from Flask's app config"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/salary_normalizer.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/salary_normalizer.py @ b30348a0faa4dd92e39a05ef1f6af28a69bb7537 (private job-cannon). Ledger L-0448."
+        },
+        {
+          "line": 16,
+          "text": "— was job_finder.web-specific in the private source.)"
+        },
+        {
+          "line": 82,
+          "text": "# PORT-SEAM: private source also defines VALID_PROVENANCES = frozenset(PROVENANCE_RANK)"
+        },
+        {
+          "line": 90,
+          "text": "# earlier port wave — not in the private source at this row's declared SHA."
         }
       ]
     },
@@ -914,6 +1134,16 @@
       ]
     },
     {
+      "path": "jobcannon/engine/scoring_types.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/scoring_types.py @ 9d063804c86d76dec470dfb221db44fe7e716be3 (private job-cannon). Ledger L-0038."
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/services.py",
       "root": "engine",
       "markers": [
@@ -960,8 +1190,54 @@
       "root": "engine",
       "markers": [
         {
-          "line": 65,
+          "line": 1,
+          "text": "# PORTED from job_finder/web/source_registry.py @ c2b27f9ea5db46a4fee94608a7b30035eefb1f3c (private job-cannon). Ledger L-0459."
+        },
+        {
+          "line": 28,
+          "text": "# PORT-SEAM: __all__ is an engine-side addition — the private source has none."
+        },
+        {
+          "line": 48,
+          "text": "# engine-side addition from an earlier port wave — not in the private source"
+        },
+        {
+          "line": 74,
           "text": "job_finder.db._queries._liveness_gate_sql — same predicate logic (same"
+        },
+        {
+          "line": 118,
+          "text": "# earlier port wave — not in the private source at this row's declared SHA."
+        },
+        {
+          "line": 154,
+          "text": "# earlier port wave — not in the private source at this row's declared SHA."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/stale_detector.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/stale_detector.py @ 4348fc77093fa44e7be4e29a97ded6bed7d9ced3 (private job-cannon). Ledger L-0039."
+        },
+        {
+          "line": 69,
+          "text": "# job_finder.web.db_helpers.standalone_connection (host owns connection lifecycle)."
+        },
+        {
+          "line": 91,
+          "text": "# PORT-SEAM: the private original's on-disk config.yaml refresh for"
+        },
+        {
+          "line": 92,
+          "text": "# opaque_redirect_sources (#1513/#1607 — job_finder.web.user_data_dirs.config_path()"
+        },
+        {
+          "line": 145,
+          "text": "# PORT-SEAM: private source refreshes opaque_redirect_sources from disk"
         }
       ]
     },

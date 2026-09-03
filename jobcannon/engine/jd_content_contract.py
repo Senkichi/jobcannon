@@ -1,3 +1,4 @@
+# PORTED from job_finder/db/_jd_content_contract.py @ 3aaa360feac49fcd96e21c52e4fc7295ad6914c4 (private job-cannon). Ledger L-0004.
 """Positive jd_full content contract — "is this text the description of THIS job?"
 
 WHY THIS EXISTS (the same architectural inversion as ``_title_contract``)
@@ -61,6 +62,8 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
+# PORT-SEAM: private source imports get_jd_full_thresholds from job_finder.config
+# (app-level, not portable). The resolver is inlined below instead of imported.
 from jobcannon.engine.normalizers import (
     TITLE_STOPWORDS,
     body_mentions_any_stem,
@@ -72,20 +75,24 @@ from jobcannon.engine.normalizers import (
 # already-stored jd_full could newly pass or newly fail. Bumping re-arms the
 # standing re-sweep so the whole corpus is re-validated under the new version.
 # Mirrors NORMALIZER_VERSION / TITLE_HYGIENE_VERSION.
-#
-# DIVERGENCE FROM PRIVATE NUMBERING (F7 port — declared per the port-record
-# convention, precedent jobcannon/db/_jd_full.py): the
-# private source's version integer for these same three rule changes is 5 (its
-# own #1813), 6 (#1892), 6-unchanged (#1814, merged behind an independent
-# #1892 bump already at 6). Public was already at 5 for an UNRELATED earlier
-# port (#124 / private 5fd8807e, config-shape hardening) before this port
-# landed, so the private integers are not reusable here without colliding with
-# that unrelated bump. What matters for the re-sweep contract is monotonic
-# strictly-increasing, not numeric parity with private — so this port bumps
-# 5 -> 8 (one increment per verdict-changing rule change: company_absent,
-# short-token company stems, AMBIGUOUS-widening signals).
 # ---------------------------------------------------------------------------
-JD_CONTENT_VERSION: int = 8
+# v9 (#1952): re-arm after the ``empty_requirements_header`` AMBIGUOUS-widening
+# signal was added — a structurally-complete posting whose requirement-bearing
+# section headers (## Key Responsibilities / ## Skills / ## Qualifications /
+# etc.) are EMPTY no longer passes ``classify_jd_content`` as CLEAN. Rows
+# stamped CLEAN under v8 or earlier may have been classified before this
+# signal existed, so the watermark bump is what re-arms them.
+#
+# The deterministic startup re-sweep (``_run_jd_content_resweep_if_stale``)
+# does NOT call ``classify_jd_content`` — it only runs ``jd_content_reject``,
+# which this signal deliberately does not touch (no new write-time rejection,
+# per the #1814 discipline this signal follows). So the bump is a no-op on the
+# startup sweep. The operative effect is entirely in the adjudicator:
+# ``jd_adjudicator`` re-selects every row with
+# ``jd_adjudicated_version < JD_CONTENT_VERSION`` (including previously-CLEAN
+# rows whose stamped version fell behind) for LLM re-adjudication, and
+# ``job_scorer``'s ``awaiting_jd_adjudication`` precheck gate follows suit.
+JD_CONTENT_VERSION: int = 9
 
 # Reason codes emitted into jobs.unresolved_reasons (the m078 quarantine surface).
 # Distinct from I-13's ``jd_full_junk`` (the length/density gate, owned by
@@ -97,6 +104,42 @@ JD_TRUNCATED: str = "jd_full_truncated"
 
 #: All jd-content reason codes the re-sweep owns + recomputes.
 JD_CONTENT_REASON_CODES: frozenset[str] = frozenset({JD_OFFSITE, JD_EXPIRED, JD_TRUNCATED})
+
+# PORT-SEAM: the private source re-exports _is_jd_junk from job_finder.db._jd_full
+# (parsed_job.py: "from job_finder.db._jd_full import _is_jd_junk as _is_jd_junk"),
+# a module this port group does not carry. _jd_full.py's I-13 gate is a separate,
+# older fail-open denylist that this module's docstring explicitly supersedes in
+# design intent but the private ParsedJob.from_job still calls both gates. Inlined
+# here (verbatim from job_finder/db/_jd_full.py @ 6a2af961fbffb78564ce8783277d916d60ad0906,
+# the SHA L-0008/parsed_job.py declares) so parsed_job.py's
+# "from jobcannon.engine.jd_content_contract import _is_jd_junk" re-export resolves
+# without pulling in the rest of _jd_full.py (DB writer, unrelated to this contract).
+_MIN_JD_LENGTH: int = 200  # characters, post-strip
+
+_JD_JUNK_PREFIXES: tuple[str, ...] = (
+    "sign in",
+    "loading",
+    "open roles at",
+    "skip to content",
+    "cookie",
+    "privacy policy",
+    "404",
+)
+
+
+def _is_jd_junk(text: str) -> bool:
+    """Return True if jd_full content fails the I-13 density gate.
+
+    Two failure modes:
+    - Text shorter than ``_MIN_JD_LENGTH`` after stripping whitespace.
+    - Text whose first 200 chars (lowercased) start with a junk prefix.
+    """
+    stripped = text.strip()
+    if len(stripped) < _MIN_JD_LENGTH:
+        return True
+    prefix = stripped[:200].lower()
+    return any(prefix.startswith(p) for p in _JD_JUNK_PREFIXES)
+
 
 # ---------------------------------------------------------------------------
 # Tunables (validated against the live 13,664-row corpus via scripts/jd_*).
@@ -243,15 +286,58 @@ _JD_POSITIVE_RE = re.compile(
 )
 
 
+#: Trailing ellipsis/… (optionally followed by whitespace). A body ending like
+#: this is almost always a search-result snippet, not a full JD.
+_TRAILING_ELLIPSIS_RE = re.compile(r"(?:\.\.\.|…)\s*$")
+
+
+#: ATX markdown section header line (``#{1,6} text``), optionally closed with
+#: trailing ``#`` chars. Used by ``_has_empty_requirement_header`` to locate
+#: section headers whose body — the text up to the next header or end-of-doc —
+#: is empty. Setext (underlined) headers are deliberately not recognized: the
+#: observed failure shape (issue #1952) is ATX-only, and Setext detection on
+#: arbitrary JD bodies carries a higher false-positive risk (a line of ``----``
+#: is also a horizontal rule / table border).
+_ATX_HEADER_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$", re.MULTILINE)
+
+
+#: Requirement-bearing section-header vocabulary (issue #1952). A markdown
+#: header whose text matches one of these keywords names a substantive
+#: requirement / responsibility / qualification / skills / duties section —
+#: the content that actually carries the job's demands. When such a header is
+#: present but its body is EMPTY (immediately followed by another header or
+#: end-of-document), the posting is structurally complete yet carries no
+#: requirement content, and the gate must not call it CLEAN.
+#:
+#: Deliberately NARROW — only the concrete requirement-list headers. Empty
+#: metadata headers (``## Company``, ``## Leadership Team``, ``## About Us``)
+#: are common and benign across the corpus and MUST keep passing, so the
+#: vocabulary excludes role-description / about / culture / benefits headers.
+#: Mirrors the requirement-bearing subset of ``_JD_POSITIVE_RE`` plus ``skills``
+#: (which ``_JD_POSITIVE_RE`` does not carry as a standalone marker but which
+#: the issue names explicitly — ``## Skills, Knowledge & Expertise``).
+_REQUIREMENT_HEADER_RE = re.compile(
+    r"\b(?:"
+    r"responsibilit(?:y|ies)"
+    r"|qualification(?:s)?"
+    r"|requirement(?:s)?"
+    r"|skills?"
+    r"|duties"
+    r"|essential\s+functions"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
 # --- jd_full completeness thresholds ---
 # Minimum characters for a job description to be accepted as the full jd_full.
 # A body below this floor, or ending in a trailing ellipsis/…, is treated as a
 # truncated snippet and routed back to enrichment.
 #
-# ADAPTATION (declared in the port record): upstream these defaults and the
-# resolver live in the app-level config module. The engine cannot import that
-# layer (boundary: pure engine, no host config), and this contract module is
-# the only engine consumer, so the resolver is inlined here verbatim.
+# PORT-SEAM: upstream these defaults and the resolver live in the app-level
+# config module. The engine cannot import that layer (boundary: pure engine,
+# no host config), and this contract module is the only engine consumer, so
+# the resolver is inlined here verbatim.
 DEFAULT_JD_FULL_MIN_CHARS = 200
 DEFAULT_JD_FULL_REJECT_TRAILING_ELLIPSIS = True
 
@@ -293,9 +379,67 @@ def get_jd_full_thresholds(config: dict | None = None) -> tuple[int, bool]:
     return min_chars, reject_ellipsis
 
 
-#: Trailing ellipsis/… (optionally followed by whitespace). A body ending like
-#: this is almost always a search-result snippet, not a full JD.
-_TRAILING_ELLIPSIS_RE = re.compile(r"(?:\.\.\.|…)\s*$")
+def _has_empty_requirement_header(stripped: str) -> bool:
+    """True if a requirement-bearing markdown header has an empty body.
+
+    Issue #1952: a posting whose ``## Key Responsibilities`` and ``## Skills,
+    Knowledge & Expertise`` sections are empty headers (immediately followed by
+    another header or end-of-document) is structurally complete yet carries no
+    requirement content. The boilerplate / DEI / benefits text that remains
+    supplies length and title grounding, so the plain shape+grounded+substantial
+    CLEAN test passes while the body has no actual demands to score against.
+
+    This structural check scans ATX headers (``#{1,6} text``) whose text matches
+    the requirement-bearing vocabulary (``_REQUIREMENT_HEADER_RE``) and checks
+    whether the body between the header and the next header of EQUAL OR
+    SHALLOWER depth (or end-of-document) is empty (whitespace-only). When at
+    least one such empty requirement-bearing header is found, the body must not
+    be CLEAN — it is routed to AMBIGUOUS for LLM adjudication by
+    ``_ambiguous_widening_signal``.
+
+    Depth-aware terminator (bug found in adversarial review of the original
+    any-depth version): a header's body legitimately continues past a DEEPER
+    sub-header — ``## Requirements`` followed by ``### Minimum Qualifications``
+    / ``### Preferred Qualifications`` sub-sections is a populated,
+    fully-formed section, not an empty one. trafilatura's markdown output
+    (``html_extract.py``) preserves the source page's nested header hierarchy,
+    so this shape is common on real postings. Terminating on ANY header
+    (including deeper ones) misread that populated section as empty. Only a
+    header at the SAME depth or SHALLOWER genuinely ends the section — deeper
+    headers are the section's own subdivided content. This introduces no blind
+    spot: a genuinely empty requirement sub-header (e.g. an ``### Skills``
+    sub-section with nothing under it) still trips on its own pass through the
+    outer loop, since it independently matches ``_REQUIREMENT_HEADER_RE`` with
+    its own empty body.
+
+    Pure and deterministic — no model call. Narrow by construction: only
+    requirement-bearing headers gate (``## Company`` / ``## Leadership Team``
+    do not match ``_REQUIREMENT_HEADER_RE``), and only EMPTY headers gate (a
+    populated ``## Responsibilities`` section does not trip).
+    """
+    lines = stripped.split("\n")
+    headers: list[tuple[int, int]] = []  # (line index, ATX depth)
+    requirement_line_indices: list[int] = []
+    for i, line in enumerate(lines):
+        m = _ATX_HEADER_RE.match(line)
+        if m:
+            depth = len(m.group(1))
+            headers.append((i, depth))
+            if _REQUIREMENT_HEADER_RE.search(m.group(2)):
+                requirement_line_indices.append(i)
+    depth_by_line = dict(headers)
+    for idx in requirement_line_indices:
+        own_depth = depth_by_line[idx]
+        # Body = lines up to the next header at equal-or-shallower depth (or
+        # EOF). A deeper sub-header is section content, not a terminator.
+        next_header = next(
+            (j for j, d in headers if j > idx and d <= own_depth),
+            len(lines),
+        )
+        body_text = "\n".join(lines[idx + 1 : next_header]).strip()
+        if not body_text:
+            return True
+    return False
 
 
 #: Generic organizational / legal / structural words that appear in company
@@ -303,9 +447,12 @@ _TRAILING_ELLIPSIS_RE = re.compile(r"(?:\.\.\.|…)\s*$")
 #: Office" is grounded by "Highgate" / "Hotels", not by "Corporate" or
 #: "Office". Filtered out of the company-stem presence check (issue #1813) so a
 #: wrong-employer body that happens to mention "office" or "corporate" is not
-#: silently let through as CLEAN. The union with ``TITLE_STOPWORDS`` (imported
-#: from the shared normalizers module) covers seniority/level words that also
-#: leak into company names ("co", "contract", "manager").
+#: silently let through as CLEAN. Mirrors the web-layer
+#: ``enrichment_tiers._COMPANY_STOP_WORDS`` (kept local because this module is
+#: PURE — see the module docstring — and must not import from
+#: ``job_finder.web``); the union with ``TITLE_STOPWORDS`` (already applied by
+#: ``significant_tokens``) covers seniority/level words that also leak into
+#: company names ("co", "contract", "manager").
 _COMPANY_STOPWORDS: frozenset[str] = frozenset(
     {
         "corp",
@@ -449,7 +596,7 @@ _JSON_START_CHARS: frozenset[str] = frozenset({"{", "["})
 #: Keys (case- and separator-insensitive) that mark a JD-prose field inside a
 #: leading JSON object — the escape hatch in ``_is_json_config_blob`` that
 #: keeps a real JSON-served posting from being misclassified as a config
-#: blob (issue #37). Widened beyond snake_case ``job_description``/
+#: blob (public jobcannon#37). Widened beyond snake_case ``job_description``/
 #: ``description`` to also recognize camelCase (``jobDescription``, which
 #: normalizes the same as ``job_description`` once separators are stripped)
 #: and the generic ``content`` key some ATS micro-sites use for the prose
@@ -521,6 +668,44 @@ def _dict_has_description_prose(obj: dict) -> bool:
         if _normalize_json_key(key) in _DESCRIPTION_KEY_ALIASES and _has_prose(val):
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# AMBIGUOUS-widening signals (issue #1814). These do NOT join the REJECT set —
+# they route a previously-CLEAN body to the AMBIGUOUS->LLM adjudication lane so
+# the tight, high-precision REJECT set is unchanged and no new write-time
+# rejection is introduced at set_jd_full. Each is a co-occurring-marker signal
+# (single-marker bodies must not trip) calibrated against the observed
+# non-posting captures that scored as real requisitions.
+# ---------------------------------------------------------------------------
+
+#: Career-explainer / SEO topic markers — a page whose title (or leading H1) is
+#: a question/topic about a role rather than the role itself. Observed on
+#: Randstad marketing/SEO pages (issue #1814): "what is a data scientist",
+#: "salary of a data scientist", "data scientist profile page", "data scientist
+#: career path", "how to become a data scientist". Checked against the job
+#: title AND the body (the H1 may live in the body when the title field is just
+#: the bare role name, e.g. ``randstad|data scientist``).
+_EXPLAINER_TOPIC_RE = re.compile(
+    r"\bwhat\s+is\s+(?:a|an)\b"
+    r"|\bsalary\s+of\s+(?:a|an)\b"
+    r"|\bprofile\s+page\b"
+    r"|\bcareer\s+path\b"
+    r"|\bhow\s+to\s+become\s+(?:a|an)\b",
+    re.IGNORECASE,
+)
+
+#: Aggregate-salary language — national/BLS statistics cited instead of an
+#: actual employer offer. The co-occurring marker that distinguishes an
+#: explainer/SEO page from a real requisition: a real JD states a role's
+#: duties/requirements and (when it lists comp) a specific offer, not a Bureau
+#: of Labor Statistics national median.
+_AGGREGATE_SALARY_RE = re.compile(
+    r"\bnational\s+average\b"
+    r"|\bBLS\b"
+    r"|\bmedian\s+salary\s+in\s+the\b",
+    re.IGNORECASE,
+)
 
 
 def _is_json_config_blob(jd_full: str, *, anchored: bool = True) -> bool:
@@ -696,8 +881,8 @@ def jd_content_reject(
     if _EXPIRED_RE.search(low):
         return (JD_EXPIRED, "expired_or_filled")
 
-    # Serialized configuration / markup with no prose job description. A
-    # LEADING JSON blob (Eightfold/Netflix micro-site config, empty
+    # Serialized configuration / markup with no prose job description (issue
+    # #1558). A LEADING JSON blob (Eightfold/Netflix micro-site config, empty
     # ``job_description``) fools the length gate; reject at the content layer
     # so the scorer never sees it. The un-anchored (non-leading) case is an
     # AMBIGUOUS-widening signal handled by ``classify_jd_content`` (issue
@@ -715,44 +900,6 @@ def jd_content_reject(
     return None
 
 
-# ---------------------------------------------------------------------------
-# AMBIGUOUS-widening signals (issue #1814). These do NOT join the REJECT set —
-# they route a previously-CLEAN body to the AMBIGUOUS->LLM adjudication lane so
-# the tight, high-precision REJECT set is unchanged and no new write-time
-# rejection is introduced at the storage gate. Each is a co-occurring-marker
-# signal (single-marker bodies must not trip) calibrated against the observed
-# non-posting captures that scored as real requisitions.
-# ---------------------------------------------------------------------------
-
-#: Career-explainer / SEO topic markers — a page whose title (or leading H1) is
-#: a question/topic about a role rather than the role itself. Observed on
-#: Randstad marketing/SEO pages (issue #1814): "what is a data scientist",
-#: "salary of a data scientist", "data scientist profile page", "data scientist
-#: career path", "how to become a data scientist". Checked against the job
-#: title AND the body (the H1 may live in the body when the title field is just
-#: the bare role name, e.g. ``randstad|data scientist``).
-_EXPLAINER_TOPIC_RE = re.compile(
-    r"\bwhat\s+is\s+(?:a|an)\b"
-    r"|\bsalary\s+of\s+(?:a|an)\b"
-    r"|\bprofile\s+page\b"
-    r"|\bcareer\s+path\b"
-    r"|\bhow\s+to\s+become\s+(?:a|an)\b",
-    re.IGNORECASE,
-)
-
-#: Aggregate-salary language — national/BLS statistics cited instead of an
-#: actual employer offer. The co-occurring marker that distinguishes an
-#: explainer/SEO page from a real requisition: a real JD states a role's
-#: duties/requirements and (when it lists comp) a specific offer, not a Bureau
-#: of Labor Statistics national median.
-_AGGREGATE_SALARY_RE = re.compile(
-    r"\bnational\s+average\b"
-    r"|\bBLS\b"
-    r"|\bmedian\s+salary\s+in\s+the\b",
-    re.IGNORECASE,
-)
-
-
 def _ambiguous_widening_signal(stripped: str, low: str, title: str | None) -> str | None:
     """Return an AMBIGUOUS-widening signal tag, or None (issue #1814).
 
@@ -763,8 +910,24 @@ def _ambiguous_widening_signal(stripped: str, low: str, title: str | None) -> st
     Each is a co-occurring-marker signal so a single-marker body does not trip.
 
     Returns one of ``"json_config_blob_unanchored"``, ``"listing_index"``,
-    ``"career_explainer_seo"`` — or None when no widening signal fires.
+    ``"career_explainer_seo"``, ``"empty_requirements_header"`` — or None when
+    no widening signal fires.
     """
+    # Issue #1952: a structurally-complete posting whose requirement-bearing
+    # section headers (## Key Responsibilities / ## Skills / ## Qualifications
+    # / etc.) are EMPTY — immediately followed by another header at
+    # equal-or-shallower depth, or end-of-document. (A DEEPER sub-header, e.g.
+    # ``### Minimum Qualifications`` under ``## Requirements``, is the
+    # section's own content and does not end it — see
+    # ``_has_empty_requirement_header``.) The remaining boilerplate / DEI /
+    # benefits text supplies length and title grounding, so the plain
+    # shape+grounded+substantial CLEAN test passes while the body has no
+    # actual demands to score against. Route to AMBIGUOUS for LLM
+    # adjudication; never REJECT (the body IS a posting page, just one whose
+    # content did not render / was never filled).
+    if _has_empty_requirement_header(stripped):
+        return "empty_requirements_header"
+
     # A dominating JSON config blob that is NOT the leading value (a leading
     # blob was already caught as REJECT by jd_content_reject). The blob may be
     # preceded by a short markdown heading / nav markup wrapper.
@@ -792,14 +955,20 @@ def _ambiguous_widening_signal(stripped: str, low: str, title: str | None) -> st
     return None
 
 
+# PORT-SEAM: (L-0004) the private source this file was carried from (job_finder/db/
+# _jd_content_contract.py @ 3aaa360) no longer defines a standalone
+# ``has_recognizable_jd_shape`` -- its positive-shape check was inlined directly into
+# ``classify_jd_content`` below. But this public jobcannon.engine module is a shared
+# library boundary: jobcannon/host/structural_axes/jd_quality.py imports
+# ``has_recognizable_jd_shape`` from here (pre-dating this port), so dropping it breaks
+# that host-layer consumer even though it is faithful to the private source's current
+# shape. Restored as a thin wrapper around ``_JD_POSITIVE_RE``, mirroring the origin/main
+# docstring's stated intent ("single point of enforcement... so callers outside this
+# module never duplicate the regex") and kept in sync with the inline check
+# ``classify_jd_content`` performs.
 def has_recognizable_jd_shape(text: str | None) -> bool:
     """Public: does text contain a recognizable JD section signal
     (responsibilities/qualifications/'what you'll do'/...)?
-
-    Single point of enforcement for the positive JD-shape vocabulary
-    (``_JD_POSITIVE_RE``) so callers outside this module (the structural-axes
-    jd-quality scorer) never duplicate the regex. ``classify_jd_content``
-    below is refactored to call this wrapper for the identical check.
     """
     if not text:
         return False
@@ -834,11 +1003,21 @@ def classify_jd_content(
     requisition attached to a Highgate Hotels listing shares the generic "Data
     Scientist" title stems, so it passes every title-grounded CLEAN gate while
     being about a different employer. It is deliberately NOT a hard REJECT
-    (the module's discipline: AMBIGUOUS is where uncertainty goes); company
-    *absence* is the cheap deterministic half, and a body that names a
-    *different* employer is left for the LLM to weigh. A company name with no
-    distinctive stem (e.g. "The Corporate Group") skips the check — absence
-    cannot be asserted of a name with nothing to be absent.
+    (the module's discipline, lines 95-97: AMBIGUOUS is where uncertainty
+    goes); company *absence* is the cheap deterministic half, and a body that
+    names a *different* employer is left for the LLM to weigh. A company name
+    with no distinctive stem (e.g. "The Corporate Group") skips the check —
+    absence cannot be asserted of a name with nothing to be absent.
+
+    AMBIGUOUS-widening signals (issues #1814 / #1952) run AFTER the deterministic
+    REJECT and BEFORE the CLEAN test. A body that the tight REJECT set lets
+    through but that carries a non-posting structural tell (a dominating
+    non-leading JSON config blob, a listing-index result-count block, a
+    career-explainer/SEO page, or a structurally-complete posting whose
+    requirement-bearing section headers are empty) is routed to AMBIGUOUS even
+    when it would otherwise satisfy shape+grounded+substantial — so the LLM
+    adjudicator, not the scorer, decides. These signals add no REJECT member and
+    introduce no write-time rejection.
 
     The company stem derivation is company-specific (issue #1892): it accepts
     alphanumeric runs of length >= 2 (not the title tokenizer's >= 3 floor)
@@ -848,14 +1027,6 @@ def classify_jd_content(
     vs ``patriot``). The title contract's ``TITLE_STEM_LEN`` /
     ``_SIGNIFICANT_TOKEN_RE`` are unchanged — they have their own calibrated
     false-positive budget.
-
-    AMBIGUOUS-widening signals (issue #1814) run AFTER the deterministic REJECT
-    and BEFORE the CLEAN test. A body that the tight REJECT set lets through but
-    that carries a non-posting structural tell (a dominating non-leading JSON
-    config blob, a listing-index result-count block, or a career-explainer/SEO
-    page) is routed to AMBIGUOUS even when it would otherwise satisfy
-    shape+grounded+substantial — so the LLM adjudicator, not the scorer, decides.
-    These signals add no REJECT member and introduce no write-time rejection.
     """
     rej = jd_content_reject(jd_full, title, config)
     if rej is not None:
@@ -870,7 +1041,9 @@ def classify_jd_content(
     if widen is not None:
         return JdContentResult(JdVerdict.AMBIGUOUS, None, widen)
 
-    has_shape = has_recognizable_jd_shape(low)
+    has_shape = has_recognizable_jd_shape(
+        low
+    )  # PORT-SEAM: routed through the restored wrapper (see above)
     substantial = len(stripped) >= _CLEAN_MIN_CHARS
 
     ground_tokens = significant_tokens(title) if title else significant_tokens(company or "")
@@ -891,39 +1064,3 @@ def classify_jd_content(
             return JdContentResult(JdVerdict.AMBIGUOUS, None, "company_absent")
         return JdContentResult(JdVerdict.CLEAN, None, "shape+grounded")
     return JdContentResult(JdVerdict.AMBIGUOUS, None, "needs_adjudication")
-
-
-# ---------------------------------------------------------------------------
-# re-homed from job_finder/db/_jd_full.py (plan Task 1 Step 6 amendment):
-# the I-13 length/density gate, ported verbatim along with the two constants
-# its body reads. Both constants are plain literals with no external deps.
-# ---------------------------------------------------------------------------
-_MIN_JD_LENGTH: int = 200  # characters, post-strip
-
-# Shell / auth-wall prefix patterns mirroring the tg_jobs_jd_full_junk trigger
-# (m078).  Applied case-insensitively to the first 200 stripped chars.
-# SINGLE SOURCE OF TRUTH — imported by m078_contract_invariants and
-# pre_m078_remediation; do NOT duplicate these values elsewhere.
-_JD_JUNK_PREFIXES: tuple[str, ...] = (
-    "sign in",
-    "loading",
-    "open roles at",
-    "skip to content",
-    "cookie",
-    "privacy policy",
-    "404",
-)
-
-
-def _is_jd_junk(text: str) -> bool:
-    """Return True if jd_full content fails the I-13 density gate.
-
-    Two failure modes:
-    - Text shorter than ``_MIN_JD_LENGTH`` after stripping whitespace.
-    - Text whose first 200 chars (lowercased) start with a junk prefix.
-    """
-    stripped = text.strip()
-    if len(stripped) < _MIN_JD_LENGTH:
-        return True
-    prefix = stripped[:200].lower()
-    return any(prefix.startswith(p) for p in _JD_JUNK_PREFIXES)

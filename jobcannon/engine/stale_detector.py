@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/stale_detector.py @ 4348fc77093fa44e7be4e29a97ded6bed7d9ced3 (private job-cannon). Ledger L-0039.
 """Stale job detection and auto-archive logic.
 
 Runs nightly (via APScheduler CronTrigger, as Phase A of the unified
@@ -37,7 +38,7 @@ being re-sighted, and the default jobs view hides stale rows, so marking
 them stale silently hid active applications (21 such rows at the
 2026-06-11 audit).
 
-Gated-only re-sightings do not reset the unverified decay clock:
+Gated-only re-sightings do not reset the unverified decay clock (#1077):
 some aggregators (Jooble et al., the same opaque/gated set as
 is_opaque_redirect_source) republish stale inventory as fresh results, so a
 job whose sources are ALL gated re-sightings gets its last_seen refreshed
@@ -53,10 +54,19 @@ composition — it matters that (1) runs before (2) inside the same
 transaction.
 """
 
+# PORT-SEAM: copy/os/pathlib/yaml (private's on-disk config refresh) are not
+# needed — see the disk-refresh PORT-SEAM note below.
 import logging
+
+# PORT-SEAM: os (private's on-disk config refresh) is not needed here.
 from datetime import UTC, datetime, timedelta
 
+# PORT-SEAM: pathlib.Path + yaml (private's on-disk config refresh) are not
+# needed — see the disk-refresh PORT-SEAM note below.
 from jobcannon.engine.json_utils import utc_now_iso
+
+# PORT-SEAM: DB access routes through ScanServices.connection_factory, replacing
+# job_finder.web.db_helpers.standalone_connection (host owns connection lifecycle).
 from jobcannon.engine.services import get_services
 from jobcannon.engine.source_registry import (
     UNVERIFIABLE_EVIDENCE_CEILING,
@@ -77,6 +87,15 @@ _ARCHIVE_THRESHOLD_DAYS = 30  # Auto-archive passive-stage jobs after this many 
 # stale threshold".
 _UNVERIFIED_STALE_THRESHOLD_DAYS = 5
 
+
+# PORT-SEAM: the private original's on-disk config.yaml refresh for
+# opaque_redirect_sources (#1513/#1607 — job_finder.web.user_data_dirs.config_path()
+# + _load_disk_opaque_sources/_refresh_opaque_sources_from_disk) is deliberately NOT
+# ported here: it is config-file-shaped and needs the host's own config surface, not
+# an engine-owned one. run_stale_detection below takes the passed-in `config` as-is;
+# a host wanting the disk-freshness fix supplies an already-refreshed config.
+
+
 # Stages where time-based staleness is meaningful. Active pipeline stages
 # (applied onward) and user-resolved stages (dismissed, archived) are excluded.
 _PASSIVE_STATUSES = ("discovered", "reviewing")
@@ -94,7 +113,7 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
       unverified threshold instead — see module docstring "Two-tier stale
       threshold".
     - Clear: job seen recently again, OR job no longer in a passive stage
-      → set is_stale = 0. EXCEPTION: a gated-only job's last_seen
+      → set is_stale = 0. EXCEPTION (#1077): a gated-only job's last_seen
       refresh does not count as "seen recently" for this arm — see module
       docstring "Gated-only re-sightings" — unless expiry_status='live'.
     - Auto-archive: last_seen older than the archive threshold AND
@@ -123,6 +142,8 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
                 visibility policy (opaque-only sources, never corroborated,
                 grace-period-gated branch match or hard-ceiling backstop).
     """
+    # PORT-SEAM: private source refreshes opaque_redirect_sources from disk
+    # here (#1513); not ported — see the module-level PORT-SEAM note above.
     staleness_cfg = (config or {}).get("staleness", {})
     stale_days = staleness_cfg.get("stale_threshold_days", _STALE_THRESHOLD_DAYS)
     archive_days = staleness_cfg.get("archive_threshold_days", _ARCHIVE_THRESHOLD_DAYS)
@@ -136,7 +157,7 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
     archive_cutoff = (now_naive_utc - timedelta(days=archive_days)).isoformat()
 
     passive_placeholders = ",".join("?" * len(_PASSIVE_STATUSES))
-    svc = get_services()
+    svc = get_services()  # PORT-SEAM: connection ownership moves to the host's ScanServices
 
     with svc.connection_factory() as conn:
         try:
@@ -146,7 +167,7 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
             # everything else (NULL = not yet checked, 'live' = confirmed)
             # keeps the standard stale_cutoff.
             #
-            # For jobs whose sources are ALL gated/opaque (is_opaque_redirect_source),
+            # ISSUE #1077 FIX: For jobs whose sources are ALL gated/opaque (is_opaque_redirect_source),
             # re-sightings from those same sources must not reset the unverified decay clock.
             # We key the unverified cutoff on expiry_checked_at (when the job became unverifiable)
             # instead of last_seen for gated-only jobs. This prevents the infinite loop where
@@ -206,7 +227,8 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
             # unverified cutoff, since its last_seen is by definition more
             # recent than the standard cutoff too.
             #
-            # Composition of the three passes above/here, in order:
+            # ISSUE #1077 FIX — composition of the three passes above/here,
+            # in order:
             #   1. mark pass (last_seen, standard/inconclusive two-tier cutoff)
             #   2. gated-only mark pass (expiry_checked_at instead of
             #      last_seen — catches what (1) can never catch, because a
@@ -340,12 +362,14 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
                 (config or {}).get("direct_link", {}).get("resolver", {}).get("max_attempts", 3)
             )
             grace_cutoff = (now_naive_utc - timedelta(days=unverifiable_grace_days)).isoformat()
-            ceiling_cutoff = (now_naive_utc - timedelta(days=unverifiable_ceiling_days)).isoformat()
+            ceiling_cutoff = (
+                now_naive_utc - timedelta(days=unverifiable_ceiling_days)
+            ).isoformat()  # PORT-SEAM: ruff line-length 100 vs 99 wraps this differently; pure reformat
 
             unverifiable_rows = conn.execute(
                 "SELECT j.dedup_key, j.pipeline_status, j.sources, j.source_urls, "
                 "j.direct_url, j.first_seen, j.company_id, j.careers_checked_at, "
-                "j.direct_url_attempts, c.scan_enabled, c.ats_probe_status "
+                "j.direct_url_attempts, c.scan_enabled, c.ats_probe_status "  # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented column, no migration backs it)
                 "FROM jobs j "
                 "LEFT JOIN companies c ON c.id = j.company_id "
                 f"WHERE j.first_seen < ? AND j.pipeline_status IN ({passive_placeholders})",
@@ -366,14 +390,18 @@ def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
                     continue
 
                 company_id = row["company_id"]
-                scan_enabled = row["scan_enabled"]
+                scan_enabled = row[
+                    "scan_enabled"
+                ]  # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted
                 probe_status = row["ats_probe_status"]
                 careers_checked = row["careers_checked_at"]
                 attempts = row["direct_url_attempts"] or 0
 
                 branch_matched = (
                     company_id is None  # Branch 1
-                    or (company_id is not None and scan_enabled == 0)  # Branch 2
+                    or (
+                        company_id is not None and scan_enabled == 0
+                    )  # Branch 2 (# PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted)
                     or (probe_status == "miss" and careers_checked is not None)  # Branch 3
                     or (
                         probe_status == "hit"
