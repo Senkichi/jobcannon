@@ -105,6 +105,42 @@ JD_TRUNCATED: str = "jd_full_truncated"
 #: All jd-content reason codes the re-sweep owns + recomputes.
 JD_CONTENT_REASON_CODES: frozenset[str] = frozenset({JD_OFFSITE, JD_EXPIRED, JD_TRUNCATED})
 
+# PORT-SEAM: the private source re-exports _is_jd_junk from job_finder.db._jd_full
+# (parsed_job.py: "from job_finder.db._jd_full import _is_jd_junk as _is_jd_junk"),
+# a module this port group does not carry. _jd_full.py's I-13 gate is a separate,
+# older fail-open denylist that this module's docstring explicitly supersedes in
+# design intent but the private ParsedJob.from_job still calls both gates. Inlined
+# here (verbatim from job_finder/db/_jd_full.py @ 6a2af961fbffb78564ce8783277d916d60ad0906,
+# the SHA L-0008/parsed_job.py declares) so parsed_job.py's
+# "from jobcannon.engine.jd_content_contract import _is_jd_junk" re-export resolves
+# without pulling in the rest of _jd_full.py (DB writer, unrelated to this contract).
+_MIN_JD_LENGTH: int = 200  # characters, post-strip
+
+_JD_JUNK_PREFIXES: tuple[str, ...] = (
+    "sign in",
+    "loading",
+    "open roles at",
+    "skip to content",
+    "cookie",
+    "privacy policy",
+    "404",
+)
+
+
+def _is_jd_junk(text: str) -> bool:
+    """Return True if jd_full content fails the I-13 density gate.
+
+    Two failure modes:
+    - Text shorter than ``_MIN_JD_LENGTH`` after stripping whitespace.
+    - Text whose first 200 chars (lowercased) start with a junk prefix.
+    """
+    stripped = text.strip()
+    if len(stripped) < _MIN_JD_LENGTH:
+        return True
+    prefix = stripped[:200].lower()
+    return any(prefix.startswith(p) for p in _JD_JUNK_PREFIXES)
+
+
 # ---------------------------------------------------------------------------
 # Tunables (validated against the live 13,664-row corpus via scripts/jd_*).
 # ---------------------------------------------------------------------------
