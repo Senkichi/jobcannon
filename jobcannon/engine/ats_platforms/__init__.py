@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/ats_platforms/__init__.py @ abedc58ab57db586c74bf22c8a80cb40399deb8b (private job-cannon). Ledger L-0014.
 """ATS platform job scanning — public surface, registry, and shared utilities.
 
 The 16 ``scan_*`` functions defined here delegate to the
@@ -66,14 +67,14 @@ from jobcannon.engine.ats_platforms._platforms_workable import SCANNER as _WORKA
 from jobcannon.engine.ats_platforms._platforms_workday import SCANNER as _WORKDAY_SCANNER
 from jobcannon.engine.ats_platforms._registry import PlatformScanner, run_platform_scan
 from jobcannon.engine.ats_platforms._title_match import (  # noqa: F401
-    _MAX_TARGET_GAP,
     _PUNCT_RUN,
     _TITLE_EXPANSIONS,
     _WS_RUN,
+    TITLE_MATCH_VERSION,
     _compile_word_boundary,
     _normalize_title,
-    _ordered_words_match,
     _title_matches,
+    _token_set_match,
 )
 
 # NON_SCANNABLE_PLATFORMS now lives in jobcannon.engine.ats_registry, derived from

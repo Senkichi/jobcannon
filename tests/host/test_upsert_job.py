@@ -261,3 +261,36 @@ def test_write_failure_leaves_connection_usable(db_conn, company_id):
 
     r = upsert_job(conn, parsed, company_id=company_id)
     assert r.kind == "inserted"
+
+
+def test_upsert_writes_currency_period(db_conn, company_id):
+    """PORTED from tests/test_salary_tagging.py::test_upsert_writes_currency_period
+    @ abedc58ab57db586c74bf22c8a80cb40399deb8b (private job-cannon). Ledger L-0014.
+
+    salary_currency/salary_period round-trip through Job -> ParsedJob ->
+    upsert_job. Private original used sqlite3.Row + job_finder.db.upsert_job
+    against a migrated sqlite DB; this engine port drives the real
+    jobcannon.db._jobs.upsert_job Postgres writer via the db_conn fixture
+    (same pattern as test_insert_then_unchanged above).
+    """
+    from jobcannon.db._jobs import upsert_job
+
+    conn = _svc_conn(db_conn)
+    parsed = _parsed(
+        title="Staff Data Scientist",
+        source="greenhouse",
+        source_url="https://acme.com/42",
+    )
+    parsed.salary_min = 180000
+    parsed.salary_max = 240000
+    parsed.salary_currency = "GBP"
+    parsed.salary_period = "annual"
+
+    result = upsert_job(conn, parsed, company_id=company_id)
+    assert result.kind == "inserted"
+    row = db_conn.execute(
+        "SELECT salary_currency, salary_period FROM postings WHERE dedup_key = %s",
+        (result.dedup_key,),
+    ).fetchone()
+    assert row["salary_currency"] == "GBP"
+    assert row["salary_period"] == "annual"

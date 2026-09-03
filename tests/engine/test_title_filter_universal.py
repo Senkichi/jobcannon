@@ -17,13 +17,26 @@ TestCallerBoundaryMetadataBlob class (Job -> ParsedJob.from_job -> upsert_job
 are Task 3 (PR-3, ScanServices) scope, not this task's manifest. The denylist
 seam is adapted: the private repo patched load_config/get_company_denylist;
 the engine port drives parsed_job.set_denylist_provider instead (Step 7a).
+
+The trailing WI-10 (#1834/#1860) + #1861 sections below are a same-named-file
+merge, not a fresh port: the private source's tests/test_title_filter_universal.py
+carries both this unrelated blob-filter suite AND the ats_platforms tier-3
+title-matcher golden-corpus suite under one filename. Ledger L-0015 carries
+only that second section (jobcannon.engine.ats_platforms.TITLE_MATCH_VERSION /
+_title_matches); the module docstring above is unchanged from Ledger L-0014's
+prior port and still describes only the blob-filter suite.
 """
 
 from __future__ import annotations
 
 import contextlib
+import json
+from pathlib import Path
+
+import pytest
 
 from jobcannon.engine import parsed_job as parsed_job_mod
+from jobcannon.engine.ats_platforms import TITLE_MATCH_VERSION, _title_matches
 from jobcannon.engine.models import Job
 from jobcannon.engine.parsed_job import ParsedJob, UnresolvedParsedJob
 
@@ -169,3 +182,127 @@ class TestTitleFilterUniversalBlobs:
             result = ParsedJob.from_job(job)
         assert isinstance(result, UnresolvedParsedJob)
         assert result.raw_title == blob_title
+
+
+# ---------------------------------------------------------------------------
+# PORTED from job_finder/web/... via tests/test_title_filter_universal.py
+# @ 7788dcfa71b4ad05f7015c357cf57c67fa436e32 (private job-cannon). Ledger L-0015.
+# WI-10 (#1834/#1860): order-insensitive title matching (TITLE_MATCH_VERSION 2)
+# ---------------------------------------------------------------------------
+
+_GOLDEN_PATH = Path("tests/engine/fixtures/title_match_golden.json")
+
+
+def _load_golden() -> dict:
+    with open(_GOLDEN_PATH, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def test_title_match_version_is_two():
+    """The order-insensitive fallback is the active tier-3 semantics."""
+    assert TITLE_MATCH_VERSION == 2
+
+
+def test_golden_corpus():
+    """Every golden row's `_title_matches` verdict equals its mechanical label.
+
+    Labels were produced by the WI-10 rubric (order-free token-set subset of
+    any target title, after `_normalize_title`, exclusions empty) applied to
+    live `companies.last_scan_postings_json`. The fixture is self-contained:
+    it carries its own `target_titles`/`exclusions`, so the test does not read
+    live config and is stable in CI. Asserting the real public entry point
+    (`_title_matches`, the same one `_registry.py`/`__init__.py` call) pins
+    that the shipped code implements the rubric across all three tiers.
+    """
+    golden = _load_golden()
+    targets = golden["target_titles"]
+    exclusions = golden["exclusions"]
+    assert targets, "fixture must carry target_titles"
+
+    mismatches = []
+    for row in golden["rows"]:
+        want = row["expected"] == "MATCH"
+        got = _title_matches(row["title"], targets, exclusions)
+        if got != want:
+            mismatches.append((row["title"], row["expected"], got))
+
+    assert not mismatches, (
+        f"{len(mismatches)}/{len(golden['rows'])} golden rows disagree with "
+        f"_title_matches. First 10: {mismatches[:10]}"
+    )
+
+
+# (title, target_titles, expected) — the four REPORT D-4 examples asserted
+# against the live profile list, plus explicit order-scramble tripwires.
+# Under the mechanical token-set rubric only the Airbnb reorder is rescued;
+# the other three are *seniority-coverage* misses (staff vs senior/lead, or no
+# profile subset at all), NOT order misses — out of scope for WI-10.
+_ORDER_INSENSITIVE_CASES = [
+    # Airbnb: reversed + qualifier-inserted. OLD ordered matcher rejects
+    # (needs "analytics" before "lead"); NEW subset accepts. Sabotage tripwire.
+    ("Lead, Advanced Analytics", ["Analytics Lead"], True),
+    # Okta: "Staff Product Analyst" — no profile is a subset ("Lead Product
+    # Analyst" needs "lead"). Seniority-coverage miss, stays NO_MATCH.
+    ("Staff Product Analyst", None, False),
+    # Upstart: "Staff Data Analyst" — "Senior/Lead Data Analyst" need
+    # senior/lead. Seniority-coverage miss, stays NO_MATCH.
+    ("Staff Data Analyst", None, False),
+    # Affirm: "Analytics Engineer II" — no profile is {analytics, engineer}.
+    # Stays NO_MATCH (would need a profile-coverage change, not a matcher one).
+    ("Analytics Engineer II", None, False),
+    # Second independent order tripwire: reversed "Senior Analyst".
+    ("Analyst Senior, TPO Operations", ["Senior Analyst"], True),
+    # Negative control: subset requires ALL tokens — "scientist" absent.
+    ("Senior Data Platform", ["Data Scientist"], False),
+]
+
+
+@pytest.mark.parametrize("title, targets, expected", _ORDER_INSENSITIVE_CASES)
+def test_order_insensitive_examples(title, targets, expected):
+    """The four REPORT D-4 examples + order-scramble tripwires.
+
+    `targets=None` uses the live profile list from the golden fixture; an
+    explicit list isolates the order-insensitivity for a single phrase.
+    """
+    if targets is None:
+        targets = _load_golden()["target_titles"]
+    assert _title_matches(title, targets, []) is expected
+
+
+# ---------------------------------------------------------------------------
+# #1861: all-caps abbreviation expansion must be case-sensitive
+# ---------------------------------------------------------------------------
+# A lowercased "em" is the Portuguese preposition "in"; case-insensitive
+# \bEM\b expansion injected a spurious "manager" token, making
+# "Especialista em Data Analytics" token-set-match "Analytics Manager".
+# The same class of false positive hit "da" (Da Nang city / Italian "from")
+# and "ds" (Polish "do spraw" = regarding). All-caps abbreviations now
+# expand only when the original token is uppercase.
+_ALL_CAPS_CASE_SENSITIVE_CASES = [
+    # The issue's primary case: Portuguese "em" must NOT expand.
+    ("Especialista em Data Analytics", ["Analytics Manager"], False),
+    # Da Nang (Vietnamese city) — "Da" must NOT expand to "Data Analyst".
+    ("Senior Engineer - Da Nang", ["Senior Data Analyst"], False),
+    # Polish "ds." (do spraw = regarding) — "DS" must NOT expand.
+    ("Doradca ds. Produktów", ["Data Scientist"], False),
+    # Positive control: uppercase EM still expands to "engineering manager".
+    ("EM, Platform Team", ["Engineering Manager"], True),
+    # Positive control: uppercase DA still expands to "data analyst".
+    ("DA, Marketing", ["Data Analyst"], True),
+    # Positive control: uppercase DS still expands to "data scientist".
+    ("DS, Growth", ["Data Scientist"], True),
+    # Mixed-case "Em" (sentence-start) must NOT expand — only all-caps
+    # is unambiguous recruiter shorthand.
+    ("Em Data Analytics We Trust", ["Analytics Manager"], False),
+]
+
+
+@pytest.mark.parametrize("title, targets, expected", _ALL_CAPS_CASE_SENSITIVE_CASES)
+def test_all_caps_abbreviations_case_sensitive(title, targets, expected):
+    """All-caps abbreviations expand only when the original token is uppercase (#1861).
+
+    A lowercased ``em``/``da``/``ds`` is a non-English word, not recruiter
+    shorthand — expanding it injects spurious tokens ("manager", "data
+    analyst") that produce false-positive token-set matches.
+    """
+    assert _title_matches(title, targets, []) is expected

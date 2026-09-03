@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-03T07:43:46Z",
+  "generated_at": "2026-09-03T08:09:31Z",
   "roots": [
     "engine",
     "db",
@@ -246,6 +246,16 @@
       ]
     },
     {
+      "path": "jobcannon/engine/ats_platforms/__init__.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/ats_platforms/__init__.py @ abedc58ab57db586c74bf22c8a80cb40399deb8b (private job-cannon). Ledger L-0014."
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/ats_platforms/_platforms_icims.py",
       "root": "engine",
       "markers": [
@@ -310,6 +320,16 @@
         {
           "line": 340,
           "text": "# forwards to a host-registered recorder (e.g. the private repo's"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/ats_platforms/_title_match.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/ats_platforms/_title_match.py @ 7788dcfa71b4ad05f7015c357cf57c67fa436e32 (private job-cannon). Ledger L-0015."
         }
       ]
     },
