@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-31T02:59:33Z",
+  "generated_at": "2026-09-03T07:27:47Z",
   "roots": [
     "engine",
     "db",
@@ -540,6 +540,26 @@
         {
           "line": 3,
           "text": "The private source reads scan-tuning knobs from Flask's app config"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/scoring_prompts/variants/v4_finalist.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/scoring_prompts/variants/v4_finalist.py @ b5b955bde5afd7e318be5d5a5b374c31db026a95 (private job-cannon). Ledger L-0261."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/scoring_prompts/variants/v5_domain_skills_anchor.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/scoring_prompts/variants/v5_domain_skills_anchor.py @ 7b8d57012bdc1283264b5b286b79ec2d44df4211 (private job-cannon). Ledger L-0262."
         }
       ]
     },
