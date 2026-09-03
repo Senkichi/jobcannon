@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-03T11:40:05Z",
+  "generated_at": "2026-09-03T12:25:55Z",
   "roots": [
     "engine",
     "db",
@@ -9,6 +9,32 @@
     "worker"
   ],
   "entries": [
+    {
+      "path": "jobcannon/db/_assessment_writer.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/db/_assessment_writer.py @ b1f69f3e10a452cc498527f830959b852108f5e9"
+        },
+        {
+          "line": 6,
+          "text": "# private original also wrote is either already owned by another host"
+        },
+        {
+          "line": 14,
+          "text": "scoring_model)`` on ``postings``, mirroring the private original's role. No"
+        },
+        {
+          "line": 60,
+          "text": "# (mirroring the private original's ``fit_analysis_payload[\"location_policy\"]``"
+        },
+        {
+          "line": 297,
+          "text": "(matches the private original's rationale: it is re-stamped via"
+        }
+      ]
+    },
     {
       "path": "jobcannon/db/_companies.py",
       "root": "db",
@@ -36,6 +62,66 @@
         {
           "line": 34,
           "text": "original's full name-normalization + denylist identity work is Phase-2"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/_company_attribution.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"set_company_attribution -- Postgres port of the private repo's single"
+        },
+        {
+          "line": 3,
+          "text": "Private source: ``job_finder/db/_company_attribution.py`` @"
+        },
+        {
+          "line": 40,
+          "text": "# (job_finder/db/_company_state.py, WI-08) to record the transition in"
+        },
+        {
+          "line": 72,
+          "text": ")  # PORT-SEAM: json_utils.utc_now_iso/private _company_state imports dropped -- see below and module docstring"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/_conversion_metrics.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/db/_conversion_metrics.py @ 27663d9ae9cb553fded7c5832831a5d3935a1836"
+        },
+        {
+          "line": 52,
+          "text": ")  # PORT-SEAM: replaces private's job_finder.constants import (CLASSIFICATIONS/PIPELINE_STATUSES both live in jobcannon.engine.constants on this host)"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/_direct_link.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/db/_direct_link.py @ c81bb00205e1a87d14c37f855a90e2a8027cabac"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/_feed.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 43,
+          "text": "`_SORTS`'s non-default tokens (ledger L-0076, private source:"
+        },
+        {
+          "line": 44,
+          "text": "``job_finder/db/_queries.py``'s ``get_filtered_jobs`` allowlist @"
         }
       ]
     },
@@ -110,12 +196,118 @@
           "text": "gates the private repo's auto-reopen logic, which has no hosted counterpart"
         },
         {
-          "line": 129,
+          "line": 132,
           "text": "# of the append-only salary_observations JSON array (mirrors the private"
         },
         {
-          "line": 130,
+          "line": 133,
           "text": "# original's cap; oldest entries are dropped first once the cap is hit)."
+        },
+        {
+          "line": 472,
+          "text": "# PORTED from job_finder/db/_jobs.py @ b1f69f3e10a452cc498527f830959b852108f5e9"
+        },
+        {
+          "line": 478,
+          "text": "# PORT-SEAM: set_source_id_if_free's IntegrityError backstop has no schema"
+        },
+        {
+          "line": 479,
+          "text": "# analog here. Private's UPDATE relies on the I-11 partial UNIQUE index on"
+        },
+        {
+          "line": 558,
+          "text": "# no analog of private's separate per-source postings sub-entity list or the"
+        },
+        {
+          "line": 560,
+          "text": "# L-0075 (job_finder/db/_postings.py, this same ledger) is escalated OPEN"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/_locations.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"apply_location_observation -- Postgres port of the private repo's"
+        },
+        {
+          "line": 3,
+          "text": "Private source: ``job_finder/db/_locations.py`` @"
+        },
+        {
+          "line": 251,
+          "text": "# PORT-SEAM: paths changed from job_finder.web.* to jobcannon.engine.*"
+        },
+        {
+          "line": 282,
+          "text": ")  # PORT-SEAM: locations_raw is native jsonb here -- no json.loads text-column round-trip needed (private's original wrapped this in a try/except json.JSONDecodeError)"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/_persistence.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/db/_persistence.py @ 546674e0cc6c35e3511e9f7cf66d1f0a65d880ed"
+        },
+        {
+          "line": 38,
+          "text": "# PORT-SEAM: private's job_finder.db.__init__ re-export paragraph dropped --"
+        },
+        {
+          "line": 113,
+          "text": "private-repo incident detail, not load-bearing for this port.)"
+        },
+        {
+          "line": 130,
+          "text": "job_finder.json_utils.normalize_iso_string_to_naive_utc before"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/_scan_observability.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/db/_dashboard_queries.py @ 0db233db03855928377bd512bdd64c60b2631c43"
+        },
+        {
+          "line": 3,
+          "text": "# PORT-SEAM: this row's adjudicated seam splits the private module's 17"
+        },
+        {
+          "line": 4,
+          "text": "# functions across two surfaces: personal kanban/pipeline-summary functions"
+        },
+        {
+          "line": 40,
+          "text": ")  # PORT-SEAM: replaces private's job_finder.web.ats_registry import (same concept, host module path)"
+        },
+        {
+          "line": 47,
+          "text": ")  # PORT-SEAM: replaces private's job_finder.web.location_normalizer import (same functions, host module path)"
+        },
+        {
+          "line": 119,
+          "text": "# (job_finder/db/_queries.py), which at this ledger row's carry_range depended"
+        },
+        {
+          "line": 434,
+          "text": "(jobcannon/db/_persistence.py::log_run / jobcannon/db/migrations/m0016)."
+        },
+        {
+          "line": 435,
+          "text": "# PORT-SEAM: private's runs.timestamp -> this host's runs.run_at"
+        },
+        {
+          "line": 437,
+          "text": "# jobcannon/db/migrations/m0016_persistence_writer_columns.py). private's"
         }
       ]
     },
@@ -210,6 +402,44 @@
         {
           "line": 36,
           "text": "WI-09 writer (record_title_outcomes, private job_finder/db/_scan_log.py)"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/migrations/m0015_postings_scoring_tuple.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 7,
+          "text": "Private source: ``job_finder/db/_assessment_writer.py`` (``persist_job_assessment``"
+        },
+        {
+          "line": 10,
+          "text": "Deliberately narrower than the private schema -- this migration adds ONLY the"
+        },
+        {
+          "line": 29,
+          "text": "``derive_classification`` INPUTS in the private schema, not part of the"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/migrations/m0016_persistence_writer_columns.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 4,
+          "text": "sibling PR lands (private source: ``job_finder/db/_persistence.py`` @"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/migrations/m0017_postings_direct_url_writer_columns.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 4,
+          "text": "job_finder/db/_direct_link.py @ c81bb00205e1a87d14c37f855a90e2a8027cabac"
         }
       ]
     },
@@ -406,11 +636,7 @@
       "root": "engine",
       "markers": [
         {
-          "line": 1,
-          "text": "# PORTED from job_finder/web/ats_scanner/__init__.py @ a03521500442af0751d73ccb5737f2950d5ad06c (private job-cannon). Ledger L-0450."
-        },
-        {
-          "line": 20,
+          "line": 19,
           "text": "the private source they were static top-level imports; in the engine both"
         }
       ]
@@ -420,23 +646,15 @@
       "root": "engine",
       "markers": [
         {
-          "line": 1,
-          "text": "# PORTED from job_finder/web/ats_scanner/_probe.py @ b24cf4a6b434f96154144ee087acbae766b4e255 (private job-cannon). Ledger L-0018."
+          "line": 34,
+          "text": "# Re-homed from the private repo's ats_slug_challenge.py: a plain string"
         },
         {
-          "line": 45,
-          "text": "# PORT-SEAM: re-homed from the private repo's ats_slug_challenge.py -- a"
-        },
-        {
-          "line": 62,
-          "text": "# (job_finder/web/ats_identity_reconcile.reconcile_company_ats privately),"
-        },
-        {
-          "line": 169,
+          "line": 156,
           "text": "host-supplied ``ScanServices`` fields (the private source's"
         },
         {
-          "line": 683,
+          "line": 519,
           "text": "# job_finder/web/brand_blocklist.py for the rationale and seed list."
         }
       ]
@@ -460,36 +678,56 @@
       ]
     },
     {
-      "path": "jobcannon/engine/ats_scanner/_run_html.py",
-      "root": "engine",
-      "markers": [
-        {
-          "line": 1,
-          "text": "# PORTED from job_finder/web/ats_scanner/_run_html.py @ 4c65f020a404de6504a21593875685db99d3cd65 (private job-cannon). Ledger L-0019."
-        }
-      ]
-    },
-    {
       "path": "jobcannon/engine/ats_scanner/_run_playwright.py",
       "root": "engine",
       "markers": [
         {
-          "line": 1,
-          "text": "# PORTED from job_finder/web/ats_scanner/_run_playwright.py @ 4c65f020a404de6504a21593875685db99d3cd65 (private job-cannon). Ledger L-0020."
-        },
-        {
-          "line": 35,
-          "text": "# private-only job_finder.db helpers with no ScanServices equivalent yet;"
+          "line": 214,
+          "text": "# private repo resolved this via careers_crawler's PEP-562 __getattr__"
         }
       ]
     },
     {
-      "path": "jobcannon/engine/ats_scanner/_upsert.py",
+      "path": "jobcannon/engine/ats_scanner/_scan_log.py",
       "root": "engine",
       "markers": [
         {
           "line": 1,
-          "text": "# PORTED from job_finder/web/ats_scanner/_upsert.py @ 4348fc77093fa44e7be4e29a97ded6bed7d9ced3 (private job-cannon). Ledger L-0021."
+          "text": "\"\"\"PORTED from job_finder/db/_scan_log.py @ 6b17d78cb770cf53cb21b5e0b34c2cc7cd203136"
+        },
+        {
+          "line": 165,
+          "text": "versioned by migration and m0001 carries no ``source`` column yet,"
+        },
+        {
+          "line": 166,
+          "text": "unlike private's one fixed dev schema); ``scanned_at`` defaults to"
+        },
+        {
+          "line": 173,
+          "text": "# PORT-SEAM: private said \"always written\" -- private's ``company_id``"
+        },
+        {
+          "line": 174,
+          "text": "# and ``source`` are both fixed columns on its single dev schema, so"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/ats_scanner/_scan_selection.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/db/_scan_selection.py @ ec9b1404f684a8f20ad1ec2aa81c3a2f20fc0394"
+        },
+        {
+          "line": 21,
+          "text": "package.  # PORT-SEAM: \"web package\" (private) -> \"engine package\" (this"
+        },
+        {
+          "line": 22,
+          "text": "# repo's callers live in jobcannon.engine, not a web package)."
         }
       ]
     },
