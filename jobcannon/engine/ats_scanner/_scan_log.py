@@ -10,8 +10,7 @@ and :func:`record_title_outcomes` / :func:`prune_title_outcomes` for
 ``_run_html.py``, and ``_run_playwright.py`` over to these functions is OUT
 OF SCOPE for this module/ledger row (L-0077, ``carried_files: []``) — those
 three files are owned by separate, already-adjudicated ledger rows
-(L-0450, L-0019, L-0020) being ported concurrently in a sibling worktree
-(``port/jobcannon-engine-ats_scanner``). This PR does not add a single-writer
+(L-0450, L-0019, L-0020), ported separately. This PR does not add a single-writer
 grep-guard test for that reason: it would fail CI against the pre-existing
 raw INSERTs in those not-yet-rewired files, which are someone else's diff.
 Once that wiring PR lands, a grep-guard test (e.g.
