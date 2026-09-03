@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/location_canonical.py @ 6c0ba1bc42d11053e09e1b27da642aac4af53f0c (private job-cannon). Ledger L-0455.
 """Canonical structured location for job postings.
 
 `JobLocation` is the value object the location parser (Layer 2/3) and the

@@ -1,3 +1,4 @@
+# PORTED from job_finder/salary_normalizer.py @ b30348a0faa4dd92e39a05ef1f6af28a69bb7537 (private job-cannon). Ledger L-0448.
 """Single normalization point for salary observations (Data Integrity Overhaul P1.1).
 
 This is the **foundation layer** of the salary capture -> normalize -> reconcile

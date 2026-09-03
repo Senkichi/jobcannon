@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/ats_detection.py @ 9880aa404c8adde81d769cb84a2e8ba1f3c9a043 (private job-cannon). Ledger L-0012.
 """ATS URL pattern extraction and slug candidate derivation."""
 
 import logging
@@ -25,24 +26,10 @@ def extract_ats_from_url_best(url: str) -> tuple[str, str, int] | None:
     Returns:
         Tuple (platform, slug, specificity_weight) or None.
     """
-    if not isinstance(url, str) or not url.strip():
-        return None
+    from jobcannon.engine.ats_registry import resolve_url_match
 
-    from jobcannon.engine.ats_registry import _URL_DETECTION_PATTERNS
-
-    for platform, pattern, specificity, extractor in _URL_DETECTION_PATTERNS:
-        match = pattern.search(url)
-        if match:
-            slug = extractor(match, url)
-            if slug is None:
-                # Special marker: if extractor returns None and platform is successfactors,
-                # this is a demo/internal URL that should return None (stop matching)
-                if platform == "successfactors":
-                    return None
-                continue  # Skip this match (e.g., workday /wday/ path)
-            return platform, slug, specificity
-
-    return None
+    match = resolve_url_match(url)
+    return None if match is None else match[:3]
 
 
 def probe_hit_consistent_with_careers_url(hit_platform: str, careers_url: str | None) -> bool:

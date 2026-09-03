@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/http_fetch.py @ 46cbb877bd3ba02f18cee7e5d3a88b2c2f2d8871 (private job-cannon). Ledger L-0454.
 """Hard-deadline HTTP GET — bounds TOTAL wall-clock time, not just per-read.
 
 ``requests``' ``timeout=`` is a *per-read* (inter-byte) timeout, NOT a ceiling

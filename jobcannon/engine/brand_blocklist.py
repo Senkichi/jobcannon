@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/brand_blocklist.py @ 929e3ad49398f23c4b9e44904f7aeddc62bf6fda (private job-cannon). Ledger L-0451.
 """F8 — brand-name blocklist for speculative ATS probing.
 
 The speculative-probe loop (`ats_scanner._probe.probe_ats_slugs`) derives

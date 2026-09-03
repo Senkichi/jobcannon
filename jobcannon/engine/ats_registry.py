@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/ats_registry.py @ b24cf4a6b434f96154144ee087acbae766b4e255 (private job-cannon). Ledger L-0017.
 """Single source of truth for ATS platform capabilities.
 
 Historically, "which platforms can do X" was re-enumerated by hand in ~12
@@ -16,8 +17,8 @@ CI failure (a scannable platform with no probe, a scanner missing from dispatch,
 etc.), exemptable only via an explicit capability flag — never a hardcoded skip.
 
 **Scatter map (all facets now derive from the registry):**
-- PR-4: URL detection metadata (patterns, extractors, specificity)
-- PR-5: Posting-id patterns (expiry_checker, ats_reconciler)
+- PR-4 (#650): URL detection metadata (patterns, extractors, specificity)
+- PR-5 (#655): Posting-id patterns (expiry_checker, ats_reconciler)
 - PR-6 (this PR): Domain facets (ATS_DOMAINS, redirect patterns, PRIORITY_DOMAINS)
 
 The one documented exception: PRIORITY_DOMAINS includes 4 non-ATS job boards
@@ -39,6 +40,7 @@ that monkeypatches ``ats_prober._probe_lever`` still takes effect.
 
 from __future__ import annotations
 
+import enum
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -138,6 +140,26 @@ class PlatformSpec:
     playwright_scanner: PlaywrightPlatformScanner | None = None
     # LIVENESS — attribute name on ats_prober, resolved via getattr at call time.
     probe_attr: str | None = None
+    # LIVENESS (RAISING VARIANT) — attribute name on ats_prober for a probe
+    # that returns a status-carrying ``ats_prober.ProbeHttpResult`` (hit +
+    # status_code) and lets ``requests.exceptions.Timeout`` / ``ConnectionError``
+    # propagate, instead of the ``probe_attr`` contract (always a bare bool,
+    # never raises — the shape batch callers require). When set,
+    # ``verify_live_detail`` dispatches through THIS function and classifies
+    # both the raised exceptions and the result's status code via
+    # ``ats_prober._is_transient_error``, so callers like
+    # ``probe_single_company`` can route transient failures (Timeout/
+    # ConnectionError, or a 429/5xx status) through ``_handle_scan_error``
+    # (retry-with-backoff), and a blocked-but-reachable status (401/403) to a
+    # distinct ``platform_slug_blocked`` miss — instead of everything
+    # non-transient collapsing into a permanent ``platform_slug_404`` miss.
+    # Only the platforms that had inline retry-aware HTTP pre-#1928
+    # (lever / greenhouse / ashby / smartrecruiters) declare this; platforms
+    # whose probe was always exception-swallowing (workday / icims /
+    # successfactors / adp / ...) leave it None, and ``verify_live_detail``
+    # falls back to the bool ``verify_live`` (returning HIT or MISS, never
+    # TRANSIENT/BLOCKED) for them.
+    probe_raising_attr: str | None = None
     # BOARD IDENTITY — attribute name on ats_prober for an OPTIONAL probe that
     # returns the board/company's own display name (e.g. Greenhouse's
     # ``GET /v1/boards/{slug}`` -> ``{"name": ...}``), resolved via getattr the
@@ -194,6 +216,7 @@ _SPECS: tuple[PlatformSpec, ...] = (
     PlatformSpec(
         "lever",
         probe_attr="_probe_lever",
+        probe_raising_attr="_probe_lever_with_result",
         speculative_safe=True,
         speculative_order=0,
         url_fastpath=True,
@@ -207,6 +230,7 @@ _SPECS: tuple[PlatformSpec, ...] = (
     PlatformSpec(
         "greenhouse",
         probe_attr="_probe_greenhouse",
+        probe_raising_attr="_probe_greenhouse_raising",
         identity_probe_attr="_probe_identity_greenhouse",
         speculative_safe=True,
         speculative_order=1,
@@ -221,6 +245,7 @@ _SPECS: tuple[PlatformSpec, ...] = (
     PlatformSpec(
         "ashby",
         probe_attr="_probe_ashby",
+        probe_raising_attr="_probe_ashby_raising",
         speculative_safe=True,
         speculative_order=2,
         url_fastpath=True,
@@ -270,6 +295,7 @@ _SPECS: tuple[PlatformSpec, ...] = (
     PlatformSpec(
         "smartrecruiters",
         probe_attr="_probe_smartrecruiters",
+        probe_raising_attr="_probe_smartrecruiters_raising",
         identity_probe_attr="_probe_identity_smartrecruiters",
         url_fastpath=True,
         reconcilable=True,
@@ -397,11 +423,102 @@ def verify_live(platform: str, slug: str) -> bool:
 
     Table lookup into the registry, replacing the former hand-maintained
     if-ladder in ``ats_identity_reconcile``. Returns False for unknown platforms
-    or platforms with no probe (keyword adapters / pure stubs)."""
+    or platforms with no probe (keyword adapters / pure stubs).
+
+    The dispatched ``_probe_*`` function swallows ALL exceptions (including
+    transient ``Timeout`` / ``ConnectionError``) and returns ``False`` — this
+    is the contract batch callers (``verify_fastpath_live``, the speculative
+    ladder) rely on so they never raise. Callers that need to distinguish a
+    transient network failure from a permanent 404 miss must use
+    :func:`verify_live_detail` instead."""
     spec = PLATFORMS.get(platform)
     if spec is None or spec.probe_attr is None:
         return False
     return bool(_resolve_probe(spec.probe_attr)(slug))
+
+
+class ProbeOutcome(enum.Enum):
+    """Four-valued liveness result for :func:`verify_live_detail`.
+
+    ``verify_live`` collapses transient, blocked, and permanent failures into
+    ``False`` because its batch callers must not raise. ``verify_live_detail``
+    restores those distinctions so retry-aware callers (``probe_single_company``)
+    can route:
+
+    - ``TRANSIENT`` (a ``Timeout``/``ConnectionError``, or a 429/5xx status —
+      both classified through the single ``ats_prober._is_transient_error``
+      chokepoint) through ``_handle_scan_error`` (retry-with-backoff), and
+    - ``BLOCKED`` (a non-transient, non-404/410 status, e.g. 401/403 — the
+      probe reached a real response but was denied) to a distinct
+      ``platform_slug_blocked`` miss reason instead of the generic
+      ``platform_slug_404`` — restoring the pre-#1928 diagnostic distinction
+      (a slug that doesn't exist vs. one that exists but is blocked) the
+      #1928 rework review flagged as lost.
+    """
+
+    HIT = "hit"
+    MISS = "miss"
+    TRANSIENT = "transient"
+    BLOCKED = "blocked"
+
+
+def verify_live_detail(platform: str, slug: str) -> ProbeOutcome:
+    """Like :func:`verify_live` but distinguishes transient failures and
+    blocked-but-reachable slugs from permanent misses.
+
+    For platforms with a ``probe_raising_attr`` (lever / greenhouse / ashby /
+    smartrecruiters — the four that had inline retry-aware HTTP pre-#1928),
+    dispatches through the raising variant, which returns an
+    ``ats_prober.ProbeHttpResult`` (hit + status_code) rather than a bare
+    bool. Both the raised exceptions (Timeout / ConnectionError) AND the
+    result's status code are classified through the single
+    ``ats_prober._is_transient_error`` chokepoint — there is no second,
+    status-blind notion of transience here:
+
+    - ``result.hit`` → :attr:`ProbeOutcome.HIT`.
+    - status 200 (non-hit — e.g. an empty postings list) or a status in
+      ``ats_prober._PERMANENT_MISS_CODES`` ({404, 410}) → :attr:`ProbeOutcome.MISS`.
+    - a transient exception, or a status in ``ats_prober._TRANSIENT_CODES``
+      ({429, 500, 502, 503, 504}) → :attr:`ProbeOutcome.TRANSIENT`.
+    - any other status (e.g. 401/403 — the probe reached a real response but
+      was denied) → :attr:`ProbeOutcome.BLOCKED`.
+
+    Non-transient exceptions (e.g. ``JSONDecodeError`` from a malformed
+    response) are NOT classified here; they propagate to the caller, which
+    treats them as a generic error (retryable via ``_handle_scan_error``'s
+    broad ``except Exception`` path in ``probe_single_company``).
+
+    For platforms WITHOUT a raising variant (workday / icims /
+    successfactors / adp / ...), falls back to the bool :func:`verify_live`:
+    returns :attr:`ProbeOutcome.HIT` or :attr:`ProbeOutcome.MISS`, never
+    :attr:`ProbeOutcome.TRANSIENT`/:attr:`ProbeOutcome.BLOCKED`. These
+    platforms' probes always swallowed exceptions pre-#1928 too, so no
+    retry-with-backoff regression exists for them — this fallback preserves
+    that pre-existing behaviour rather than silently introducing a new
+    capability outside this issue's scope.
+
+    Returns :attr:`ProbeOutcome.MISS` for unknown platforms or platforms with
+    no probe (keyword adapters / pure stubs), matching :func:`verify_live`."""
+    spec = PLATFORMS.get(platform)
+    if spec is None or spec.probe_attr is None:
+        return ProbeOutcome.MISS
+    if spec.probe_raising_attr is not None:
+        raising_fn = _resolve_probe(spec.probe_raising_attr)
+        try:
+            result = raising_fn(slug)
+        except Exception as exc:
+            if _prober._is_transient_error(exc):
+                return ProbeOutcome.TRANSIENT
+            raise
+        if result.hit:
+            return ProbeOutcome.HIT
+        if result.status_code == 200 or result.status_code in _prober._PERMANENT_MISS_CODES:
+            return ProbeOutcome.MISS
+        if _prober._is_transient_error(result.status_code):
+            return ProbeOutcome.TRANSIENT
+        return ProbeOutcome.BLOCKED
+    # No raising variant — fall back to the swallowing bool probe.
+    return ProbeOutcome.HIT if verify_live(platform, slug) else ProbeOutcome.MISS
 
 
 def verify_fastpath_live(platform: str, slug: str) -> bool:
@@ -452,6 +569,17 @@ RECONCILABLE_PLATFORMS: frozenset[str] = frozenset(
 KEYWORD_ADAPTER_PLATFORMS: frozenset[str] = frozenset(
     n for n, s in PLATFORMS.items() if s.keyword_adapter
 )
+# Platforms whose URLs carry a stable posting id extractable via a regex
+# pattern (``spec.posting_id_pattern is not None``) — the "direct posting-id
+# extraction" capability. This is a STRICT subset of RECONCILABLE_PLATFORMS:
+# successfactors/adp are reconcilable via batch set-diff but expose no
+# single-posting URL shape, so they have no posting_id_pattern. Consumers that
+# need "platforms with a direct posting-id URL shape" (e.g. the M1 latency
+# metric's ``ats_direct`` cohort in scripts/ats_rectification_metrics.py) must
+# anchor on THIS view, not RECONCILABLE_PLATFORMS — the two diverge by design.
+POSTING_ID_PLATFORMS: frozenset[str] = frozenset(
+    n for n, s in PLATFORMS.items() if s.posting_id_pattern is not None
+)
 
 # URL detection ordering: load-bearing flat list of (platform, pattern, specificity, extractor)
 # for extract_ats_from_url_best. Replaces the hand-maintained if-ladder in ats_detection.py.
@@ -476,7 +604,9 @@ _URL_DETECTION_PATTERNS: list[
     # Order 2: Workday API
     (
         "workday",
-        re.compile(r"https?://([^/]+)\.myworkdayjobs\.com/wday/cxs/[^/]+/([^/?#]+)", re.IGNORECASE),
+        re.compile(
+            r"https?://([^/]+)\.myworkdayjobs\.com/wday/cxs/[^/]+/([^/?#]+)", re.IGNORECASE
+        ),
         _SPECIFICITY_API,
         _extract_slug_workday_api,
     ),
@@ -660,6 +790,56 @@ _URL_DETECTION_PATTERNS: list[
     ),
 ]
 
+# Extractors whose match evidence is host-shape only (currently just Phenom's
+# catch-all `careers.<domain>` / `jobs.<domain>` pattern, order 24 above): the
+# URL's host merely LOOKS like a careers subdomain, with no vendor-specific
+# host token verified (contrast e.g. Order 14 BambooHR, which requires the
+# literal `.bamboohr.com` suffix). Referenced by extractor-function identity,
+# not by platform-name string, so membership can only grow via an explicit
+# opt-in here -- never a silent trust bump for a future equally-weak pattern
+# (#1899: `careers.playstation.com` matched this catch-all and produced a
+# `set` proposal despite the page actually linking to Greenhouse).
+_HOST_SHAPE_ONLY_EXTRACTORS: frozenset[Callable[[re.Match, str], str | None]] = frozenset(
+    {_extract_slug_phenom}
+)
+
+
+def resolve_url_match(url: str) -> tuple[str, str, int, bool] | None:
+    """Full-metadata single-URL ATS match: (platform, slug, specificity, host_shape_only).
+
+    Single point of truth for walking :data:`_URL_DETECTION_PATTERNS` --
+    ``ats_detection.extract_ats_from_url_best`` (the public 3-tuple contract)
+    and :func:`url_match_is_host_shape_only` both delegate here so "which
+    pattern won" is decided exactly once.
+    """
+    if not isinstance(url, str) or not url.strip():
+        return None
+    for platform, pattern, specificity, extractor in _URL_DETECTION_PATTERNS:
+        match = pattern.search(url)
+        if match:
+            slug = extractor(match, url)
+            if slug is None:
+                # Special marker: if extractor returns None and platform is
+                # successfactors, this is a demo/internal URL -> stop matching.
+                if platform == "successfactors":
+                    return None
+                continue  # Skip this match (e.g., workday /wday/ path)
+            return platform, slug, specificity, extractor in _HOST_SHAPE_ONLY_EXTRACTORS
+    return None
+
+
+def url_match_is_host_shape_only(url: str) -> bool:
+    """True if ``url``'s winning ATS match came from a host-shape-only pattern.
+
+    See :data:`_HOST_SHAPE_ONLY_EXTRACTORS`. Used by
+    ``scripts/ats_identity_adjudicate.py`` to cap a proposal at ``review``
+    instead of ``set`` when the only URL evidence is a generic
+    careers-subdomain shape rather than a vendor-specific host token (#1899).
+    """
+    match = resolve_url_match(url)
+    return bool(match) and match[3]
+
+
 # Speculative ladder: ordered (platform, probe_fn) pairs, fastest first. Probe
 # refs captured here (import-time) match the prior _PROBES behaviour exactly.
 SPECULATIVE_PROBES: list[tuple[str, object]] = [
@@ -701,7 +881,7 @@ SCANNABLE_TARGET_PLATFORMS: frozenset[str] = SCANNABLE_PLATFORMS - NON_SCANNABLE
 # and embed shapes) MUST route through extract_greenhouse_posting_id() so that
 # ats_reconciler, expiry_checker, and the backfill migration cannot diverge.
 # (Previously each carried its own copy and only the reconciler's was complete —
-# custom-domain and EU-host greenhouse postings silently failed to resolve.)
+# custom-domain and EU-host greenhouse postings silently failed to resolve, #644.)
 #
 # Two shape tiers:
 #   DISCRIMINATING — a greenhouse.io host+path, or the branded gh_jid= query param.
@@ -890,7 +1070,7 @@ def is_direct_ats_platform(platform_key: str) -> bool:
     and is not marked ``non_scannable``. This is equivalent to
     ``SCANNABLE_TARGET_PLATFORMS - KEYWORD_ADAPTER_PLATFORMS``.
 
-    This predicate is used by the posting sub-entity upsert logic to
+    This predicate is used by the posting sub-entity upsert logic (#640) to
     determine which sightings should mint a posting descriptor. Keyword adapters
     (Amazon, Microsoft, Eightfold) and non-scannable stubs (jobvite, google,
     taleo, etc.) do NOT mint postings.
@@ -902,5 +1082,6 @@ def is_direct_ats_platform(platform_key: str) -> bool:
         True if the platform is a direct ATS platform, False otherwise.
     """
     return (
-        platform_key in SCANNABLE_TARGET_PLATFORMS and platform_key not in KEYWORD_ADAPTER_PLATFORMS
+        platform_key in SCANNABLE_TARGET_PLATFORMS
+        and platform_key not in KEYWORD_ADAPTER_PLATFORMS
     )

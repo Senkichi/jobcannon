@@ -1,3 +1,4 @@
+# PORTED from job_finder/enrichment_states.py @ 307c369c0688763a18c6989adb81b229928e20d0 (private job-cannon). Ledger L-0446.
 """Single source of truth for enrichment-tier vocabulary (F1 root-cause fix).
 
 The ``jobs.enrichment_tier`` column records the highest enrichment tier attempted

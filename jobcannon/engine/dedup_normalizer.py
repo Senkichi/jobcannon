@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/dedup_normalizer.py @ 65e5ce021068b70a2369ac279c75395a078e1013 (private job-cannon). Ledger L-0452.
 """Smart deduplication normalization for job dedup keys.
 
 Provides normalization functions that collapse common formatting variations so

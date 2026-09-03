@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/source_registry.py @ c2b27f9ea5db46a4fee94608a7b30035eefb1f3c (private job-cannon). Ledger L-0459.
 """Opaque-redirect source registry — Section 1 of
 docs/superpowers/specs/2026-07-08-job-listing-verification-design.md.
 

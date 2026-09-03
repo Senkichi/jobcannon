@@ -1,4 +1,5 @@
-"""JSON deserialization utilities shared across every host layer."""
+# PORTED from job_finder/json_utils.py @ 8905c4b1177c51df5ac7630f0efdfac51e44a4a6 (private job-cannon). Ledger L-0006.
+"""JSON deserialization utilities shared across persistence and web layers."""
 
 import json
 import logging
@@ -25,7 +26,7 @@ def to_naive_utc_iso(dt: datetime) -> str:
     to already be UTC (the store-UTC-render-local convention) and serialized
     as-is. Every datetime headed for a DB TEXT column should pass through
     here so aware values from source feeds (Greenhouse ``-04:00`` offsets,
-    email ``Z`` suffixes) never leak tz suffixes into storage.
+    email ``Z`` suffixes) never leak tz suffixes into storage (#361).
     """
     if dt.tzinfo is not None:
         dt = dt.astimezone(UTC).replace(tzinfo=None)
@@ -41,7 +42,7 @@ def normalize_iso_string_to_naive_utc(value: str) -> str:
     tz-aware strings (trailing ``Z`` or an explicit ``+HH:MM`` / ``-HH:MM``
     offset) are parsed, converted to UTC, and re-serialized without the
     offset — the same guarantee ``to_naive_utc_iso`` gives datetime callers
-    (a caller once fed an aware string into
+    (#1226: a pre-#361 caller once fed an aware string into
     ``persist_job_expiry_state``, and since ``expiry_checked_at`` is copied
     into ``last_seen`` on a 'live' verdict, that leaked the aware suffix
     into a store-UTC-naive column).
@@ -90,6 +91,35 @@ def local_day_utc_window() -> tuple[str, str]:
     start_utc = local_midnight.astimezone(UTC).replace(tzinfo=None).isoformat()
     end_utc = local_tomorrow.astimezone(UTC).replace(tzinfo=None).isoformat()
     return start_utc, end_utc
+
+
+def format_local_iso(value: str | None) -> str | None:
+    """Convert a stored (naive-UTC, or tz-aware) ISO timestamp to a local-aware ISO string.
+
+    Single source of truth for the *read* side of the store-UTC/render-local
+    convention (``to_naive_utc_iso`` / ``normalize_iso_string_to_naive_utc``
+    are the write side): a naive value is assumed to already be UTC — the
+    storage convention every DB write and JSON marker in this codebase
+    follows — and converted to this machine's local timezone; a tz-aware
+    value converts directly. Promoted from a private duplicate that lived in
+    ``healthcheck.py`` (#1982) once a second caller (``supervisor.py``'s
+    doctor output, #1981) needed the identical conversion — matching this
+    module's role as the existing canonical home for store-UTC/render-local
+    helpers (``local_today``, ``local_day_utc_window``).
+
+    Returns ``None`` when *value* is missing or unparseable, so callers can
+    distinguish "no timestamp" from "timestamp at X" rather than emitting a
+    misleading placeholder.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone().isoformat()
 
 
 def safe_json_load(value: str | None, default: Any = None) -> Any:

@@ -1,3 +1,4 @@
+# PORTED from job_finder/constants.py @ 5515b02b61de024225470e582d5ca0a4778f8e4b (private job-cannon). Ledger L-0445.
 """Foundation-layer constants shared across all layers.
 
 This module has no intra-package imports by design (it sits below db/, web/,

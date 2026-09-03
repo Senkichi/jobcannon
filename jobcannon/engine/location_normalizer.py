@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/location_normalizer.py @ efc0c5545f6b16886a859afdbe9d4976dbbdc393 (private job-cannon). Ledger L-0456.
 """Location normalization for job listings.
 
 Pure functions. No I/O, no shared state. Used at two boundaries:

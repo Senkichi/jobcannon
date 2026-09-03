@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/html_extract.py @ 4ffcf87760c3fe2e2ead80bd0b827745094c8b23 (private job-cannon). Ledger L-0453.
 """Structure-aware HTML → clean text extraction for job descriptions.
 
 JD Extraction Layer 2, step 1 ("broad bloat cut"). This replaces the naive

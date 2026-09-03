@@ -1,3 +1,4 @@
+# PORTED from job_finder/models.py @ b1f69f3e10a452cc498527f830959b852108f5e9 (private job-cannon). Ledger L-0447.
 """Data models for Job Finder."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# PORTED from job_finder/web/_field_alias.py @ 7491ce38a9c8abe10973e5c443ed113f5996ad42 (private job-cannon). Ledger L-0449.
 """Shared field-alias helpers for JSON job-posting extraction.
 
 Provides the canonical key lists and first-match-wins extractors shared
