@@ -6,6 +6,7 @@ import logging
 import sqlite3
 import time  # noqa: F401 — available for callers that may need it
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import requests
 from bs4 import BeautifulSoup
@@ -18,6 +19,34 @@ from jobcannon.engine.http_fetch import fetch_with_deadline
 logger = logging.getLogger(__name__)
 
 _PROBE_TIMEOUT = 8  # seconds
+
+# PORT-SEAM (L-0016): Host-injectable extension bundle (None-default seam).
+# Replaces the private source's lazy imports of ats_identity_reconcile /
+# ats_slug_challenge / careers_crawler tiers — none of which port to the
+# engine (see ledger rows L-0013 / L-0022, both ADAPT, whose seam is
+# ScanServices, not standalone engine modules). Duck-typed: any object
+# exposing the nine callables below (same signatures as the private
+# functions they stand in for). With no bundle registered, the static-first
+# fall-through records a miss ("static_fallthrough_unavailable") and
+# speculative slug promotion FAILS CLOSED: claims are stamped provisional and
+# a slug collision never demotes the incumbent — promotion without identity
+# verification is how phantom-company pollution happens. The scan-orchestration
+# entry point (jobcannon.engine.ats_scanner._run.run_ats_scan) propagates
+# services.prober_extensions into set_prober_extensions() automatically
+# (restoring the prior value in a finally) — see services.py's module
+# docstring for the full wiring.
+#   promote_from_careers_link, identity_reconcile_settings,
+#   owner_identity_passes, resolve_slug_collision,
+#   new_summary, try_static_extract, try_embedded_json_extract,
+#   try_playwright_extract, upsert_and_log
+_prober_extensions: Any | None = None
+
+
+def set_prober_extensions(ext: Any | None) -> None:
+    """Register (or clear, with None) the host's prober extension bundle."""
+    global _prober_extensions
+    _prober_extensions = ext
+
 
 # Probe status precedence for upsert conflict resolution (higher = more advanced)
 _PROBE_STATUS_PRECEDENCE = {
@@ -224,7 +253,7 @@ def _try_static_first_fallthrough(
     On success, promotes the company to the detected ATS or persists jobs from
     custom careers pages. Custom pages are NOT marked as 'hit' (that state
     requires a real ATS platform with platform+slug); instead they are marked
-    as 'miss' with scan_enabled=1 and jobs persisted, so the careers_crawler
+    as 'miss' with scan_enabled=TRUE and jobs persisted, so the careers_crawler
     picks them up for ongoing extraction. Sets specific miss_reason on failure.
 
     Args:
@@ -240,11 +269,23 @@ def _try_static_first_fallthrough(
         with jobs persisted, or all tiers failed), or "error" (transient failure).
     """
     from jobcannon.engine._http_constants import _HEADERS, _TIMEOUT
-    from jobcannon.engine.ats_identity_reconcile import promote_from_careers_link
-    from jobcannon.engine.careers_crawler import _new_summary
-    from jobcannon.engine.careers_crawler._embedded_json_tier import _try_embedded_json_extract
-    from jobcannon.engine.careers_crawler._persistence import _upsert_and_log
-    from jobcannon.engine.careers_crawler._static_tier import _try_static_extract
+
+    ext = _prober_extensions
+    if ext is None:
+        conn.execute(
+            """UPDATE companies
+               SET ats_probe_status = 'miss',
+                   miss_reason = ?,
+                   updated_at = ?
+               WHERE id = ?""",
+            ("static_fallthrough_unavailable", now, company_id),
+        )
+        conn.commit()
+        logger.info(
+            "static_fallthrough: no prober extensions registered for %s — miss",
+            company_name,
+        )
+        return {"status": "miss", "reason": "static_fallthrough_unavailable"}
 
     # Extract target titles and exclusions from config for title filtering
     profile_cfg = config.get("profile", {})
@@ -281,7 +322,7 @@ def _try_static_first_fallthrough(
             # Compute reenable_scan based on company state (Fix 3)
             # Only re-enable for the m074 cohort: no known platform, prior miss
             reenable = company["ats_platform"] is None and company["ats_probe_status"] == "miss"
-            res = promote_from_careers_link(
+            res = ext.promote_from_careers_link(
                 conn,
                 company_id,
                 platform,
@@ -336,7 +377,7 @@ def _try_static_first_fallthrough(
                             company["ats_platform"] is None
                             and company["ats_probe_status"] == "miss"
                         )
-                        res = promote_from_careers_link(
+                        res = ext.promote_from_careers_link(
                             conn,
                             company_id,
                             platform,
@@ -366,17 +407,17 @@ def _try_static_first_fallthrough(
     # ------------------------------------------------------------
     logger.debug("static_fallthrough: tier2 static extract for %s", company_name)
     try:
-        static_jobs = _try_static_extract(careers_url, target_titles, title_exclusions)
+        static_jobs = ext.try_static_extract(careers_url, target_titles, title_exclusions)
         if static_jobs is not None:
             # static_jobs is a list (may be empty) -> page was statically rendered
             if len(static_jobs) > 0:
                 # Found jobs statically -> persist them and enable scan for custom careers page
                 # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
-                # scan_enabled=1 and a specific miss_reason, so careers_crawler picks it up.
+                # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up.
                 if db_path:
-                    summary = _new_summary()
+                    summary = ext.new_summary()
                     all_new_job_keys = []
-                    _upsert_and_log(
+                    ext.upsert_and_log(
                         static_jobs,
                         company_id,
                         company_name,
@@ -400,9 +441,7 @@ def _try_static_first_fallthrough(
                 conn.execute(
                     """UPDATE companies
                        SET ats_probe_status = 'miss',
-                           scan_enabled = 1,
-                           ats_scan_enabled = 1,
-                           careers_scan_enabled = 1,
+                           scan_enabled = TRUE,
                            miss_reason = 'static_fallthrough_tier2_jobs_persisted',
                            updated_at = ?
                        WHERE id = ?""",
@@ -447,17 +486,17 @@ def _try_static_first_fallthrough(
     # ------------------------------------------------------------
     logger.debug("static_fallthrough: tier3 embedded JSON for %s", company_name)
     try:
-        json_jobs = _try_embedded_json_extract(careers_url, target_titles, title_exclusions)
+        json_jobs = ext.try_embedded_json_extract(careers_url, target_titles, title_exclusions)
         if json_jobs is not None:
             # json_jobs is a list (may be empty) -> embedded JSON found
             if len(json_jobs) > 0:
                 # Found jobs in embedded JSON -> persist them and enable scan for custom careers page
                 # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
-                # scan_enabled=1 and a specific miss_reason, so careers_crawler picks it up.
+                # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up.
                 if db_path:
-                    summary = _new_summary()
+                    summary = ext.new_summary()
                     all_new_job_keys = []
-                    _upsert_and_log(
+                    ext.upsert_and_log(
                         json_jobs,
                         company_id,
                         company_name,
@@ -481,9 +520,7 @@ def _try_static_first_fallthrough(
                 conn.execute(
                     """UPDATE companies
                        SET ats_probe_status = 'miss',
-                           scan_enabled = 1,
-                           ats_scan_enabled = 1,
-                           careers_scan_enabled = 1,
+                           scan_enabled = TRUE,
                            miss_reason = 'static_fallthrough_tier3_jobs_persisted',
                            updated_at = ?
                        WHERE id = ?""",
@@ -528,8 +565,6 @@ def _try_static_first_fallthrough(
     # ------------------------------------------------------------
     logger.debug("static_fallthrough: tier4 Playwright for %s", company_name)
     try:
-        from jobcannon.engine.careers_crawler._playwright_tier import _try_playwright_extract
-
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
@@ -539,17 +574,17 @@ def _try_static_first_fallthrough(
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(headless=True)
                 try:
-                    playwright_jobs = _try_playwright_extract(
+                    playwright_jobs = ext.try_playwright_extract(
                         browser, careers_url, target_titles, title_exclusions
                     )
                     if len(playwright_jobs) > 0:
                         # Found jobs via Playwright -> persist them and enable scan for custom careers page
                         # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
-                        # scan_enabled=1 and a specific miss_reason, so careers_crawler picks it up.
+                        # scan_enabled=TRUE and a specific miss_reason, so careers_crawler picks it up.
                         if db_path:
-                            summary = _new_summary()
+                            summary = ext.new_summary()
                             all_new_job_keys = []
-                            _upsert_and_log(
+                            ext.upsert_and_log(
                                 playwright_jobs,
                                 company_id,
                                 company_name,
@@ -573,9 +608,7 @@ def _try_static_first_fallthrough(
                         conn.execute(
                             """UPDATE companies
                                SET ats_probe_status = 'miss',
-                                   scan_enabled = 1,
-                                   ats_scan_enabled = 1,
-                                   careers_scan_enabled = 1,
+                                   scan_enabled = TRUE,
                                    miss_reason = 'static_fallthrough_tier4_jobs_persisted',
                                    updated_at = ?
                                WHERE id = ?""",
@@ -662,9 +695,11 @@ def _promote_speculative_hit(
     incumbent. ``resolve_slug_collision`` applies the same identity
     re-verification and consecutive-challenge threshold used by every other
     promotion write site, so a poisoned owner can still be demoted here —
-    just not by one speculative guess alone. Local (not top-of-file) imports:
-    ats_identity_reconcile -> ats_registry -> ats_prober would otherwise cycle
-    (see ats_registry's module docstring on the acyclic layering).
+    just not by one speculative guess alone. The identity-challenge machinery
+    (``owner_identity_passes`` / ``resolve_slug_collision`` /
+    ``identity_reconcile_settings``) lives host-side and arrives via the
+    ``_prober_extensions`` bundle (see ``set_prober_extensions``); with no
+    bundle registered this function fails closed (see below).
 
     Like every other promotion write site, this claim is scored with
     ``owner_identity_passes`` and stamped ``ats_evidence_provisional`` (see
@@ -678,14 +713,17 @@ def _promote_speculative_hit(
     ``company_id`` (first try or after a demotion); False if the pair stays
     with its current owner and the caller should try the next candidate.
     """
-    from jobcannon.engine.ats_slug_challenge import owner_identity_passes
-
     own = conn.execute(
         "SELECT name, name_raw FROM companies WHERE id = ?", (company_id,)
     ).fetchone()
     own_name = own["name"] if own else ""
     own_name_raw = own["name_raw"] if own else ""
-    is_provisional = 0 if owner_identity_passes(own_name, own_name_raw, None, slug) else 1
+    ext = _prober_extensions
+    is_provisional = (
+        0
+        if (ext is not None and ext.owner_identity_passes(own_name, own_name_raw, None, slug))
+        else 1
+    )
 
     # Every column below is nulled explicitly (not just omitted) so a company
     # row that once held an evidence-based promotion — then got its slug
@@ -711,15 +749,17 @@ def _promote_speculative_hit(
         conn.execute(speculative_sql, (platform, slug, is_provisional, company_id))
         return True
     except sqlite3.IntegrityError as ie:
-        from jobcannon.engine.ats_identity_reconcile import identity_reconcile_settings
-        from jobcannon.engine.ats_slug_challenge import resolve_slug_collision
+        if ext is None:
+            # Fail closed: without the slug-ownership challenge machinery a
+            # single speculative guess must never evict an incumbent owner.
+            return False
 
-        collision = resolve_slug_collision(
+        collision = ext.resolve_slug_collision(
             conn,
             platform=platform,
             slug=slug,
             challenger_id=company_id,
-            settings=identity_reconcile_settings(config),
+            settings=ext.identity_reconcile_settings(config),
             config=config,
         )
         if collision["demoted"]:
@@ -1747,9 +1787,7 @@ def _probe_successfactors(slug: str) -> bool:
         logger.debug("_probe_successfactors('%s'): invalid slug format", slug)
         return False
 
-    url = (
-        f"https://{host}/career?company={company_id}&career_ns=job_listing_summary&resultType=XML"
-    )
+    url = f"https://{host}/career?company={company_id}&career_ns=job_listing_summary&resultType=XML"
     try:
         r = requests.get(url, timeout=_PROBE_TIMEOUT)
         if r.status_code != 200:
