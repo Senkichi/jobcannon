@@ -158,6 +158,54 @@
       ]
     },
     {
+      "path": "jobcannon/db/migrations/m0013_scan_selection_log.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/migrations/m209595733_scan_selection_log_and_run_id.py"
+        },
+        {
+          "line": 2,
+          "text": "@ ec9b1404f684a8f20ad1ec2aa81c3a2f20fc0394 (private job-cannon). Ledger L-0284."
+        },
+        {
+          "line": 29,
+          "text": "scheme; the private original above is an epoch-second stamp -- see"
+        },
+        {
+          "line": 39,
+          "text": "private job_finder/db/_scan_selection.py) is out of scope for ledger"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/migrations/m0014_scan_title_outcomes.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/migrations/m209605115_scan_title_outcomes.py"
+        },
+        {
+          "line": 2,
+          "text": "@ 6b17d78cb770cf53cb21b5e0b34c2cc7cd203136 (private job-cannon). Ledger L-0287."
+        },
+        {
+          "line": 25,
+          "text": "(``record_title_outcomes`` in ``job_finder/db/_scan_log.py``) is the single"
+        },
+        {
+          "line": 29,
+          "text": "scheme; the private original above is an epoch-second stamp -- see"
+        },
+        {
+          "line": 36,
+          "text": "WI-09 writer (record_title_outcomes, private job_finder/db/_scan_log.py)"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/db/migrations/types.py",
       "root": "db",
       "markers": [
