@@ -3,7 +3,6 @@
 import sqlite3
 from datetime import datetime
 
-import pytest
 
 from jobcannon.engine.ats_detection import (
     aggregate_ats_candidates_from_job_bundles,
@@ -63,32 +62,14 @@ class TestAggregateAtsCandidates:
         assert abstain == "ambiguous_tie"
 
 
-@pytest.fixture()
-def seeded_pending_company(migrated_db_path):
-    conn = sqlite3.connect(migrated_db_path)
-    conn.row_factory = sqlite3.Row
-    now = datetime.now().isoformat()
-    conn.execute(
-        """INSERT INTO companies (name, name_raw, ats_probe_status, scan_enabled, created_at, updated_at)
-           VALUES ('acme', 'Acme', 'pending', 1, ?, ?)""",
-        (now, now),
-    )
-    cid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    conn.execute(
-        """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
-           first_seen, last_seen, company_id, pipeline_status)
-           VALUES ('k1', 'T', 'Acme', 'Remote', '[]',
-           ?, ?, ?, ?, 'discovered')""",
-        (
-            '["https://boards.greenhouse.io/acmecorp/jobs/1"]',
-            now,
-            now,
-            cid,
-        ),
-    )
-    conn.commit()
-    conn.close()
-    return migrated_db_path, int(cid)
+# DROPPED fixture (port L-group jobcannon/engine) [seeded_pending_company]: private-only
+# migrated_db_path/app fixtures (SQLite migrated-DB clone-template / Flask app harness);
+# jobcannon has no equivalent (Postgres tests/host harness is structurally different) --
+# L-group jobcannon/engine fixture-gap. Unused by any test in this file (dead even in the
+# private source); dropped rather than left as a latent trap referencing an undefined
+# fixture, consistent with the other fixture-gap drops in this port
+# (tests/test_brand_blocklist.py, tests/test_oracle_cloud_scanner.py,
+# tests/test_speculative_probe_consistency.py).
 
 
 def _seed_scan_disabled_miss(db_path: str) -> int:
