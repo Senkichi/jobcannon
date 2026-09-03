@@ -179,7 +179,7 @@ def test_manifest_pins_known_provenance_files():
     )
 
 
-def test_tight_gap_excludes_unrelated_local_filename_near_private():
+def test_tight_gap_excludes_unrelated_local_filename_near_private(tmp_path):
     """Regression guard for the noun-gap/tight-gap split in PROVENANCE_RE.
 
     jobcannon/engine/ats_scanner/__init__.py's module docstring says "...live
@@ -187,26 +187,40 @@ def test_tight_gap_excludes_unrelated_local_filename_near_private():
     underscore-privacy describing THIS repo's own sibling files, not a
     cross-repo reference — sitting a few words from an unrelated `.py`
     filename. An earlier version of this detector (single wide proximity
-    window for every artifact type) matched it. These real sentences
-    from the tree, plus that one, must NOT match on their own; if a future
-    change collapses the tight/noun gap split back into one budget, this is
-    what would go red (the other 10 tests would stay green, since none of
-    them exercises this specific ambiguity).
+    window for every artifact type) matched it.
 
-    ``_title_match.py`` was dropped from this list by Ledger L-0015 (migration
-    completeness audit): its former "Extracted from ``ats_platforms.py`` ..."
-    near-miss sentence is still present, but the file now ALSO carries a
-    genuine ``PORTED from ...`` marker (line 1), so it correctly IS
-    provenance-bearing today — asserting the negative here would fight a
-    true positive, not guard a false one. ``stale_detector.py`` was dropped
-    from this list the same way by Ledger L-0039 (same audit): it now also
-    carries a genuine ``PORTED from ...`` marker (line 1). ``_run_html.py``
-    below still carries the "Extracted from ..." phrasing with no genuine
-    marker, so the ambiguity this test targets stays covered.
+    This test used to pin that exact shape against real in-tree files
+    instead of a synthetic one: ``_title_match.py`` (Ledger L-0015),
+    ``stale_detector.py`` (Ledger L-0039), and ``_run_html.py`` (Ledger
+    L-0019) — all from the migration completeness audit — each carried a
+    coincidental "Extracted from ... during S7c ..." refactor-note sentence
+    with the same near-miss shape and, at the time, no genuine marker
+    elsewhere in the file. Porting any one of them adds a real ``PORTED
+    from ...`` marker (line 1) that makes the file correctly
+    provenance-bearing — asserting the negative here would then fight a
+    true positive, not guard a false one — so each was dropped from this
+    list as its row landed. All three real-file examples are now spent, and
+    every remaining in-tree file with a similar sentence risks the same
+    fate the moment it too gets a ledger row, which is exactly this test's
+    job to not depend on. A synthetic fixture below reproduces the __init__.py
+    shape directly (word "private", then real words, then a backtick-wrapped
+    `_sibling.py` filename) so the regression guard survives future porting
+    instead of needing a new live donor file each time. If a future change
+    collapses the tight/noun gap split back into one budget, this is what
+    would go red (the other tests would stay green, since none of them
+    exercises this specific ambiguity end-to-end through find_provenance_files).
     """
-    found = dpp.find_provenance_files(REPO_ROOT)
-    for path in ("jobcannon/engine/ats_scanner/_run_html.py",):
-        assert path not in found, f"{path} should not be provenance-bearing"
+    pkg_dir = tmp_path / "jobcannon" / "engine"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "_scan.py").write_text(
+        '"""Scan helpers.\n\n'
+        "The package's first-party concerns live in private sibling modules:\n\n"
+        "- `_sibling.py`   — shared tokenizing helper.\n"
+        '"""\n',
+        encoding="utf-8",
+    )
+    found = dpp.find_provenance_files(tmp_path)
+    assert "jobcannon/engine/_scan.py" not in found, found
 
 
 def test_provenance_regex_rejects_local_underscore_privacy_near_filename():
