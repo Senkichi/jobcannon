@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T06:24:30Z",
+  "generated_at": "2026-09-04T06:50:52Z",
   "roots": [
     "engine",
     "db",
@@ -556,6 +556,40 @@
       ]
     },
     {
+      "path": "jobcannon/db/migrations/m0023_careers_crawler_scan_columns.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 4,
+          "text": "migration's sibling PR lands (ledger L-0465, private source:"
+        },
+        {
+          "line": 5,
+          "text": "``job_finder/web/careers_crawler/_persistence.py`` @"
+        },
+        {
+          "line": 9,
+          "text": "- ``company_scan_log.source`` text, nullable, no default. Absorbs private"
+        },
+        {
+          "line": 10,
+          "text": "migration ``m208996968_add_source_to_company_scan_log.py`` (ledger L-0274,"
+        },
+        {
+          "line": 17,
+          "text": "private migration ``m209009471_add_failure_reason_to_company_scan_log.py``"
+        },
+        {
+          "line": 22,
+          "text": "default. Absorbs private migration"
+        },
+        {
+          "line": 46,
+          "text": "Does NOT add ``companies.careers_crawl_tier`` -- private's ``_persistence.py``"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/db/migrations/m0025_mailbox_credentials.py",
       "root": "db",
       "markers": [
@@ -976,6 +1010,16 @@
         {
           "line": 1,
           "text": "# PORTED from job_finder/web/careers_crawler/_bench_predicate.py @ a071c405a6908b6af417eef7aab6ec0b795a7d27 (private job-cannon). Ledger L-0463."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/careers_crawler/_persistence.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/_persistence.py @ 23644885615a78d509d73c8b1c640b7d49b4a089 (private job-cannon). Ledger L-0465."
         }
       ]
     },
@@ -2184,11 +2228,11 @@
       "root": "host",
       "markers": [
         {
-          "line": 122,
+          "line": 123,
           "text": "_JD_STORAGE_MAX_CHARS = 50_000  # parity with the private repo's JD_STORAGE_MAX_CHARS"
         },
         {
-          "line": 124,
+          "line": 125,
           "text": "# Parity with the private deployment's job-level runtime cap for the ATS"
         }
       ]
