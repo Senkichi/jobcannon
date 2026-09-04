@@ -112,6 +112,7 @@ import os
 from jobcannon.db import _companies, _direct_link, _jd_full, _jobs
 from jobcannon.db import pool as pool_mod
 from jobcannon.engine import extraction_health, runtime_config, services
+from jobcannon.host import model_provider as _model_provider
 from jobcannon.host import posthog_admin, posthog_client, task_app
 from jobcannon.host.config import HostConfig
 from jobcannon.host.health_recorder import record_scan_health
@@ -172,6 +173,13 @@ def build_scan_services(host_config: HostConfig) -> services.ScanServices:
         jd_storage_max_chars=_JD_STORAGE_MAX_CHARS,
         # prober_extensions deliberately omitted -> None (fail-closed, spec §3.6)
         scan_deadline_s=_SCAN_DEADLINE_S,
+        # L-0036 PR-1: the hosted model
+        # dispatcher + its cost/usage sink, both module-level functions
+        # (not per-tenant closures — call_model takes user_id per call and
+        # builds a fresh, per-call CredentialResolver internally; see
+        # jobcannon.host.model_provider.call_model's docstring).
+        call_model=_model_provider.call_model,
+        record_cost=_model_provider.record_cost,
     )
 
 

@@ -137,6 +137,13 @@ services:
       # ever sending the raw Clerk user id to PostHog.
       - key: JC_ANALYTICS_PSEUDONYM_SALT
         sync: false
+      # BYO-key encryption-at-rest KEK (L-0036).
+      # Declared on both services -- web AND worker each build a
+      # call_model via wiring.py's build_scan_services. Unset fails closed
+      # (jobcannon/host/credentials.py: every resolve_credential(...) call
+      # returns None) rather than blocking startup.
+      - key: JC_BYO_KEY_KEK
+        sync: false
 
   - type: worker
     name: jobcannon-worker
@@ -213,6 +220,11 @@ services:
       # Clerk user ids), and this is a real secret so it stays sync: false
       # rather than a committed literal.
       - key: JC_ANALYTICS_PSEUDONYM_SALT
+        sync: false
+      # Same dedicated secret as jobcannon-web's JC_BYO_KEY_KEK declaration
+      # above -- both services must be set to the SAME value (they decrypt
+      # the same byo_key_credentials rows).
+      - key: JC_BYO_KEY_KEK
         sync: false
       # Issue #136: the reconciliation-sweep periodic
       # (jobcannon.host.tasks.reconcile_deleted_users) needs its own Clerk

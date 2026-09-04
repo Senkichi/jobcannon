@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T01:06:48Z",
+  "generated_at": "2026-09-04T01:57:44Z",
   "roots": [
     "engine",
     "db",
@@ -32,6 +32,16 @@
         {
           "line": 297,
           "text": "(matches the private original's rationale: it is re-stamped via"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/_byo_key_credentials.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 3,
+          "text": "NOT a port -- no private-repo equivalent exists; BYO-key hosted credentials"
         }
       ]
     },
@@ -1602,6 +1612,16 @@
       ]
     },
     {
+      "path": "jobcannon/engine/model_types.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/model_provider.py @ 9678c44c5d667d8a1d587c2d1f92b9df4056ead9"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/models.py",
       "root": "engine",
       "markers": [
@@ -1726,6 +1746,36 @@
         {
           "line": 1,
           "text": "# PORTED from job_finder/web/profile_schema.py @ c82b924bf60c9059bb3b4ed29db48d8fc9ddcba8 (private job-cannon). Ledger L-0231."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/providers/cerebras_provider.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/providers/cerebras_provider.py @ 9d57537f2f7100239181d34d0515cba342c83237"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/providers/gemini_provider.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/providers/gemini_provider.py @ 9678c44c5d667d8a1d587c2d1f92b9df4056ead9"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/providers/groq_provider.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/providers/groq_provider.py @ 9d57537f2f7100239181d34d0515cba342c83237"
         }
       ]
     },
@@ -1978,15 +2028,51 @@
       ]
     },
     {
+      "path": "jobcannon/host/model_provider.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"ADAPTED from job_finder/web/model_provider.py @ 9678c44c5d667d8a1d587c2d1f92b9df4056ead9"
+        },
+        {
+          "line": 32,
+          "text": "#     ever fire hosted, so parameterizing the private function with a"
+        },
+        {
+          "line": 45,
+          "text": "#   - cost_gate / BudgetExceededError / FREE_PROVIDERS (private:"
+        },
+        {
+          "line": 46,
+          "text": "#     claude_client.py) do not carry: those gate an OWNER's daily spend"
+        },
+        {
+          "line": 232,
+          "text": "# canonical location) rather than job_finder.constants."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/provider_catalog.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/provider_catalog.py @ e6c17c32051602be4b565becb71486f2a4c10ed1"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/host/wiring.py",
       "root": "host",
       "markers": [
         {
-          "line": 121,
+          "line": 122,
           "text": "_JD_STORAGE_MAX_CHARS = 50_000  # parity with the private repo's JD_STORAGE_MAX_CHARS"
         },
         {
-          "line": 123,
+          "line": 124,
           "text": "# Parity with the private deployment's job-level runtime cap for the ATS"
         }
       ]
