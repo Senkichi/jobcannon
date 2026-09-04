@@ -12,16 +12,28 @@ The malformed-name predicate is isalnum()-based like the private original
 Recorded divergence (Ledger L-0011, ats_company.py drift since Wave-1
 baseline): four private-side commits landed after this module's baseline
 (#1913 merged-loser resolution, #1881 company_state_history, #1867
-normalizer v2, #1869 scan_enabled split). None of that is reflected here.
-Two gaps specifically: (1) company_state_history — the private repo now
-appends an audit-trail row on certain state transitions; this module writes
-`companies` in place with no equivalent history table. (2) merge-survivor
-resolution (#1913) — the private repo's merged-loser handling picks a
-surviving row across duplicate companies; this module's collision path
-(above) only handles the ats_platform/ats_slug UNIQUE case, not a general
-merge. Both are unaddressed scope, not intentional non-ports — a future
-row should close them, matching the intentional Phase-2 deferral recorded
-just below.
+normalizer v2, #1869 scan_enabled split). Two gaps were originally recorded
+here; one is now closed:
+(1) company_state_history — CLOSED by ledger L-0040. ``_update_existing``
+below snapshots the tracked fields before its UPDATE and diffs them after
+(``jobcannon.db._company_state.snapshot_tracked`` /
+``record_state_diff``), same wrapping as private's ``ats_company.py``. This
+needed the WI-13 ``ats_scan_enabled``/``careers_scan_enabled`` split
+(``jobcannon/db/migrations/m0018_wi13_scan_lane_columns.py``) to land first
+so the tracked set has all 6 public columns to read.
+(2) merge-survivor resolution (#1913) — STILL OPEN. The private repo's
+merged-loser handling picks a surviving row across duplicate companies;
+this module's collision path (above) only handles the ats_platform/ats_slug
+UNIQUE case, not a general merge. Unaddressed scope, not an intentional
+non-port — a future row should close it, matching the intentional Phase-2
+deferral recorded just below.
+
+``jobcannon/db/_company_attribution.py`` (ledger L-0065, a sibling writer
+this module does not call) still has its OWN separate, not-yet-closed
+company_state_history gap — its module docstring names it explicitly as
+follow-up now that this module's history wiring exists; wiring
+``set_company_attribution`` is out of this row's scope (L-0040 covers only
+this module's UPDATE path).
 
 Row access note: all internal row reads use STRING keys only (never
 positional). This function is called both through the pooled
@@ -67,6 +79,7 @@ from typing import Any
 
 import psycopg
 
+from jobcannon.db._company_state import record_state_diff, snapshot_tracked
 from jobcannon.db.pool import commit_unless_nested
 
 logger = logging.getLogger(__name__)
@@ -118,7 +131,16 @@ def _update_existing(
 ) -> int:
     """Shared existing-row update path: monotonic probe-status rule +
     collision-safe ATS field write. Used both by the normal "row already
-    existed" flow and by the INSERT-side name-collision recovery path."""
+    existed" flow and by the INSERT-side name-collision recovery path.
+
+    # PORT-SEAM: snapshot_tracked/record_state_diff wrapping added (ledger
+    # L-0040) -- mirrors how private's job_finder/web/ats_company.py wraps
+    # this same UPDATE. Reads before the branch below, diffs after every
+    # path through it resolves, so a collision fallback (ATS fields left
+    # untouched) still records whatever DID change (e.g. homepage_url is
+    # not tracked, so a pure-collision retry correctly records zero rows).
+    """
+    state_before = snapshot_tracked(raw, company_id)
     current_rank = _PROBE_STATUS_PRECEDENCE.get(current_status, 0)
     new_rank = _PROBE_STATUS_PRECEDENCE.get(ats_probe_status, 0)
     if new_rank >= current_rank:
@@ -165,6 +187,10 @@ def _update_existing(
                 "WHERE id = %s",
                 (homepage_url, company_id),
             )
+    # PORT-SEAM: see docstring above -- L-0040 wiring.
+    record_state_diff(
+        raw, company_id, state_before, snapshot_tracked(raw, company_id), "upsert_company"
+    )
     commit_unless_nested(raw)
     return company_id
 
