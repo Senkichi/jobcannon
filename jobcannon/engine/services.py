@@ -143,7 +143,10 @@ class ScanServices:
     # caller instead (same treatment as ats_slug_challenge's
     # TRIGGER_PREFIX_CAREERS_URL, documented above).
     tiebreak_primary_posting: Callable[..., Any] | None = None
-    # db._postings.annotate_posting_apply_url (L-0075, escalated/unlanded).
+    # db._jobs.annotate_posting_apply_url (L-0075, landed -- flat
+    # re-adaptation, signature (conn, dedup_key, aggregator_apply_url); the
+    # private (ats_platform, source_id) descriptor keying has no target on
+    # this host's flat postings table, see jobcannon/db/_jobs.py).
     annotate_posting_apply_url: Callable[..., Any] | None = None
     # db._persistence.{persist_job_expiry_state,update_pipeline_status} — no
     # ledger row identified in this port's read scope; both are DB-layer

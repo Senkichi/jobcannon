@@ -161,6 +161,7 @@ def build_scan_services(host_config: HostConfig) -> services.ScanServices:
         upsert_company=_companies.upsert_company,
         set_direct_url=_direct_link.set_direct_url,
         stamp_direct_url_checks=_direct_link.stamp_direct_url_checks,
+        annotate_posting_apply_url=_jobs.annotate_posting_apply_url,  # PORT-SEAM: L-0075, flat re-adaptation (jobcannon/db/_jobs.py)
         # Deliberately the SAME object runtime_config.set_config_provider below
         # hands back (not a copy) — one source of truth, so the services
         # snapshot and the live provider can never drift apart.

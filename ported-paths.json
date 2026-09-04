@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-03T21:54:33Z",
+  "generated_at": "2026-09-04T00:38:19Z",
   "roots": [
     "engine",
     "db",
@@ -216,12 +216,20 @@
           "text": "# analog here. Private's UPDATE relies on the I-11 partial UNIQUE index on"
         },
         {
-          "line": 562,
-          "text": "# no analog of private's separate per-source postings sub-entity list or the"
+          "line": 581,
+          "text": "# PORTED from job_finder/db/_postings.py @ 175d0e1024eee45a279522868798fb7b4777a952"
         },
         {
-          "line": 564,
-          "text": "# L-0075 (job_finder/db/_postings.py, this same ledger) is escalated OPEN"
+          "line": 585,
+          "text": "# subsumed, not ported -- see the PORT-SEAM block above this function)."
+        },
+        {
+          "line": 586,
+          "text": "#"
+        },
+        {
+          "line": 587,
+          "text": "# PORT-SEAM: private keyed the write on (ats_platform, source_id) to find"
         }
       ]
     },
@@ -460,6 +468,16 @@
         {
           "line": 1,
           "text": "\"\"\"PORTED from job_finder/web/migrations/m206169048_add_score_audits_table.py"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/migrations/m0019_postings_aggregator_apply_url_column.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 4,
+          "text": "re-adaptation) from private's job_finder/db/_postings.py::annotate_posting_apply_url"
         }
       ]
     },
