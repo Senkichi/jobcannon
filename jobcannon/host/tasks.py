@@ -1,13 +1,13 @@
 """Procrastinate task-shape declarations for the hosted job taxonomy, plus the
 periodic enqueue tick, storage-check tick, orphaned-job reclaim tick,
 anon-user reap tick, events-retention reap tick, deletion-reconciliation
-sweep tick, revoked-subjects reap tick, and jd-adjudication tick that fire on
-a schedule.
+sweep tick, revoked-subjects reap tick, jd-adjudication tick, and
+nightly-monitor sampler tick that fire on a schedule.
 
-Task shapes (`scan`, `expiry_check`, `stale_detect`) and the eight periodics
+Task shapes (`scan`, `expiry_check`, `stale_detect`) and the nine periodics
 (`enqueue_due_scans`, `db_storage_check`, `reclaim_orphaned_jobs`,
 `reap_anon_users`, `reap_old_events`, `reconcile_deleted_users`,
-`reap_revoked_subjects`, `jd_adjudication`, each declared with
+`reap_revoked_subjects`, `jd_adjudication`, `nightly_sampler`, each declared with
 `@app.periodic` + `@app.task` below) all live here — this ONE
 `procrastinate.App` instance (constructed below) is the sole periodic-task
 scheduling mechanism in this codebase; a new periodic task is another peer
@@ -63,6 +63,7 @@ from jobcannon.db._events import delete_expired_events
 from jobcannon.db._revoked_subjects import prune_expired_revocations
 from jobcannon.db._users import reap_unconverted_anon_users
 from jobcannon.host import scan_tasks as _scan_tasks
+from jobcannon.host.nightly.config import nightly_monitor_enabled
 from jobcannon.host.scan_tasks import (
     run_expiry_check_task,
     run_scan_task,
@@ -434,3 +435,27 @@ def jd_adjudication(timestamp: int) -> dict:
     config = runtime_config.get_runtime_config()
     with connection_factory() as conn:
         return run_jd_adjudication_backfill(conn, config, call_model=_model_provider.call_model)
+
+
+@app.periodic(
+    cron=os.environ.get("JC_NIGHTLY_SAMPLER_CRON", "*/4 * * * *"),
+    periodic_id="nightly_sampler",
+)
+@app.task(queue="maintenance", queueing_lock="nightly_sampler")
+def nightly_sampler(timestamp: int) -> dict:
+    """Periodic (Ledger L-0471): watermark-driven checkpoint sampler over
+    scan_health_log / procrastinate_jobs, gated OFF by default behind
+    JC_NIGHTLY_MONITOR_ENABLED -- the checker below MUST run before any
+    other import or DB connection in this function, so a disabled monitor
+    costs nothing beyond this one os.environ read (same shape as every
+    other gated-but-always-registered periodic in this module: registering
+    the shape is not the same as running it, and enabling here is a pure
+    env change with no redeploy). See jobcannon/host/nightly/sampler.py's
+    module docstring for what this tick does and does not do while dark:
+    no LLM spend (call_model stays unwired), no issue filing, only a
+    fire-once scan_health_log ERROR row on a forced FAIL verdict."""
+    if not nightly_monitor_enabled():
+        return {"skipped": "disabled"}
+    from jobcannon.host.nightly.sampler import run_sampler_tick
+
+    return run_sampler_tick() or {"skipped": "tick_failed"}
