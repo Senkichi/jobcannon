@@ -9,6 +9,9 @@ Each job card is a <table class="width-100"> containing:
 """
 
 from datetime import datetime
+from urllib.parse import (
+    urlsplit,
+)  # PORT-SEAM: netloc-exact URL check below (CodeQL py/incomplete-url-substring-sanitization)
 
 from jobcannon.engine.email_parsers.monster_parser import parse_monster_alert
 
@@ -189,7 +192,8 @@ class TestMonsterSingleJob:
     def test_source_url_is_tracking_link(self):
         jobs = parse_monster_alert(SINGLE_JOB_HTML)
         assert jobs[0].source_url == TITLE_HREF_1
-        assert "click.monster.com" in jobs[0].source_url
+        # PORT-SEAM: netloc-exact check, not substring (CodeQL py/incomplete-url-substring-sanitization)
+        assert urlsplit(jobs[0].source_url).netloc == "click.monster.com"
 
     def test_source_id_empty(self):
         # Monster tracking URLs expose no raw job ID

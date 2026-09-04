@@ -2,6 +2,9 @@
 """Tests for Greenhouse job alert parser (no-reply@us.greenhouse-jobs.com)."""
 
 from datetime import datetime
+from urllib.parse import (
+    urlsplit,
+)  # PORT-SEAM: netloc-exact URL check below (CodeQL py/incomplete-url-substring-sanitization)
 
 from jobcannon.engine.email_parsers.greenhouse_parser import parse_greenhouse_alert
 
@@ -76,7 +79,8 @@ class TestGreenhouseParser:
         """source_url should not include ?gh_src= tracking param."""
         jobs = parse_greenhouse_alert(SAMPLE_SINGLE_JOB)
         assert "gh_src" not in jobs[0].source_url
-        assert "job-boards.greenhouse.io" in jobs[0].source_url
+        # PORT-SEAM: netloc-exact check, not substring (CodeQL py/incomplete-url-substring-sanitization)
+        assert urlsplit(jobs[0].source_url).netloc == "job-boards.greenhouse.io"
         assert "/jobs/4647776006" in jobs[0].source_url
 
     def test_source_is_greenhouse(self):

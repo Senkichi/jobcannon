@@ -2,6 +2,9 @@
 """Tests for Indeed match email parser (donotreply@match.indeed.com)."""
 
 from datetime import datetime
+from urllib.parse import (
+    urlsplit,
+)  # PORT-SEAM: netloc-exact URL check below (CodeQL py/incomplete-url-substring-sanitization)
 
 from jobcannon.engine.email_parsers.indeed_parser import parse_indeed_match_alert
 
@@ -104,7 +107,8 @@ class TestIndeedMatchSingleJob:
 
     def test_single_job_source_url(self):
         jobs = parse_indeed_match_alert(SAMPLE_SINGLE_JOB_WITH_SALARY)
-        assert "cts.indeed.com" in jobs[0].source_url
+        # PORT-SEAM: netloc-exact check, not substring (CodeQL py/incomplete-url-substring-sanitization)
+        assert urlsplit(jobs[0].source_url).netloc == "cts.indeed.com"
 
     def test_single_job_source_id(self):
         jobs = parse_indeed_match_alert(SAMPLE_SINGLE_JOB_WITH_SALARY)

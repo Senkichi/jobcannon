@@ -7,6 +7,9 @@
 
 import os  # PORT-SEAM: hoisted to top (L-0559 test drop); see note below
 from datetime import datetime
+from urllib.parse import (
+    urlsplit,
+)  # PORT-SEAM: netloc-exact URL checks below (CodeQL py/incomplete-url-substring-sanitization)
 
 from jobcannon.engine.email_parsers.glassdoor_parser import parse_glassdoor_alert
 from jobcannon.engine.email_parsers.indeed_parser import parse_indeed_alert
@@ -535,8 +538,9 @@ class TestIndeedParser:
     def test_job_source_url_contains_indeed(self):
         """All parsed jobs have source_url containing 'indeed.com'."""
         jobs = parse_indeed_alert(SAMPLE_INDEED_ALERT_HTML)
-        assert all("indeed.com" in j.source_url for j in jobs), (
-            "All source_urls should contain 'indeed.com'"
+        # PORT-SEAM: netloc-exact check, not substring (CodeQL py/incomplete-url-substring-sanitization)
+        assert all(urlsplit(j.source_url).netloc == "www.indeed.com" for j in jobs), (
+            "All source_urls should be hosted at www.indeed.com"
         )
 
     def test_job_title_not_unknown(self):
@@ -728,8 +732,9 @@ class TestIndeedPlaintextParser:
         """source_url contains 'engage.indeed.com'."""
         jobs = parse_indeed_alert(SAMPLE_INDEED_PLAINTEXT_MULTI)
         assert len(jobs) >= 1
-        assert "engage.indeed.com" in jobs[0].source_url, (
-            f"Expected engage.indeed.com in URL, got '{jobs[0].source_url}'"
+        # PORT-SEAM: netloc-exact check, not substring (CodeQL py/incomplete-url-substring-sanitization)
+        assert urlsplit(jobs[0].source_url).netloc == "engage.indeed.com", (
+            f"Expected engage.indeed.com host, got '{jobs[0].source_url}'"
         )
 
     def test_plaintext_source_id_from_url(self):
