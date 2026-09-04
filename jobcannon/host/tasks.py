@@ -11,7 +11,14 @@ Task shapes (`scan`, `expiry_check`, `stale_detect`) and the nine periodics
 `@app.periodic` + `@app.task` below) all live here — this ONE
 `procrastinate.App` instance (constructed below) is the sole periodic-task
 scheduling mechanism in this codebase; a new periodic task is another peer
-registered on it, never a second scheduler. 'enrich' is intentionally not defined: no enrich hook exists
+registered on it, never a second scheduler. An eighth periodic,
+`enqueue_imap_ingest` (L-0188), lives in the sibling
+`jobcannon.host.ingestion_tasks` module rather than here — same `app`
+instance, imported separately by `jobcannon/worker/__main__.py` purely for
+its `@app.task`/`@app.periodic` decorators to register (that module's own
+docstring explains why it is a separate file: `ingestion_tasks.py` pulls in
+`jobcannon.engine.parsed_job`/`ats_detection`, a different dependency
+surface than this module's). 'enrich' is intentionally not defined: no enrich hook exists
 to run. Defining a periodic task's SHAPE is not the same as RUNNING it: this
 module still never runs a worker or applies procrastinate's schema at import
 time — `jobcannon.worker.__main__` owns both (it applies procrastinate's

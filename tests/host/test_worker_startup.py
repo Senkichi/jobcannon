@@ -32,7 +32,7 @@ def test_worker_main_wires_in_order(monkeypatch):
     # mock of it, so this proves the wiring actually calls through.
     assert calls[0][2] == {"allow_newer_db": False}
     kwargs = calls[-1][1]
-    assert kwargs["queues"] == ["scan", "maintenance"]
+    assert kwargs["queues"] == ["scan", "maintenance", "ingest"]
     assert kwargs["concurrency"] == 2  # JC_WORKER_CONCURRENCY default
 
 

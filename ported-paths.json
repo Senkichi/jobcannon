@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T17:36:03Z",
+  "generated_at": "2026-09-04T17:47:49Z",
   "roots": [
     "engine",
     "db",
@@ -2284,6 +2284,28 @@
       ]
     },
     {
+      "path": "jobcannon/host/ingestion_tasks.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED (persistence logic) from job_finder/web/ingestion_runner.py"
+        },
+        {
+          "line": 21,
+          "text": "# against the two lifted functions, not the whole private file, following"
+        },
+        {
+          "line": 28,
+          "text": "# task queue) in the single-user private repo, so this scaffolding has no"
+        },
+        {
+          "line": 29,
+          "text": "# private-repo equivalent. It mirrors jobcannon/host/scan_tasks.py's"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/host/jd_adjudication_backfill.py",
       "root": "host",
       "markers": [
@@ -2518,6 +2540,16 @@
         {
           "line": 1,
           "text": "# PORTED from job_finder/web/_htmx.py @ b1aa40239b89327d2d0abdf38dd5cfd4f53698e3 (private job-cannon). Ledger L-0123."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/web/sync.py",
+      "root": "web",
+      "markers": [
+        {
+          "line": 4,
+          "text": "(`scheduler/_sync.py`, private repo's manual \"Sync Now\" scheduler job) --"
         }
       ]
     }

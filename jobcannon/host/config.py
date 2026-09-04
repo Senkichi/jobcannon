@@ -164,6 +164,35 @@ class HostConfig:
     byo_key_kek: str | None = field(
         default=None, metadata={"env": "JC_BYO_KEY_KEK", "declare_on": ("web", "worker")}
     )
+    # IMAP per-user ingestion feature flag (L-0188, design-aggregators-imap.md
+    # §3). Same non-consumption pattern as byo_key_kek above:
+    # jobcannon.host.ingestion_tasks's periodic tick and jobcannon.web.sync's
+    # Sync-Now route both read this env var directly via
+    # imap_ingest_enabled() below (not via this field) -- the tick runs
+    # inside a @app.periodic-decorated function body, and calling
+    # load_host_config() there would raise RuntimeError whenever
+    # DATABASE_URL is unset (e.g. when
+    # test_render_config.py::test_worker_start_command_module_is_importable
+    # imports this module's package for decorator registration only).
+    # Declared here purely so test_render_config.py's declare_on derivation
+    # covers it in render.yaml on both services. Default OFF (design note
+    # §3: "periodic tick and on-demand route both ship behind the flag").
+    imap_ingest_enabled: str | None = field(
+        default=None, metadata={"env": "IMAP_INGEST_ENABLED", "declare_on": ("web", "worker")}
+    )
+
+
+def imap_ingest_enabled() -> bool:
+    """Whether the IMAP per-user ingestion pipeline (L-0188) is active.
+
+    The ONE place IMAP_INGEST_ENABLED's boolean-parsing rule lives --
+    jobcannon.host.ingestion_tasks.enqueue_imap_ingest and
+    jobcannon.web.sync's Sync-Now route both call this directly (not
+    HostConfig.imap_ingest_enabled above; see that field's comment for why).
+    Fail-closed: unset, blank, or anything other than "true"
+    (case-insensitive) is False -- an operator must opt in explicitly.
+    """
+    return (os.environ.get("IMAP_INGEST_ENABLED") or "").strip().lower() == "true"
 
 
 def _put_int(mapping: dict, section: str, key: str, env_var: str) -> None:
@@ -227,4 +256,5 @@ def load_host_config() -> HostConfig:
         clerk_webhook_signing_secret=os.environ.get("CLERK_WEBHOOK_SIGNING_SECRET", ""),
         render_git_commit=os.environ.get("RENDER_GIT_COMMIT", ""),
         byo_key_kek=(os.environ.get("JC_BYO_KEY_KEK") or "").strip() or None,
+        imap_ingest_enabled=(os.environ.get("IMAP_INGEST_ENABLED") or "").strip() or None,
     )

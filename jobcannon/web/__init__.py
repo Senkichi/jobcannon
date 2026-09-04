@@ -1039,6 +1039,10 @@ def create_app(config: dict | None = None) -> Flask:
 
     app.register_blueprint(actions_bp)
 
+    from jobcannon.web.sync import sync_bp
+
+    app.register_blueprint(sync_bp)
+
     from jobcannon.web.account import account_bp
     from jobcannon.web.export import export_bp
 
