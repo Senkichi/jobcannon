@@ -1,5 +1,6 @@
 """AST guard: jobcannon/db/_events.py is the ONLY module allowed to write to
-the events table OR the users.analytics_consent column.
+the events table OR the users.analytics_consent / users.mailbox_consent
+columns.
 
 Best-effort STATIC lint over string LITERALS. It cannot see SQL assembled at
 runtime (f-strings / concatenation / .format() split the table name across
@@ -53,6 +54,11 @@ def _is_forbidden_events_sql(s: str) -> bool:
     # `analytics_consent_updated_at` in schema DDL does NOT trip `\bupdate\b`.
     if "analytics_consent" in n and re.search(r"\b(?:update|insert\s+into)\b", n):
         return True
+    # mailbox_consent (m0025) mirrors analytics_consent exactly: same single
+    # sanctioned writer (record_consent's mailbox branch), same word-boundary
+    # reasoning so `mailbox_consent_updated_at` in schema DDL doesn't trip.
+    if "mailbox_consent" in n and re.search(r"\b(?:update|insert\s+into)\b", n):
+        return True
     return False
 
 
@@ -96,4 +102,10 @@ def test_forbidden_events_sql_predicate():
     # word-boundary: schema DDL for analytics_consent_updated_at must NOT trip the update check
     assert not _is_forbidden_events_sql(
         "ALTER TABLE users ADD COLUMN analytics_consent_updated_at timestamptz"
+    )
+    # mailbox_consent (m0025) mirrors the analytics_consent checks above
+    assert _is_forbidden_events_sql("UPDATE users SET mailbox_consent = true WHERE id = %s")
+    assert not _is_forbidden_events_sql("SELECT mailbox_consent FROM users WHERE id = %s")
+    assert not _is_forbidden_events_sql(
+        "ALTER TABLE users ADD COLUMN mailbox_consent_updated_at timestamptz"
     )

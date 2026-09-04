@@ -211,13 +211,30 @@ def record_consent(
     _jobs.py: no commit here — the caller wraps this in connection_factory()
     + pool.commit_unless_nested(), or a test's rollback-isolated db_conn).
 
-    `analytics_consent_version` (m0006) is set unconditionally, on a decline
-    as well as a grant — the version stored on a decline row is never
-    consulted by read_consent_state/read_consent_choice_made (a decline's
-    analytics_consent is already false, which short-circuits both readers
-    before the version comparison), so this is inert for a decline and is
-    the only column that lets a later grant's version-mismatch check work at
-    all.
+    `consent_type` selects one of two literal UPDATE statements (kept as
+    two separate, fully-spelled-out statements rather than one
+    column-name-mapping-driven UPDATE — the two consent domains' column
+    sets already differ, `analytics` carries a version column and
+    `mailbox` (m0025, design note §1.2) does not, so a generic mapping
+    would be a leaky abstraction for a shape that doesn't hold; keeping
+    both as visible literals also keeps them legible to
+    tests/host/test_events_single_writer.py's string-literal AST scan):
+
+    - "analytics": `analytics_consent_version` (m0006) is set
+      unconditionally, on a decline as well as a grant — the version stored
+      on a decline row is never consulted by read_consent_state/
+      read_consent_choice_made (a decline's analytics_consent is already
+      false, which short-circuits both readers before the version
+      comparison), so this is inert for a decline and is the only column
+      that lets a later grant's version-mismatch check work at all.
+    - "mailbox": no version column exists or is needed yet (single
+      mailbox-consent version in flight); `consent_version` stays a
+      required kwarg regardless of `consent_type` so the audit event's
+      payload shape is uniform across both consent domains — it is simply
+      not persisted to a `users` column for this branch.
+
+    Any other `consent_type` raises ValueError before either write is
+    attempted — there is no silent third branch.
 
     The payload is validated against events_schema's PII allowlist + 200-char
     cap BEFORE either write is issued — the same validation every log_event
@@ -231,12 +248,38 @@ def record_consent(
     }
     events_schema.validate_payload("consent_recorded", payload)
     raw = conn.raw if hasattr(conn, "raw") else conn
-    raw.execute(
-        "UPDATE users SET analytics_consent = %s, analytics_consent_updated_at = now(), "
-        "analytics_consent_version = %s WHERE id = %s",
-        (granted, consent_version, user_id),
-    )
+    if consent_type == "analytics":
+        raw.execute(
+            "UPDATE users SET analytics_consent = %s, analytics_consent_updated_at = now(), "
+            "analytics_consent_version = %s WHERE id = %s",
+            (granted, consent_version, user_id),
+        )
+    elif consent_type == "mailbox":
+        raw.execute(
+            "UPDATE users SET mailbox_consent = %s, mailbox_consent_updated_at = now() "
+            "WHERE id = %s",
+            (granted, user_id),
+        )
+    else:
+        raise ValueError(f"record_consent: unknown consent_type {consent_type!r}")
     insert_event(raw, event_type="consent_recorded", user_id=user_id, payload=payload)
+
+
+def read_mailbox_consent(conn: Any, user_id: str) -> bool:
+    """True only when the tenant has an active mailbox-intake grant.
+
+    Mirrors read_consent_state's shape but mailbox consent has no version
+    column to compare (see record_consent's docstring) — a bare boolean
+    read is the whole contract. jobcannon.host.credentials.build_mailbox_
+    resolver calls this FIRST and fails closed (returns None from every
+    resolve call) when it reads False, even if an active mailbox_credentials
+    row exists — consent is the gate, not the row's mere presence."""
+    raw = conn.raw if hasattr(conn, "raw") else conn
+    row = raw.execute(
+        "SELECT mailbox_consent FROM users WHERE id = %s",
+        (user_id,),
+    ).fetchone()
+    return bool(row and row["mailbox_consent"])
 
 
 def delete_expired_events(conn: Any, *, retention_days: int) -> list[int]:
