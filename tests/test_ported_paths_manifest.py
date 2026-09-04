@@ -158,18 +158,29 @@ def test_manifest_pins_known_provenance_files():
     would only prove the file hasn't gone stale (test_manifest_matches_fresh_scan
     already covers that); it would keep passing even if PROVENANCE_RE
     regressed to stop matching these files, as long as nobody reran derive.
-    Also pins the specific matched lines, not just file presence, so a
-    detector that keeps these files in the manifest for an unrelated /
-    coincidental reason still fails this check.
+    Also pins the specific matched marker content, not just file presence,
+    so a detector that keeps these files in the manifest for an unrelated /
+    coincidental reason still fails this check. compat.py's pin is
+    phrase-anchored (not line-anchored, after that line number itself
+    drifted mid-session from an unrelated docstring edit); ats_prober.py's
+    remains line-anchored since its wrapped-phrase regression is about a
+    fixed line boundary, not prose content.
     """
     found = dpp.find_provenance_files(REPO_ROOT)
     assert "jobcannon/db/compat.py" in found
     assert "jobcannon/engine/ats_prober.py" in found
 
-    compat_lines = {m["line"] for m in found["jobcannon/db/compat.py"]}
-    assert {67, 68} & compat_lines, (
-        "expected the private-schema/private-migration lines in compat.py's "
-        f"markers, got lines {sorted(compat_lines)}"
+    # Phrase-anchored rather than line-anchored: compat.py's docstring has
+    # already shifted these markers once this session (67/68 -> 84/85) from
+    # an unrelated prose edit, which is exactly the brittleness a hardcoded
+    # line number invites. Anchoring on the phrase text survives future
+    # docstring edits as long as the provenance wording itself is unchanged.
+    compat_texts = [m["text"] for m in found["jobcannon/db/compat.py"]]
+    assert any("private-schema" in t for t in compat_texts), (
+        f"expected a private-schema marker in compat.py, got {compat_texts}"
+    )
+    assert any("private migration" in t for t in compat_texts), (
+        f"expected a private migration marker in compat.py, got {compat_texts}"
     )
 
     prober_lines = {m["line"] for m in found["jobcannon/engine/ats_prober.py"]}

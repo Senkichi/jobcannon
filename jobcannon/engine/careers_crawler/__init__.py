@@ -134,6 +134,16 @@ def __getattr__(name: str):
 #     string) is rewritten to `datetime('now', '-' || ? || ' days')` (bound
 #     with a plain positive int) -- the shape db/compat.py engine_sql_to_host()
 #     translates for Postgres via _DATETIME_REWRITES.
+#   - `c.careers_nav_recipe` dropped from both lane SELECT lists (public
+#     #385 fix unit finding, filed separately). The private column
+#     (`job_finder/web/migrations/m037_careers_nav_recipe.py`) has zero
+#     readers anywhere in this port: its only private consumers
+#     (`_ai_nav_tier.py:123`, `_tier_cache.py:99`) belong to the ai_nav
+#     tier, which this package's own module docstring already documents as
+#     DELETED (`ai_career_navigator` DIES, ledger L-0133). Migrating in a
+#     column nothing reads would silently widen scope past #385's actual
+#     ask (`careers_api_endpoint` + `careers_crawl_tier`, both of which ARE
+#     read by `_escalation.py`) for no behavioral benefit.
 
 
 def _lane1_query_sql(select_cols: str, bench_predicate_sql: str) -> str:
@@ -246,27 +256,32 @@ def crawl_careers_batch(config: dict) -> dict:
         # interpolated into both lane queries below so the two lanes cannot
         # drift on the decay window.
         bench_decay_days = resolve_bench_decay_days(config)
-        bench_predicate_sql = build_bench_predicate_sql(bench_decay_days)
+        bench_predicate_sql, bench_predicate_params = build_bench_predicate_sql(bench_decay_days)
+
+        select_cols = (
+            "c.id, c.name_raw, c.careers_url, c.careers_api_endpoint, c.careers_crawl_tier"
+        )
 
         # Lane 1: re-discovery — proven-relevant companies due for a re-crawl.
+        # Lane 1's SQL text places the freshness placeholder
+        # (`careers_crawl_last_at < datetime(...)`) BEFORE the bench
+        # predicate's own placeholder, so params are ordered
+        # (freshness_days, *bench_predicate_params) to match.
         rediscovery = conn.execute(
-            _lane1_query_sql(
-                "c.id, c.name_raw, c.careers_url, c.careers_api_endpoint, "
-                "c.careers_crawl_tier, c.careers_nav_recipe",
-                bench_predicate_sql,
-            ),
-            (freshness_days,),
+            _lane1_query_sql(select_cols, bench_predicate_sql),
+            (freshness_days, *bench_predicate_params),
         ).fetchall()
 
         # Lane 2: origination — never-crawled companies with a careers_url and
         # no apply/consider history. Capped and ordered by id for determinism.
+        # Lane 2's SQL text places the bench predicate's placeholder BEFORE
+        # the trailing `LIMIT ?`, so params are ordered
+        # (*bench_predicate_params, origination_limit) to match — reversed
+        # from Lane 1's order because the two lanes place the bench
+        # predicate at different points in their own WHERE clause.
         origination = conn.execute(
-            _lane2_query_sql(
-                "c.id, c.name_raw, c.careers_url, c.careers_api_endpoint, "
-                "c.careers_crawl_tier, c.careers_nav_recipe",
-                bench_predicate_sql,
-            ),
-            (origination_limit,),
+            _lane2_query_sql(select_cols, bench_predicate_sql),
+            (*bench_predicate_params, origination_limit),
         ).fetchall()
 
     # Re-discovery runs first (proven relevance), then the capped origination

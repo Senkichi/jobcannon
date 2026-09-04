@@ -172,7 +172,9 @@ def resolve_bench_decay_days(config: dict) -> int:
     return value if value > 0 else BENCH_STRIKE_DECAY_DAYS
 
 
-def build_bench_predicate_sql(decay_days: int = BENCH_STRIKE_DECAY_DAYS) -> str:
+def build_bench_predicate_sql(
+    decay_days: int = BENCH_STRIKE_DECAY_DAYS,
+) -> tuple[str, tuple[int]]:
     """Build the ``NOT EXISTS`` benching predicate SQL fragment.
 
     Uses the outer-query alias ``c.id`` (the alias both selection lanes in
@@ -189,14 +191,25 @@ def build_bench_predicate_sql(decay_days: int = BENCH_STRIKE_DECAY_DAYS) -> str:
     (T2.3, D9) — an old strike ages out even if its reason was never clean. A
     single successful scan (``jobs_matched > 0``), at any age, still clears
     benching (#1725, W4; decay does not apply to hits — see module docstring).
+
+    Returns ``(sql, params)``. The decay-window comparison is bound via a
+    single ``?`` placeholder using the canonical parameterized shape
+    ``datetime('now', '-' || ? || ' days')`` (public #386) — the same shape
+    ``ats_scanner/_run.py``'s ``_dormancy_gate_clause`` uses and the only one
+    ``jobcannon/db/compat.py``'s ``_DATETIME_REWRITES`` translates for
+    Postgres — bound with *decay_days* itself (a plain positive int), not a
+    pre-negated string. Callers that splice this fragment into a larger query
+    (both ``crawl_careers_batch`` lanes) must append ``params`` to their own
+    param tuple at the position this fragment's ``?`` falls in the final SQL
+    text — see ``__init__.py``'s lane call sites for the exact ordering.
     """
-    return (
+    sql = (
         "NOT EXISTS (\n"
         "                    SELECT 1 FROM (\n"
         "                        SELECT SUM(CASE WHEN jobs_matched > 0 THEN 1 ELSE 0 END) AS hits,\n"
         "                               SUM(CASE WHEN jobs_matched > 0 THEN 0\n"
         f"                                        WHEN failure_reason IN ({_CLEAN_REASONS_SQL}) THEN 0\n"
-        f"                                        WHEN datetime(scanned_at) < datetime('now', '-{decay_days} days') THEN 0\n"
+        "                                        WHEN datetime(scanned_at) < datetime('now', '-' || ? || ' days') THEN 0\n"
         "                                        ELSE 1 END) AS strikes\n"
         "                        FROM company_scan_log\n"
         "                        WHERE company_id = c.id\n"
@@ -204,13 +217,17 @@ def build_bench_predicate_sql(decay_days: int = BENCH_STRIKE_DECAY_DAYS) -> str:
         f"                    ) s WHERE s.hits = 0 AND s.strikes >= {BENCH_STRIKE_THRESHOLD}\n"
         "                )"
     )
+    return sql, (decay_days,)
 
 
-#: The default-decay predicate fragment, for callers that don't need a
-#: config-driven decay window (e.g. tests asserting the fragment shape).
-#: ``crawl_careers_batch`` builds its own via :func:`build_bench_predicate_sql`
-#: with the configured decay window instead of importing this constant.
-BENCH_PREDICATE_SQL = build_bench_predicate_sql()
+#: The default-decay predicate fragment + its bind params, for callers that
+#: don't need a config-driven decay window (e.g. tests asserting the fragment
+#: shape). ``crawl_careers_batch`` builds its own via
+#: :func:`build_bench_predicate_sql` with the configured decay window instead
+#: of importing these constants. ``BENCH_PREDICATE_SQL`` carries one bare
+#: ``?`` placeholder — interpolating it into a query without also binding
+#: ``BENCH_PREDICATE_PARAMS`` at the matching position raises at execute time.
+BENCH_PREDICATE_SQL, BENCH_PREDICATE_PARAMS = build_bench_predicate_sql()
 
 
 def is_company_benched(
@@ -231,15 +248,19 @@ def is_company_benched(
     AND its ``scanned_at`` is within *decay_days* (T2.3, D9); a single
     successful scan (``jobs_matched > 0``), at any age, still clears benching
     (#1725, W4).
+
+    Uses the same canonical ``datetime('now', '-' || ? || ' days')`` shape as
+    :func:`build_bench_predicate_sql` (public #386), bound with *decay_days*
+    directly rather than a pre-negated string.
     """
     hits, strikes = conn.execute(
         "SELECT SUM(CASE WHEN jobs_matched > 0 THEN 1 ELSE 0 END), "
         "SUM(CASE WHEN jobs_matched > 0 THEN 0 "
         f"WHEN failure_reason IN ({_CLEAN_REASONS_SQL}) THEN 0 "
-        "WHEN datetime(scanned_at) < datetime('now', ? || ' days') THEN 0 "
+        "WHEN datetime(scanned_at) < datetime('now', '-' || ? || ' days') THEN 0 "
         "ELSE 1 END) "
         "FROM company_scan_log WHERE company_id = ? "
         f"AND source = '{BENCH_CRAWLER_SOURCE}'",
-        (f"-{decay_days}", company_id),
+        (decay_days, company_id),
     ).fetchone()
     return int(hits or 0) == 0 and int(strikes or 0) >= BENCH_STRIKE_THRESHOLD
