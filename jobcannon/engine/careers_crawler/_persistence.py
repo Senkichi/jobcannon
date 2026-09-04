@@ -6,7 +6,7 @@ orchestrator calls these helpers to:
 - Upsert each scraped job (creating a `Job` model object) into the
   `jobs` table.
 - Stamp the company's `careers_crawl_last_at`, `last_scanned_at`, and
-  `jobs_found_total` columns.
+  `jobs_found_total` columns.  # PORT-SEAM: careers_crawl_tier dropped, see below (#347)
 - Append a row to `company_scan_log` for the per-run audit trail via
   `svc.record_scan_outcome`.
 - On a per-company exception, only stamp `careers_crawl_last_at` so a
@@ -101,6 +101,7 @@ def _upsert_and_log(
     company_id: int,
     company_name: str,
     now: str,
+    # PORT-SEAM: db_path dropped -- svc.connection_factory() is zero-arg (L-0465)
     summary: dict,
     all_new_job_keys: list[str],
     tier_used: str,  # PORT-SEAM: unused pending #347 (see module docstring)
@@ -121,12 +122,7 @@ def _upsert_and_log(
     predicate treats NULL as a strike, preserving pre-W4 behaviour for rows
     the crawler cannot attribute.
     """
-    # PORT-SEAM: db_path param dropped -- svc.connection_factory() is a
-    # zero-positional-arg contract (services.py), unlike private's
-    # standalone_connection(db_path). No caller ports this same PR
-    # (crawl_careers_batch is a later unit), so there is no call site whose
-    # signature this needs to preserve.
-    svc = get_services()
+    svc = get_services()  # PORT-SEAM: seam (L-0465)
 
     from jobcannon.engine.models import Job
     from jobcannon.engine.parsed_job import DenylistedCompanyError, ListingTileError, ParsedJob
@@ -236,12 +232,12 @@ def _upsert_and_log(
 
 
 def _update_timestamp_on_error(
+    # PORT-SEAM: db_path dropped -- svc.connection_factory() is zero-arg (L-0465)
     company_id: int,
     now: str,
 ) -> None:
     """Update crawl timestamp on error so company doesn't block the queue."""
-    # PORT-SEAM: db_path param dropped -- see _upsert_and_log's PORT-SEAM note.
-    svc = get_services()
+    svc = get_services()  # PORT-SEAM: seam (L-0465)
     try:
         with svc.connection_factory() as err_conn:  # PORT-SEAM: seam (L-0465)
             err_conn.execute(
