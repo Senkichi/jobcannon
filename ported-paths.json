@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T01:19:10Z",
+  "generated_at": "2026-09-04T01:57:44Z",
   "roots": [
     "engine",
     "db",
@@ -1746,6 +1746,36 @@
         {
           "line": 1,
           "text": "# PORTED from job_finder/web/profile_schema.py @ c82b924bf60c9059bb3b4ed29db48d8fc9ddcba8 (private job-cannon). Ledger L-0231."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/providers/cerebras_provider.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/providers/cerebras_provider.py @ 9d57537f2f7100239181d34d0515cba342c83237"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/providers/gemini_provider.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/providers/gemini_provider.py @ 9678c44c5d667d8a1d587c2d1f92b9df4056ead9"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/providers/groq_provider.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/providers/groq_provider.py @ 9d57537f2f7100239181d34d0515cba342c83237"
         }
       ]
     },

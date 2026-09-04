@@ -1,4 +1,4 @@
-"""jobcannon.host.model_provider -- hosted cascade dispatcher (L-0036 PR-1,
+"""jobcannon.host.model_provider -- hosted cascade dispatcher (L-0036,
 ADAPT extraction of job_finder/web/model_provider.py).
 
 This module is an ADAPT extraction split across two files and is exempt
@@ -8,10 +8,10 @@ carried unchanged -- this file is that behavioral verification. Pure
 functions (resolve_hosted_routing, schema validation, degenerate detection)
 get direct unit tests; call_model's cascade orchestration is exercised with
 _make_adapter, get_active_providers, and build_credential_resolver
-monkeypatched, since the real gemini/groq/cerebras adapters
-(jobcannon/engine/providers/*) do not exist yet (PR-2, draft #281, is a
-separate unit) -- _make_adapter's ImportError-until-then behavior is itself
-asserted below.
+monkeypatched for isolation. _make_adapter's construction of the real
+gemini/groq/cerebras adapters (jobcannon/engine/providers/*, L-0235/L-0239/
+L-0240, carried in this same PR so the phantom-import boundary test can
+resolve them) is asserted directly below, one test per provider.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ def test_resolve_hosted_routing_triage_has_no_hosted_defaults():
 
 
 # ---------------------------------------------------------------------------
-# _make_adapter -- eligibility gate + PR-2 dependency boundary
+# _make_adapter -- eligibility gate + real adapter construction
 # ---------------------------------------------------------------------------
 
 
@@ -77,13 +77,36 @@ def test_make_adapter_rejects_non_hosted_eligible_provider():
         mp._make_adapter("ollama", {}, lambda provider: None)
 
 
-def test_make_adapter_raises_import_error_until_pr2_adapters_land():
-    """jobcannon/engine/providers/{gemini,groq,cerebras}_provider.py are
-    PR-2 scope (draft #281), not this unit -- _make_adapter's lazy imports
-    must raise ImportError (caught by call_model's cascade loop) rather than
-    crash the process, until that PR lands."""
-    with pytest.raises(ImportError):
-        mp._make_adapter("gemini", {}, lambda provider: "key")
+@pytest.mark.parametrize(
+    ("provider_name", "adapter_cls_name"),
+    [("groq", "GroqProvider"), ("cerebras", "CerebrasProvider")],
+)
+def test_make_adapter_constructs_real_rest_adapter_bound_to_the_resolver(
+    provider_name, adapter_cls_name
+):
+    """Each REST hosted-eligible branch constructs the real
+    jobcannon.engine.providers adapter (L-0235/L-0240), bound to the
+    CredentialResolver passed in -- not a cached, previously-built instance."""
+    adapter = mp._make_adapter(provider_name, {}, lambda provider: "test-key")
+    assert type(adapter).__name__ == adapter_cls_name
+    assert adapter._api_key == "test-key"
+
+
+def test_make_adapter_constructs_real_gemini_adapter_bound_to_the_resolver():
+    """gemini (L-0239) resolves its key through the same CredentialResolver
+    seam but stores a constructed genai.Client rather than the raw key
+    (pure-local construction, no network call)."""
+    adapter = mp._make_adapter("gemini", {}, lambda provider: "test-key")
+    assert type(adapter).__name__ == "GeminiProvider"
+    assert adapter._client is not None
+
+
+def test_make_adapter_propagates_missing_credential_as_value_error():
+    """resolve_credential returning None for the requested provider surfaces
+    as the adapter constructor's own ValueError (caught by call_model's
+    cascade loop as a skip-this-provider signal), not a KeyError/AttributeError."""
+    with pytest.raises(ValueError, match="Groq API key not set"):
+        mp._make_adapter("groq", {}, lambda provider: None)
 
 
 def test_make_adapter_never_caches_across_calls(monkeypatch):
