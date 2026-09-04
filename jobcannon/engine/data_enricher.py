@@ -409,8 +409,12 @@ def enrich_job(
                         fragments.update(ats_result)
 
                 # Sub-tier C: HTML careers scrape (if company has homepage_url)
-                if conn is not None and job_row.get("company_id"):
-                    careers_result = svc.scrape_careers_tier(  # PORT-SEAM: L-0178 HOLD
+                if (
+                    conn is not None
+                    and job_row.get("company_id")
+                    and svc.scrape_careers_tier is not None
+                ):  # PORT-SEAM: L-0178 HOLD, fail-open (matches :427/:900 idiom)
+                    careers_result = svc.scrape_careers_tier(
                         job_row, conn, config, careers_memo=careers_memo
                     )
                     if careers_result:

@@ -154,6 +154,7 @@ every sibling hook in the module.
 """
 
 import contextlib
+import dataclasses
 import json
 import sqlite3
 from unittest.mock import MagicMock
@@ -650,6 +651,135 @@ class TestEnrichJobTierOrder:
 
         mock_scrape.assert_called_once()
         mock_ddg.assert_not_called()
+
+    def test_free_tier_survives_real_wiring_scrape_careers_tier_none(
+        self, sparse_job_row, db, monkeypatch
+    ):
+        """B1 (#371 refuter r1): production wiring leaves scrape_careers_tier
+        unbound (jobcannon/host/wiring.py's build_scan_services deliberately
+        does not bind it -- the 8th ATS-tier split, ``scrape_careers``, never
+        ported; see jobcannon/engine/_enrichment_ats_tier.py's PORT-SEAM).
+        Before the guard at :412-416, data_enricher.py called
+        svc.scrape_careers_tier(...) unconditionally whenever conn +
+        company_id were present, so on this REAL production value every such
+        job hit ``TypeError: 'NoneType' object is not callable`` -- swallowed
+        by the tier's broad except, silently stranding set_direct_url,
+        merge_primary_posting_fields, and the free-tier persist/return.
+
+        Every other test in this class overrides scrape_careers_tier with a
+        MagicMock, which can never expose this (a MagicMock is callable;
+        None is not). This test instead builds ScanServices via the REAL
+        jobcannon.host.wiring.build_scan_services -- not _install_services'
+        hand-rolled defaults -- so scrape_careers_tier carries whatever
+        production actually binds it to, and only swaps in sqlite-compatible
+        fakes for the fields this in-memory harness needs for I/O isolation
+        (connection_factory, upsert_job, set_jd_full, upsert_company,
+        fetch_direct_jd, the search/ddg hooks, set_direct_url,
+        parse_structured_fields). scrape_careers_tier itself is left
+        untouched.
+        """
+        from jobcannon.engine.data_enricher import enrich_job
+        from jobcannon.host.config import HostConfig
+        from jobcannon.host.wiring import build_scan_services
+
+        real_svc = build_scan_services(HostConfig(database_url="postgresql://test/test"))
+        assert real_svc.scrape_careers_tier is None, (
+            "test assumption stale: production wiring now binds "
+            "scrape_careers_tier -- update this regression test"
+        )
+
+        sparse_job_row["company_id"] = 1
+        sparse_job_row["source_urls"] = "[]"  # no source_url on an ATS host to short-circuit
+        sparse_job_row["salary_min"] = 100000
+        sparse_job_row["salary_max"] = 150000
+        sparse_job_row["has_subcountry_constraint"] = 0
+
+        db.execute(
+            "INSERT INTO jobs (dedup_key, title, company, source_urls, company_id, "
+            "salary_min, salary_max, has_subcountry_constraint) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                sparse_job_row["dedup_key"],
+                sparse_job_row["title"],
+                sparse_job_row["company"],
+                sparse_job_row["source_urls"],
+                1,
+                100000,
+                150000,
+                0,
+            ),
+        )
+        db.execute(
+            "INSERT INTO companies (id, name, name_raw, ats_platform, ats_slug, ats_probe_status) "
+            "VALUES (1, 'acme corp', 'Acme Corp', 'lever', 'acme-corp', 'hit')"
+        )
+        db.commit()
+
+        primary_posting = {"salary_min": 100000, "_marker": "ats-primary-posting"}
+        mock_ats = MagicMock(
+            return_value={
+                "jd_full": "ATS API returned full JD. " * 8,
+                "direct_url": "https://boards.greenhouse.io/acme/jobs/123",
+                "direct_url_confidence": "strict",
+                "_primary_posting": primary_posting,
+            }
+        )
+        mock_set_direct_url = MagicMock()
+        mock_merge = MagicMock(return_value=True)
+        monkeypatch.setattr(
+            "jobcannon.engine.data_enricher.merge_primary_posting_fields", mock_merge
+        )
+
+        @contextlib.contextmanager
+        def factory(*, synchronous="FULL"):
+            yield db
+
+        svc = dataclasses.replace(
+            real_svc,
+            connection_factory=factory,
+            upsert_job=MagicMock(),
+            set_jd_full=_fake_set_jd_full,
+            upsert_company=MagicMock(),
+            config={},
+            get_secret=MagicMock(return_value=None),
+            fetch_direct_jd=MagicMock(return_value=None),
+            query_ats_api=mock_ats,
+            search_ddg_web=MagicMock(return_value={}),
+            fetch_ddg_jds=MagicMock(return_value=(None, None)),
+            search_duckduckgo=MagicMock(return_value=None),
+            search_serpapi=MagicMock(return_value=(None, [])),
+            set_direct_url=mock_set_direct_url,
+            parse_structured_fields=MagicMock(return_value={}),
+        )
+        assert svc.scrape_careers_tier is None  # untouched -- the real wiring value
+        services.set_services(svc)
+
+        result = enrich_job(sparse_job_row, conn=db)
+
+        mock_ats.assert_called_once()
+        # The free tier terminated with data -- proof the code after the
+        # (now-guarded) scrape_careers_tier call kept running instead of
+        # raising into the tier's swallowed except.
+        assert result.get("jd_full")
+
+        # set_direct_url (:429): direct company-posting link capture ran.
+        mock_set_direct_url.assert_called_once_with(
+            db,
+            sparse_job_row["dedup_key"],
+            "https://boards.greenhouse.io/acme/jobs/123",
+            "strict",
+        )
+        # merge_primary_posting_fields (:438): authoritative-field merge from
+        # the strict-matched primary posting sub-tier B resolved -- ran too.
+        mock_merge.assert_called_once()
+        assert mock_merge.call_args.args[2] is primary_posting
+
+        # _persist(..., "free", ...) (:446): tier recorded, cascade
+        # terminated at free rather than escalating to paid ddg/serpapi.
+        row = db.execute(
+            "SELECT enrichment_tier FROM jobs WHERE dedup_key = ?",
+            (sparse_job_row["dedup_key"],),
+        ).fetchone()
+        assert row["enrichment_tier"] == "free"
 
 
 # ---------------------------------------------------------------------------
