@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T01:00:24Z",
+  "generated_at": "2026-09-04T01:06:48Z",
   "roots": [
     "engine",
     "db",
@@ -900,6 +900,26 @@
         {
           "line": 1,
           "text": "# PORTED from job_finder/web/brand_blocklist.py @ 929e3ad49398f23c4b9e44904f7aeddc62bf6fda (private job-cannon). Ledger L-0451."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/careers_crawler/_ats_link_discovery.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/_ats_link_discovery.py @ 1ff50e2e6b996fe79023c11b14028afe52828c0d (private job-cannon). Ledger L-0470."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/careers_crawler/_bench_predicate.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/_bench_predicate.py @ a071c405a6908b6af417eef7aab6ec0b795a7d27 (private job-cannon). Ledger L-0463."
         }
       ]
     },
