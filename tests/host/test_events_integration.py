@@ -169,3 +169,113 @@ def test_read_consent_choice_made_false_for_a_stale_grant_true_for_a_stale_decli
 def test_set_posthog_client_none_is_pure_noop():
     posthog_client.set_posthog_client(None)
     posthog_client.capture("user_1", "posting_saved", {})  # must not raise
+
+
+def test_record_consent_mailbox_writes_column_and_audit_event(db_conn):
+    """record_consent's "mailbox" branch (m0025, design note §1.2): a
+    SEPARATE column pair (mailbox_consent/mailbox_consent_updated_at) from
+    the analytics branch, so granting mailbox consent must never touch
+    analytics_consent and vice versa."""
+    user_id = "user_consent_mailbox_1"
+    db_conn.execute("INSERT INTO users (id, email) VALUES (%s, 'm1@example.org')", (user_id,))
+
+    _events.record_consent(
+        db_conn,
+        user_id=user_id,
+        consent_type="mailbox",
+        granted=True,
+        consent_version="v1",
+        consented_at="2026-07-17T00:00:00Z",
+    )
+
+    user_row = db_conn.execute(
+        "SELECT mailbox_consent, mailbox_consent_updated_at, analytics_consent "
+        "FROM users WHERE id = %s",
+        (user_id,),
+    ).fetchone()
+    assert user_row["mailbox_consent"] is True
+    assert user_row["mailbox_consent_updated_at"] is not None
+    assert user_row["analytics_consent"] is False  # untouched by the mailbox branch
+
+    event_row = db_conn.execute(
+        "SELECT payload FROM events WHERE user_id = %s AND event_type = 'consent_recorded'",
+        (user_id,),
+    ).fetchone()
+    assert event_row is not None
+    assert event_row["payload"] == {
+        "consent_type": "mailbox",
+        "granted": True,
+        "consent_version": "v1",
+        "consented_at": "2026-07-17T00:00:00Z",
+    }
+
+
+def test_record_consent_mailbox_revoke_does_not_delete_credential_row(db_conn):
+    """Revoking mailbox consent only flips the column -- deactivating a
+    mailbox_credentials row (if any) is a separate, deliberate call
+    (jobcannon.db._mailbox_credentials.deactivate_credential), never a side
+    effect of record_consent. build_mailbox_resolver is the join point that
+    makes an active row unusable once consent reads False."""
+    user_id = "user_consent_mailbox_2"
+    db_conn.execute("INSERT INTO users (id, email) VALUES (%s, 'm2@example.org')", (user_id,))
+    _events.record_consent(
+        db_conn,
+        user_id=user_id,
+        consent_type="mailbox",
+        granted=True,
+        consent_version="v1",
+        consented_at="2026-07-17T00:00:00Z",
+    )
+
+    _events.record_consent(
+        db_conn,
+        user_id=user_id,
+        consent_type="mailbox",
+        granted=False,
+        consent_version="v1",
+        consented_at="2026-07-17T00:01:00Z",
+    )
+
+    user_row = db_conn.execute(
+        "SELECT mailbox_consent FROM users WHERE id = %s", (user_id,)
+    ).fetchone()
+    assert user_row["mailbox_consent"] is False
+
+
+def test_record_consent_unknown_type_raises_before_any_write(db_conn):
+    user_id = "user_consent_unknown"
+    db_conn.execute("INSERT INTO users (id, email) VALUES (%s, 'm3@example.org')", (user_id,))
+
+    with pytest.raises(ValueError):
+        _events.record_consent(
+            db_conn,
+            user_id=user_id,
+            consent_type="not_a_real_consent_type",
+            granted=True,
+            consent_version="v1",
+            consented_at="2026-07-17T00:00:00Z",
+        )
+
+    n = db_conn.execute(
+        "SELECT count(*) AS n FROM events WHERE user_id = %s", (user_id,)
+    ).fetchone()["n"]
+    assert n == 0
+
+
+def test_read_mailbox_consent_reflects_column(db_conn):
+    user_id = "user_read_mailbox_consent"
+    db_conn.execute(
+        "INSERT INTO users (id, email, mailbox_consent) VALUES (%s, 'm4@example.org', true)",
+        (user_id,),
+    )
+    assert _events.read_mailbox_consent(db_conn, user_id) is True
+
+
+def test_read_mailbox_consent_false_for_unknown_user(db_conn):
+    assert _events.read_mailbox_consent(db_conn, "no-such-user") is False
+
+
+def test_read_mailbox_consent_false_default_for_fresh_row(db_conn):
+    user_id = "user_read_mailbox_default"
+    db_conn.execute("INSERT INTO users (id, email) VALUES (%s, 'm5@example.org')", (user_id,))
+    assert _events.read_mailbox_consent(db_conn, user_id) is False

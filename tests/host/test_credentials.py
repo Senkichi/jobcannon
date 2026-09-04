@@ -159,3 +159,172 @@ def test_resolver_is_bound_to_one_tenant_no_user_id_arity(db_conn, monkeypatch):
     assert resolve_a("gemini") == "sk-tenant-a"
     assert resolve_b("gemini") == "sk-tenant-b"
     assert resolve_a.__code__.co_argcount == 1  # provider only, no user_id
+
+
+# --- build_mailbox_resolver (L-0115 PR-3, design note §1.3) ---
+
+from jobcannon.db import _mailbox_credentials  # noqa: E402
+from jobcannon.db._events import record_consent  # noqa: E402
+from jobcannon.host.credentials import (  # noqa: E402
+    encrypt_mailbox_secret,
+    build_mailbox_resolver,
+)
+
+
+def _grant_mailbox_consent(conn, user_id):
+    record_consent(
+        conn,
+        user_id=user_id,
+        consent_type="mailbox",
+        granted=True,
+        consent_version="v1",
+        consented_at="2026-07-17T00:00:00Z",
+    )
+
+
+def _seed_mailbox_credential(conn, user_id, *, address, secret, kek=None, **overrides):
+    kwargs = dict(
+        imap_host="imap.example.org",
+        imap_port=993,
+        auth_type="app_password",
+        folder="INBOX",
+        username_hint="j***@example.org",
+    )
+    kwargs.update(overrides)
+    blob = encrypt_mailbox_secret(address, secret, kek=kek)
+    _mailbox_credentials.set_mailbox_credential(conn, user_id, encrypted_secret=blob, **kwargs)
+
+
+def test_build_mailbox_resolver_round_trips_through_db(db_conn, monkeypatch):
+    monkeypatch.setenv("JC_BYO_KEY_KEK", _fresh_kek_b64())
+    _seed_user(db_conn, "mbx-cred-u1")
+    _grant_mailbox_consent(db_conn, "mbx-cred-u1")
+    _seed_mailbox_credential(
+        db_conn, "mbx-cred-u1", address="tenant1@gmail.com", secret="app-password-1"
+    )
+
+    resolve = build_mailbox_resolver(db_conn, "mbx-cred-u1")
+    credential = resolve()
+
+    assert credential is not None
+    assert credential.address == "tenant1@gmail.com"
+    assert credential.secret == "app-password-1"
+    assert credential.imap_host == "imap.example.org"
+    assert credential.imap_port == 993
+    assert credential.folder == "INBOX"
+
+
+def test_build_mailbox_resolver_fails_closed_without_consent_even_with_active_row(
+    db_conn, monkeypatch
+):
+    """Consent is checked FIRST, before the credential row -- an active row
+    with no consent grant must resolve to None, never to the credential."""
+    monkeypatch.setenv("JC_BYO_KEY_KEK", _fresh_kek_b64())
+    _seed_user(db_conn, "mbx-cred-u2")
+    _seed_mailbox_credential(db_conn, "mbx-cred-u2", address="t2@gmail.com", secret="pw")
+    # No _grant_mailbox_consent call.
+
+    resolve = build_mailbox_resolver(db_conn, "mbx-cred-u2")
+
+    assert resolve() is None
+
+
+def test_build_mailbox_resolver_returns_none_when_consent_revoked(db_conn, monkeypatch):
+    monkeypatch.setenv("JC_BYO_KEY_KEK", _fresh_kek_b64())
+    _seed_user(db_conn, "mbx-cred-u3")
+    _grant_mailbox_consent(db_conn, "mbx-cred-u3")
+    _seed_mailbox_credential(db_conn, "mbx-cred-u3", address="t3@gmail.com", secret="pw")
+    resolve = build_mailbox_resolver(db_conn, "mbx-cred-u3")
+    assert resolve() is not None
+
+    record_consent(
+        db_conn,
+        user_id="mbx-cred-u3",
+        consent_type="mailbox",
+        granted=False,
+        consent_version="v1",
+        consented_at="2026-07-17T00:01:00Z",
+    )
+
+    assert resolve() is None
+
+
+def test_build_mailbox_resolver_returns_none_for_absent_credential(db_conn, monkeypatch):
+    monkeypatch.setenv("JC_BYO_KEY_KEK", _fresh_kek_b64())
+    _seed_user(db_conn, "mbx-cred-u4")
+    _grant_mailbox_consent(db_conn, "mbx-cred-u4")
+
+    resolve = build_mailbox_resolver(db_conn, "mbx-cred-u4")
+
+    assert resolve() is None
+
+
+def test_build_mailbox_resolver_returns_none_when_kek_unset_not_raises(db_conn, monkeypatch):
+    monkeypatch.setenv("JC_BYO_KEY_KEK", _fresh_kek_b64())
+    _seed_user(db_conn, "mbx-cred-u5")
+    _grant_mailbox_consent(db_conn, "mbx-cred-u5")
+    _seed_mailbox_credential(db_conn, "mbx-cred-u5", address="t5@gmail.com", secret="pw")
+
+    monkeypatch.delenv("JC_BYO_KEY_KEK", raising=False)
+    resolve = build_mailbox_resolver(db_conn, "mbx-cred-u5")
+
+    assert resolve() is None  # fail-closed, not an exception
+
+
+def test_build_mailbox_resolver_returns_none_on_decrypt_failure_wrong_kek(db_conn, monkeypatch):
+    monkeypatch.setenv("JC_BYO_KEY_KEK", _fresh_kek_b64())
+    _seed_user(db_conn, "mbx-cred-u6")
+    _grant_mailbox_consent(db_conn, "mbx-cred-u6")
+    _seed_mailbox_credential(db_conn, "mbx-cred-u6", address="t6@gmail.com", secret="pw")
+
+    monkeypatch.setenv("JC_BYO_KEY_KEK", _fresh_kek_b64())  # different KEK now
+    resolve = build_mailbox_resolver(db_conn, "mbx-cred-u6")
+
+    assert resolve() is None  # non-fatal, not a raised exception
+
+
+def test_build_mailbox_resolver_returns_none_for_inactive_credential(db_conn, monkeypatch):
+    monkeypatch.setenv("JC_BYO_KEY_KEK", _fresh_kek_b64())
+    _seed_user(db_conn, "mbx-cred-u7")
+    _grant_mailbox_consent(db_conn, "mbx-cred-u7")
+    _seed_mailbox_credential(db_conn, "mbx-cred-u7", address="t7@gmail.com", secret="pw")
+    _mailbox_credentials.deactivate_credential(db_conn, "mbx-cred-u7")
+
+    resolve = build_mailbox_resolver(db_conn, "mbx-cred-u7")
+
+    assert resolve() is None
+
+
+def test_build_mailbox_resolver_stamps_last_used_at_on_success(db_conn, monkeypatch):
+    monkeypatch.setenv("JC_BYO_KEY_KEK", _fresh_kek_b64())
+    _seed_user(db_conn, "mbx-cred-u8")
+    _grant_mailbox_consent(db_conn, "mbx-cred-u8")
+    _seed_mailbox_credential(db_conn, "mbx-cred-u8", address="t8@gmail.com", secret="pw")
+    assert _mailbox_credentials.get_active_for_user(db_conn, "mbx-cred-u8")["last_used_at"] is None
+
+    resolve = build_mailbox_resolver(db_conn, "mbx-cred-u8")
+    resolve()
+
+    row = _mailbox_credentials.get_active_for_user(db_conn, "mbx-cred-u8")
+    assert row["last_used_at"] is not None
+
+
+def test_build_mailbox_resolver_is_bound_to_one_tenant_zero_arg_arity(db_conn, monkeypatch):
+    """resolve_mailbox_credential's arity is `()` -- zero args, bound to ONE
+    user by closure (one tighter than build_credential_resolver, which
+    still takes a provider argument -- a tenant has at most one mailbox
+    credential)."""
+    monkeypatch.setenv("JC_BYO_KEY_KEK", _fresh_kek_b64())
+    _seed_user(db_conn, "mbx-cred-u9a")
+    _seed_user(db_conn, "mbx-cred-u9b")
+    _grant_mailbox_consent(db_conn, "mbx-cred-u9a")
+    _grant_mailbox_consent(db_conn, "mbx-cred-u9b")
+    _seed_mailbox_credential(db_conn, "mbx-cred-u9a", address="a9@gmail.com", secret="pw-a")
+    _seed_mailbox_credential(db_conn, "mbx-cred-u9b", address="b9@gmail.com", secret="pw-b")
+
+    resolve_a = build_mailbox_resolver(db_conn, "mbx-cred-u9a")
+    resolve_b = build_mailbox_resolver(db_conn, "mbx-cred-u9b")
+
+    assert resolve_a().address == "a9@gmail.com"
+    assert resolve_b().address == "b9@gmail.com"
+    assert resolve_a.__code__.co_argcount == 0  # bound to one tenant, no params at all
