@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T07:37:21Z",
+  "generated_at": "2026-09-04T17:35:52Z",
   "roots": [
     "engine",
     "db",
@@ -604,6 +604,16 @@
         {
           "line": 46,
           "text": "Does NOT add ``companies.careers_crawl_tier`` -- private's ``_persistence.py``"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/migrations/m0023_nightly_monitor_state.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED (schema-only) from job_finder/web/nightly_monitor/_state.py's"
         }
       ]
     },
@@ -2310,6 +2320,144 @@
         {
           "line": 232,
           "text": "# canonical location) rather than job_finder.constants."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/baselines.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/nightly_monitor/_baselines.py"
+        },
+        {
+          "line": 13,
+          "text": "must diff clean against the private original. duration_band / out_of_band /"
+        },
+        {
+          "line": 15,
+          "text": "-- they were already source-agnostic in the private original (the private"
+        },
+        {
+          "line": 26,
+          "text": "# PORT-SEAM: job_finder.config's three DEFAULT_NIGHTLY_* constants -> the"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/checkpoint_packet.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_checkpoint.py (packet half)"
+        },
+        {
+          "line": 10,
+          "text": "name-and-body extraction diff of every top-level function against the"
+        },
+        {
+          "line": 11,
+          "text": "private _checkpoint.py source at the pinned SHA (zero body drift beyond the"
+        },
+        {
+          "line": 15,
+          "text": "private original is expected to show prose-only hunks beyond the split"
+        },
+        {
+          "line": 19,
+          "text": "# from job_finder/web/run_events.jsonl by an event writer outside"
+        },
+        {
+          "line": 31,
+          "text": "# (job_finder.web.run_events.jd_full_loss_excess) derived from it. Nothing"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/checkpoint_verdict.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_checkpoint.py (verdict half)"
+        },
+        {
+          "line": 39,
+          "text": "# `job_finder.web.run_events.jd_full_loss_excess`, a module outside"
+        },
+        {
+          "line": 77,
+          "text": "whatever the packet carries, and its logic carries over from the private"
+        },
+        {
+          "line": 78,
+          "text": "original unchanged function-for-function -- verified by a name-and-body"
+        },
+        {
+          "line": 79,
+          "text": "extraction diff against the private source at the pinned SHA (all 29"
+        },
+        {
+          "line": 86,
+          "text": "raw text diff against the private original is expected to show prose-only"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/config.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 11,
+          "text": "# from job_finder/config.py's DEFAULT_NIGHTLY_* constants so a hosted"
+        },
+        {
+          "line": 28,
+          "text": "# Byte-identical to job_finder/config.py's DEFAULT_NIGHTLY_BASELINE_MIN_HISTORY /"
+        },
+        {
+          "line": 39,
+          "text": "# Byte-identical to job_finder/config.py's DEFAULT_NIGHTLY_SUCCESS_COUNT_KEYS."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/sampler.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_sampler.py"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/signatures.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_signatures.py"
+        },
+        {
+          "line": 25,
+          "text": "``worst_severity`` carries over UNCHANGED from the private original -- it is"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/state.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_state.py"
+        },
+        {
+          "line": 92,
+          "text": "# PORT-SEAM: temp-file + os.replace (private) -> INSERT ... ON CONFLICT"
         }
       ]
     },
