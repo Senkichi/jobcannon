@@ -1,20 +1,27 @@
 """PORTED from job_finder/web/scoring_orchestrator.py @ 6fd9f9b31c6a32c7262de3619d247008425e2cde
 (private job-cannon). Ledger L-0259.
+# PORT-SEAM: residence is host, not engine -- this module calls
+# jobcannon.db._assessment_writer.persist_job_assessment, a jobcannon.db
+# import the engine's DI rule forbids inside jobcannon/engine/ (see
+# _assessment_writer.py lines 16-18 and job_scorer.py's own module
+# docstring, both of which name a future host wiring of
+# score_and_persist_job as the intended caller). Injected into the
+# already-declared optional ScanServices.score_and_persist_job field via
+# jobcannon/host/wiring.py::build_scan_services.
 
-Scoring orchestration -- v3.0 unified entry (Phase 34 Plan 4), hosted wiring.
+Scoring orchestration -- v3.0 unified entry (Phase 34 Plan 4).
 
-Residence is host, not engine: this module calls
-``jobcannon.db._assessment_writer.persist_job_assessment``, a ``jobcannon.db``
-import the engine's DI rule forbids inside ``jobcannon/engine/`` (see
-``_assessment_writer.py`` lines 16-18 and ``job_scorer.py``'s own module
-docstring, both of which name a future *host* wiring of
-``score_and_persist_job`` as the intended caller). Injected into the
-already-declared optional ``ScanServices.score_and_persist_job`` field via
-``jobcannon/host/wiring.py::build_scan_services``.
+Consolidates the scoring workflow (cost gate, profile loading, persistence)
+for the v3.0 unified scorer. The legacy two-tier (Haiku + Sonnet) entry
+points were removed in Plan 4 Commit E once all callers migrated to
+score_and_persist_job.
 
 Public API:
     score_and_persist_job(job, conn, config,
                           scorer_fn=None, *, run_id=None) -> ScoringResult | None
+    # PORT-SEAM: run_id accepted for call-signature compatibility with the
+    # fixed ScanServices.score_and_persist_job contract; currently unused
+    # (see score_and_persist_job's own docstring below).
     load_scoring_profile(config) -> dict
 
 These functions handle the core scoring + persistence logic. Callers remain
@@ -30,10 +37,17 @@ scoring function, which preserves mock injection in tests (tests patch the
 name in the caller's module namespace).
 """
 
+# PORT-SEAM: `functools` added for the call_model-binding functools.partial
+# seam in score_and_persist_job below.
 import functools
 import hashlib
 import json
 import logging
+
+# PORT-SEAM: `import os` / `import sqlite3` dropped -- os.path.getmtime was
+# only used by the now-removed profile-file mtime term (see
+# _context_fingerprint below); sqlite3.Connection was only a type hint
+# (conn is now typed Any, matching the host's psycopg-only convention).
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -58,32 +72,33 @@ logger = logging.getLogger(__name__)
 # multi-config eval runs). Invalidation is automatic — the fingerprint hashes
 # the relevant config slice, so any settings save or profile edit produces a
 # new key.
+# PORT-SEAM: private also hashed the experience-profile file's mtime here;
+# no profile file exists on this host, see load_scoring_profile below.
 _CONTEXT_CACHE: dict[str, str] = {}
 _CONTEXT_CACHE_LOCK = threading.Lock()
 _CONTEXT_CACHE_MAX = 8  # cap to avoid unbounded growth in eval sweeps
 
 
 def load_scoring_profile(config: dict) -> dict:
-    """Load the candidate's scoring profile from ``config``.
-
-    Args:
-        config: Application config dict. Reads ``config["profile"]``.
-
-    Returns:
-        Profile dict, or ``{}`` if absent.
-    """
-    # PORT-SEAM: private resolved a single-user disk path (
-    # `config["scoring"]["profile_path"]` or `config["profile_path"]`,
-    # defaulting to `user_data_dirs.profile_path()`) and delegated to
-    # `profile_schema.load_profile()` for file I/O. A hosted, multi-tenant
+    """Return the candidate's scoring profile.
+    # PORT-SEAM: private resolved a single-user disk path
+    # (config["scoring"]["profile_path"] or config["profile_path"],
+    # defaulting to user_data_dirs.profile_path()) and delegated to
+    # profile_schema.load_profile() for file I/O. A hosted, multi-tenant
     # caller has no single profile file to resolve a path for -- design
     # note Q-A's recommendation is to thread the profile through `config`
-    # at `build_scan_services` time (the host owns per-user resolution;
-    # this orchestrator stays a pure consumer). Whatever host caller
-    # assembles `config` for a scoring call is responsible for placing the
+    # at build_scan_services time (the host owns per-user resolution; this
+    # orchestrator stays a pure consumer). Whatever host caller assembles
+    # `config` for a scoring call is responsible for placing the
     # candidate's full profile bundle (targeting + resume fields) at
-    # `config["profile"]`; `_profile_path` (the private path-resolution
+    # config["profile"]; `_profile_path` (the private path-resolution
     # helper) has no public counterpart and is dropped entirely.
+    Reads ``config["profile"]``; returns ``{}`` when absent.
+    """
+    # PORT-SEAM: private's lazy `profile_schema.load_profile()` import, its
+    # profile_path resolution logic, and the whole `_profile_path` helper
+    # function (its sole other caller) are all dropped here -- there is no
+    # profile file to load a path for on this host; see the docstring above.
     return config.get("profile") or {}
 
 
@@ -94,15 +109,18 @@ def _context_fingerprint(config: dict) -> str:
     floor / industries / exclusions / resume fields). Settings saves
     rebuild config["profile"], so the JSON content changes and the cache
     invalidates automatically — no manual flush required.
-    """
     # PORT-SEAM: private also hashed the experience-profile file's mtime
-    # (`os.path.getmtime(_profile_path(config))`) so a profile-file edit
+    # (os.path.getmtime(_profile_path(config))) so a profile-file edit
     # invalidated the cache independently of a config rebuild. There is no
     # profile file on this host (see load_scoring_profile above) -- the
-    # config dict is the sole source of truth, so the mtime term is
-    # dropped; a profile edit is only ever visible via a new config["profile"]
-    # value, which this hash already covers.
+    # config dict is the sole source of truth now, so the mtime term is
+    # dropped; a profile edit is only ever visible via a new
+    # config["profile"] value, which this hash already covers.
+    """
     cfg_profile = config.get("profile") or {}
+    # PORT-SEAM: os.path.getmtime(_profile_path(config)) mtime term dropped
+    # here too -- no profile file exists on this host; config["profile"]
+    # content is the sole fingerprint input now.
     blob = json.dumps({"profile": cfg_profile}, sort_keys=True, default=str)
     return hashlib.sha1(blob.encode("utf-8"), usedforsecurity=False).hexdigest()
 
@@ -111,9 +129,11 @@ def _resolve_candidate_context(config: dict) -> str:
     """Return the prompt-ready candidate-context block for this config.
 
     Memoized by ``_context_fingerprint(config)``. Cache invalidates when
-    the relevant config slice changes. This is the production-path entry
-    point; tests can still call ``build_candidate_context`` directly for
-    unit-level assertions.
+    the relevant config slice changes.
+    # PORT-SEAM: private's docstring also said "...or the profile file is
+    # rewritten" -- no profile file exists on this host anymore.
+    This is the production-path entry point; tests can still call
+    ``build_candidate_context`` directly for unit-level assertions.
     """
     key = _context_fingerprint(config)
     with _CONTEXT_CACHE_LOCK:
@@ -121,11 +141,12 @@ def _resolve_candidate_context(config: dict) -> str:
         if cached is not None:
             return cached
 
-    # Load + build OUTSIDE the lock. PORT-SEAM: private's rationale here was
-    # "load_profile does file I/O, and we don't want to serialize unrelated
-    # scorers behind a slow disk read" -- load_scoring_profile is now a pure
-    # config read (no disk I/O), but build_candidate_context itself is still
-    # nontrivial per-call work, so this stays outside the lock regardless.
+    # PORT-SEAM: private's rationale here was "load_profile does file I/O,
+    # and we don't want to serialize unrelated scorers behind a slow disk
+    # read" -- load_scoring_profile is now a pure config read (no disk
+    # I/O), but build_candidate_context is still nontrivial per-call work,
+    # so this stays outside the lock regardless.
+    # Load + build OUTSIDE the lock.
     profile = load_scoring_profile(config)
     ctx = build_candidate_context(config, profile)
 
@@ -150,16 +171,22 @@ def score_and_persist_job(
 ):
     """Unified v3.0 scoring entry point.
 
+    # PORT-SEAM: scorer_fn now binds call_model via functools.partial (see
+    # the function body) since jobcannon.engine.job_scorer.score_job takes
+    # call_model as a required keyword-only injection -- the engine has no
+    # model provider of its own.
     - scorer_fn: defaults to job_scorer.score_job, bound to the host's wired
-      call_model dispatcher (jobcannon.engine.job_scorer.score_job requires
-      call_model as a required keyword-only injection -- the engine has no
-      provider of its own). Injection point preserved for tests — pass your
+      call_model dispatcher. Injection point preserved for tests — pass your
       own reference to support mock injection.
     - timeout: optional provider-call timeout override (seconds), forwarded
       to scorer_fn ONLY when set (issue #1413's scoring-leg gap). Left
       unforwarded when None so the many existing test doubles registered via
       scorer_fn -- most are narrow lambdas of the shape
       ``lambda j, c, cfg, candidate_context, location_policy=None: ...`` with
+      # PORT-SEAM: private's trailing note about the onboarding wizard /
+      # _process_one_job (production callers of the timeout kwarg) is
+      # private-app-specific and dropped; the kwarg itself is kept (costs
+      # nothing, matches score_job's existing timeout support).
       no **kwargs catch-all -- keep working unchanged.
     - The candidate-context block is resolved INTERNALLY via
       ``_resolve_candidate_context(config)`` — callers cannot bypass it.
@@ -167,9 +194,15 @@ def score_and_persist_job(
       target locations / titles / floor / background, so the v3 rubric
       anchors (e.g. "on-site in a location candidate cannot relocate to")
       can be applied correctly. Spec D-2.1 / D-2.2.
+    # PORT-SEAM: "the three location_policy_* columns" -> a single
+    # location_policy_verdict_json string (_assessment_writer's seam, no
+    # location_policy_* columns exist on this host).
     - Persists: classification (Python-derived), sub_scores_json,
       fit_analysis (rationale payload), scoring_provider, scoring_model,
       and the location-policy verdict JSON (echoed into fit_analysis).
+    # PORT-SEAM: "the jobs row" -> "the postings row" (L-0075 flat table);
+    # "per-posting verdict writes" dropped (set_postings has no public
+    # counterpart, see the call site below).
     - Computes a deterministic LocationPolicy pre-LLM from the postings row
       and passes it into the scorer (prompt block) and persist
       (classification enforcement). Issue #1214.
@@ -178,15 +211,20 @@ def score_and_persist_job(
       rejected before scoring runs (returns None) — there is no row to key
       a persisted assessment against, so scoring would be wasted work.
     - run_id: optional correlation id from the scheduler / harness run
+      # PORT-SEAM: private's paragraph here described the now-dropped
+      # run_events.mark(...) emission (design note Q-D: no public
+      # run_events table; dropped for this port, log_run's run-envelope
+      # already covers auditing).
       wrapper. Accepted for call-signature compatibility with the
-      ``ScanServices.score_and_persist_job`` slot; currently unused -- see
-      the per-job audit event note below.
+      ``ScanServices.score_and_persist_job`` slot; currently unused.
 
     Plan 4 Commit E removed the legacy haiku_score / sonnet_score /
     haiku_summary dual-write shim now that all readers consume
     classification + sub_scores_json + fit_analysis directly.
     """
-    raw = conn.raw if hasattr(conn, "raw") else conn  # PORT-SEAM: pooled-connection unwrap, matches _assessment_writer.py's convention
+    raw = (
+        conn.raw if hasattr(conn, "raw") else conn
+    )  # PORT-SEAM: pooled-connection unwrap, matches _assessment_writer.py's convention
 
     if scorer_fn is None:
         # PORT-SEAM: private lazily imported job_finder.web.job_scorer.score_job
@@ -213,6 +251,7 @@ def score_and_persist_job(
         logger.warning("score_and_persist_job: missing dedup_key, skipping score+persist")
         return None
 
+    # PORT-SEAM: `jobs` -> `postings` (L-0075 flat single-writer table).
     # Pre-LLM: compute the deterministic LocationPolicy from the postings row.
     # The row is authoritative for the structured location facts; the job dict
     # passed by callers may not carry every column.
@@ -221,6 +260,9 @@ def score_and_persist_job(
     # actually read, matching _jobs.py's idiom of selecting only what's used.
     location_policy = None
     try:
+        # PORT-SEAM: `?` -> `%s`; raw.execute(...).fetchone() replaces
+        # cursor-based conn.execute(...).fetchone() (psycopg convention,
+        # matches _assessment_writer.py).
         row = raw.execute(
             "SELECT locations_structured, workplace_type, primary_country_code "
             "FROM postings WHERE dedup_key = %s",
@@ -231,20 +273,25 @@ def score_and_persist_job(
         row = None
 
     if row is not None:
-        # PORT-SEAM: locations_structured is jsonb -- psycopg auto-decodes to
-        # a Python list/None, no json.loads needed (unlike private's sqlite3
-        # TEXT column). PORT-SEAM: no public `postings` JSON sub-postings
-        # column exists (L-0075's flat single-writer model subsumes the
-        # per-posting collection) -- pass postings=None. PORT-SEAM: no public
-        # has_subcountry_constraint column exists -- always False, so the
-        # #1202 sub-country gate never fires on this host (BEHAVIOR CHANGE,
-        # not a mechanical seam; called out in the PR body's fidelity items).
+        # PORT-SEAM: private's two try/except json.loads(...) blocks and its
+        # has_subcountry bool derivation are dropped here -- locations_structured
+        # is jsonb (auto-decoded, no json.loads needed) and
+        # has_subcountry_constraint has no public column (always False below).
         location_policy = compute_location_policy(
+            # PORT-SEAM: locations_structured is jsonb -- psycopg auto-
+            # decodes to a Python list/None, no json.loads needed (unlike
+            # private's sqlite3 TEXT column). postings=None: no public
+            # `postings` JSON sub-postings column exists (L-0075's flat
+            # single-writer model subsumes the per-posting collection).
             locations_structured=row["locations_structured"] or [],
             workplace_type=row["workplace_type"],
             primary_country_code=row["primary_country_code"],
             postings=None,
             config=config,
+            # PORT-SEAM: no public has_subcountry_constraint column exists --
+            # always False, so the #1202 sub-country gate never fires on this
+            # host (BEHAVIOR CHANGE, not a mechanical seam; called out in the
+            # PR body's fidelity items).
             has_subcountry_constraint=False,
         )
 
@@ -290,13 +337,20 @@ def score_and_persist_job(
         verdict_to_json(location_policy) if location_policy is not None else None
     )
 
-    classification = persist_job_assessment(
+    # PORT-SEAM: private captured the `classification` return value to gate
+    # and populate the now-dropped run_events.mark(...) call below (a
+    # missing-row silent no-op returns classification=None, per
+    # _assessment_writer's own docstring). With that call gone there is
+    # nothing left to gate on, so the return value goes uncaptured.
+    persist_job_assessment(
         conn,
         dedup_key,
         assessment,
         provider=provider,
         model=model,
         config=config,
+        # PORT-SEAM: location_policy=lp -> location_policy_verdict_json=
+        # verdict_to_json(lp) (_assessment_writer's own string seam).
         location_policy_verdict_json=location_policy_verdict_json,
     )
     # PORT-SEAM: private's trailing conn.commit() dropped here --
@@ -477,9 +531,7 @@ def build_candidate_context(config: dict, profile: dict) -> str:
         if min_salary
         else "- Compensation floor: Not specified"
     )
-    parts.append(
-        f"- Target industries: {', '.join(industries) if industries else 'Not specified'}"
-    )
+    parts.append(f"- Target industries: {', '.join(industries) if industries else 'Not specified'}")
     if excl_companies:
         parts.append(f"- Exclusions: companies {excl_companies}")
 
