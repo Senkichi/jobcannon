@@ -1,6 +1,12 @@
 """PORTED from job_finder/web/nightly_monitor/_disagreement_baseline.py
-@ e1f47695b07f928e6c91cc64767c97a99645d68f (private job-cannon).
-Ledger L-0471.
+@ b34eb0b00a13c0bf0c9c95020ceddfeca71022b8 (private job-cannon).
+Ledger L-0387.
+
+Byte-identical between the L-0387 carry SHA and L-0471's newer
+e1f47695b07f928e6c91cc64767c97a99645d68f (verified: no diff in this file
+between the two) -- citing L-0387's SHA here for consistency with the rest
+of this unit's provenance headers; see the PR body for the full L-0387 vs
+L-0471 carry-SHA disclosure.
 
 Rolling baseline for the nightly disagreement-rate alarm (D13, #1619).
 
