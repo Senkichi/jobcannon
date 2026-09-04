@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T20:42:33Z",
+  "generated_at": "2026-09-04T20:52:30Z",
   "roots": [
     "engine",
     "db",
@@ -686,6 +686,84 @@
       ]
     },
     {
+      "path": "jobcannon/engine/_enrichment_ats_tier.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/enrichment_tiers.py @ 0a4c33c5af7cd4055e539672158cb301b7bdc407 (private job-cannon). Ledger L-0178."
+        },
+        {
+          "line": 4,
+          "text": "Split out of the private ``enrichment_tiers.py`` (design note PR-4). Binds"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/_enrichment_ddg_web_tier.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/enrichment_tiers.py @ 0a4c33c5af7cd4055e539672158cb301b7bdc407 (private job-cannon). Ledger L-0178."
+        },
+        {
+          "line": 4,
+          "text": "Split out of the private ``enrichment_tiers.py`` (design note PR-4). Binds to"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/_enrichment_jd_fetch.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/enrichment_tiers.py @ 0a4c33c5af7cd4055e539672158cb301b7bdc407 (private job-cannon). Ledger L-0178."
+        },
+        {
+          "line": 4,
+          "text": "Split out of the private ``enrichment_tiers.py`` (design note PR-4): this is"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/_enrichment_search_tiers.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/enrichment_tiers.py @ 0a4c33c5af7cd4055e539672158cb301b7bdc407 (private job-cannon). Ledger L-0178."
+        },
+        {
+          "line": 4,
+          "text": "Split out of the private ``enrichment_tiers.py`` (design note PR-4). Binds to"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/_enrichment_structured_fields.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/enrichment_tiers.py @ 0a4c33c5af7cd4055e539672158cb301b7bdc407 (private job-cannon). Ledger L-0178."
+        },
+        {
+          "line": 4,
+          "text": "Split out of the private ``enrichment_tiers.py`` (design note PR-4) as the"
+        },
+        {
+          "line": 10,
+          "text": "# `from job_finder.web.model_provider import call_model` import. The caller"
+        },
+        {
+          "line": 81,
+          "text": "the private repo's ``model_provider.call_model`` signature."
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/_field_alias.py",
       "root": "engine",
       "markers": [
@@ -1326,39 +1404,39 @@
           "text": "# seams, but they also call job_finder.web.autoheal.agentic_enricher"
         },
         {
-          "line": 86,
-          "text": "# PORT-SEAM: job_finder.web.enrichment_tiers is L-0178 (HOLD, unlanded) -- its"
+          "line": 87,
+          "text": "# PORT-SEAM: job_finder.web.enrichment_tiers is L-0178. 7 of its 8 functions"
         },
         {
-          "line": 90,
-          "text": "# instead of a copied module. job_finder.sources._error_envelope is L-0111"
+          "line": 95,
+          "text": "# job_finder.sources._error_envelope is L-0111"
         },
         {
-          "line": 94,
+          "line": 99,
           "text": "# job_finder.web.autoheal.health_monitor has no ledger row in this port's"
         },
         {
-          "line": 97,
+          "line": 102,
           "text": "# job_finder.db._jd_full.set_jd_full is the required ScanServices.set_jd_full"
         },
         {
-          "line": 100,
+          "line": 105,
           "text": "# jobcannon.db import). job_finder.config.JD_STORAGE_MAX_CHARS is"
         },
         {
-          "line": 1197,
+          "line": 1210,
           "text": "# PORT-SEAM: job_finder.db._jobs._reconcile_salary_for_write has no"
         },
         {
-          "line": 1350,
+          "line": 1363,
           "text": "# This is a SEPARATE write path from job_finder.db._jobs.upsert_job (this"
         },
         {
-          "line": 1376,
+          "line": 1389,
           "text": "# PORT-SEAM: job_finder.db._persistence.update_pipeline_status -> svc.update_pipeline_status"
         },
         {
-          "line": 1385,
+          "line": 1398,
           "text": "# PORT-SEAM: job_finder.db._persistence.update_pipeline_status has"
         }
       ]
@@ -1400,6 +1478,24 @@
         {
           "line": 1,
           "text": "# PORTED from job_finder/web/description_formatter.py @ 8225db222f7ca4b592f5858373979fc2c4057a5c (private job-cannon). Ledger L-0034."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/description_reformatter.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/description_reformatter.py @ 65e5ce021068b70a2369ac279c75395a078e1013 (private job-cannon). Ledger L-0175."
+        },
+        {
+          "line": 28,
+          "text": "# module-level `from job_finder.web.model_provider import call_model` import"
+        },
+        {
+          "line": 119,
+          "text": "the private repo's ``model_provider.call_model`` signature"
         }
       ]
     },
@@ -1660,6 +1756,20 @@
         {
           "line": 4,
           "text": "job_finder.web.autoheal. The engine keeps the call site but forwards to a"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/homepage_discoverer.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/homepage_discoverer.py @ f20c5b927308f288888fd068a1d3e7af64b644be (private job-cannon). Ledger L-0186."
+        },
+        {
+          "line": 35,
+          "text": "# imports ``job_finder.web.claude_enricher.enrich_companies_via_claude``, a"
         }
       ]
     },
@@ -2084,8 +2194,26 @@
           "text": "# svc.connection_factory(). job_finder.web.primary_source_tiebreak."
         },
         {
-          "line": 103,
-          "text": "# precedent). job_finder.db._postings.annotate_posting_apply_url is L-0075"
+          "line": 106,
+          "text": "# (ats_slug_challenge.TRIGGER_PREFIX_CAREERS_URL precedent). job_finder.db."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/primary_source_tiebreak.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/primary_source_tiebreak.py @ a1de3bc10a4d9e9b43d13562d1e9acf9d1011544 (private job-cannon). Ledger L-0230."
+        },
+        {
+          "line": 29,
+          "text": "# `from job_finder.web.model_provider import call_model` import — the engine"
+        },
+        {
+          "line": 110,
+          "text": "the private repo's ``model_provider.call_model`` signature"
         }
       ]
     },
@@ -2288,27 +2416,27 @@
           "text": "# -- Wave 2 job_finder/web follow-up (L-0174/L-0182/L-0229) --"
         },
         {
-          "line": 142,
+          "line": 145,
           "text": "# `run_detection` field above, which already covers a third function from"
         },
         {
-          "line": 143,
+          "line": 146,
           "text": "# this same private module."
         },
         {
-          "line": 243,
+          "line": 250,
           "text": "#   matches job_finder.web.autoheal.override_loader.careers_recipe(source)"
         },
         {
-          "line": 245,
+          "line": 252,
           "text": "#   (ported inline as a private function in _autoheal_seam.py -- see"
         },
         {
-          "line": 248,
+          "line": 255,
           "text": "#   matches job_finder.web.autoheal.recipe_extractor.careers_recipe_extract("
         },
         {
-          "line": 251,
+          "line": 258,
           "text": "#   matches job_finder.web.autoheal.health_monitor.record_extraction(conn,"
         }
       ]
@@ -2380,6 +2508,16 @@
         {
           "line": 145,
           "text": "# PORT-SEAM: private source refreshes opaque_redirect_sources from disk"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/_ollama.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/scheduler/_ollama.py @ 99bde92e667fcc1fb2c66fdcbfaa526367c900f1 (private job-cannon). Ledger L-0054."
         }
       ]
     },
@@ -2728,11 +2866,11 @@
       "root": "host",
       "markers": [
         {
-          "line": 124,
+          "line": 131,
           "text": "_JD_STORAGE_MAX_CHARS = 50_000  # parity with the private repo's JD_STORAGE_MAX_CHARS"
         },
         {
-          "line": 126,
+          "line": 133,
           "text": "# Parity with the private deployment's job-level runtime cap for the ATS"
         }
       ]
