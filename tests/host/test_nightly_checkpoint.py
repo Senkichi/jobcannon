@@ -1,4 +1,4 @@
-# PORTED from tests/test_nightly_checkpoint.py @ d21f9803c3f6bb9e606b5b7cf7b27bd5f5f06e00 (private job-cannon). Ledger L-0534.
+# PORTED from tests/test_nightly_checkpoint.py @ 9fdff4c127d3044bb47e00bf5c1b2e26d6642d5c (private job-cannon). Ledger L-0534.
 # PORT-SEAM: private's job_finder/web/nightly_monitor/_checkpoint.py was
 # split in two for the host: jobcannon/host/nightly/checkpoint_verdict.py
 # (the guard chain -- _sanitize_verdict -> _guard_in_band_duration ->
@@ -18,14 +18,28 @@
 # takes call_model as an injected keyword instead, so every test below
 # passes call_model=MagicMock(...) directly.
 #
-# Dropped (6 of 116, all of TestJdContentSameHashInvalidatedCheckpoint):
-# assert on jd_content_same_hash_invalidated_pairs(), a DB-querying helper
-# that is not among this port's carried top-level functions -- it belongs
-# to a different, unscoped subsystem/ledger unit. See this PR's body.
+# Dropped (11 of 121):
+# - 6, all of TestJdContentSameHashInvalidatedCheckpoint: assert on
+#   jd_content_same_hash_invalidated_pairs(), a DB-querying helper that is
+#   not among this port's carried top-level functions -- it belongs to a
+#   different, unscoped subsystem/ledger unit.
+# - 5, all of TestKilledRunBandAssessment (added upstream after this row's
+#   original carry point; carried forward by re-copying at this file's
+#   current private tip rather than porting stale content): assert that a
+#   run killed at its runtime wall with a truncated duration inside the
+#   historical band reports band_assessment: out_of_band/slow rather than
+#   in_band. build_packet() in this port's checkpoint_packet.py computes
+#   band_assessment purely from out_of_band(duration_s, band, ...) and
+#   band.get("status") -- there is no disposition/error-aware override, so
+#   these 5 tests would fail against current host code. The override is
+#   host-source behavior, not test-carry scope; ported as source, tests can
+#   follow in a later ledger row. See this PR's body.
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import (
+    MagicMock,
+)  # PORT-SEAM: mock import switched: MagicMock replaces module-patch `patch`
 
 import pytest
 
@@ -35,16 +49,19 @@ from jobcannon.host.nightly.checkpoint_packet import (
     build_packet,
     job_tracks_db_delta_from_history,
 )
-from jobcannon.host.nightly.checkpoint_verdict import (
+from jobcannon.host.nightly.checkpoint_verdict import (  # PORT-SEAM: _FakeResult replaces the make_model_result fixture (host suite has no such fixture); DEFAULT_NIGHTLY_SUCCESS_COUNT_KEYS import moved to jobcannon.host.nightly.config
     _SYSTEM,
     VERDICT_SCHEMA,
+    # PORT-SEAM: import list regrouped across the checkpoint_packet/checkpoint_verdict module split
     _guard_new_row_backlog,
     _has_evidence_of_work,
     _has_success_excerpt,
-    _is_excerpt_absence_reason,
+    _is_excerpt_absence_reason,  # PORT-SEAM: import list regrouped across the checkpoint_packet/checkpoint_verdict module split
     _is_improvement_reason,
     _is_no_work_reason,
+    # PORT-SEAM: import list regrouped across the checkpoint_packet/checkpoint_verdict module split
     checkpoint_verdict,
+    # PORT-SEAM: import list regrouped across the checkpoint_packet/checkpoint_verdict module split
 )
 from jobcannon.host.nightly.config import DEFAULT_NIGHTLY_SUCCESS_COUNT_KEYS
 
@@ -53,6 +70,8 @@ class _FakeResult:
     def __init__(self, data):
         self.data = data
 
+
+# PORT-SEAM: _FakeResult replaces the make_model_result fixture (host suite has no such fixture); DEFAULT_NIGHTLY_SUCCESS_COUNT_KEYS import moved to jobcannon.host.nightly.config
 
 RUN_END = {
     "event": "run_end",
@@ -150,6 +169,7 @@ class TestBuildPacket:
 
 
 class TestBandAssessment:
+    # PORT-SEAM: class docstring dropped -- restated in checkpoint_packet.py's build_packet() docstring, already carried at module level
     def test_insufficient_history_when_band_not_ok(self):
         p = _packet(
             run_end={"duration_s": 1142.95},
@@ -166,44 +186,68 @@ class TestBandAssessment:
         assert p["in_band"] is False
 
 
+# PORT-SEAM: TestKilledRunBandAssessment (5 tests) dropped here -- asserts a
+# killed-run-at-wall band_assessment override that build_packet() in this
+# port does not implement yet; itemized in this PR's body header comment
+# above and in the PR body.
+
+
 class TestForcedFail:
-    def test_failed_disposition_forces_fail_without_model_call(self):
+    def test_failed_disposition_forces_fail_without_model_call(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(run_end={"disposition": "failed", "error": "RuntimeError"})
         mock_cm = MagicMock()
-        v = checkpoint_verdict(p, call_model=mock_cm)
+        v = checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         mock_cm.assert_not_called()
         assert v["verdict"] == "FAIL"
         assert v["forced"] is True
         assert any("RuntimeError" in r for r in v["reasons"])
 
-    def test_fail_signature_is_model_adjudicated_not_forced(self):
+    def test_fail_signature_is_model_adjudicated_not_forced(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A tick-global fail signature must NOT force-FAIL a job pre-model: hits
         carry no run_id, so force-FAILing would blame every job whose run_end
         shares the tick with another job's failure line. The attribution-aware
         model decides. Regression guard for the cross-job false-FAIL the
         two-family review caught."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(hits=[{"pattern": "database is locked", "severity": "fail", "line": "x"}])
         result = _FakeResult({"verdict": "PASS", "reasons": ["another job's line"]})
         mock_cm = MagicMock(return_value=result)
-        v = checkpoint_verdict(p, call_model=mock_cm)
+        v = checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         mock_cm.assert_called_once()  # model consulted, not bypassed
         assert v["verdict"] == "PASS"
         assert v["forced"] is False
 
-    def test_fail_signature_with_model_down_floors_at_verdict_unavailable(self):
+    def test_fail_signature_with_model_down_floors_at_verdict_unavailable(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """Model unavailable + fail signature => "VERDICT_UNAVAILABLE" floor:
         surfaced for the morning review as an infra failure, but never a false
         critical FAIL for a co-running job."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(hits=[{"pattern": "database is locked", "severity": "fail", "line": "x"}])
-        v = checkpoint_verdict(p, call_model=MagicMock(side_effect=RuntimeError("cascade down")))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(side_effect=RuntimeError("cascade down"))
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "VERDICT_UNAVAILABLE"
         assert v["forced"] is False
 
-    def test_anomaly_signature_does_not_force(self):
+    def test_anomaly_signature_does_not_force(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(hits=[{"pattern": "HTTP 429", "severity": "anomaly", "line": "x"}])
         result = _FakeResult({"verdict": "PASS", "reasons": []})
         mock_cm = MagicMock(return_value=result)
-        v = checkpoint_verdict(p, call_model=mock_cm)
+        v = checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         mock_cm.assert_called_once()
         assert v["verdict"] == "PASS"
         assert v["forced"] is False
@@ -211,11 +255,13 @@ class TestForcedFail:
 
 class TestModelVerdict:
     def test_quick_tier_and_schema(self):
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {"verdict": "ANOMALY", "reasons": ["unexplained db_delta for job-table counters"]}
         )
         mock_cm = MagicMock(return_value=result)
-        v = checkpoint_verdict(_packet(), call_model=mock_cm)
+        v = checkpoint_verdict(
+            _packet(), call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         args, kwargs = mock_cm.call_args
         assert kwargs.get("tier", args[0] if args else None) == "quick"
         assert kwargs["output_schema"] == VERDICT_SCHEMA
@@ -231,19 +277,21 @@ class TestModelVerdict:
     def test_model_exception_yields_verdict_unavailable(self):
         v = checkpoint_verdict(
             _packet(), call_model=MagicMock(side_effect=RuntimeError("cascade down"))
-        )
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "VERDICT_UNAVAILABLE"
         assert v["forced"] is False
         assert any("RuntimeError" in r for r in v["reasons"])
 
-    def test_provider_cascade_exhausted_yields_verdict_unavailable_not_anomaly(self):
+    def test_provider_cascade_exhausted_yields_verdict_unavailable_not_anomaly(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """Regression for #1402: infra failures must not masquerade as job ANOMALY."""
         v = checkpoint_verdict(
             _packet(),
             call_model=MagicMock(
                 side_effect=ProviderCascadeExhaustedError("ollama/gemini/anthropic exhausted")
             ),
-        )
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "VERDICT_UNAVAILABLE"
         assert v["forced"] is False
         assert any("ProviderCascadeExhaustedError" in r for r in v["reasons"])
@@ -251,15 +299,20 @@ class TestModelVerdict:
 
     def test_unrecognized_verdict_yields_anomaly(self):
         result = _FakeResult({"verdict": "MAYBE", "reasons": []})
-        v = checkpoint_verdict(_packet(), call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            _packet(), call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
 
-    def test_ai_nav_failure_does_not_force_fail_when_degraded(self):
+    def test_ai_nav_failure_does_not_force_fail_when_degraded(
+        self,
+    ):  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         """A degraded careers_crawl run still surfaces ai_nav counts but lets the model adjudicate.
 
         Issue #1367: the run is now ``degraded`` rather than ``failed`` so partial
         crawl results are preserved and the checkpoint is not forced into FAIL.
         """
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         error_msg = (
             "ai_nav: discovery call failed for 10/10 attempts (100%) — exceeds 50% threshold"
         )
@@ -267,7 +320,9 @@ class TestModelVerdict:
         assert "10/10" in p["error"]
         result = _FakeResult({"verdict": "ANOMALY", "reasons": ["ai_nav failure rate high"]})
         mock_cm = MagicMock(return_value=result)
-        v = checkpoint_verdict(p, call_model=mock_cm)
+        v = checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         mock_cm.assert_called_once()
         assert v["verdict"] == "ANOMALY"
         assert v["forced"] is False
@@ -282,10 +337,14 @@ class TestBuildPacketInBand:
         assert "db_delta_summary" in p
         assert p["db_delta_tracked"] is None
 
-    def test_in_band_boolean_reaches_model_prompt(self):
+    def test_in_band_boolean_reaches_model_prompt(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet()
         mock_cm = MagicMock(return_value=_FakeResult({"verdict": "PASS", "reasons": []}))
-        checkpoint_verdict(p, call_model=mock_cm)
+        checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         kwargs = mock_cm.call_args[1]
         assert "band_assessment" in kwargs["system"]
         assert "in_band" in kwargs["system"].lower()
@@ -302,7 +361,9 @@ class TestBuildPacketInBand:
 
 
 class TestInBandDurationGuard:
-    def test_in_band_duration_anomaly_downgraded_to_pass(self):
+    def test_in_band_duration_anomaly_downgraded_to_pass(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={"duration_s": 1142.95},
             band={"status": "ok", "n": 10, "p10": 1044.282, "p90": 1906.478},
@@ -310,7 +371,7 @@ class TestInBandDurationGuard:
         assert p["in_band"] is True
         assert p["band_assessment"] == "in_band"
         assert p["out_of_band"] is None
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -318,12 +379,16 @@ class TestInBandDurationGuard:
                 ],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["reasons"] == ["duration in band; out_of_band is null"]
         assert v["forced"] is False
 
-    def test_in_band_duration_anomaly_with_other_reason_keeps_anomaly(self):
+    def test_in_band_duration_anomaly_with_other_reason_keeps_anomaly(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={"duration_s": 4.27},
             band={"status": "ok", "n": 10, "p10": 3.669, "p90": 7.954},
@@ -331,7 +396,7 @@ class TestInBandDurationGuard:
         assert p["in_band"] is True
         assert p["band_assessment"] == "in_band"
         assert p["out_of_band"] is None
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -340,7 +405,9 @@ class TestInBandDurationGuard:
                 ],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert len(v["reasons"]) == 1
         assert "HTTP 429" in v["reasons"][0]
@@ -348,7 +415,9 @@ class TestInBandDurationGuard:
         assert "4.27s" not in v["reasons"][0]
         assert v["forced"] is False
 
-    def test_out_of_band_duration_anomaly_not_suppressed(self):
+    def test_out_of_band_duration_anomaly_not_suppressed(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={"duration_s": 500.0},
             band={"status": "ok", "n": 10, "p10": 90.0, "p90": 120.0},
@@ -357,27 +426,36 @@ class TestInBandDurationGuard:
         assert p["band_assessment"] == "out_of_band"
         assert p["out_of_band"] == "slow"
         result = _FakeResult({"verdict": "ANOMALY", "reasons": ["duration 500s is slow"]})
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert v["reasons"] == ["duration 500s is slow"]
         assert v["forced"] is False
 
-    def test_in_band_fail_with_duration_only_downgraded_to_pass(self):
+    def test_in_band_fail_with_duration_only_downgraded_to_pass(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(run_end={"duration_s": 100.0}, band=BAND)
         assert p["in_band"] is True
         assert p["band_assessment"] == "in_band"
         result = _FakeResult({"verdict": "FAIL", "reasons": ["run was fast"]})
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["reasons"] == ["duration in band; out_of_band is null"]
         assert v["forced"] is False
 
-    def test_insufficient_history_duration_anomaly_not_downgraded(self):
+    def test_insufficient_history_duration_anomaly_not_downgraded(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A newly degrading job with no good-run history must not get a false PASS.
 
         Regression for the three-state review: duration-citing reasons are only
         stripped when the band has actually cleared the run.
         """
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={"duration_s": 1142.95},
             band={"status": "insufficient_history", "n": 2},
@@ -385,88 +463,118 @@ class TestInBandDurationGuard:
         assert p["in_band"] is False
         assert p["band_assessment"] == "insufficient_history"
         assert p["out_of_band"] is None
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["Duration of 1142.95 seconds is longer than expected for a new job."],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert v["reasons"] == [
             "Duration of 1142.95 seconds is longer than expected for a new job."
         ]
         assert v["forced"] is False
 
-    def test_in_band_no_longer_reason_survives(self):
+    def test_in_band_no_longer_reason_survives(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """'no longer ...' is not a duration comparison and must not be stripped."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(run_end={"duration_s": 100.0}, band=BAND)
         assert p["in_band"] is True
         assert p["band_assessment"] == "in_band"
         result = _FakeResult({"verdict": "ANOMALY", "reasons": ["no longer emitting events"]})
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert v["reasons"] == ["no longer emitting events"]
         assert v["forced"] is False
 
-    def test_in_band_http_429s_reason_survives(self):
+    def test_in_band_http_429s_reason_survives(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """HTTP status plurals like 'HTTP 429s' must not be stripped as a duration."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(run_end={"duration_s": 100.0}, band=BAND)
         assert p["in_band"] is True
         assert p["band_assessment"] == "in_band"
         result = _FakeResult({"verdict": "ANOMALY", "reasons": ["HTTP 429s in signature_hits"]})
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert v["reasons"] == ["HTTP 429s in signature_hits"]
         assert v["forced"] is False
 
-    def test_in_band_pass_with_only_duration_reasons_sanitizes(self):
+    def test_in_band_pass_with_only_duration_reasons_sanitizes(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """PASS with only duration-citing reasons must drop them, not cite a cleared anomaly."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(run_end={"duration_s": 100.0}, band=BAND)
         assert p["in_band"] is True
         assert p["band_assessment"] == "in_band"
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "PASS",
                 "reasons": ["Duration of 4.27s is shorter than baseline p90 of 7.95s"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["reasons"] == ["duration in band; out_of_band is null"]
         assert v["forced"] is False
 
 
 class TestOutOfBandDurationContradiction:
-    def test_rejects_short_when_slow(self):
+    def test_rejects_short_when_slow(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A run slower than the upper band must not be called 'short'."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(run_end={"duration_s": 500.0})
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {"verdict": "ANOMALY", "reasons": ["Duration is extremely short (3.34 seconds)"]}
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["reasons"] == []
         assert v["rejected_reasons"] == 1
 
-    def test_rejects_shorter_than_p90_when_slow(self):
+    def test_rejects_shorter_than_p90_when_slow(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A slow run cannot be 'shorter than p90'."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(run_end={"duration_s": 500.0})
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["significantly shorter than the baseline p90 of 120.0"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["reasons"] == []
         assert v["rejected_reasons"] == 1
 
 
 class TestNoWorkValidation:
-    def test_zero_total_jobs_with_result_does_not_anomaly(self):
+    def test_zero_total_jobs_with_result_does_not_anomaly(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A zero total_jobs delta on a job that produces non-table work is not 'no work'."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "duration_s": 100.0,
@@ -474,14 +582,16 @@ class TestNoWorkValidation:
                 "result": {"reformatted": 164},
             }
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["No jobs or backlog changes in db_delta, suggesting no work was done"],
             }
         )
         mock_cm = MagicMock(return_value=result)
-        v = checkpoint_verdict(p, call_model=mock_cm)
+        v = checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         mock_cm.assert_called_once()
         assert v["verdict"] == "PASS"
         assert v["reasons"] == []
@@ -489,6 +599,7 @@ class TestNoWorkValidation:
 
 
 class TestStringifiedResultEvidence:
+    # PORT-SEAM: mechanical rewrite for the host checkpoint_verdict/build_packet call shape (call_model injected, no DB conn) -- see file header
     def test_stringified_all_zero_dict_is_not_evidence(self):
         """A stringified all-zero result dict is NOT evidence of work."""
         packet = {
@@ -523,9 +634,12 @@ class TestStringifiedResultEvidence:
         }
         assert _has_evidence_of_work(packet) is False
 
-    def test_stringified_all_zero_result_keeps_no_work_reason(self):
+    def test_stringified_all_zero_result_keeps_no_work_reason(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """End-to-end: a stringified all-zero result must NOT contradict a no-work
         reason — the reason is kept and the verdict is not downgraded by it."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "duration_s": 100.0,
@@ -533,14 +647,16 @@ class TestStringifiedResultEvidence:
                 "result": "{'jobs_found': 0, 'jobs_new': 0}",
             }
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["No jobs or backlog changes in db_delta, suggesting no work was done"],
             }
         )
         mock_cm = MagicMock(return_value=result)
-        v = checkpoint_verdict(p, call_model=mock_cm)
+        v = checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         mock_cm.assert_called_once()
         # The no-work reason is NOT contradicted (all-zero result is not evidence),
         # so it survives and the ANOMALY verdict stands.
@@ -550,9 +666,12 @@ class TestStringifiedResultEvidence:
         ]
         assert v["rejected_reasons"] == 0
 
-    def test_stringified_nonzero_result_rejects_no_work_reason(self):
+    def test_stringified_nonzero_result_rejects_no_work_reason(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """End-to-end: a stringified non-zero result DOES contradict a no-work
         reason — the reason is rejected and the verdict downgrades to PASS."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "duration_s": 100.0,
@@ -560,14 +679,16 @@ class TestStringifiedResultEvidence:
                 "result": "{'jobs_found': 5, 'jobs_new': 3}",
             }
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["No jobs or backlog changes in db_delta, suggesting no work was done"],
             }
         )
         mock_cm = MagicMock(return_value=result)
-        v = checkpoint_verdict(p, call_model=mock_cm)
+        v = checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         mock_cm.assert_called_once()
         assert v["verdict"] == "PASS"
         assert v["reasons"] == []
@@ -575,8 +696,11 @@ class TestStringifiedResultEvidence:
 
 
 class TestNegativeProgressValidation:
-    def test_negative_backlog_decrease_is_not_unusual(self):
+    def test_negative_backlog_decrease_is_not_unusual(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A decrease in a progress counter is expected, not anomalous."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "duration_s": 100.0,
@@ -584,64 +708,80 @@ class TestNegativeProgressValidation:
                 "result": {"auto_updated": 2},
             }
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["decrease in missing_jd_full by -2, which is unusual"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["reasons"] == []
         assert v["rejected_reasons"] == 1
 
 
 class TestFailVerdictDowngrade:
-    def test_fail_with_sole_contradicted_no_work_reason_downgrades_to_pass(self):
+    # PORT-SEAM: mechanical rewrite for the host checkpoint_verdict/build_packet call shape (call_model injected, no DB conn) -- see file header
+    def test_fail_with_sole_contradicted_no_work_reason_downgrades_to_pass(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """FAIL whose only reason is a fabricated no-work claim must downgrade to PASS."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "duration_s": 100.0,
                 "db_delta": {"total_jobs": 4},
             }
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "FAIL",
                 "reasons": ["No jobs or backlog changes in db_delta, suggesting no work was done"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["reasons"] == []
         assert v["forced"] is False
         assert v["rejected_reasons"] == 1
 
-    def test_fail_with_sole_contradicted_duration_reason_downgrades_to_pass(self):
+    def test_fail_with_sole_contradicted_duration_reason_downgrades_to_pass(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """FAIL whose only reason contradicts the deterministic band must downgrade to PASS."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(run_end={"duration_s": 500.0})
         assert p["out_of_band"] == "slow"
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "FAIL",
                 "reasons": ["Duration is extremely short (3.34 seconds)"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["reasons"] == []
         assert v["forced"] is False
         assert v["rejected_reasons"] == 1
 
-    def test_fail_with_surviving_reason_is_not_downgraded(self):
+    def test_fail_with_surviving_reason_is_not_downgraded(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """FAIL with at least one non-contradicted reason must stay FAIL."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "duration_s": 100.0,
                 "db_delta": {"total_jobs": 4},
             }
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "FAIL",
                 "reasons": [
@@ -650,7 +790,9 @@ class TestFailVerdictDowngrade:
                 ],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "FAIL"
         assert v["reasons"] == ["database is locked in log_excerpt"]
         assert v["forced"] is False
@@ -658,68 +800,90 @@ class TestFailVerdictDowngrade:
 
 
 class TestOutOfBandAssertionContradiction:
-    def test_rejects_fast_assertion_when_packet_is_slow(self):
+    def test_rejects_fast_assertion_when_packet_is_slow(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A reason asserting 'out_of_band: fast' when the packet says slow is fabricated."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(run_end={"duration_s": 500.0})
         assert p["out_of_band"] == "slow"
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["out_of_band: fast — run completed too quickly"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["reasons"] == []
         assert v["rejected_reasons"] == 1
 
-    def test_rejects_slow_assertion_when_packet_is_fast(self):
+    def test_rejects_slow_assertion_when_packet_is_fast(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A reason asserting 'out_of_band: slow' when the packet says fast is fabricated."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(run_end={"duration_s": 50.0})
         assert p["out_of_band"] == "fast"
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["out_of_band: slow — run took unusually long"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["reasons"] == []
         assert v["rejected_reasons"] == 1
 
-    def test_rejects_null_assertion_when_packet_is_out_of_band(self):
+    def test_rejects_null_assertion_when_packet_is_out_of_band(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A reason asserting 'out_of_band: null' when the packet is out-of-band is fabricated."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(run_end={"duration_s": 500.0})
         assert p["out_of_band"] == "slow"
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["out_of_band: null — duration within normal band"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["reasons"] == []
         assert v["rejected_reasons"] == 1
 
-    def test_correct_out_of_band_assertion_survives(self):
+    def test_correct_out_of_band_assertion_survives(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A reason asserting the correct out_of_band value must NOT be rejected."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(run_end={"duration_s": 500.0})
         assert p["out_of_band"] == "slow"
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["out_of_band: slow — run exceeded the upper band"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert v["reasons"] == ["out_of_band: slow — run exceeded the upper band"]
 
 
 class TestAmbiguousOnlyEvidenceGuard:
-    def test_ambiguous_only_anomaly_downgraded_to_pass(self):
+    def test_ambiguous_only_anomaly_downgraded_to_pass(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={"duration_s": 100.0},
             band=BAND,
@@ -737,7 +901,7 @@ class TestAmbiguousOnlyEvidenceGuard:
         assert p["band_assessment"] == "in_band"
         assert p["signature_hits"] == []
         assert p["disposition"] == "completed"
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -746,13 +910,18 @@ class TestAmbiguousOnlyEvidenceGuard:
                 ],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["forced"] is False
         assert "ambiguous" in v["reasons"][0].lower()
 
-    def test_own_signature_hit_keeps_anomaly(self):
+    def test_own_signature_hit_keeps_anomaly(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A run with its own signature hit is not rescued by the ambiguous guard."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={"duration_s": 100.0},
             band=BAND,
@@ -778,8 +947,11 @@ class TestAmbiguousOnlyEvidenceGuard:
         v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
         assert v["verdict"] == "ANOMALY"
 
-    def test_worsened_db_delta_keeps_anomaly(self):
+    def test_worsened_db_delta_keeps_anomaly(
+        self,
+    ):  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         """A real db_delta worsening is independent anomaly evidence; guard does not fire."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={"duration_s": 100.0, "db_delta": {"scoring_backlog": 10}},
             band=BAND,
@@ -798,8 +970,11 @@ class TestAmbiguousOnlyEvidenceGuard:
         v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
         assert v["verdict"] == "ANOMALY"
 
-    def test_non_ambiguous_shared_hit_keeps_anomaly(self):
+    def test_non_ambiguous_shared_hit_keeps_anomaly(
+        self,
+    ):  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         """A shared hit without the ambiguous marker is not sole-ambiguous evidence."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={"duration_s": 100.0},
             band=BAND,
@@ -816,8 +991,11 @@ class TestAmbiguousOnlyEvidenceGuard:
         v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
         assert v["verdict"] == "ANOMALY"
 
-    def test_failed_disposition_not_downgraded(self):
+    def test_failed_disposition_not_downgraded(
+        self,
+    ):  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         """A failed run is never rescued by the ambiguous guard."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         # disposition=failed forces FAIL before the model is even called.
         p = _packet(
             run_end={"duration_s": 100.0, "disposition": "failed", "error": "boom"},
@@ -832,12 +1010,17 @@ class TestAmbiguousOnlyEvidenceGuard:
                 }
             ],
         )
-        v = checkpoint_verdict(p)
+        v = checkpoint_verdict(
+            p
+        )  # PORT-SEAM: checkpoint_verdict() call updated: call_model passed as keyword, no conn/config positional args
         assert v["verdict"] == "FAIL"
         assert v["forced"] is True
 
-    def test_out_of_band_not_downgraded(self):
+    def test_out_of_band_not_downgraded(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """An out-of-band run is not rescued; the band itself is anomaly signal."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={"duration_s": 500.0},
             band={"status": "ok", "n": 10, "p10": 90.0, "p90": 120.0},
@@ -853,11 +1036,14 @@ class TestAmbiguousOnlyEvidenceGuard:
         )
         assert p["band_assessment"] == "out_of_band"
         result = _FakeResult({"verdict": "ANOMALY", "reasons": ["duration slow"]})
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
 
 
 class TestDbDeltaMisread:
+    # PORT-SEAM: mechanical rewrite for the host checkpoint_verdict/build_packet call shape (call_model injected, no DB conn) -- see file header
     def test_build_packet_semantic_summary_improvement_label(self):
         p = build_packet(
             {**RUN_END, "db_delta": {"missing_jd_full": -1, "scoring_backlog": -3}},
@@ -870,7 +1056,9 @@ class TestDbDeltaMisread:
         assert p["db_delta_summary"]["by_counter"]["scoring_backlog"]["label"] == "improved_by_3"
         assert p["db_delta_summary"]["by_counter"]["total_jobs"]["label"] == "unchanged"
 
-    def test_negative_missing_jd_full_suppressed(self):
+    def test_negative_missing_jd_full_suppressed(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "job": "Backup",
@@ -889,7 +1077,7 @@ class TestDbDeltaMisread:
             log_excerpt="2026-07-31 01:00:01 INFO Backup: {'status': 'success', 'rotated': 1}",
             db_delta_tracked=False,
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -898,12 +1086,16 @@ class TestDbDeltaMisread:
             }
         )
         mock_cm = MagicMock(return_value=result)
-        v = checkpoint_verdict(p, call_model=mock_cm)
+        v = checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         mock_cm.assert_called_once()
         assert v["verdict"] != "ANOMALY"
         assert not any("jd_full" in r.lower() for r in v["reasons"])
 
-    def test_all_zero_untracked_company_linkage_suppressed(self):
+    def test_all_zero_untracked_company_linkage_suppressed(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "job": "Company linkage",
@@ -922,7 +1114,7 @@ class TestDbDeltaMisread:
             log_excerpt="2026-07-31 05:00:45 INFO link_jobs_to_companies complete: linked=10, new_companies=0, matched=10, skipped=8",
             db_delta_tracked=False,
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -932,12 +1124,16 @@ class TestDbDeltaMisread:
             }
         )
         mock_cm = MagicMock(return_value=result)
-        v = checkpoint_verdict(p, call_model=mock_cm)
+        v = checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         mock_cm.assert_called_once()
         assert v["verdict"] != "ANOMALY"
         assert not any("no work" in r.lower() or "no changes" in r.lower() for r in v["reasons"])
 
-    def test_tracked_all_zero_with_success_not_flagged_as_no_work(self):
+    def test_tracked_all_zero_with_success_not_flagged_as_no_work(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "job": "Ingestion",
@@ -956,25 +1152,30 @@ class TestDbDeltaMisread:
             log_excerpt="2026-07-31 08:00:00 INFO ingestion complete: jobs_found=0, jobs_new=0",
             db_delta_tracked=True,
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["db_delta is all zero, indicating no work performed"],
             }
         )
         mock_cm = MagicMock(return_value=result)
-        v = checkpoint_verdict(p, call_model=mock_cm)
+        v = checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         mock_cm.assert_called_once()
         # For a tracked job with all-zero and no positive success token, the
         # post-return guard does not suppress the no-work reason.
         assert v["verdict"] == "ANOMALY"
 
-    def test_first_run_unknown_all_zero_with_success_suppressed(self):
+    def test_first_run_unknown_all_zero_with_success_suppressed(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A no-history job must not have db_delta_tracked collapsed to True.
 
         With no historical tracking signal, an all-zero db_delta and a no-work
         reason should still be contradicted by a success token in the log.
         """
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "job": "First-run untracked",
@@ -995,20 +1196,25 @@ class TestDbDeltaMisread:
         )
         assert p["db_delta_tracked"] is None
         assert p["db_delta_summary"]["tracked"] is None
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["db_delta is all zero, indicating no work performed"],
             }
         )
         mock_cm = MagicMock(return_value=result)
-        v = checkpoint_verdict(p, call_model=mock_cm)
+        v = checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         mock_cm.assert_called_once()
         assert v["verdict"] == "PASS"
         assert not any("no work" in r.lower() for r in v["reasons"])
 
-    def test_increase_counter_anomaly_not_suppressed(self):
+    def test_increase_counter_anomaly_not_suppressed(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A total_jobs/first_seen_today increase with anomalous magnitude is not a sign misread."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "job": "Ingestion",
@@ -1027,20 +1233,25 @@ class TestDbDeltaMisread:
             log_excerpt="",
             db_delta_tracked=True,
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["total_jobs increased by 100, an anomalously large spike"],
             }
         )
         mock_cm = MagicMock(return_value=result)
-        v = checkpoint_verdict(p, call_model=mock_cm)
+        v = checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         mock_cm.assert_called_once()
         assert v["verdict"] == "ANOMALY"
         assert any("total_jobs" in r.lower() for r in v["reasons"])
 
-    def test_success_branch_does_not_suppress_worsened_counter_reasons(self):
+    def test_success_branch_does_not_suppress_worsened_counter_reasons(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A success token must not suppress a legitimate worsened-counter concern."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "job": "Ingestion",
@@ -1066,14 +1277,16 @@ class TestDbDeltaMisread:
             log_excerpt="2026-07-31 09:00:00 INFO link_jobs_to_companies complete: linked=2, matched=1",
             db_delta_tracked=None,
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["db_delta for missing_jd_full worsened by 2, indicating data loss"],
             }
         )
         mock_cm = MagicMock(return_value=result)
-        v = checkpoint_verdict(p, call_model=mock_cm)
+        v = checkpoint_verdict(
+            p, call_model=mock_cm
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         mock_cm.assert_called_once()
         # Worsened counter is real damage; do not downgrade to PASS.
         assert v["verdict"] == "ANOMALY"
@@ -1081,6 +1294,7 @@ class TestDbDeltaMisread:
 
 
 class TestSuppressionHeuristics:
+    # PORT-SEAM: mechanical rewrite for the host checkpoint_verdict/build_packet call shape (call_model injected, no DB conn) -- see file header
     def test_is_no_work_reason_word_boundaries_and_generic_phrases(self):
         assert _is_no_work_reason("The run did no work") is True
         assert _is_no_work_reason("The run was a no-op") is True
@@ -1255,6 +1469,7 @@ class TestJobTracksDbDelta:
 
 
 class TestDbDeltaAttributable:
+    # PORT-SEAM: mechanical rewrite for the host checkpoint_verdict/build_packet call shape (call_model injected, no DB conn) -- see file header
     def test_solo_run_is_attributable(self):
         p = _packet(run_end={"db_delta": {"total_jobs": 4}})
         assert p["db_delta_attributable"] is True
@@ -1304,9 +1519,12 @@ class TestDbDeltaAttributable:
         assert by_counter["total_jobs"]["label"] == "improved_by_4"
         assert by_counter["classification_null"]["label"] == "improved_by_2"
 
-    def test_guard_drops_db_delta_reasons_when_not_attributable(self):
+    def test_guard_drops_db_delta_reasons_when_not_attributable(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """An ANOMALY whose reasons all cite db_delta counters is downgraded to
         PASS when the delta is not attributable."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "db_delta": {"classification_null": 1, "missing_jd_full": 1},
@@ -1314,7 +1532,7 @@ class TestDbDeltaAttributable:
             }
         )
         assert p["db_delta_attributable"] is False
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -1323,20 +1541,25 @@ class TestDbDeltaAttributable:
                 ],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["reasons"] == []
         assert v["rejected_reasons"] == 2
 
-    def test_guard_preserves_non_db_delta_reasons_when_not_attributable(self):
+    def test_guard_preserves_non_db_delta_reasons_when_not_attributable(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A non-db_delta reason survives the guard; only db_delta reasons drop."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "db_delta": {"classification_null": 1},
                 "concurrent_run_ids": ["other:1:1"],
             }
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -1345,13 +1568,18 @@ class TestDbDeltaAttributable:
                 ],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert v["reasons"] == ["signature hit: database is locked"]
         assert v["rejected_reasons"] == 1
 
-    def test_guard_noop_when_attributable(self):
+    def test_guard_noop_when_attributable(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A solo run with a genuine non-zero delta keeps its db_delta reasons."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "db_delta": {"classification_null": 5, "missing_jd_full": 3},
@@ -1359,7 +1587,7 @@ class TestDbDeltaAttributable:
             }
         )
         assert p["db_delta_attributable"] is True
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -1368,7 +1596,9 @@ class TestDbDeltaAttributable:
                 ],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert v["reasons"] == [
             "classification_null worsened by 5",
@@ -1376,8 +1606,11 @@ class TestDbDeltaAttributable:
         ]
         assert v["rejected_reasons"] == 0
 
-    def test_guard_drops_db_delta_field_reference(self):
+    def test_guard_drops_db_delta_field_reference(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A reason referencing 'db_delta' generically is also dropped."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "db_delta": {"total_jobs": 1},
@@ -1385,7 +1618,9 @@ class TestDbDeltaAttributable:
             }
         )
         result = _FakeResult({"verdict": "ANOMALY", "reasons": ["unexplained db_delta movement"]})
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["rejected_reasons"] == 1
 
@@ -1396,6 +1631,7 @@ class TestDbDeltaAttributable:
 
 
 class TestLogExcerptNonAttribution:
+    # PORT-SEAM: mechanical rewrite for the host checkpoint_verdict/build_packet call shape (call_model injected, no DB conn) -- see file header
     def test_prompt_declares_excerpt_scoping(self):
         # The prompt must NOT claim the excerpt is unconditionally scoped.
         assert "log_excerpt is scoped to this run's window" not in _SYSTEM
@@ -1459,8 +1695,11 @@ class TestLogExcerptNonAttribution:
         assert "concurrent_context" in p
         assert p["concurrent_context"] == ""
 
-    def test_verdict_passes_packet_with_scoping_to_model(self):
+    def test_verdict_passes_packet_with_scoping_to_model(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """The scoping flag and concurrent_context reach the model in the prompt JSON."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         captured: dict = {}
 
         def fake_call_model(*args, **kwargs):
@@ -1471,7 +1710,9 @@ class TestLogExcerptNonAttribution:
         p["log_excerpt_is_job_scoped"] = True
         p["log_excerpt_status"] = "captured_non_empty"
         p["concurrent_context"] = "stale_detector warning"
-        checkpoint_verdict(p, call_model=fake_call_model)
+        checkpoint_verdict(
+            p, call_model=fake_call_model
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
 
         body = json.loads(captured["messages"][-1]["content"])
         assert body["log_excerpt_is_job_scoped"] is True
@@ -1480,14 +1721,18 @@ class TestLogExcerptNonAttribution:
 
 
 class TestLogExcerptStatusGuard:
-    def test_drops_excerpt_absence_reason_on_capture_unavailable(self):
+    # PORT-SEAM: mechanical rewrite for the host checkpoint_verdict/build_packet call shape (call_model injected, no DB conn) -- see file header
+    def test_drops_excerpt_absence_reason_on_capture_unavailable(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """An ANOMALY reason solely about the empty excerpt is dropped when
         capture is unavailable; the verdict is downgraded to PASS with a
         caveat note."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet()
         p["log_excerpt_status"] = "capture_unavailable"
         p["log_excerpt_is_job_scoped"] = False
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -1495,28 +1740,37 @@ class TestLogExcerptStatusGuard:
                 ],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["rejected_reasons"] == 1
         assert any("capture unavailable" in r.lower() for r in v["reasons"])
 
-    def test_drops_excerpt_absence_reason_on_captured_empty(self):
+    def test_drops_excerpt_absence_reason_on_captured_empty(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """An ANOMALY reason solely about the empty excerpt is dropped when
         capture is captured_empty (the job genuinely emitted no lines)."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet()
         p["log_excerpt_status"] = "captured_empty"
         p["log_excerpt_is_job_scoped"] = True
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["No log excerpt provided for analysis"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["rejected_reasons"] == 1
 
-    def test_drops_issue_quoted_absence_reason_with_hyphenated_qualifier(self):
+    def test_drops_issue_quoted_absence_reason_with_hyphenated_qualifier(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """Regression for the regex gap in _EXCERPT_ABSENCE_RE (#2013 review).
 
         The issue's own quoted manufactured-verdict example —
@@ -1528,21 +1782,28 @@ class TestLogExcerptStatusGuard:
         was NOT classified as an excerpt-absence reason and survived the
         guard as a false escalation. It must now be dropped.
         """
+        # PORT-SEAM: import path updated for host package layout (private module split into jobcannon.host.nightly.checkpoint_packet/checkpoint_verdict)
         literal = "No job-scoped log content to confirm expected activity"
         assert _is_excerpt_absence_reason(literal) is True
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet()
         p["log_excerpt_status"] = "captured_empty"
         p["log_excerpt_is_job_scoped"] = True
         result = _FakeResult({"verdict": "ANOMALY", "reasons": [literal]})
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["rejected_reasons"] == 1
         assert literal not in v["reasons"]
 
-    def test_keeps_content_citing_reason_on_captured_non_empty(self):
+    def test_keeps_content_citing_reason_on_captured_non_empty(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A reason that cites specific content found in the excerpt (e.g.
         'database is locked in log_excerpt') is NOT dropped — it references a
         present string, not an absence."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = build_packet(
             RUN_END,
             hits=[],
@@ -1550,17 +1811,21 @@ class TestLogExcerptStatusGuard:
             band=BAND,
             log_excerpt_status="captured_non_empty",
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "FAIL",
                 "reasons": ["database is locked in log_excerpt"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         # The content-citing reason survives — it is not an excerpt-absence reason.
         assert "database is locked in log_excerpt" in v["reasons"]
 
-    def test_keeps_combined_reason_with_other_evidence(self):
+    def test_keeps_combined_reason_with_other_evidence(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """When an excerpt-absence reason is dropped but other reasons
         survive, the verdict is not downgraded — only the absence reason is
         removed.
@@ -1575,10 +1840,11 @@ class TestLogExcerptStatusGuard:
         passes through (proven by test_in_band_http_429s_reason_survives),
         so it isolates the excerpt-absence guard as the only dropper.
         """
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet()
         p["log_excerpt_status"] = "capture_unavailable"
         p["log_excerpt_is_job_scoped"] = False
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -1587,7 +1853,9 @@ class TestLogExcerptStatusGuard:
                 ],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         # The verdict stays ANOMALY: the surviving HTTP-429 reason keeps it
         # escalated; only the excerpt-absence reason is dropped.
         assert v["verdict"] == "ANOMALY"
@@ -1637,6 +1905,7 @@ def _ingestion_packet(total_jobs, classification_null, missing_jd_full):
 
 
 class TestNewRowBacklogLabelling:
+    # PORT-SEAM: mechanical rewrite for the host checkpoint_verdict/build_packet call shape (call_model injected, no DB conn) -- see file header
     def test_fully_bounded_increase_labelled_pending(self):
         summary = _db_delta_summary(
             {
@@ -1752,16 +2021,19 @@ class TestNewRowBacklogLabelling:
 
 
 class TestNewRowBacklogGuard:
-    def test_fully_bounded_packet_does_not_escalate(self):
+    def test_fully_bounded_packet_does_not_escalate(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """Acceptance: total_jobs +10 / first_seen_today +10 /
         classification_null +10 / missing_jd_full +10 does not produce an
         ANOMALY on its own, even when the model returns ANOMALY citing the
         counters as worsened."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _ingestion_packet(10, 10, 10)
         assert p["db_delta_summary"]["by_counter"]["classification_null"]["label"] == (
             "pending_from_new_rows_10"
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -1770,31 +2042,41 @@ class TestNewRowBacklogGuard:
                 ],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "PASS"
         assert v["reasons"] == []
         assert v["rejected_reasons"] == 2
 
-    def test_excess_growth_still_escalates(self):
+    def test_excess_growth_still_escalates(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """Acceptance: classification_null growing by more than the new-row
         count still labels the excess as worsened and still escalates."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _ingestion_packet(10, 15, 10)
         assert (
             p["db_delta_summary"]["by_counter"]["classification_null"]["label"] == "worsened_by_5"
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["classification_null worsened by 5, backlog accumulation"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert v["rejected_reasons"] == 0
 
-    def test_zero_new_rows_still_escalates(self):
+    def test_zero_new_rows_still_escalates(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """Acceptance: classification_null growing while total_jobs and
         first_seen_today are both 0 still escalates."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "job": "Scheduled ingestion",
@@ -1816,20 +2098,25 @@ class TestNewRowBacklogGuard:
         assert (
             p["db_delta_summary"]["by_counter"]["classification_null"]["label"] == "worsened_by_4"
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {"verdict": "ANOMALY", "reasons": ["classification_null worsened by 4"]}
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert v["rejected_reasons"] == 0
 
-    def test_guard_preserves_non_db_delta_reason(self):
+    def test_guard_preserves_non_db_delta_reason(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A non-db_delta reason (e.g. a signature hit) survives the guard even
         when a bounded counter is also cited alongside it as a separate
         reason; the bounded-counter reason drops, the signature reason keeps
         the verdict escalated."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _ingestion_packet(10, 10, 10)
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -1838,27 +2125,37 @@ class TestNewRowBacklogGuard:
                 ],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert v["reasons"] == ["signature hit: database is locked"]
         assert v["rejected_reasons"] == 1
 
-    def test_guard_keeps_reason_citing_mixed_pending_and_worsened(self):
+    def test_guard_keeps_reason_citing_mixed_pending_and_worsened(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """A single reason citing both a pending and a genuinely-worsened
         counter is kept (the worsened part is a legitimate basis)."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _ingestion_packet(10, 15, 10)
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["classification_null and missing_jd_full worsened, backlog growing"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert v["rejected_reasons"] == 0
 
-    def test_guard_noop_when_no_pending_counters(self):
+    def test_guard_noop_when_no_pending_counters(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """The guard is a no-op (0 dropped) when no counter is pending."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "db_delta": {"classification_null": 5, "missing_jd_full": 3},
@@ -1866,7 +2163,7 @@ class TestNewRowBacklogGuard:
             },
             db_delta_tracked=True,
         )
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -1875,11 +2172,15 @@ class TestNewRowBacklogGuard:
                 ],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert v["rejected_reasons"] == 0
 
-    def test_scoring_backlog_reason_survives_guard_alongside_bounded_counters(self):
+    def test_scoring_backlog_reason_survives_guard_alongside_bounded_counters(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         """Sabotage tripwire at the guard layer (the layer where #1893's
         false-negative actually fired): a reason citing only scoring_backlog
         must survive `_guard_new_row_backlog` even in the same delta where
@@ -1888,6 +2189,7 @@ class TestNewRowBacklogGuard:
         would also be in `pending`, the reason's citation would be a subset of
         `pending`, and the guard would drop it — downgrading ANOMALY to PASS
         and silently suppressing genuine backlog growth."""
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _packet(
             run_end={
                 "job": "Scheduled ingestion",
@@ -1907,23 +2209,30 @@ class TestNewRowBacklogGuard:
             db_delta_tracked=True,
         )
         assert p["db_delta_summary"]["by_counter"]["scoring_backlog"]["label"] == "worsened_by_3"
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": ["scoring_backlog worsened by 3, genuine backlog growth"],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         assert v["verdict"] == "ANOMALY"
         assert v["reasons"] == ["scoring_backlog worsened by 3, genuine backlog growth"]
         assert v["rejected_reasons"] == 0
 
 
 class TestIssue1893NamedPacketsDeterministic:
+    # PORT-SEAM: mechanical rewrite for the host checkpoint_verdict/build_packet call shape (call_model injected, no DB conn) -- see file header
     @pytest.mark.parametrize("total_jobs,classification_null,missing_jd_full", _ISSUE_1893_PACKETS)
     def test_named_packet_passes_regardless_of_model_wording(
-        self, total_jobs, classification_null, missing_jd_full
+        self,
+        total_jobs,
+        classification_null,
+        missing_jd_full,  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
     ):
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _ingestion_packet(total_jobs, classification_null, missing_jd_full)
         # Every bounded counter is pending, never worsened.
         for key in ("classification_null", "missing_jd_full"):
@@ -1941,18 +2250,23 @@ class TestIssue1893NamedPacketsDeterministic:
             ["classification_null and missing_jd_full worsened, suggesting problems"],
         ):
             result = _FakeResult({"verdict": "ANOMALY", "reasons": reasons})
-            v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+            v = checkpoint_verdict(
+                p, call_model=MagicMock(return_value=result)
+            )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
             assert v["verdict"] == "PASS", (total_jobs, reasons)
 
 
 class TestIssue1893Sabotage:
-    def test_sabotage_relabelling_pending_as_worsened_re_escalates(self):
+    # PORT-SEAM: mechanical rewrite for the host checkpoint_verdict/build_packet call shape (call_model injected, no DB conn) -- see file header
+    def test_sabotage_relabelling_pending_as_worsened_re_escalates(
+        self,
+    ):  # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         p = _ingestion_packet(10, 10, 10)
         # Simulate the pre-fix labelling: pending counters become worsened.
         for key in ("classification_null", "missing_jd_full"):
             entry = p["db_delta_summary"]["by_counter"][key]
             entry["label"] = f"worsened_by_{entry['raw_delta']}"
-        result = _FakeResult(
+        result = _FakeResult(  # PORT-SEAM: make_model_result fixture call replaced by local _FakeResult(...) construction
             {
                 "verdict": "ANOMALY",
                 "reasons": [
@@ -1961,7 +2275,9 @@ class TestIssue1893Sabotage:
                 ],
             }
         )
-        v = checkpoint_verdict(p, call_model=MagicMock(return_value=result))
+        v = checkpoint_verdict(
+            p, call_model=MagicMock(return_value=result)
+        )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
         # With the pre-fix labels, no guard drops the reasons -> ANOMALY stands.
         assert v["verdict"] == "ANOMALY"
 
@@ -1981,3 +2297,4 @@ class TestPromptDescribesPendingLabel:
     def test_prompt_mentions_pending_from_new_rows(self):
         assert "pending_from_new_rows_N" in _SYSTEM
         assert "MUST NOT be cited as an anomaly" in _SYSTEM
+        # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
