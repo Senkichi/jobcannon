@@ -21,8 +21,12 @@ equivalent ported-package root) — the only non-trivial adaptation here.
 F7 delta (private #1766): the `expired` tier and its membership in both
 predicate sets are ported (pure vocabulary). The state machine that *writes*
 `expired` — a cooldown-gated bounded retry against a hosted agentic
-enricher, plus its supporting columns/migration — is WAIVED: no hosted LLM
-caller or schema-migration authority exists in this engine yet.
+enricher — landed under ledger row L-0132
+(`jobcannon/engine/agentic_enricher.py::requeue_or_expire_agentic_exhausted`,
+PR #378) with the Playwright/call_model loop it depends on gated OFF: no
+hosted caller wires it into this engine yet, so its runtime behavior is
+unchanged from the prior WAIVED state even though the writer itself now
+exists.
 """
 
 from __future__ import annotations
@@ -59,8 +63,9 @@ def test_expired_is_terminal_and_low_signal():
     """'expired' (bounded agentic_exhausted retry budget spent with no jd_full
     recovered, in the private original) is the terminal end-state — the cascade
     gave up exactly like agentic_exhausted, so it belongs in both predicate
-    sets. The writer for this transition is unported (see the module
-    docstring); this pins the vocabulary membership only."""
+    sets. The writer for this transition landed under L-0132 (see the module
+    docstring) but has no caller yet; this pins the vocabulary membership
+    only."""
     assert EnrichmentTier.EXPIRED in TERMINAL
     assert EnrichmentTier.EXPIRED in LOW_SIGNAL_TERMINAL
 
@@ -189,34 +194,44 @@ def test_all_enrichment_tier_sql_literals_are_enum_members():
     )
 
 
-def test_expired_is_not_yet_written_anywhere():
-    """Adding EXPIRED to the enum widens the grep gate above's allowlist — it no
-    longer flags a write of enrichment_tier = 'expired' as off-vocabulary. This
-    port carries EXPIRED as vocabulary only (module docstring): no writer exists
-    yet (private original's retry/requeue sweep needs a hosted LLM caller, #139).
-    Pin that claim positively so it's enforced, not just asserted in prose.
+def test_expired_writer_landed_under_l0132_with_no_caller_yet():
+    """Supersedes the prior `test_expired_is_not_yet_written_anywhere` tripwire.
+    That test asserted nothing anywhere wrote `enrichment_tier = 'expired'` and
+    said, in its own docstring, to DELETE it the day a hosted writer for
+    'expired' landed — that day is this PR (#378, ledger row L-0132):
+    `jobcannon/engine/agentic_enricher.py::requeue_or_expire_agentic_exhausted`
+    is that writer. Its actual UPDATE binds `EnrichmentTier.EXPIRED.value` as a
+    query parameter (not a raw SQL literal), so the grep-gate test above stays
+    silent on it — this test pins the new invariant directly instead:
 
-    Positive control (run against this codebase at port time): the matched-literal
-    set is EMPTY, not just missing 'expired' — jobcannon/ has no
-    ``enrichment_tier = '...'``-shaped write of ANY kind yet (no hosted
-    persist_job_assessment-equivalent; see the waived ledger in this PR). That
-    means this assertion — like the grep gate above it, which is equally empty
-    today — is currently vacuously true. It is not a currently-active guard; it
-    is a tripwire for the day *any* raw-literal enrichment_tier write lands, the
-    same design the pre-existing gate already uses. Both tests are honest about
-    this in their assertions rather than papering over it with a non-empty
-    fixture, since the codebase genuinely has zero such writes right now.
+    1. The writer function exists and genuinely binds `EnrichmentTier.EXPIRED`.
+    2. It still has no caller anywhere in `jobcannon/` — the port lands the
+       writer gated OFF (no hosted `call_model` caller wires it in yet, see the
+       module docstring and the PR's Design conformance section), so this
+       port's runtime behavior is unchanged even though the writer now exists.
 
-    DELETE this test the day a hosted writer for 'expired' lands (issue #139) —
-    at that point a real write is expected and this assertion becomes false by
-    design."""
-    literals: set[str] = set()
+    Relax/delete part 2 the day a real caller lands for
+    `requeue_or_expire_agentic_exhausted` — at that point a caller is expected
+    and this assertion becomes false by design, mirroring the predecessor
+    test's own DELETE-note pattern."""
+    from jobcannon.engine import agentic_enricher
+
+    assert hasattr(agentic_enricher, "requeue_or_expire_agentic_exhausted")
+
+    source = Path(agentic_enricher.__file__).read_text(encoding="utf-8")
+    assert "EnrichmentTier.EXPIRED.value" in source
+
+    callers: list[str] = []
     for py in _JOB_FINDER_ROOT.rglob("*.py"):
-        if "__pycache__" in py.parts or "migrations" in py.parts:
+        if "__pycache__" in py.parts or py.name == "agentic_enricher.py":
             continue
         text = py.read_text(encoding="utf-8")
-        literals.update(m.group(1) for m in _TIER_LITERAL_RE.finditer(text))
-    assert "expired" not in literals
+        if "requeue_or_expire_agentic_exhausted(" in text:
+            callers.append(str(py.relative_to(_JOB_FINDER_ROOT)))
+    assert callers == [], (
+        f"requeue_or_expire_agentic_exhausted now has caller(s), so this port's "
+        f"EXPIRED sweep is no longer inert -- relax this guard: {callers}"
+    )
 
 
 # ---------------------------------------------------------------------------
