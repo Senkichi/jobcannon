@@ -19,9 +19,10 @@ consumes these columns; it must not re-add them.
 Backfill: both new columns copy the existing ``scan_enabled`` value
 verbatim. ``companies.scan_enabled`` has been ``NOT NULL`` since m0001, so
 this port needs no COALESCE the way private's NULL-tolerant
-``COALESCE(scan_enabled, 1)`` did. This host also has no
-``careers_crawl_flag_reason`` column (the careers crawler is unported —
-ledger L-0286), so there is no second signal to fold into
+``COALESCE(scan_enabled, 1)`` did. This host had no
+``careers_crawl_flag_reason`` column at the time this migration ran (the
+careers crawler was unported — ledger L-0286; the column was added later
+by m0028, issue #370), so there was no second signal to fold into
 ``careers_scan_enabled`` the way private's backfill combined
 ``scan_enabled`` with that reason column; both new columns therefore start
 IDENTICAL to the legacy bit, preserving every company's current

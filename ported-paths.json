@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T19:07:07Z",
+  "generated_at": "2026-09-04T19:56:38Z",
   "roots": [
     "engine",
     "db",
@@ -88,11 +88,11 @@
           "text": "Private source: ``job_finder/db/_company_attribution.py`` @"
         },
         {
-          "line": 40,
+          "line": 43,
           "text": "# (job_finder/db/_company_state.py, WI-08) to record the transition in"
         },
         {
-          "line": 72,
+          "line": 75,
           "text": ")  # PORT-SEAM: json_utils.utc_now_iso/private _company_state imports dropped -- see below and module docstring"
         }
       ]
@@ -554,7 +554,7 @@
           "text": "``job_finder/web/migrations/m209604315_per_source_scan_enabled.py`` (WI-13,"
         },
         {
-          "line": 54,
+          "line": 55,
           "text": "instrumentation (job_finder/db/_company_state.py's own docstring: \"every"
         }
       ]
@@ -650,6 +650,24 @@
         {
           "line": 1,
           "text": "\"\"\"PORTED (schema-only) from job_finder/web/nightly_monitor/_state.py's"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/migrations/m0028_careers_crawl_flag_reason_column.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 24,
+          "text": "-- enforcement belongs at the writer, not the schema. Private's"
+        },
+        {
+          "line": 25,
+          "text": "``job_finder/web/migrations/m205996202_careers_crawl_flag_reason_column.py``"
+        },
+        {
+          "line": 31,
+          "text": "No backfill: NULL means \"never flagged,\" matching private's own migration"
         }
       ]
     },
