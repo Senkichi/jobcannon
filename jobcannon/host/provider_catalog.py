@@ -1,15 +1,14 @@
 """PORTED from job_finder/web/provider_catalog.py @ e6c17c32051602be4b565becb71486f2a4c10ed1
 (private job-cannon). Ledger L-0051.
-# PORT-SEAM: verbatim PORT (not ADAPT) -- ledger L-0051's own adjudication:
-# "desktop CLI providers in the roster? Enumerating a provider is config
-# data, not a coupling -- hosted config just omits them from
-# fallback_chain." Hosted-eligibility ({gemini, groq, cerebras}) is
-# enforced where design-providers-byokey.md §1c puts it: the HOST's chain
-# builder (jobcannon/host/model_provider.py's ``resolve_hosted_routing``),
-# which is the roster's only hosted consumer -- not by trimming this file.
-# Trimming would also break this module's own single-source-of-truth
-# contract (FREE_PROVIDER_NAMES / PROVIDER_KEY_FIELDS / cli_binaries() all
-# derive from the full PROVIDERS tuple) for zero behavioral benefit.
+# PORT-SEAM: verbatim PORT (not ADAPT). Enumerating a desktop-CLI provider
+# here is config data, not a coupling -- hosted config simply omits it
+# from fallback_chain. Hosted-eligibility ({gemini, groq, cerebras}) is
+# enforced by the roster's only hosted consumer, the HOST's chain builder
+# (jobcannon/host/model_provider.py's ``resolve_hosted_routing``), not by
+# trimming this file. Trimming would also break this module's own
+# single-source-of-truth contract (FREE_PROVIDER_NAMES / PROVIDER_KEY_FIELDS
+# / cli_binaries() all derive from the full PROVIDERS tuple) for zero
+# behavioral benefit.
 
 Single source of truth for the LLM provider roster + per-provider properties.
 

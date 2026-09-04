@@ -1,8 +1,8 @@
 """jobcannon.host.credentials -- AES-256-GCM envelope + per-tenant
-CredentialResolver builder (L-0036 PR-1, design-providers-byokey.md §1b/§3).
+CredentialResolver builder (L-0036 PR-1).
 
 Not a port: no private-repo equivalent exists. Covers the encrypt/decrypt
-round trip, the fail-closed-not-fail-fast KEK-unset contract (design's own
+round trip, the fail-closed-not-fail-fast KEK-unset contract (a hard
 requirement -- resolve_credential must return None, never raise, so an
 unconfigured host degrades to "no BYO-key providers" instead of crashing),
 and the resolver's non-fatal handling of a corrupt/mismatched-key row.

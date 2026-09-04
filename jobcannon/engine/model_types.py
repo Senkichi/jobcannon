@@ -1,8 +1,8 @@
 """PORTED from job_finder/web/model_provider.py @ 9678c44c5d667d8a1d587c2d1f92b9df4056ead9
 (private job-cannon). Ledger L-0036.
 
-# PORT-SEAM: split per docs/superpowers design note design-providers-byokey.md
-# §1a. Private's model_provider.py mixed a pure contract (ModelResult,
+# PORT-SEAM: split so the pure contract half can live in the engine layer.
+# Private's model_provider.py mixed a pure contract (ModelResult,
 # BaseProvider, adapter-raised exceptions) with a host-only cascade
 # dispatcher (call_model, routing, adapter construction, deadline
 # machinery, cost/rate accounting) in one module. Hosted, the dispatcher

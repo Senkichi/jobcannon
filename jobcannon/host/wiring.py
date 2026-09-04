@@ -173,7 +173,7 @@ def build_scan_services(host_config: HostConfig) -> services.ScanServices:
         jd_storage_max_chars=_JD_STORAGE_MAX_CHARS,
         # prober_extensions deliberately omitted -> None (fail-closed, spec §3.6)
         scan_deadline_s=_SCAN_DEADLINE_S,
-        # L-0036 (design-providers-byokey.md PR-1): the hosted model
+        # L-0036 PR-1: the hosted model
         # dispatcher + its cost/usage sink, both module-level functions
         # (not per-tenant closures — call_model takes user_id per call and
         # builds a fresh, per-call CredentialResolver internally; see

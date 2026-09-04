@@ -152,7 +152,7 @@ class HostConfig:
     render_git_commit: str = field(
         default="", metadata={"env": "RENDER_GIT_COMMIT", "declare_on": ()}
     )
-    # BYO-key encryption-at-rest KEK (L-0036, design-providers-byokey.md §3).
+    # BYO-key encryption-at-rest KEK (L-0036).
     # jobcannon.host.credentials reads this env var directly (not via this
     # field) -- declared here purely so test_render_config.py's declare_on
     # derivation covers it in render.yaml on both services (web AND worker

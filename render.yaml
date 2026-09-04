@@ -137,8 +137,8 @@ services:
       # ever sending the raw Clerk user id to PostHog.
       - key: JC_ANALYTICS_PSEUDONYM_SALT
         sync: false
-      # BYO-key encryption-at-rest KEK (L-0036, design-providers-byokey.md
-      # §3). Declared on both services -- web AND worker each build a
+      # BYO-key encryption-at-rest KEK (L-0036).
+      # Declared on both services -- web AND worker each build a
       # call_model via wiring.py's build_scan_services. Unset fails closed
       # (jobcannon/host/credentials.py: every resolve_credential(...) call
       # returns None) rather than blocking startup.

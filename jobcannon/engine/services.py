@@ -184,18 +184,17 @@ class ScanServices:
     set_direct_url: Callable[..., Any] | None = None
     stamp_direct_url_checks: Callable[..., Any] | None = None
 
-    # L-0036 (design-providers-byokey.md, PR-1). ``call_model`` matches the
-    # already-landed ``jobcannon.engine.job_scorer.score_job(...,
-    # call_model=...)`` keyword-only REQUIRED param: score_job's own call
-    # site passes tier=/system=/messages=/conn=/config=/output_schema=/
-    # job_id=/purpose=/max_tokens=/timeout= and no more, so any callable
-    # matching jobcannon.host.model_provider.call_model's signature works
-    # here without change. Per design-nightly-flywheel.md §4 item 2 and
-    # design-crawler-cascade.md §1(c): this field is the ONE host-side
-    # construction point for the dispatcher; the crawler/enricher/nightly
-    # consumers named in those notes read it off ``get_services()`` once at
-    # their own entry point and thread it down explicitly as a parameter
-    # from there — they do NOT each read ScanServices themselves.
+    # L-0036, PR-1. ``call_model`` matches the already-landed
+    # ``jobcannon.engine.job_scorer.score_job(..., call_model=...)``
+    # keyword-only REQUIRED param: score_job's own call site passes
+    # tier=/system=/messages=/conn=/config=/output_schema=/job_id=/purpose=/
+    # max_tokens=/timeout= and no more, so any callable matching
+    # jobcannon.host.model_provider.call_model's signature works here
+    # without change. This field is the ONE host-side construction point
+    # for the dispatcher; the crawler/enricher/nightly consumers read it
+    # off ``get_services()`` once at their own entry point and thread it
+    # down explicitly as a parameter from there — they do NOT each read
+    # ScanServices themselves.
     # Optional (None) because nothing invokes hosted scoring yet (no
     # config.yaml-equivalent primary/fallback exists to route without a
     # tenant's byo_key_credentials — see model_provider.call_model's

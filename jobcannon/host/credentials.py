@@ -1,8 +1,7 @@
 """Host-side per-tenant CredentialResolver builder.
 
 NOT a port -- private (single-user, config.yaml-backed API keys) has no
-equivalent; this is new hosted infrastructure. Implements design note
-design-providers-byokey.md §1b/§3.
+equivalent; this is new hosted infrastructure (L-0036 PR-1).
 
 Encryption: byo_key_credentials.encrypted_key is opaque bytea (m0001);
 no encryption scheme existed before this module. Uses AES-256-GCM

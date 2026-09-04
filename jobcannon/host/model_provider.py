@@ -1,17 +1,16 @@
 """ADAPTED from job_finder/web/model_provider.py @ 9678c44c5d667d8a1d587c2d1f92b9df4056ead9
 (private job-cannon). Ledger L-0036.
 
-# PORT-SEAM: this is an ADAPT extraction, not a verbatim port -- design note
-# design-providers-byokey.md §6 explicitly exempts this file (and
-# jobcannon/engine/model_types.py) from fidelity-diff verbatim comparison:
-# "they are ADAPT extractions (split across two files + owner-budget->host-DB
-# seam). Verify by behavior/tests, and by a structural diff showing the
-# deadline machinery carried unchanged." See the module-level PORT-SEAM notes
-# below for what carries byte-identical vs. what is deliberately rewritten,
-# and docs/superpowers/plans/2026-09-02-migration-completeness-audit.md's PR
+# PORT-SEAM: this is an ADAPT extraction, not a verbatim port -- it is split
+# across two files (this file plus jobcannon/engine/model_types.py) and
+# rewires the owner-budget seam to a per-tenant host-DB seam, so it is
+# exempted from verbatim fidelity-diff comparison and verified instead by
+# behavior/tests plus a structural diff showing the deadline machinery
+# carried unchanged. See the module-level PORT-SEAM notes below for what
+# carries byte-identical vs. what is deliberately rewritten, and this PR's
 # body for the full Design conformance mapping.
 #
-# What carries BYTE-IDENTICAL (design §1d): the single-monotonic-deadline
+# What carries BYTE-IDENTICAL: the single-monotonic-deadline
 # machinery (_deadline / _remaining_or_raise / _TIMEOUT_EPSILON / the
 # _UnsetTimeout sentinel / _TIER_DEFAULT_TIMEOUTS), schema validation/retry
 # (_validate_schema / _sanitize_output / _coerce_enum), and degenerate-vector
@@ -25,9 +24,9 @@
 #     parsing: providers.primary/overrides/consented_providers, craft-tier
 #     pin to claude_code_cli) do NOT carry: hosted has no config.yaml at all
 #     (jobcannon/host/config.py's HostConfig docstring), and claude_code_cli
-#     is not hosted-eligible (design §5, Gate-2 DIE/HOLD), so the pin has no
-#     hosted meaning. Replaced by resolve_hosted_routing(), which implements
-#     design §1c's stated mechanism directly: intersect the tenant's active
+#     is not hosted-eligible (Gate-2 DIE/HOLD), so the pin has no
+#     hosted meaning. Replaced by resolve_hosted_routing(), which
+#     intersects the tenant's active
 #     byo_key_credentials providers with HOSTED_ELIGIBLE_PROVIDERS and feed
 #     that as the ordered chain -- there is no owner-config branch that would
 #     ever fire hosted, so parameterizing the private function with a
@@ -37,7 +36,7 @@
 #     only (ollama/anthropic/claude_code_cli/gemini_cli/openrouter/
 #     local_bundled are absent -- Gate-2 DIE/HOLD) and drops the
 #     (provider_name, base_url, keep_alive, num_ctx) adapter-memoization
-#     cache ENTIRELY (explicit instruction; design §4 modularity note #1,
+#     cache ENTIRELY (explicit instruction -- see the Modularity note item 1,
 #     HIGH: the cache keys three of its four dimensions None for every
 #     non-Ollama provider, so it would hand tenant B's adapter -- holding
 #     tenant A's decrypted API key in a closure/attribute -- to tenant B's
@@ -46,8 +45,7 @@
 #   - cost_gate / BudgetExceededError / FREE_PROVIDERS (private:
 #     claude_client.py) do not carry: those gate an OWNER's daily spend
 #     budget, which has no meaning under BYO-key (every REST call bills the
-#     TENANT's own key -- design §5's semantics-inversion note). Dropped
-#     entirely rather than ported-and-unused.
+#     TENANT's own key). Dropped entirely rather than ported-and-unused.
 #   - _daily_usage / _check_daily_limit / _increment_usage /
 #     _init_usage_from_db / _ensure_usage_current (private's in-process
 #     daily-request-cap tracker) do not carry: private bootstraps from a
@@ -55,9 +53,9 @@
 #     creates it), so a verbatim port would crash on first call. daily_limits
 #     is always {} hosted (no owner config.yaml source for it), which made
 #     private's own _check_daily_limit a no-op in that case anyway. Rate-limit
-#     ownership is an open question this design defers (§5, §4 modularity
-#     note #4: per-(user_id, provider) limits from a real per-tenant ledger,
-#     filed as a follow-up, not invented here).
+#     ownership is deferred (Modularity note item 4: per-(user_id, provider)
+#     limits from a real per-tenant ledger, filed as a follow-up, not
+#     invented here).
 #   - _maybe_record_cost is replaced by the module-level record_cost() below:
 #     same free/paid cost_usd-zeroing semantics, but a structured-log sink
 #     instead of an INSERT into `scoring_costs` (which does not exist on this
@@ -96,10 +94,10 @@ logger = logging.getLogger(__name__)
 # PORT-SEAM: byte-identical to private's _VALID_WORKLOADS.
 _VALID_WORKLOADS: frozenset[str] = frozenset({"quick", "score", "triage", "craft"})
 
-# design §5: "Recommend {gemini, groq, cerebras} only -- all three are pure
-# REST, no CLI/local-binary dep." Order is the default preference when a
-# tenant has multiple active credentials: gemini first (is_free=True on the
-# tenant's own Google quota), then groq/cerebras (billed).
+# Hosted-eligible: all three are pure REST, no CLI/local-binary dependency.
+# Order is the default preference when a tenant has multiple active
+# credentials: gemini first (is_free=True on the tenant's own Google
+# quota), then groq/cerebras (billed).
 HOSTED_ELIGIBLE_PROVIDERS: tuple[str, ...] = ("gemini", "groq", "cerebras")
 
 
@@ -151,7 +149,7 @@ class ProviderCascadeTimeoutError(Exception):
 
 # ---------------------------------------------------------------------------
 # Schema validation / sanitization / degenerate-vector detection
-# PORT-SEAM: byte-identical to private (design §1d).
+# PORT-SEAM: byte-identical to private.
 # ---------------------------------------------------------------------------
 
 
@@ -278,7 +276,7 @@ def _augment_with_errors(messages: list[dict], errors: list[str]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Hosted routing -- design §1c (replaces private's resolve_workload_routing /
+# Hosted routing (replaces private's resolve_workload_routing /
 # resolve_provider_config; see module docstring for why).
 # ---------------------------------------------------------------------------
 
@@ -331,7 +329,7 @@ def resolve_hosted_routing(tier: str, available_providers: list[str]) -> dict:
 
 # ---------------------------------------------------------------------------
 # Adapter construction -- gemini/groq/cerebras only, NO memoization cache
-# (design §4 modularity note #1, HIGH -- see module docstring).
+# (Modularity note item 1, HIGH -- see module docstring).
 # ---------------------------------------------------------------------------
 
 
@@ -366,10 +364,10 @@ def _make_adapter(
 
 
 # ---------------------------------------------------------------------------
-# Cost/usage recording -- exposed as its own ScanServices field (per
-# design-nightly-flywheel.md §4 item 2) so callers OTHER than call_model's
-# own cascade loop (e.g. a future SerpAPI-enrichment quota counter) share
-# one seam instead of hand-rolling their own cost-ledger writes.
+# Cost/usage recording -- exposed as its own ScanServices field so callers
+# OTHER than call_model's own cascade loop (e.g. a future SerpAPI-enrichment
+# quota counter) share one seam instead of hand-rolling their own
+# cost-ledger writes.
 # ---------------------------------------------------------------------------
 
 
@@ -392,11 +390,11 @@ def record_cost(
     references in jobcannon/engine/data_enricher.py -- _serpapi_daily_calls_used
     / _record_serpapi_call -- query one that does not exist on this host and
     are themselves pre-existing, out-of-scope dead code, unrelated to this
-    port). Rather than invent a table this design's own open questions (§5)
-    have not resolved the shape of (does it need a user_id column? per-tenant
-    or per-provider granularity?), this is a structured-log sink only.
+    port). The shape of a real per-tenant cost table (user_id column?
+    per-tenant or per-provider granularity?) is not yet decided, so this is
+    a structured-log sink only.
 
-    Modularity follow-up (design §4 item 4, HIGH-ish): factor a real
+    Modularity follow-up (item 4, HIGH-ish): factor a real
     per-tenant spend/rate-accounting module once that shape is decided, and
     wire it in here without changing this function's signature or any
     caller.
@@ -502,8 +500,8 @@ def call_model(
     if isinstance(timeout, _UnsetTimeout):
         timeout = _TIER_DEFAULT_TIMEOUTS.get(tier, _TIER_DEFAULT_TIMEOUT_FALLBACK)
 
-    # PORT-SEAM: byte-identical deadline machinery to private (design §1d /
-    # docs/design/provider-cascade-constraints.md, binding constraint 1).
+    # PORT-SEAM: byte-identical deadline machinery to private
+    # (docs/design/provider-cascade-constraints.md, binding constraint 1).
     _deadline: float | None = time.monotonic() + timeout if timeout is not None else None
 
     def _remaining_or_raise(entry_provider: str) -> float | None:

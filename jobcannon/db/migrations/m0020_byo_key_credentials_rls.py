@@ -5,10 +5,9 @@ deliberately zero policies (default-deny for every role, including the
 table owner). This migration adds the single carve-out: a tenant may see
 and write only their own rows.
 
-Ledger L-0036 (design-providers-byokey.md §3): "the same
-current_setting('app.user_id')-style predicate the rest of the per-user
-tables use -- verify the exact session-var convention before writing."
-Verified (grep across jobcannon/db/migrations/): no other table in this
+Ledger L-0036: this migration must pick the exact session-var convention
+for a tenant-scoped RLS predicate, verifying there is no existing one to
+match. Verified (grep across jobcannon/db/migrations/): no other table in this
 schema is RLS-scoped -- byo_key_credentials is the FIRST. There is no prior
 convention to match; this migration establishes app.user_id as that
 convention. jobcannon/db/_byo_key_credentials.py -- the table's sole
