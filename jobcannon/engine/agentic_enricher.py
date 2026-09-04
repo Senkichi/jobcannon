@@ -103,28 +103,26 @@ DEFAULT_AGENTIC_EXHAUSTED_MAX_RETRIES = 2
 
 
 def get_agentic_exhausted_retry_policy(config: dict | None = None) -> tuple[int, int]:
-    """Resolve (cooldown_days, max_retries) for the agentic_exhausted retry sweep.
+    """Resolve the agentic_exhausted retry/expiry policy from config.
 
-    Reads ``agentic.retry_cooldown_days`` / ``agentic.retry_max_attempts`` from
-    config, falling back to the defaults above. Both values are clamped to
-    ``>= 0`` so a malformed or negative config value can't invert the sweep's
-    intent (e.g. a negative cooldown always-satisfied, a negative max_retries
-    that expires everything on the first pass).
+    Returns:
+        (cooldown_days, max_retries) with safe defaults. Both are clamped to
+        >= 0 (a malformed negative config value falls back to the default
+        rather than producing a policy that retries every sweep or never
+        retries at all).
     """
-    agentic_cfg = (config or {}).get("agentic", {}) if config else {}
-    try:
-        cooldown_days = int(
-            agentic_cfg.get("retry_cooldown_days", DEFAULT_AGENTIC_EXHAUSTED_COOLDOWN_DAYS)
-        )
-    except (TypeError, ValueError):
+    if config is None:
+        config = {}
+    agentic_cfg = config.get("agentic", {}) or {}
+    cooldown_days = int(
+        agentic_cfg.get("retry_cooldown_days", DEFAULT_AGENTIC_EXHAUSTED_COOLDOWN_DAYS)
+    )
+    max_retries = int(agentic_cfg.get("retry_max_attempts", DEFAULT_AGENTIC_EXHAUSTED_MAX_RETRIES))
+    if cooldown_days < 0:
         cooldown_days = DEFAULT_AGENTIC_EXHAUSTED_COOLDOWN_DAYS
-    try:
-        max_retries = int(
-            agentic_cfg.get("retry_max_attempts", DEFAULT_AGENTIC_EXHAUSTED_MAX_RETRIES)
-        )
-    except (TypeError, ValueError):
+    if max_retries < 0:
         max_retries = DEFAULT_AGENTIC_EXHAUSTED_MAX_RETRIES
-    return max(cooldown_days, 0), max(max_retries, 0)
+    return cooldown_days, max_retries
 
 
 def _resolve_batch_limit(config: dict, limit: int | None) -> int:
