@@ -1,25 +1,30 @@
 """ADAPTED from job_finder/web/nightly_monitor/_checkpoint.py (verdict half)
 @ e1f47695b07f928e6c91cc64767c97a99645d68f (private job-cannon).
-Ledger L-0471.
+Ledger L-0471, L-0585.
 
 Checkpoint verdict: given an evidence packet from checkpoint_packet.py
 (the other half of this port's file split), call the injected verdict
 model and run the packet-falsification guard chain over its answer.
 
-One forced-FAIL rule runs BEFORE any model call: disposition=failed (the
-authoritative per-run signal) is a FAIL regardless of model opinion. A
-fail-severity signature is NOT forced -- hits are matched over the whole
-tick's log window and carry no run_id, so forcing FAIL would blame every
-job sharing the tick with another job's failure line; the hits go into the
-packet and the attribution-aware model adjudicates. This is the private
-implementation's own rule, stated in its docstring, and it is what this
-port preserves byte-identical -- disposition=failed only. Otherwise the
-verdict comes from the injected ``call_model`` at workload tier "quick".
-Unparseable model output => ANOMALY; verdict-call failures (missing
-call_model, provider/transport/cascade exhausted) => VERDICT_UNAVAILABLE --
-both are fail-safe and not alarming, but only the latter carries the
-infra-failure signal so morning review can separate job anomalies from
-scorer outages (issue #1402).
+Two forced rules run BEFORE any model call: disposition=failed (the
+authoritative per-run signal) is a FAIL regardless of model opinion, and
+disposition=orphaned (a run that ended with no terminal outcome -- no
+duration, result, or error) is an ANOMALY regardless of model opinion, so it
+can never silently resolve to PASS. A fail-severity signature is NOT forced
+-- hits are matched over the whole tick's log window and carry no run_id, so
+forcing FAIL would blame every job sharing the tick with another job's
+failure line; the hits go into the packet and the attribution-aware model
+adjudicates. These are the private implementation's own rules, stated in its
+docstring (private #2107), and this port preserves them byte-identical --
+disposition=failed and disposition=orphaned only; the forced path keeps an
+orphan out of the post-return reason filter's reach, since the filter can
+empty a bare packet's reason list and would otherwise downgrade ANOMALY to
+PASS. Otherwise the verdict comes from the injected ``call_model`` at
+workload tier "quick". Unparseable model output => ANOMALY; verdict-call
+failures (missing call_model, provider/transport/cascade exhausted) =>
+VERDICT_UNAVAILABLE -- both are fail-safe and not alarming, but only the
+latter carries the infra-failure signal so morning review can separate job
+anomalies from scorer outages (issue #1402).
 
 # PORT-SEAM: call_model is an injected optional keyword parameter
 # (default None), matching jobcannon.engine.job_scorer.score_job's
@@ -34,18 +39,31 @@ scorer outages (issue #1402).
 # caller needs (which user_id owns a given nightly job) is unscoped here
 # and is listed as a follow-up, not invented.
 #
-# jd_full_loss_excess (private's second forced rule, ANOMALY on a
+# PORT-SEAM: disposition=orphaned reachability -- checkpoint_packet.py's
+# module docstring records that the hosted caller (jobcannon.host.nightly.
+# sampler) derives ``disposition`` from a procrastinate_jobs row via
+# sampler.py's ``_STATUS_TO_DISPOSITION`` map, which today covers only
+# {"succeeded": "completed", "failed": "failed"} and falls through to the
+# raw procrastinate job status otherwise; procrastinate has no "orphaned"
+# status, so no current host caller emits this disposition value. The forced
+# branch is ported anyway for parity with the private rule and to be correct
+# the moment a caller does emit it (e.g. a future host-side orphan-reclaim
+# path modeled on jobcannon.host.tasks.reclaim_orphaned_jobs), matching how
+# call_model above is ported unwired ahead of its caller.
+#
+# jd_full_loss_excess (private's third forced rule, ANOMALY on a
 # jd_full-loss invariant violation) is DROPPED, not ported: it imports
 # `job_finder.web.run_events.jd_full_loss_excess`, a module outside
 # nightly_monitor/ with no host analog, and it operates on `db_delta`,
 # which no hosted caller populates yet (see checkpoint_packet.py's module
 # docstring). A stub that always returns 0 would look implemented when it
-# is not, so the branch is absent rather than inert. Forced FAIL here is
-# scoped to exactly what the private code's own docstring specifies: only
-# disposition=failed is forced. A fail-severity signature is adjudicated
-# by the model like any other packet evidence, matching the private
-# implementation -- FAIL escalation to a recorded health-log ERROR is a
-# sampler-level concern, not this function's internal forcing rule.
+# is not, so the branch is absent rather than inert. Forced verdicts here
+# are scoped to exactly what the private code's own docstring specifies:
+# disposition=failed (FAIL) and disposition=orphaned (ANOMALY) only -- no
+# other disposition value is forced. A fail-severity signature is
+# adjudicated by the model like any other packet evidence, matching the
+# private implementation -- FAIL escalation to a recorded health-log ERROR
+# is a sampler-level concern, not this function's internal forcing rule.
 
 The packet that reaches the model is a *semantic* view of the run. Raw
 ``db_delta`` integers are replaced by a precomputed ``db_delta_summary`` that
@@ -943,7 +961,9 @@ def checkpoint_verdict(
     conn: Any = None,
     config: dict | None = None,
 ) -> dict:
-    """Forced-FAIL only on the authoritative per-run signal (disposition=failed).
+    """Forced verdicts on the authoritative per-run signals: disposition=failed
+    (FAIL) and disposition=orphaned (ANOMALY); everything else is
+    model-adjudicated (private #2107; see module docstring).
 
     A fail-severity signature is deliberately NOT a forced FAIL: hits are matched
     over the whole tick's log window and carry no run_id, so forcing FAIL here
@@ -956,10 +976,20 @@ def checkpoint_verdict(
     so morning review can distinguish job anomalies from infra noise (issue
     #1402).
 
+    ``disposition=orphaned`` is forced to ANOMALY pre-model: an orphan is a
+    run that ended with no terminal outcome (no duration/result/error), so it
+    carries no evidence a guard could validate. Without a forced path the
+    verdict would fall to the model and the post-return reason guards, which
+    can empty the reason list on such a bare packet and downgrade ANOMALY to
+    PASS -- recording a run that never reported an outcome as passing.
+    Forcing pre-model bypasses the reason filter entirely, exactly as
+    ``failed`` does.
+
     Every return path carries ``rejected_reasons``: the count of model-supplied
     reasons dropped by the deterministic post-verdict guards as fabricated
     (falsified against the packet), defaulting to 0 where no model reasons
-    reached validation (forced FAIL, unparseable verdict, verdict-call failure).
+    reached validation (forced FAIL/ANOMALY, unparseable verdict, verdict-call
+    failure).
 
     ``call_model`` defaults to None: on this host, no caller has a live
     user_id-scoped model dispatcher wired to a nightly-monitor tick yet (see
@@ -971,6 +1001,20 @@ def checkpoint_verdict(
         return {
             "verdict": "FAIL",
             "reasons": [f"disposition=failed (error={packet.get('error')})"],
+            "forced": True,
+            "rejected_reasons": 0,
+        }
+    if packet.get("disposition") == "orphaned":
+        # PORT-SEAM: private #2107 -- an orphan never reported an outcome (no
+        # duration/result/error). Force ANOMALY pre-model so the reason
+        # filter cannot empty the reason list and downgrade to PASS, exactly
+        # as disposition=failed forces FAIL above.
+        return {
+            "verdict": "ANOMALY",
+            "reasons": [
+                "disposition=orphaned (run ended with no terminal event; "
+                "process was reaped or wedged before reporting an outcome)"
+            ],
             "forced": True,
             "rejected_reasons": 0,
         }
