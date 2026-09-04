@@ -270,7 +270,9 @@ def test_parser_dispatch_and_failure_are_recorded_via_capture(db_conn, monkeypat
     )
 
     def fake_extract(parser_fn, body, email_date):
-        if body == "boom":
+        # `body` carries EmailMessage.set_content's trailing "\n" -- compare
+        # with a substring check, not equality.
+        if "boom" in body:
             raise ValueError("synthetic parse failure")
         return [{"title": "Fake Job"}]
 
