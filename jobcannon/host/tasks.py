@@ -76,6 +76,7 @@ from jobcannon.host.scan_tasks import (
     run_scan_task,
     run_stale_detect_task,
 )
+from jobcannon.host.scoring_runner import run_scoring
 from jobcannon.host.storage_check import check_db_storage
 from jobcannon.host.task_app import app
 
@@ -92,6 +93,18 @@ DEFAULT_EVENTS_RETENTION_DAYS = 365
 @app.task(queue="scan")
 def scan(company_name: str | None = None) -> dict:
     return run_scan_task([company_name] if company_name else None)
+
+
+@app.task(queue="scan")
+def score(dedup_keys: list[str]) -> dict:
+    """L-0263: batch-scores `dedup_keys` via `run_scoring`. Mirrors `scan`'s
+    shape -- an explicit dedup_key list (the private module's own contract),
+    not a "due" discovery query of its own (no ledger-signed candidate
+    selector exists for this row; enqueuers -- e.g. run_scan_task's Phase D
+    equivalent, or a future periodic tick -- own picking the batch)."""
+    from jobcannon.engine import runtime_config
+
+    return run_scoring(dedup_keys, dict(runtime_config.get_runtime_config()))
 
 
 @app.task(queue="maintenance")

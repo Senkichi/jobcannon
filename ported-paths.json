@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T17:47:49Z",
+  "generated_at": "2026-09-04T18:10:27Z",
   "roots": [
     "engine",
     "db",
@@ -2516,6 +2516,40 @@
         {
           "line": 230,
           "text": "# PORT-SEAM: private lazily imported job_finder.web.job_scorer.score_job"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/scoring_runner.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/scoring_runner.py @ 5c6e4603623dd796b9074d2c694ba45dc85250a9"
+        },
+        {
+          "line": 42,
+          "text": "# PORT-SEAM: private's `from job_finder.web.legitimacy_scanner import"
+        },
+        {
+          "line": 45,
+          "text": "# PORT-SEAM: private's `from job_finder.web.location_policy import"
+        },
+        {
+          "line": 51,
+          "text": "# PORT-SEAM: private's local `from job_finder.web.scoring_orchestrator"
+        },
+        {
+          "line": 59,
+          "text": "# PORT-SEAM: private's `try: from job_finder.web.data_enricher import"
+        },
+        {
+          "line": 73,
+          "text": "# job_finder.web.vram_query (rated DIES -- no local GPU to probe on a"
+        },
+        {
+          "line": 348,
+          "text": "# PORT-SEAM: `utc_now_iso()` (job_finder.json_utils) has no"
         }
       ]
     },
