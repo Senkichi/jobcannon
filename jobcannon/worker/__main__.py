@@ -54,6 +54,7 @@ import psycopg
 
 from jobcannon.db.migrate import allow_newer_db_from_env, run_migrations
 from jobcannon.host import init_engine_seams, load_host_config
+from jobcannon.host import ingestion_tasks  # noqa: F401 -- import registers its @app.task/@app.periodic
 from jobcannon.host import tasks
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ def main() -> None:
     init_engine_seams(host_config)
     _ensure_procrastinate_schema()
     tasks.app.run_worker(
-        queues=["scan", "maintenance"],
+        queues=["scan", "maintenance", "ingest"],
         concurrency=int(os.environ.get("JC_WORKER_CONCURRENCY", "2")),
     )
 

@@ -61,7 +61,7 @@ PURGE_POSTHOG_PERSON_TASK = "jobcannon.host.tasks.purge_posthog_person"
 # @app.task(queue="maintenance") -- configure_task's allow_unknown fallback
 # defaults an unspecified queue to procrastinate's DEFAULT_QUEUE ("default"),
 # which jobcannon/worker/__main__.py's run_worker(queues=["scan",
-# "maintenance"]) never polls. A job deferred with the wrong queue sits
+# "maintenance", "ingest"]) never polls. A job deferred with the wrong queue sits
 # forever, with no error anywhere -- this constant exists so that fact is
 # named once, not re-typed at each defer call site.
 _PURGE_POSTHOG_PERSON_QUEUE = "maintenance"

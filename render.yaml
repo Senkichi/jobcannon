@@ -144,6 +144,15 @@ services:
       # returns None) rather than blocking startup.
       - key: JC_BYO_KEY_KEK
         sync: false
+      # IMAP per-user ingestion feature flag (L-0188, design-aggregators-
+      # imap.md §3). Committed literal, not a secret -- default OFF; the
+      # periodic tick and the Sync-Now route (jobcannon.web.sync) both gate
+      # on jobcannon.host.config.imap_ingest_enabled() reading this var.
+      # Flip to "true" here (both services -- see jobcannon-worker's own
+      # declaration below) once the mailbox-onboarding flow has real users
+      # to serve.
+      - key: IMAP_INGEST_ENABLED
+        value: "false"
 
   - type: worker
     name: jobcannon-worker
@@ -257,3 +266,9 @@ services:
       # why an explicit value was chosen over a transform.
       - key: POSTHOG_ADMIN_API_HOST
         value: https://eu.posthog.com
+      # Same committed literal as jobcannon-web's declaration above -- both
+      # services must agree (the periodic tick runs here on the worker; the
+      # Sync-Now route reads it on the web service). See that declaration's
+      # comment for the flip-to-"true" note.
+      - key: IMAP_INGEST_ENABLED
+        value: "false"

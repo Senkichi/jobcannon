@@ -32,7 +32,7 @@ module. The caller MUST still pass `queue=` explicitly matching the target
 task's own `@app.task(queue=...)` (e.g. `queue="maintenance"`):
 `configure_task`'s fallback path defaults an unspecified queue to
 procrastinate's own `DEFAULT_QUEUE` ("default"), which
-`jobcannon/worker/__main__.py`'s `run_worker(queues=["scan", "maintenance"])`
+`jobcannon/worker/__main__.py`'s `run_worker(queues=["scan", "maintenance", "ingest"])`
 never polls — a job deferred without the right `queue=` would sit forever,
 never picked up, with no error anywhere.
 
