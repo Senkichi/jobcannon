@@ -106,7 +106,6 @@ def test_init_builds_genai_client_from_resolved_credential():
 
 def test_init_reads_retry_sleep_from_config():
     cfg = {"providers": {"gemini": {"retry_sleep_seconds": 3.0}}}
-    provider = _make_provider(resolve_credential=lambda provider: None)
     provider = GeminiProvider(
         config=cfg, client=_make_mock_client(), resolve_credential=lambda provider: None
     )
