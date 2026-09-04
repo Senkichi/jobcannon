@@ -88,38 +88,110 @@ driving it through a live connection (tests/host/test_scan_services_contract.py)
 from __future__ import annotations
 
 import re
+from typing import Iterator
 
 
-def qmark_to_format(sql: str) -> str:
-    """Translate '?' placeholders to '%s' and escape literal '%' to '%%',
-    skipping single-quoted string literals (standard SQL '' escaping)."""
-    out: list[str] = []
+def _iter_sql_regions(sql: str) -> Iterator[tuple[str, str]]:
+    """Single scanner behind every comment/string-aware pass in this module
+    (`qmark_to_format` and `_strip_comments`) — walk `sql` once and yield
+    `(chunk, region)` pairs, `region` in `{"code", "string", "line_comment",
+    "block_comment"}`. `code` chunks are always one character; `string`
+    chunks are one character except a doubled `''` escape, which is yielded
+    as a single two-character chunk; comment chunks span the whole comment
+    (`--` to end of line, or `/* ... */`, not nested — SQLite doesn't nest
+    block comments and this shim only ever sees SQLite-dialect engine SQL).
+
+    String state is checked before comment state, so a `--` or `/*` inside a
+    single-quoted string literal is NOT treated as a comment start (matches
+    every SQL dialect's actual lexing order, and is exactly what #388's
+    literal-scanner reuse is meant to guarantee stays true for comments too).
+    An unterminated string or block comment runs to end-of-input rather than
+    raising — same permissiveness the prior implementation had for
+    unterminated strings.
+    """
+    n = len(sql)
     in_string = False
     i = 0
-    while i < len(sql):
+    while i < n:
         ch = sql[i]
         if in_string:
             if ch == "'":
                 # '' inside a string is an escaped quote, stay in-string
-                if i + 1 < len(sql) and sql[i + 1] == "'":
-                    out.append("''")
+                if i + 1 < n and sql[i + 1] == "'":
+                    yield sql[i : i + 2], "string"
                     i += 2
                     continue
                 in_string = False
-            out.append("%%" if ch == "%" else ch)
+            yield ch, "string"
             i += 1
             continue
         if ch == "'":
             in_string = True
-            out.append(ch)
-        elif ch == "?":
-            out.append("%s")
-        elif ch == "%":
-            out.append("%%")
-        else:
-            out.append(ch)
+            yield ch, "string"
+            i += 1
+            continue
+        if sql[i : i + 2] == "--":
+            j = sql.find("\n", i)
+            end = j if j != -1 else n
+            yield sql[i:end], "line_comment"
+            i = end
+            continue
+        if sql[i : i + 2] == "/*":
+            j = sql.find("*/", i + 2)
+            end = j + 2 if j != -1 else n
+            yield sql[i:end], "block_comment"
+            i = end
+            continue
+        yield ch, "code"
         i += 1
+
+
+def qmark_to_format(sql: str) -> str:
+    """Translate '?' placeholders to '%s' and escape literal '%' to '%%',
+    skipping single-quoted string literals (standard SQL '' escaping), '--'
+    line comments, and '/* */' block comments.
+
+    Comments matter here because SQLite (like every SQL dialect) never
+    treats a '?' inside a comment as a placeholder — it's inert text — but
+    psycopg's client-side %s substitution scans the whole query string
+    textually, comments included. Translating a commented-out '?' would
+    silently add a placeholder psycopg expects a bound parameter for, while
+    the caller's params tuple — built against the *engine's* placeholder
+    count — has none, raising `ProgrammingError: ... N placeholders but M
+    parameters` at execute time (#388). '%' still gets escaped inside
+    comments for the same reason: psycopg's scan doesn't skip comments
+    either, so a stray '%' there would otherwise be misread as a
+    placeholder introducer.
+    """
+    out: list[str] = []
+    for chunk, region in _iter_sql_regions(sql):
+        if region == "code":
+            if chunk == "?":
+                out.append("%s")
+            elif chunk == "%":
+                out.append("%%")
+            else:
+                out.append(chunk)
+        else:
+            out.append(chunk.replace("%", "%%"))
     return "".join(out)
+
+
+def _strip_comments(sql: str) -> str:
+    """Blank '--' line comments and '/* */' block comments to a single
+    space each — comments are whitespace-equivalent in SQL, so this can't
+    merge adjacent tokens (`FROM/* x */jobs` -> `FROM jobs`) — using the
+    same `_iter_sql_regions` scanner `qmark_to_format` uses, so the two can
+    never disagree about what counts as a comment. Run before every regex
+    rewrite in `engine_sql_to_host` (date-function and table rewrites
+    included) so none of them can match text inside a comment either;
+    `qmark_to_format` stays comment-aware on its own on top of that (see its
+    docstring), since it is also called and unit-tested standalone.
+    """
+    return "".join(
+        " " if region in ("line_comment", "block_comment") else chunk
+        for chunk, region in _iter_sql_regions(sql)
+    )
 
 
 _TABLE_REWRITES = (
@@ -145,16 +217,22 @@ _DATETIME_REWRITES = (
 
 
 def engine_sql_to_host(sql: str) -> str:
-    """Date-function rewrite + qmark translation + engine `jobs` -> host
-    `postings` table rewrite.
+    """Comment strip + date-function rewrite + qmark translation + engine
+    `jobs` -> host `postings` table rewrite.
 
     This is what EngineCompatConnection.execute() actually runs. Host-
     authored SQL naming `postings` directly passes through unchanged (the
     table regex only matches the literal token `jobs`), and host-authored SQL
     never calls SQLite's datetime() either, so both rewrites are a no-op for
     it.
+
+    `_strip_comments` runs first (single strip step, #388) so
+    `_DATETIME_REWRITES` and `_TABLE_REWRITES` below — plain regexes with no
+    comment awareness of their own — can never match text inside a `--` or
+    `/* */` comment either; a comment quoting `datetime('now')` or `FROM
+    jobs` as documentation would otherwise get silently rewritten too.
     """
-    out = sql
+    out = _strip_comments(sql)
     for pattern, repl in _DATETIME_REWRITES:
         out = pattern.sub(repl, out)
     out = qmark_to_format(out)
