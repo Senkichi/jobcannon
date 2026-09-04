@@ -345,9 +345,7 @@ def _try_playwright_active(
         # seam is unwired (L-0469), so the outer db_path truthy-gate is dropped
         try:
             final_html = page.content()
-            final_candidates = _extract_candidates(
-                BeautifulSoup(final_html, "html.parser"), url
-            )
+            final_candidates = _extract_candidates(BeautifulSoup(final_html, "html.parser"), url)
             record_careers_capture(
                 url,
                 final_html,
