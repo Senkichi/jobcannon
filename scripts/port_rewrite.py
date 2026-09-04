@@ -53,6 +53,11 @@ REWRITES: list[tuple[str, str]] = [
     (r"\bjob_finder\.json_utils\b", "jobcannon.engine.json_utils"),
     (r"\bjob_finder\.constants\b", "jobcannon.engine.constants"),
     (r"\bjob_finder\.enrichment_states\b", "jobcannon.engine.enrichment_states"),
+    # renamed subpackage: parsers/ -> email_parsers/ (L-0460)
+    (r"\bjob_finder\.parsers\b", "jobcannon.engine.email_parsers"),
+    # flattened sources modules (L-0113, L-0043): no jobcannon "sources" package
+    (r"\bjob_finder\.sources\.email_senders\b", "jobcannon.engine.email_senders"),
+    (r"\bjob_finder\.sources\._pii_scrub\b", "jobcannon.engine._pii_scrub"),
 ]
 # Anything still matching \bjob_finder\b after rewriting is a seam-edit
 # worklist item (config, secrets, db, non-ported web modules) — the boundary
