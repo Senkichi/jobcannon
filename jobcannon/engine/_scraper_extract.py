@@ -1,4 +1,4 @@
-# PORTED from job_finder/web/careers_scraper.py @ e218953fefd532d071482e3ff859610a46dd179d (private job-cannon). Ledger L-0167.
+# PORTED from job_finder/web/careers_scraper.py @ c2793bb9d3d6e10b9e99958d9a0a05a33e66f2c1 (private job-cannon). Ledger L-0167.
 """Low-tier (quick-model) fallback helpers for the careers-page scraper.
 
 Split out of ``careers_scraper.py`` (design note PR-4) to isolate the
