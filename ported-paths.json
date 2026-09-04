@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T06:30:27Z",
+  "generated_at": "2026-09-04T06:24:30Z",
   "roots": [
     "engine",
     "db",
@@ -288,6 +288,16 @@
       ]
     },
     {
+      "path": "jobcannon/db/_mailbox_credentials.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 3,
+          "text": "NOT a port -- no private-repo equivalent exists; job-cannon (private) is"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/db/_persistence.py",
       "root": "db",
       "markers": [
@@ -546,36 +556,38 @@
       ]
     },
     {
-      "path": "jobcannon/db/migrations/m0023_careers_crawler_scan_columns.py",
+      "path": "jobcannon/db/migrations/m0025_mailbox_credentials.py",
       "root": "db",
       "markers": [
         {
           "line": 4,
-          "text": "migration's sibling PR lands (ledger L-0465, private source:"
+          "text": "port of a private-repo migration -- job-cannon (private) is single-user and"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/migrations/m0026_email_parse_log_sender.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/migrations/m209524590_email_parse_log_per_sender.py"
         },
         {
-          "line": 5,
-          "text": "``job_finder/web/careers_crawler/_persistence.py`` @"
+          "line": 2,
+          "text": "@ bc30befa311b5c78868ece3dddd60b44d018f444 (private job-cannon)."
         },
         {
-          "line": 9,
-          "text": "- ``company_scan_log.source`` text, nullable, no default. Absorbs private"
+          "line": 19,
+          "text": "note §1.7 -- out of scope for v1; recommended follow-up: FU-C). The private"
         },
         {
-          "line": 10,
-          "text": "migration ``m208996968_add_source_to_company_scan_log.py`` (ledger L-0274,"
-        },
-        {
-          "line": 17,
-          "text": "private migration ``m209009471_add_failure_reason_to_company_scan_log.py``"
-        },
-        {
-          "line": 22,
-          "text": "default. Absorbs private migration"
+          "line": 20,
+          "text": "repo's adjacent-consumer rationale (``onboarding/inbox_check.py``) has no"
         },
         {
           "line": 46,
-          "text": "Does NOT add ``companies.careers_crawl_tier`` -- private's ``_persistence.py``"
+          "text": "Note (pre-existing, NOT fixed by this port): the private repo's"
         }
       ]
     },
@@ -964,16 +976,6 @@
         {
           "line": 1,
           "text": "# PORTED from job_finder/web/careers_crawler/_bench_predicate.py @ a071c405a6908b6af417eef7aab6ec0b795a7d27 (private job-cannon). Ledger L-0463."
-        }
-      ]
-    },
-    {
-      "path": "jobcannon/engine/careers_crawler/_persistence.py",
-      "root": "engine",
-      "markers": [
-        {
-          "line": 1,
-          "text": "# PORTED from job_finder/web/careers_crawler/_persistence.py @ 23644885615a78d509d73c8b1c640b7d49b4a089 (private job-cannon). Ledger L-0465."
         }
       ]
     },
@@ -2082,6 +2084,66 @@
       ]
     },
     {
+      "path": "jobcannon/host/ingestion/capture.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/ingestion_runner.py::_log_per_sender_email_parse"
+        },
+        {
+          "line": 4,
+          "text": "# PORT-SEAM: header inserted above; the private function's own docstring and"
+        },
+        {
+          "line": 25,
+          "text": "private function's own contract exactly)."
+        },
+        {
+          "line": 27,
+          "text": "# PORT-SEAM: PII chokepoint (design-aggregators-imap.md §6). The private"
+        },
+        {
+          "line": 28,
+          "text": "# function stored `last_error` (a parser exception's str(e)) with NO"
+        },
+        {
+          "line": 95,
+          "text": "host/ingestion/imap_intake.py builds per message (mirrors the private"
+        },
+        {
+          "line": 96,
+          "text": "ImapSource.extraction_records entries)."
+        },
+        {
+          "line": 102,
+          "text": "private function's contract). Commits on write, best-effort."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/ingestion/imap_intake.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/sources/imap_source.py @ bc30befa311b5c78868ece3dddd60b44d018f444"
+        },
+        {
+          "line": 43,
+          "text": "# imported ``job_finder.web.autoheal.override_loader`` /"
+        },
+        {
+          "line": 228,
+          "text": "resolve_sender_parsers/resolve_sender_label exactly as the private"
+        },
+        {
+          "line": 229,
+          "text": "source's ``config`` parameter did -- no per-user override storage is"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/host/model_provider.py",
       "root": "host",
       "markers": [
@@ -2122,11 +2184,11 @@
       "root": "host",
       "markers": [
         {
-          "line": 123,
+          "line": 122,
           "text": "_JD_STORAGE_MAX_CHARS = 50_000  # parity with the private repo's JD_STORAGE_MAX_CHARS"
         },
         {
-          "line": 125,
+          "line": 124,
           "text": "# Parity with the private deployment's job-level runtime cap for the ATS"
         }
       ]
