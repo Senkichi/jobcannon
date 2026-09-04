@@ -185,12 +185,11 @@ def crawl_careers_batch(config: dict) -> dict:
                       c.careers_crawl_tier, c.careers_nav_recipe
                FROM companies c
                WHERE c.careers_url IS NOT NULL
-                 AND c.careers_scan_enabled = 1
-                 AND c.merged_into_id IS NULL
-                 AND c.ats_probe_status IS NOT 'hit'
-                 AND c.careers_crawl_flag_reason IS NULL
+                 AND c.careers_scan_enabled = TRUE
+                 AND c.ats_probe_status IS DISTINCT FROM 'hit' -- # PORT-SEAM: SQLite `IS NOT 'hit'` translated to Postgres-valid `IS DISTINCT FROM` (#380)
+                 AND c.careers_crawl_flag_reason IS NULL -- # PORT-SEAM: merged_into_id IS NULL omitted (L-0461; same carve-out as L-0018/L-0019/L-0020 -- column absent from public schema)
                  AND (c.careers_crawl_last_at IS NULL
-                      OR c.careers_crawl_last_at < datetime('now', ? || ' days'))
+                      OR c.careers_crawl_last_at < datetime('now', '-' || ? || ' days')) -- # PORT-SEAM: SQLite datetime('now', ? || ' days') rewritten to the canonical shape db/compat.py's engine_sql_to_host() translates (#380)
                  AND EXISTS (
                      SELECT 1 FROM jobs j
                      WHERE j.company_id = c.id
@@ -198,7 +197,7 @@ def crawl_careers_batch(config: dict) -> dict:
                  )
                  AND {bench_predicate_sql}
                ORDER BY c.careers_crawl_last_at ASC NULLS FIRST""",
-            (f"-{freshness_days}",),
+            (freshness_days,),
         ).fetchall()
 
         # Lane 2: origination — never-crawled companies with a careers_url and
@@ -208,10 +207,9 @@ def crawl_careers_batch(config: dict) -> dict:
                       c.careers_crawl_tier, c.careers_nav_recipe
                FROM companies c
                WHERE c.careers_url IS NOT NULL
-                 AND c.careers_scan_enabled = 1
-                 AND c.merged_into_id IS NULL
-                 AND c.ats_probe_status IS NOT 'hit'
-                 AND c.careers_crawl_flag_reason IS NULL
+                 AND c.careers_scan_enabled = TRUE
+                 AND c.ats_probe_status IS DISTINCT FROM 'hit' -- # PORT-SEAM: SQLite `IS NOT 'hit'` translated to Postgres-valid `IS DISTINCT FROM` (#380)
+                 AND c.careers_crawl_flag_reason IS NULL -- # PORT-SEAM: merged_into_id IS NULL omitted (L-0461; same carve-out as L-0018/L-0019/L-0020 -- column absent from public schema)
                  AND c.careers_crawl_last_at IS NULL
                  AND NOT EXISTS (
                      SELECT 1 FROM jobs j
