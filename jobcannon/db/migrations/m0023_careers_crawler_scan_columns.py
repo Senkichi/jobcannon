@@ -29,6 +29,14 @@ writer needs and m0001/m0003/m0021 did not already carry:
   the hosted schema's dominant timestamp-column convention instead of
   copying the SQLite type verbatim.
 
+This migration intentionally carries no ``UPDATE`` backfill, unlike private's
+``m208996968_add_source_to_company_scan_log.py`` (which backfills existing
+rows' ``source`` by keying off ``jobs_matched``). No column that backfill
+reads was ever added by any public migration, and no public crawler writer
+has ever inserted a ``company_scan_log`` row (this migration's sibling PR is
+the first), so there are zero pre-existing rows for a backfill to touch --
+the private backfill has nothing to port against.
+
 Does NOT touch ``companies.ats_scan_enabled`` / ``companies.
 careers_scan_enabled`` -- those already landed via
 ``m0021_wi13_scan_lane_columns.py`` (ledger L-0286, HOLD, absorbed there;

@@ -6,7 +6,8 @@ orchestrator calls these helpers to:
 - Upsert each scraped job (creating a `Job` model object) into the
   `jobs` table.
 - Stamp the company's `careers_crawl_last_at`, `last_scanned_at`, and
-  `jobs_found_total` columns.  # PORT-SEAM: careers_crawl_tier dropped, see below (#347)
+  `jobs_found_total` columns.
+  # PORT-SEAM: careers_crawl_tier dropped, see below (#347)
 - Append a row to `company_scan_log` for the per-run audit trail via
   `svc.record_scan_outcome`.
 - On a per-company exception, only stamp `careers_crawl_last_at` so a
