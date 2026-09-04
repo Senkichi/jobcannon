@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T07:13:13Z",
+  "generated_at": "2026-09-04T07:37:21Z",
   "roots": [
     "engine",
     "db",
@@ -2324,15 +2324,41 @@
       ]
     },
     {
+      "path": "jobcannon/host/scoring_orchestrator.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/scoring_orchestrator.py @ 6fd9f9b31c6a32c7262de3619d247008425e2cde"
+        },
+        {
+          "line": 55,
+          "text": "# PORT-SEAM: `from job_finder.db import persist_job_assessment` ->"
+        },
+        {
+          "line": 58,
+          "text": "# persist_job_assessment). `from job_finder.db._jobs import set_postings`"
+        },
+        {
+          "line": 60,
+          "text": "# the call site below). `from job_finder.web import user_data_dirs` is also"
+        },
+        {
+          "line": 230,
+          "text": "# PORT-SEAM: private lazily imported job_finder.web.job_scorer.score_job"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/host/wiring.py",
       "root": "host",
       "markers": [
         {
-          "line": 123,
+          "line": 124,
           "text": "_JD_STORAGE_MAX_CHARS = 50_000  # parity with the private repo's JD_STORAGE_MAX_CHARS"
         },
         {
-          "line": 125,
+          "line": 126,
           "text": "# Parity with the private deployment's job-level runtime cap for the ATS"
         }
       ]
