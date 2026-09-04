@@ -557,14 +557,16 @@ def set_source_id_if_free(
 
 # PORT-SEAM: set_postings (private's sanctioned single-writer for the
 # jobs.postings JSON rollup column, previously here between
-# set_source_id_if_free and get_job) is deferred, not ported. This host's
-# `postings` table is a flat one-row-per-job-entity model (see m0001) with
-# no analog of private's separate per-source postings sub-entity list or the
-# jobs.postings JSON column that rolls it up -- there is no column to write.
-# L-0075 (job_finder/db/_postings.py, this same ledger) is escalated OPEN
-# for exactly this dedup-identity/sub-entity architecture question; landing
-# set_postings here ahead of that resolution would invent a target shape
-# this PR cannot validate. Revisit once L-0075 lands.
+# set_source_id_if_free and get_job) is deferred, not ported -- and, per
+# L-0075's ledger `seam` ruling below, has no separate target to land: this
+# host's `postings` table is a flat one-row-per-job-entity model (see m0001)
+# with no per-source descriptor sub-entity list, so there is no JSON rollup
+# column for set_postings / upsert_posting / build_posting_descriptor /
+# _find_descriptor_index to write -- the flat row already *is* the posting,
+# and this file's own module docstring ("single postings writer") is that
+# architecture ruling. L-0075's one remaining live surface,
+# annotate_posting_apply_url, lands below (re-adapted to key on dedup_key
+# alone -- see that function's own PORT-SEAM block).
 
 # PORT-SEAM: set_location_policy_columns is deferred, not ported. It writes
 # location_policy_version / _input_fingerprint / _verdict / _sort_order /
@@ -574,6 +576,76 @@ def set_source_id_if_free(
 # docstring); adding six new columns for a single writer function here,
 # inconsistent with those already-landed decisions, is out of scope for this
 # port group. Revisit alongside a location-policy migration.
+
+
+# PORTED from job_finder/db/_postings.py @ 175d0e1024eee45a279522868798fb7b4777a952
+# (private job-cannon). Ledger L-0075 -- flat re-adaptation of
+# annotate_posting_apply_url, the one live surface of that private module
+# (upsert_posting / build_posting_descriptor / _find_descriptor_index are
+# subsumed, not ported -- see the PORT-SEAM block above this function).
+#
+# PORT-SEAM: private keyed the write on (ats_platform, source_id) to find
+# the ONE descriptor to annotate inside the jobs.postings JSON array
+# (multiple descriptors could share a row). This host's postings table has
+# no descriptor sub-entity -- dedup_key alone already identifies the single
+# target row -- so those two args are dropped from the signature entirely
+# (arity reduction, not a default-filled shim).
+#
+# PORT-SEAM: private opened its own IMMEDIATE transaction and re-read the
+# current postings JSON inside it before merging, specifically so a
+# concurrent upsert_posting write to a DIFFERENT descriptor in the same
+# array would survive this write untouched. aggregator_apply_url is a
+# scalar column on this host (m0018) -- there is no sibling descriptor for
+# a concurrent writer to clobber, so a single UPDATE is already atomic and
+# the re-read-then-merge dance has no target to port.
+def annotate_posting_apply_url(
+    conn: Any,  # PORT-SEAM: no sqlite3 dialect on this host (psycopg only)
+    dedup_key: str,
+    # PORT-SEAM: ats_platform/source_id dropped here (arity reduction, see
+    # block comment above) -- dedup_key alone identifies the flat row.
+    aggregator_apply_url: str,
+) -> bool:
+    """Sanctioned single writer for ``postings.aggregator_apply_url`` (m0018).
+    # PORT-SEAM: docstring rewritten for the flat-column target -- private's
+    # said "attach to the posting descriptor keyed (ats_platform,
+    # source_id) on jobs.postings"; there is no descriptor here to key.
+
+    Attaches an aggregator-sourced apply link to the posting row -- a
+    distinct provenance from ``direct_url``/``direct_url_confidence``
+    (m0017, ``_direct_link.py``'s no-downgrade company-site writer; not
+    overloaded here, see m0018's migration docstring).
+
+    Returns True if a row was matched and written, False if *dedup_key* /
+    *aggregator_apply_url* is falsy or no row matches.
+    # PORT-SEAM: private only guarded dedup_key falsiness; the
+    # aggregator_apply_url guard is added below since this host's arity-
+    # reduced signature has no descriptor lookup to no-op on instead.
+
+    Args:
+        conn: pooled connection (``.raw`` unwrapped) or a bare psycopg
+            connection, matching ``set_direct_url``'s dispatch.
+        dedup_key: The posting's natural key.
+        aggregator_apply_url: The aggregator-sourced apply link to attach.
+    """
+    if (
+        not dedup_key or not aggregator_apply_url
+    ):  # PORT-SEAM: added aggregator_apply_url guard, see docstring note above
+        return False
+
+    raw = (
+        conn.raw if hasattr(conn, "raw") else conn
+    )  # PORT-SEAM: EngineCompatConnection unwrap, matches set_source_id_if_free
+
+    with raw.transaction():
+        cursor = raw.execute(
+            "UPDATE postings SET aggregator_apply_url = %s WHERE dedup_key = %s",  # PORT-SEAM: jobs.postings JSON merge -> scalar-column UPDATE; ? -> %s
+            (aggregator_apply_url, dedup_key),
+        )
+        rowcount = cursor.rowcount
+    commit_unless_nested(
+        raw
+    )  # PORT-SEAM: replaces private's conn.execute("COMMIT") inside its own BEGIN IMMEDIATE block
+    return rowcount > 0
 
 
 def get_job(conn: Any, dedup_key: str) -> dict | None:
