@@ -208,6 +208,22 @@ class ScanServices:
     # against a cost ledger.
     record_cost: Callable[..., Any] | None = None
 
+    # L-0465. Matches the already-landed
+    # jobcannon.engine.ats_scanner._scan_log.record_scan_outcome(conn, *,
+    # company_id, source, run_id=None, jobs_found=None, jobs_matched=None,
+    # jobs_new=None, error=None, failure_reason=None,
+    # skipped_title_filter=None, scanned_at=None) -> int. That module's own
+    # docstring names careers_crawler/_persistence.py as its fourth intended
+    # caller and states it is "ready for it the moment that module ports" --
+    # this field is the seam, not a re-port: a host binds the existing
+    # engine function here rather than this module importing a sibling
+    # engine package directly, so the bare-sqlite3 tests/engine/ harness can
+    # fake or substitute it like every other ScanServices field. Optional
+    # (None) because _persistence.py's own None-check makes logging a
+    # best-effort side channel -- a host that never wires this loses the
+    # company_scan_log row, not the job upsert.
+    record_scan_outcome: Callable[..., int] | None = None
+
 
 _active: ScanServices | None = None
 
