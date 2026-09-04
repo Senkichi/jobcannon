@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T00:53:46Z",
+  "generated_at": "2026-09-04T01:00:24Z",
   "roots": [
     "engine",
     "db",
@@ -594,6 +594,40 @@
       ]
     },
     {
+      "path": "jobcannon/engine/_pii_scrub.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/sources/_pii_scrub.py @ 28c03ab79e04e417741d77f8f181909acedf671f (private job-cannon). Ledger L-0043."
+        },
+        {
+          "line": 125,
+          "text": "# PORT-SEAM: prefix rewritten \"job_finder\" -> \"jobcannon\" (the public"
+        },
+        {
+          "line": 146,
+          "text": "# `job_finder`/`job_finder.*` literal below renamed to `jobcannon` — the"
+        },
+        {
+          "line": 157,
+          "text": "# `job_finder`/`job_finder.*` literal in this class renamed `jobcannon` —"
+        },
+        {
+          "line": 164,
+          "text": "if name.startswith(\"jobcannon\"):  # PORT-SEAM: job_finder -> jobcannon"
+        },
+        {
+          "line": 173,
+          "text": "# PORT-SEAM: default `prefix` renamed \"job_finder\" -> \"jobcannon\" (public"
+        },
+        {
+          "line": 186,
+          "text": "# PORT-SEAM: default `prefix` and every `job_finder`/`_JobFinderLogger`"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/ats_detection.py",
       "root": "engine",
       "markers": [
@@ -1030,6 +1064,148 @@
         {
           "line": 1,
           "text": "# PORTED from job_finder/web/domain_policy.py @ 263634cd9339885990d2510e476ad6679b675cf7 (private job-cannon). Ledger L-0177."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/email_parsers/__init__.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/parsers/__init__.py @ 7405a93c8003fdf8a74f8be383cac457c0056803 (private job-cannon). Ledger L-0460."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/email_parsers/_common.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/parsers/_common.py @ 7405a93c8003fdf8a74f8be383cac457c0056803 (private job-cannon). Ledger L-0460."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/email_parsers/_positional_fallback.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/parsers/_positional_fallback.py @ 7405a93c8003fdf8a74f8be383cac457c0056803 (private job-cannon). Ledger L-0460."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/email_parsers/_strategy.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/parsers/_strategy.py @ 7405a93c8003fdf8a74f8be383cac457c0056803 (private job-cannon). Ledger L-0460."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/email_parsers/glassdoor_parser.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/parsers/glassdoor_parser.py @ 7405a93c8003fdf8a74f8be383cac457c0056803 (private job-cannon). Ledger L-0460."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/email_parsers/greenhouse_parser.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/parsers/greenhouse_parser.py @ 7405a93c8003fdf8a74f8be383cac457c0056803 (private job-cannon). Ledger L-0460."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/email_parsers/indeed_parser.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/parsers/indeed_parser.py @ 7405a93c8003fdf8a74f8be383cac457c0056803 (private job-cannon). Ledger L-0460."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/email_parsers/jobright_parser.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/parsers/jobright_parser.py @ 7405a93c8003fdf8a74f8be383cac457c0056803 (private job-cannon). Ledger L-0460."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/email_parsers/linkedin_parser.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/parsers/linkedin_parser.py @ 7405a93c8003fdf8a74f8be383cac457c0056803 (private job-cannon). Ledger L-0460."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/email_parsers/monster_parser.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/parsers/monster_parser.py @ 7405a93c8003fdf8a74f8be383cac457c0056803 (private job-cannon). Ledger L-0460."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/email_parsers/trueup_parser.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/parsers/trueup_parser.py @ 7405a93c8003fdf8a74f8be383cac457c0056803 (private job-cannon). Ledger L-0460."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/email_parsers/ziprecruiter_parser.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/parsers/ziprecruiter_parser.py @ 7405a93c8003fdf8a74f8be383cac457c0056803 (private job-cannon). Ledger L-0460."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/email_senders.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/sources/email_senders.py @ 2dc6c820aff0a3b213e4f6c4c535097f8dd0a816 (private job-cannon). Ledger L-0113."
+        },
+        {
+          "line": 130,
+          "text": "# ported — it belongs to `job_finder/config.py`, out of scope for"
+        },
+        {
+          "line": 138,
+          "text": "# PORT-SEAM: private body opened with `from job_finder.config import"
+        },
+        {
+          "line": 180,
+          "text": "# PORT-SEAM: private body opened with `from job_finder.config import"
         }
       ]
     },
@@ -1728,6 +1904,20 @@
         {
           "line": 154,
           "text": "# earlier port wave — not in the private source at this row's declared SHA."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/sources/__init__.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/sources/__init__.py @ e4c6d2e243ca561de7a30b0acd29470f89f0c18c (private job-cannon). Ledger L-0042."
+        },
+        {
+          "line": 13,
+          "text": "The private original doc'd this as \"Job sources - IMAP, SerpAPI, DataForSEO,"
         }
       ]
     },
