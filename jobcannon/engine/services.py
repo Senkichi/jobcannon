@@ -118,11 +118,14 @@ class ScanServices:
     #   documented ">0" semantics of ats.runtime_limit_s.
 
     # -- Wave 2 job_finder/web follow-up (L-0174/L-0182/L-0229) --
-    # enrichment_tiers.* (L-0178, HOLD): data_enricher.enrich_job's cost-ordered
-    # cascade. `scrape_careers_tier` is intentionally distinct from the
-    # existing `scrape_careers_page` field -- that one matches
-    # careers_scraper.scrape_careers_page (a different private module); this
-    # one matches enrichment_tiers.scrape_careers.
+    # enrichment_tiers.* (L-0178, landed except scrape_careers_tier):
+    # data_enricher.enrich_job's cost-ordered cascade. `scrape_careers_tier`
+    # is intentionally distinct from the existing `scrape_careers_page`
+    # field -- that one matches careers_scraper.scrape_careers_page (a
+    # different private module); this one matches
+    # enrichment_tiers.scrape_careers, and stays unbound (None) until #369
+    # (careers_crawler.py, L-0167) merges -- see
+    # jobcannon/engine/_enrichment_ats_tier.py's module PORT-SEAM.
     fetch_direct_jd: Callable[..., Any] | None = None
     query_ats_api: Callable[..., Any] | None = None
     scrape_careers_tier: Callable[..., Any] | None = None
