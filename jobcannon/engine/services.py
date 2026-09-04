@@ -118,11 +118,14 @@ class ScanServices:
     #   documented ">0" semantics of ats.runtime_limit_s.
 
     # -- Wave 2 job_finder/web follow-up (L-0174/L-0182/L-0229) --
-    # enrichment_tiers.* (L-0178, HOLD): data_enricher.enrich_job's cost-ordered
-    # cascade. `scrape_careers_tier` is intentionally distinct from the
-    # existing `scrape_careers_page` field -- that one matches
-    # careers_scraper.scrape_careers_page (a different private module); this
-    # one matches enrichment_tiers.scrape_careers.
+    # enrichment_tiers.* (L-0178, landed except scrape_careers_tier):
+    # data_enricher.enrich_job's cost-ordered cascade. `scrape_careers_tier`
+    # is intentionally distinct from the existing `scrape_careers_page`
+    # field -- that one matches careers_scraper.scrape_careers_page (a
+    # different private module); this one matches
+    # enrichment_tiers.scrape_careers, and stays unbound (None) until #369
+    # (careers_crawler.py, L-0167) merges -- see
+    # jobcannon/engine/_enrichment_ats_tier.py's module PORT-SEAM.
     fetch_direct_jd: Callable[..., Any] | None = None
     query_ats_api: Callable[..., Any] | None = None
     scrape_careers_tier: Callable[..., Any] | None = None
@@ -145,11 +148,15 @@ class ScanServices:
     record_source_error: Callable[..., None] | None = None
     #   matches autoheal.health_monitor.record_source_error(conn, source,
     #   message) -> None
-    # primary_source_tiebreak.tiebreak_primary_posting (L-0230, HOLD). The
-    # module's other public symbol, DEFAULT_MAX_BOARD (=40), is a plain int
-    # constant, not a callable, and is copied verbatim into each ported
-    # caller instead (same treatment as ats_slug_challenge's
-    # TRIGGER_PREFIX_CAREERS_URL, documented above).
+    # primary_source_tiebreak.tiebreak_primary_posting (L-0230, landed). Host
+    # binds this to a partial closing over call_model
+    # (jobcannon/host/wiring.py:build_scan_services) since the callable
+    # itself takes call_model as an injected keyword-only param, not a
+    # ScanServices field of its own -- see primary_source_tiebreak.py's
+    # module docstring. The module's other public symbol,
+    # DEFAULT_MAX_BOARD (=40), is a plain int constant, not a callable, and
+    # is copied verbatim into each ported caller instead (same treatment as
+    # ats_slug_challenge's TRIGGER_PREFIX_CAREERS_URL, documented above).
     tiebreak_primary_posting: Callable[..., Any] | None = None
     # db._jobs.annotate_posting_apply_url (L-0075, landed -- flat
     # re-adaptation, signature (conn, dedup_key, aggregator_apply_url); the

@@ -80,14 +80,19 @@ from jobcannon.engine.services import get_services
 from jobcannon.engine.direct_link import pick_direct_link
 from jobcannon.engine.enrichment_sources import merge_apply_urls, parse_source_urls
 
-# PORT-SEAM: enrichment_tiers.* (L-0178 HOLD) accessed via svc.<name>() below,
+# PORT-SEAM: enrichment_tiers.* (L-0178, landed except scrape_careers_tier)
+# accessed via svc.<name>() below,
 # not imported directly here.
 from jobcannon.engine.primary_source_merge import merge_primary_posting_fields
-# PORT-SEAM: job_finder.web.enrichment_tiers is L-0178 (HOLD, unlanded) -- its
-# 8 functions used below (fetch_direct_jd, query_ats_api, scrape_careers,
-# search_ddg_web, fetch_ddg_jds, search_duckduckgo, search_serpapi,
-# parse_structured_fields) are called via svc.<name>(...) ScanServices hooks
-# instead of a copied module. job_finder.sources._error_envelope is L-0111
+# PORT-SEAM: job_finder.web.enrichment_tiers is L-0178. 7 of its 8 functions
+# (fetch_direct_jd, query_ats_api, search_ddg_web, fetch_ddg_jds,
+# search_duckduckgo, search_serpapi, parse_structured_fields) are landed,
+# split across jobcannon/engine/_enrichment_{jd_fetch,ats_tier,search_tiers,
+# ddg_web_tier,structured_fields}.py; the 8th, scrape_careers (bound as
+# svc.scrape_careers_tier), stays HOLD -- it depends on careers_crawler.py
+# (L-0167, PR #369), not yet merged. All 8 are called via svc.<name>(...)
+# ScanServices hooks instead of a directly-imported module.
+# job_finder.sources._error_envelope is L-0111
 # (HOLD) -- VendorAccountError is exposed as svc.vendor_account_error (an
 # exception TYPE, not a callable) with a local placeholder type so the
 # `except` clause always has something concrete to catch when unset.
@@ -390,20 +395,26 @@ def enrich_job(
                 # Sub-tier A: Direct URL fetch
                 source_urls = parse_source_urls(job_row.get("source_urls"))
                 for url in source_urls:
-                    jd_text = svc.fetch_direct_jd(url)  # PORT-SEAM: L-0178 HOLD
+                    jd_text = svc.fetch_direct_jd(url)  # PORT-SEAM: L-0178, landed
                     if jd_text:
                         fragments["url_jd"] = jd_text
                         break
 
                 # Sub-tier B: ATS API query (if company has confirmed ATS slug)
                 if conn is not None and job_row.get("company_id"):
-                    ats_result = svc.query_ats_api(job_row, conn, config)  # PORT-SEAM: L-0178 HOLD
+                    ats_result = svc.query_ats_api(
+                        job_row, conn, config
+                    )  # PORT-SEAM: L-0178, landed
                     if ats_result:
                         fragments.update(ats_result)
 
                 # Sub-tier C: HTML careers scrape (if company has homepage_url)
-                if conn is not None and job_row.get("company_id"):
-                    careers_result = svc.scrape_careers_tier(  # PORT-SEAM: L-0178 HOLD
+                if (
+                    conn is not None
+                    and job_row.get("company_id")
+                    and svc.scrape_careers_tier is not None
+                ):  # PORT-SEAM: L-0178 HOLD, fail-open (matches :427/:900 idiom)
+                    careers_result = svc.scrape_careers_tier(
                         job_row, conn, config, careers_memo=careers_memo
                     )
                     if careers_result:
@@ -460,17 +471,17 @@ def enrich_job(
 
         if start_idx <= TIER_ORDER.index("ddg"):
             try:
-                ddg_result = svc.search_ddg_web(title, company)  # PORT-SEAM: L-0178 HOLD
+                ddg_result = svc.search_ddg_web(title, company)  # PORT-SEAM: L-0178, landed
                 ddg_text = ddg_result.get("ddg_snippet", "")
 
-                ddg_jd, ddg_source_url = svc.fetch_ddg_jds(  # PORT-SEAM: L-0178 HOLD
+                ddg_jd, ddg_source_url = svc.fetch_ddg_jds(  # PORT-SEAM: L-0178, landed
                     ddg_result.get("ddg_urls", [])
                 )
                 if ddg_jd:
                     fragments["url_jd"] = ddg_jd
 
                 query = f"{title} {company} job description"
-                fallback_text = svc.search_duckduckgo(query)  # PORT-SEAM: L-0178 HOLD
+                fallback_text = svc.search_duckduckgo(query)  # PORT-SEAM: L-0178, landed
                 ddg_parts = [text for text in (ddg_text, fallback_text) if text]
                 if ddg_parts:
                     fragments["ddg"] = "\n\n".join(ddg_parts)
@@ -540,8 +551,10 @@ def enrich_job(
             else:
                 try:
                     query = f"{title} {company}"
-                    serpapi_result, apply_url_list = svc.search_serpapi(  # PORT-SEAM: L-0178 HOLD
-                        query, serpapi_key
+                    serpapi_result, apply_url_list = (
+                        svc.search_serpapi(  # PORT-SEAM: L-0178, landed
+                            query, serpapi_key
+                        )
                     )
                     _record_serpapi_call(conn)
                     if conn and job_row.get("dedup_key") and apply_url_list:
@@ -892,7 +905,7 @@ def _apply_post_fetch_extraction(
     if svc.parse_structured_fields is None:
         return merged
 
-    parsed = svc.parse_structured_fields(  # PORT-SEAM: L-0178 HOLD
+    parsed = svc.parse_structured_fields(  # PORT-SEAM: L-0178, landed
         jd_full=effective_jd,
         job_row=job_row,
         conn=conn,

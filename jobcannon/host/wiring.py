@@ -106,12 +106,19 @@ connection but never answers.
 from __future__ import annotations
 
 import atexit
+import functools
 import logging
 import os
 
 from jobcannon.db import _companies, _direct_link, _jd_full, _jobs
 from jobcannon.db import pool as pool_mod
 from jobcannon.engine import extraction_health, runtime_config, services
+from jobcannon.engine import primary_source_tiebreak as _primary_source_tiebreak
+from jobcannon.engine import _enrichment_ats_tier
+from jobcannon.engine import _enrichment_ddg_web_tier
+from jobcannon.engine import _enrichment_jd_fetch
+from jobcannon.engine import _enrichment_search_tiers
+from jobcannon.engine import _enrichment_structured_fields
 from jobcannon.engine.ats_scanner import _scan_log
 from jobcannon.host import model_provider as _model_provider
 from jobcannon.host import posthog_admin, posthog_client, task_app
@@ -185,6 +192,37 @@ def build_scan_services(host_config: HostConfig) -> services.ScanServices:
         # jobcannon.host.model_provider.call_model's docstring).
         call_model=_model_provider.call_model,
         record_cost=_model_provider.record_cost,
+        # L-0230: the ported tiebreak_primary_posting takes call_model as its
+        # own injected keyword-only param (not a ScanServices field of its
+        # own -- see primary_source_tiebreak.py's module docstring), so the
+        # host binds a partial that pre-applies the same call_model this
+        # ScanServices instance already carries above. The caller
+        # (primary_source_resolver.py, L-0229) invokes this field with no
+        # call_model of its own -- the host owns the callable's construction.
+        tiebreak_primary_posting=functools.partial(
+            _primary_source_tiebreak.tiebreak_primary_posting,
+            call_model=_model_provider.call_model,
+        ),
+        # L-0178: data_enricher.enrich_job's cost-ordered enrichment-tier
+        # cascade (jobcannon.engine.data_enricher, L-0174, already landed).
+        # Every field below is a plain function reference except
+        # parse_structured_fields, which -- like tiebreak_primary_posting
+        # above -- takes call_model as its own injected keyword-only param,
+        # so the host binds a partial pre-applying the same call_model this
+        # ScanServices instance already carries. scrape_careers_tier stays
+        # unbound (None): its source module depends on careers_crawler.py
+        # (L-0167, PR #369), not yet on this branch -- see
+        # jobcannon/engine/_enrichment_ats_tier.py's module PORT-SEAM.
+        fetch_direct_jd=_enrichment_jd_fetch.fetch_direct_jd,
+        query_ats_api=_enrichment_ats_tier.query_ats_api,
+        search_ddg_web=_enrichment_ddg_web_tier.search_ddg_web,
+        fetch_ddg_jds=_enrichment_ddg_web_tier.fetch_ddg_jds,
+        search_duckduckgo=_enrichment_search_tiers.search_duckduckgo,
+        search_serpapi=_enrichment_search_tiers.search_serpapi,
+        parse_structured_fields=functools.partial(
+            _enrichment_structured_fields.parse_structured_fields,
+            call_model=_model_provider.call_model,
+        ),
         # L-0465: bind the already-landed engine-side single writer for
         # company_scan_log (jobcannon.engine.ats_scanner._scan_log, ledger
         # L-0077) rather than re-porting it under careers_crawler — its own
