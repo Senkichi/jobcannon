@@ -32,12 +32,25 @@ def _nightly_procrastinate_schema(postgres_test_dsn):
     Mirrors tests/host/test_reclaim_orphaned_jobs.py's replace_connector +
     apply_schema precedent, session-scoped here since apply_schema is plain
     CREATEs, not idempotent, and only needs to run once per throwaway DB.
+
+    ``postgres_test_dsn`` is session-scoped and shared with every other test
+    file in the same pytest session/xdist worker; tests/host/
+    test_nightly_morning.py declares the identical fixture (same name,
+    different module -- pytest caches each independently), so whichever of
+    the two runs SECOND hits ``DuplicateObject`` on these non-idempotent
+    CREATEs. Swallow it here too rather than making fixture-apply ordering
+    a silent cross-file dependency.
     """
+    from procrastinate.exceptions import ConnectorException
+
     from jobcannon.host import tasks
 
     with tasks.app.replace_connector(procrastinate.PsycopgConnector(conninfo=postgres_test_dsn)):
         with tasks.app.open():
-            tasks.app.schema_manager.apply_schema()
+            try:
+                tasks.app.schema_manager.apply_schema()
+            except ConnectorException:
+                pass  # already applied by another nightly test file's fixture this session
 
 
 def _insert_terminal_job(conn, *, task_name: str, status: str, duration_s: float = 5.0) -> int:

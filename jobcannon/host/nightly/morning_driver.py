@@ -74,7 +74,11 @@ from jobcannon.host.nightly.audit_stage import run_audit_stage
 from jobcannon.host.nightly.config import nightly_monitor_config, nightly_monitor_enabled
 from jobcannon.host.nightly.disagreement_baseline import is_anomalous, rate_band, record_rate
 from jobcannon.host.nightly.error_budget import build_nightly_error_budget, markdown_section
-from jobcannon.host.nightly.issue_filer import cross_check_prior_filings, file_issue, list_open_issues
+from jobcannon.host.nightly.issue_filer import (
+    cross_check_prior_filings,
+    file_issue,
+    list_open_issues,
+)
 from jobcannon.host.nightly.report import build_report_md
 from jobcannon.host.nightly.review_stage import run_review_stage
 
@@ -132,7 +136,19 @@ def _sampler_tick_timestamps(
         )
         .fetchall()
     )
-    return [r["finished_at"] for r in rows if r["finished_at"] is not None]
+    # psycopg3 returns a `timestamptz` column as a timezone-AWARE datetime
+    # (in the connection's session timezone); every other timestamp this
+    # unit handles (window_start_utc/window_end_utc from _utcnow(), the
+    # nightly_monitor_state fields) is naive UTC by convention. Without
+    # normalizing here, itertools.pairwise below raises TypeError the
+    # moment observed_ticks > 0 -- caught by
+    # tests/host/test_nightly_morning.py's
+    # test_compute_window_coverage_one_tick_reports_larger_edge_gap.
+    return [
+        r["finished_at"].astimezone(UTC).replace(tzinfo=None)
+        for r in rows
+        if r["finished_at"] is not None
+    ]
 
 
 def _fail_count(conn: Any, window_start: datetime, window_end: datetime) -> int:
@@ -270,14 +286,22 @@ def _run(conn: Any, *, _now: datetime | None = None) -> dict:
     prior_filed = state.get("last_filed_issues") or []
     if repo:
         token = review_cfg.get("token")
-        open_issues = list_open_issues(repo, token) if token else {
-            "status": "unavailable",
-            "reason": "JC_NIGHTLY_GH_TOKEN not set",
-            "issues": [],
-        }
+        open_issues = (
+            list_open_issues(repo, token)
+            if token
+            else {
+                "status": "unavailable",
+                "reason": "JC_NIGHTLY_GH_TOKEN not set",
+                "issues": [],
+            }
+        )
         open_issues = cross_check_prior_filings(open_issues, prior_filed)
     else:
-        open_issues = {"status": "unavailable", "reason": "JC_NIGHTLY_ISSUE_REPO not set", "issues": []}
+        open_issues = {
+            "status": "unavailable",
+            "reason": "JC_NIGHTLY_ISSUE_REPO not set",
+            "issues": [],
+        }
 
     review_result = run_review_stage(
         date_str=date_str,
