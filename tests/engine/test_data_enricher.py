@@ -4,17 +4,24 @@
 Ported from job_finder/web/tests/test_data_enricher.py (job-cannon private
 repo) at the same SHA the engine module itself was ported from (ledger
 L-0174). The private suite is migration/network-heavy; the engine has no
-migrations system and no ScanServices seam for several tier functions still
-on L-0178 HOLD or otherwise unported. What did NOT port, and why:
+migrations system, and several tests below still patch
+job_finder.web.enrichment_tiers functions/requests.get directly rather than
+the now-landed jobcannon.engine._enrichment_* ScanServices hooks (L-0178,
+landed except scrape_careers_tier). What did NOT port, and why:
 
   - TestSearchSerpapi / TestSearchDuckDuckGo (8 tests): exercise
     enrichment_tiers.search_serpapi / search_duckduckgo directly against a
-    real ``requests.get`` mock. enrichment_tiers.py itself is L-0178 (HOLD,
-    unlanded) -- this port only reaches those two functions through the
-    svc.search_serpapi / svc.search_duckduckgo ScanServices hooks (see
-    TestEnrichJobTierOrder / TestDDGTierPersist below). Skipped wholesale.
-  - TestFetchDirectJd (7 tests) / TestAuthWallGuard (7 tests): same L-0178
-    HOLD reason -- both exercise enrichment_tiers._fetch_direct_jd directly.
+    real ``requests.get`` mock. L-0178 landed as
+    jobcannon.engine._enrichment_search_tiers.{search_serpapi,
+    search_duckduckgo}, reached in production via the svc.search_serpapi /
+    svc.search_duckduckgo ScanServices hooks (see TestEnrichJobTierOrder /
+    TestDDGTierPersist below, which exercise the hook via a MagicMock
+    override). Retargeting these 8 tests at the real function bodies is a
+    follow-up (not done in this port) -- skipped wholesale for now.
+  - TestFetchDirectJd (7 tests) / TestAuthWallGuard (7 tests): same
+    reason -- both exercise the private ``_fetch_direct_jd`` name directly;
+    L-0178 landed the public ``fetch_direct_jd`` as
+    jobcannon.engine._enrichment_jd_fetch.fetch_direct_jd. Same follow-up.
     Skipped wholesale.
   - TestMigration15 (3 tests) and all 4 tests in TestPipelineIntegration:
     drive real job_finder.web migrations (m008/m015) through a live
@@ -29,7 +36,7 @@ on L-0178 HOLD or otherwise unported. What did NOT port, and why:
     job_finder.web.autoheal.agentic_enricher, which has no ledger row or
     ScanServices seam in this port's read scope. Dropped wholesale rather
     than skipped: unlike the migration/L-0178 classes above (which reference
-    real functions that exist elsewhere and may land a seam later),
+    real functions that exist elsewhere and now have a landed seam),
     run_enrichment_backfill itself does not exist post-port, so there is no
     ledger-preserving value in keeping empty stub methods that reference a
     deleted function.
@@ -43,8 +50,9 @@ Everything else ports with unchanged assertions except:
      jobcannon.engine.services.ScanServices via ``_install_services()``.
      ``patch("job_finder.web.data_enricher.X")`` context managers become
      ScanServices field overrides (``_install_services(fetch_direct_jd=...)``)
-     -- the enrichment_tiers.* hooks (L-0178 HOLD) are only reachable this
-     way post-port. ``_install_services()``'s defaults for those seven hooks
+     -- the enrichment_tiers.* hooks (L-0178, landed except
+     scrape_careers_tier) are exercised this way in these tests, via a
+     ScanServices override, rather than by importing the real functions. ``_install_services()``'s defaults for those seven hooks
      reproduce the private ``stub_enrichment_network`` fixture's "always
      miss" shapes, so classes that used
      ``@pytest.mark.usefixtures("stub_enrichment_network")`` need no
@@ -136,8 +144,9 @@ Bugfix applied to data_enricher.py during this port (see that file's inline
 comment at ``_apply_post_fetch_extraction``): ``svc.parse_structured_fields``
 was called unconditionally, unlike every sibling optional ScanServices hook
 in the same module (all guarded with ``is not None``). Since
-parse_structured_fields legitimately defaults to None (services.py: L-0178
-HOLD) and every fixture here leaves it unset by default, the unguarded call
+parse_structured_fields legitimately defaults to None (its ScanServices
+dataclass field default; wiring.py binds the real function in production,
+L-0178 landed) and every fixture here leaves it unset by default, the unguarded call
 raised TypeError on almost every real-JD path, silently swallowed by
 enrich_job's per-tier ``except Exception``, cascading every affected row to
 'exhausted'. Fixed with the same ``is None: return`` guard already used by
@@ -338,8 +347,9 @@ def _install_services(conn=None, **overrides):
     """Build and register one ScanServices for a test.
 
     Defaults mirror the private repo's ``stub_enrichment_network`` fixture:
-    every enrichment_tiers.* hook (L-0178 HOLD) defaults to its real "no
-    result" shape so enrich_job proceeds to its DB logic immediately. Pass
+    every enrichment_tiers.* hook (L-0178, landed except scrape_careers_tier)
+    defaults to its real "no result" shape so enrich_job proceeds to its DB
+    logic immediately. Pass
     a fresh MagicMock as a keyword override for any hook a test needs to
     assert on (call count, args, etc.); the rest keep their default "miss".
     """
@@ -439,17 +449,20 @@ def rich_job_row():
 
 
 # ---------------------------------------------------------------------------
-# Not ported: enrichment_tiers.* (L-0178 HOLD) direct-call tests
+# Not rewired (follow-up): enrichment_tiers.* (L-0178, landed) direct-call
+# tests -- see module docstring above
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.skip(
     reason=(
         "Exercises job_finder.web.enrichment_tiers.search_serpapi directly "
-        "against a mocked requests.get. enrichment_tiers.py is L-0178 (HOLD, "
-        "unlanded) -- this port only reaches it through the svc.search_serpapi "
-        "ScanServices hook (see TestEnrichJobTierOrder / TestDDGTierPersist), "
-        "exercised there via a MagicMock override, not the real function body."
+        "against a mocked requests.get. L-0178 landed as "
+        "jobcannon.engine._enrichment_search_tiers.search_serpapi, reached in "
+        "production via the svc.search_serpapi ScanServices hook (see "
+        "TestEnrichJobTierOrder / TestDDGTierPersist), exercised there via a "
+        "MagicMock override, not the real function body. Retargeting these "
+        "at the real body is a follow-up, not done in this port."
     )
 )
 class TestSearchSerpapi:
@@ -469,9 +482,9 @@ class TestSearchSerpapi:
 @pytest.mark.skip(
     reason=(
         "Exercises job_finder.web.enrichment_tiers.search_duckduckgo directly "
-        "against a mocked requests.get. Same L-0178 HOLD reason as "
-        "TestSearchSerpapi above -- only reachable post-port via the "
-        "svc.search_duckduckgo ScanServices hook."
+        "against a mocked requests.get. Same reason as TestSearchSerpapi "
+        "above -- L-0178 landed; only reachable via the svc.search_duckduckgo "
+        "ScanServices hook here, real body retargeting is a follow-up."
     )
 )
 class TestSearchDuckDuckGo:
@@ -1695,9 +1708,10 @@ class TestPipelineIntegration:
 
 @pytest.mark.skip(
     reason=(
-        "Exercises enrichment_tiers._fetch_direct_jd directly against a "
-        "mocked requests.get. enrichment_tiers.py is L-0178 (HOLD, "
-        "unlanded) -- see module docstring."
+        "Exercises the private enrichment_tiers._fetch_direct_jd directly "
+        "against a mocked requests.get. L-0178 landed the public name as "
+        "jobcannon.engine._enrichment_jd_fetch.fetch_direct_jd -- see module "
+        "docstring; retargeting is a follow-up, not done in this port."
     )
 )
 class TestFetchDirectJd:
@@ -1726,8 +1740,8 @@ class TestFetchDirectJd:
 @pytest.mark.skip(
     reason=(
         "Exercises enrichment_tiers._fetch_direct_jd's auth-wall guard "
-        "directly against a mocked requests.get. Same L-0178 HOLD reason as "
-        "TestFetchDirectJd above."
+        "directly against a mocked requests.get. Same reason as "
+        "TestFetchDirectJd above -- L-0178 landed, retargeting is a follow-up."
     )
 )
 class TestAuthWallGuard:
