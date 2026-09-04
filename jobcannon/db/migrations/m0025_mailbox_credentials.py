@@ -11,9 +11,7 @@ RLS-only follow-up migration -- that split in m0020 existed only because
 byo_key_credentials' table predated its own RLS migration; a brand-new
 table has no such history to preserve).
 
-Design note: C:/Users/senki/AppData/Local/Temp/claude/
-C--Users-senki-repos-job-cannon/edac6690-e744-479e-bd4d-d10eb9f4cace/
-scratchpad/ports/design-aggregators-imap.md §1.1-1.2.
+Design note: design-aggregators-imap.md §1.1-1.2.
 
 Shape notes:
 - username_hint is a MASKED display value only (e.g. "j***@gmail.com") --
