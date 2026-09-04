@@ -82,7 +82,25 @@ logger = logging.getLogger(__name__)
 
 _WINDOW_HOURS = 24
 _MAX_MISSED_DATES = 14
-_FAIL_SOURCE = "nightly_sampler"
+
+# Two different namespaces that happen to share a base string -- kept as
+# separate constants deliberately (a #325/#337-adjacent bug class this
+# unit's own boundary guard doesn't catch, since both are plain strings,
+# not imports). ``procrastinate_jobs.task_name`` is the task's
+# fully-qualified dotted path (procrastinate.tasks.Task.name defaults to
+# ``full_path``, verified empirically against 3.9.0 -- see tasks.py's own
+# "Registry note" docstring on `app.tasks`), NOT the bare function name;
+# ``scan_health_log.payload->>'source'`` is whatever string the recording
+# call passed as its own ``source=`` kwarg, which sampler.py's own
+# record_scan_health call site sets to the bare "nightly_sampler" (see
+# jobcannon/host/nightly/sampler.py's ``record_scan_health(source=
+# "nightly_sampler", ...)`` call). tests/host/test_nightly_morning.py
+# pins _SAMPLER_TASK_NAME against the live tasks.nightly_sampler.name as
+# a positive control so a future rename of the task function (or a move
+# to a different module) fails loudly here instead of silently zeroing
+# observed_ticks/observer_offline.
+_SAMPLER_TASK_NAME = "jobcannon.host.tasks.nightly_sampler"
+_SAMPLER_HEALTH_SOURCE = "nightly_sampler"
 
 
 def _utcnow() -> datetime:
@@ -110,7 +128,7 @@ def _sampler_tick_timestamps(
             GROUP BY j.id
             ORDER BY finished_at
             """,
-            (_FAIL_SOURCE, window_start, window_end),
+            (_SAMPLER_TASK_NAME, window_start, window_end),
         )
         .fetchall()
     )
@@ -128,7 +146,7 @@ def _fail_count(conn: Any, window_start: datetime, window_end: datetime) -> int:
               AND payload->>'source' = %s
               AND payload->>'level' = 'ERROR'
             """,
-            (window_start, window_end, _FAIL_SOURCE),
+            (window_start, window_end, _SAMPLER_HEALTH_SOURCE),
         )
         .fetchone()
     )
