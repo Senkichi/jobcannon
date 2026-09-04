@@ -1,4 +1,4 @@
-"""Migration 18 — WI-13 scan-lane columns (ats_scan_enabled, careers_scan_enabled).
+"""Migration 21 — WI-13 scan-lane columns (ats_scan_enabled, careers_scan_enabled).
 
 Prerequisite for ledger row L-0040 (jobcannon/db/_company_state.py): the
 company-state audit log's 6 tracked fields need all 6 companies columns to
@@ -80,7 +80,7 @@ from jobcannon.db.migrations.types import Migration
 inverted_order_safe = True
 
 MIGRATION = Migration(
-    version=18,
+    version=21,
     description="WI-13 scan-lane columns (ats_scan_enabled, careers_scan_enabled)",
     sql=[
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS ats_scan_enabled boolean NOT NULL DEFAULT true",

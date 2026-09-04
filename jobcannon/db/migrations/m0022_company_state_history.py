@@ -1,5 +1,6 @@
 """PORTED from job_finder/web/migrations/m209616158_company_state_history.py
 @ f20c5b927308f288888fd068a1d3e7af64b644be (private job-cannon). Ledger L-0040.
+# PORT-SEAM: see the renumbering/dialect-translation block below.
 
 Migration 209616158 — company_state_history append-only audit log (WI-08).
 
@@ -12,7 +13,7 @@ transition is lost) together with the code path (``changed_by``) that made
 it. Append-only: writers insert one row per changed field; nothing updates
 or deletes. See ``jobcannon/db/_company_state.py`` for the sole writer.
 
-# PORT-SEAM: version renumbered to 19 (this host's sequential-integer
+# PORT-SEAM: version renumbered to 22 (this host's sequential-integer
 scheme -- see jobcannon/db/migrations/types.py module docstring for why the
 schemes differ from private's epoch-second stamp). DDL dialect-translated
 SQLite -> Postgres: ``id INTEGER PRIMARY KEY`` -> ``bigserial PRIMARY KEY``;
@@ -27,7 +28,7 @@ lexicographic comparison, and the sole writer,
 ``record_state_change``, omits ``changed_at`` from its INSERT entirely and
 lets this DEFAULT fill it, replacing private's Python-computed
 ``utc_now_iso()`` value). Depends on
-jobcannon/db/migrations/m0018_wi13_scan_lane_columns.py landing first (this
+jobcannon/db/migrations/m0021_wi13_scan_lane_columns.py landing first (this
 host's ``companies`` table has only the merged ``scan_enabled`` bit until
 that migration adds the ``ats_scan_enabled``/``careers_scan_enabled`` split
 this table's tracked set snapshots).
@@ -43,11 +44,13 @@ from __future__ import annotations
 from jobcannon.db.migrations.types import Migration
 
 MIGRATION = Migration(
-    version=19,
+    version=22,  # PORT-SEAM: 209616158 -> 22.
     description="company_state_history append-only audit log (WI-08)",
     sql=[
         """
         CREATE TABLE IF NOT EXISTS company_state_history (
+            -- # PORT-SEAM: dialect-translated from private's SQLite DDL
+            -- (see module docstring for the full type-substitution list).
             id bigserial PRIMARY KEY,
             company_id bigint NOT NULL REFERENCES companies(id),
             field text NOT NULL,
@@ -57,6 +60,8 @@ MIGRATION = Migration(
             changed_by text NOT NULL
         )
         """,
+        # PORT-SEAM: private's triple-quoted CREATE INDEX string collapsed
+        # to two concatenated single-line strings (no functional change).
         "CREATE INDEX IF NOT EXISTS idx_company_state_history_company_changed_at"
         " ON company_state_history (company_id, changed_at)",
     ],

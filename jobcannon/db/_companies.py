@@ -19,7 +19,7 @@ below snapshots the tracked fields before its UPDATE and diffs them after
 (``jobcannon.db._company_state.snapshot_tracked`` /
 ``record_state_diff``), same wrapping as private's ``ats_company.py``. This
 needed the WI-13 ``ats_scan_enabled``/``careers_scan_enabled`` split
-(``jobcannon/db/migrations/m0018_wi13_scan_lane_columns.py``) to land first
+(``jobcannon/db/migrations/m0021_wi13_scan_lane_columns.py``) to land first
 so the tracked set has all 6 public columns to read.
 (2) merge-survivor resolution (#1913) — STILL OPEN. The private repo's
 merged-loser handling picks a surviving row across duplicate companies;

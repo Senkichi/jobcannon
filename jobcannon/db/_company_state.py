@@ -3,7 +3,7 @@
 # PORT-SEAM: conn type hints sqlite3.Connection -> Any (host connections are
 # psycopg, not sqlite3); ? placeholders -> %s throughout; import sqlite3 and
 # job_finder.json_utils.utc_now_iso both dropped (see record_state_change's
-# own PORT-SEAM -- m0019's changed_at DEFAULT now() replaces the Python-
+# own PORT-SEAM -- m0022's changed_at DEFAULT now() replaces the Python-
 # computed timestamp). Sole-writer test path is class-qualified
 # (TestSoleWriter::test_record_state_change_is_the_only_insert) to match
 # this repo's grouped test-class layout, not private's flat function.
@@ -16,6 +16,8 @@ and by which path?" that the point-in-time ``companies`` row cannot.
 
 **Single-writer invariant.** ``record_state_change`` holds the ONLY
 ``INSERT INTO company_state_history`` statement in the codebase (grep-guarded by
+# PORT-SEAM: test path class-qualified for this repo's grouped test-class
+# layout (private guarded a flat function at the bare module path).
 ``tests/test_company_state_history.py::TestSoleWriter::test_record_state_change_is_the_only_insert``).
 Every other helper here routes through
 it.
@@ -27,8 +29,8 @@ it.
 # no ledger row covers it. Most importantly: private's "every instrumented
 # writer that sets scan_enabled = 0 sets ats_scan_enabled = 0 in the same
 # statement" is NOT yet true on this host -- see
-# jobcannon/db/migrations/m0018_wi13_scan_lane_columns.py's own "Stragglers:"
-# section. m0018's backfill sets the split flags ONCE, at migration time;
+# jobcannon/db/migrations/m0021_wi13_scan_lane_columns.py's own "Stragglers:"
+# section. m0021's backfill sets the split flags ONCE, at migration time;
 # no writer here (jobcannon/db/_company_attribution.py,
 # jobcannon/engine/ats_prober.py, jobcannon/engine/ats_scanner/_run.py) has
 # been instrumented to co-write them yet, unlike private's per-writer
@@ -40,7 +42,9 @@ it.
 **Tracked fields.** Six columns: the four ATS-identity/state fields
 (``ats_platform``, ``ats_slug``, ``ats_probe_status``, ``miss_reason``) plus the
 ``ats_scan_enabled`` / ``careers_scan_enabled`` scan-lane flags from the WI-13
-split (jobcannon/db/migrations/m0018_wi13_scan_lane_columns.py). The legacy
+# PORT-SEAM: private's #1869 -> the m0021 migration path (see block above
+# for the "no signal is lost" claim's honest replacement).
+split (jobcannon/db/migrations/m0021_wi13_scan_lane_columns.py). The legacy
 aggregate ``scan_enabled`` is deliberately EXCLUDED from the tracked set,
 matching private's WI-13/D16 rationale: snapshotting a tracked field means
 SELECTing it, and the split flags exist precisely so callers stop reading the
@@ -72,6 +76,7 @@ naturally record zero rows.
 
 from __future__ import annotations
 
+# PORT-SEAM: import sqlite3 dropped (host connections are psycopg's Any).
 from typing import Any
 
 # PORT-SEAM: private's comment cited a positional `zip(_TRACKED_FIELDS,
@@ -100,7 +105,7 @@ def _as_text(value: Any) -> str | None:
 
 
 def record_state_change(
-    conn: Any,
+    conn: Any,  # PORT-SEAM: sqlite3.Connection -> Any.
     company_id: int,
     field: str,
     old: Any,
@@ -118,17 +123,25 @@ def record_state_change(
         return 0
     conn.execute(
         # PORT-SEAM: ? -> %s; changed_at column omitted from the INSERT list
-        # entirely -- m0019's `DEFAULT now()` fills it, replacing private's
-        # Python-computed utc_now_iso() TEXT value (see m0019's docstring).
+        # entirely -- m0022's `DEFAULT now()` fills it, replacing private's
+        # Python-computed utc_now_iso() TEXT value (see m0022's docstring).
         """INSERT INTO company_state_history
               (company_id, field, old_value, new_value, changed_by)
            VALUES (%s, %s, %s, %s, %s)""",
-        (company_id, field, _as_text(old), _as_text(new), changed_by),
+        (
+            company_id,
+            field,
+            _as_text(old),
+            _as_text(new),
+            changed_by,
+        ),  # PORT-SEAM: changed_at arg dropped.
     )
     return 1
 
 
-def snapshot_tracked(conn: Any, company_id: int) -> dict[str, Any] | None:
+def snapshot_tracked(  # PORT-SEAM: sqlite3.Connection -> Any.
+    conn: Any, company_id: int
+) -> dict[str, Any] | None:
     """Return the current tracked-field values for a company, or None if absent.
 
     # PORT-SEAM: string-key access replaces private's positional
@@ -141,7 +154,7 @@ def snapshot_tracked(conn: Any, company_id: int) -> dict[str, Any] | None:
     row = conn.execute(_SNAPSHOT_SQL, (company_id,)).fetchone()
     if row is None:
         return None
-    return {field: row[field] for field in _TRACKED_FIELDS}
+    return {field: row[field] for field in _TRACKED_FIELDS}  # PORT-SEAM: string-keyed.
 
 
 def manual_scan_disable_predicate(company_id_sql: str) -> str:
@@ -159,6 +172,7 @@ def manual_scan_disable_predicate(company_id_sql: str) -> str:
     Used by the absorbing-state exit lanes (``run_absorbing_resweep`` and the
     reprobe UNION cohort) to EXCLUDE companies the owner deliberately disabled,
     so those lanes no longer flip ``ats_scan_enabled`` back on over the owner's
+    # PORT-SEAM: #1875 dropped (private-only tracker; see note above).
     explicit off-toggle. Reuses the WI-08 ``company_state_history``
     ledger — no new column, no new table.
 
@@ -167,7 +181,7 @@ def manual_scan_disable_predicate(company_id_sql: str) -> str:
     company there is no same-``changed_at`` collision for this field, but the
     tiebreaker keeps the ordering total for correctness).
     # PORT-SEAM: private's changed_at is ISO-8601 TEXT (lexicographic
-    # comparison); this host's is a Postgres timestamptz (m0019), so `>`
+    # comparison); this host's is a Postgres timestamptz (m0022), so `>`
     # comparison is chronological natively -- same intent, different
     # dialect.
     ``changed_at`` is a timestamptz column, so ``>`` comparison is chronological.
@@ -206,7 +220,7 @@ def manual_scan_disable_predicate(company_id_sql: str) -> str:
 
 
 def record_state_diff(
-    conn: Any,
+    conn: Any,  # PORT-SEAM: sqlite3.Connection -> Any.
     company_id: int,
     before: dict[str, Any] | None,
     after: dict[str, Any] | None,

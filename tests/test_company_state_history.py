@@ -28,7 +28,7 @@ from jobcannon.db._company_state import (
     record_state_change,
     record_state_diff,
 )
-from jobcannon.db.migrations.m0019_company_state_history import MIGRATION
+from jobcannon.db.migrations.m0022_company_state_history import MIGRATION
 
 # PORT-SEAM: db_conn/postgres_test_dsn/requires_postgres imported directly
 # from tests.host.conftest -- no root tests/conftest.py exists to make
@@ -77,9 +77,9 @@ def _insert_company(conn, name):
 
 class TestMigration:
     def test_declares_version(self):
-        # PORT-SEAM: 209616158 -> 19 (this host's sequential-integer scheme;
-        # see m0019's own module docstring).
-        assert MIGRATION.version == 19
+        # PORT-SEAM: 209616158 -> 22 (this host's sequential-integer scheme;
+        # see m0022's own module docstring).
+        assert MIGRATION.version == 22
 
     def test_table_and_index_exist(self, db_conn):  # noqa: F811
         # PORT-SEAM: PRAGMA table_info replaced with information_schema.columns;
@@ -128,7 +128,7 @@ class TestMigration:
         # a seeded row survives untouched -- same intent (idempotent re-run),
         # adapted to the shared-DB fixture shape.
         conn = db_conn
-        company_id = _insert_company(conn, "m0019-idempotent-co")
+        company_id = _insert_company(conn, "m0022-idempotent-co")
         conn.execute(
             "INSERT INTO company_state_history (company_id, field, changed_by) VALUES (%s, %s, %s)",
             (company_id, "ats_slug", "t"),
@@ -169,12 +169,12 @@ class TestRecordStateChangeUnit:
 
     def test_null_aware_transitions(self, db_conn):  # noqa: F811
         conn = db_conn
-        company_id = _insert_company(conn, "m0019-null-aware-co")
+        company_id = _insert_company(conn, "m0022-null-aware-co")
         assert record_state_change(conn, company_id, "ats_slug", None, "acme", "t") == 1
         # PORT-SEAM: private's ats_scan_enabled/careers_scan_enabled columns
         # didn't exist yet (sqlite untyped 1/0 ints stood in for the
         # not-yet-split flags); this host's columns are real `boolean`
-        # (m0018), so the transition is expressed as True/False and
+        # (m0021), so the transition is expressed as True/False and
         # `_as_text` coerces it to "True"/"False" rather than private's "1"/"0".
         assert record_state_change(conn, company_id, "ats_scan_enabled", True, False, "t") == 1
         by_field = {r["field"]: r for r in _history(conn, company_id)}
