@@ -28,13 +28,16 @@ The invariant bundle applied on every call, unchanged from private:
 When ``careers_url`` is explicitly provided (not ``_UNSET``):
 
 # PORT-SEAM: private additionally sets careers_scan_enabled=1 and clears
-# careers_crawl_flag_reason on this branch. Neither column exists on this
-# host: m0001's companies table has one merged `scan_enabled` boolean
-# (not private's split ats_scan_enabled/careers_scan_enabled -- see L-0040's
-# seam, which needs that split landed first), and no crawl-flag-reason
-# column at all. This port sets the host's single `scan_enabled = true` as
-# the nearest available re-enable signal and drops the flag-reason clear
-# (no column to clear). Revisit both once the WI-13 split (L-0040) lands.
+# careers_crawl_flag_reason on this branch. `careers_scan_enabled` does not
+# exist on this host: m0001's companies table has one merged `scan_enabled`
+# boolean (not private's split ats_scan_enabled/careers_scan_enabled -- see
+# L-0040's seam, which needs that split landed first). This port sets the
+# host's single `scan_enabled = true` as the nearest available re-enable
+# signal. `careers_crawl_flag_reason` DOES exist on this host as of m0028
+# (#370) but is deliberately left un-cleared here -- whether this port
+# should also clear it, matching private, is filed as a Modularity-note
+# follow-up (#370's PR) rather than applied inline. Revisit both once the
+# WI-13 split (L-0040) lands.
 
 # PORT-SEAM: private also calls snapshot_tracked/record_state_diff
 # (job_finder/db/_company_state.py, WI-08) to record the transition in
