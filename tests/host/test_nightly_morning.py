@@ -14,15 +14,34 @@ which exist on this host (see review_stage.py / issue_filer.py / report.py
 with). Chosen coverage targets this port's own adaptation decisions --
 the places a silent behavioral drift from private would be easy to miss --
 rather than re-deriving every private assertion. Dropped test classes,
-with reasons, are listed in the landing PR body's test-accounting section
-(TestParseResetTime, TestFiledIssuesArtifact, TestAuditBriefAsset,
-TestReviewBriefAsset, TestRegistrar, TestReviewSessionInjectionHardening,
-and every `claude -p` subprocess-spawn test inside TestRunAuditStage /
-TestRunNightlyMorningReview).
+with reasons, are listed in the landing PR body's test-accounting section.
+Ledger L-0387's own "carried in FULL... only claude-p-spawn and
+OS-scheduled-task deadman tests DROPPED" seam text is honored as: every
+`claude -p` subprocess-spawn test inside TestRunAuditStage /
+TestRunNightlyMorningReview is dropped (no subprocess seam exists on this
+host -- see model_session.py's own PORT-SEAM), TestParseResetTime /
+TestAuditBriefAsset / TestReviewBriefAsset are dropped as claude-p-adjacent
+(no local artifact files, no reset-time parsing target -- see
+review_stage.py's PORT-SEAM), and the OS-scheduled-task deadman tests are
+dropped here and ported instead in test_nightly_deadman.py (private's
+separate test_nightly_monitor_deadman.py source file, carried in full
+minus its D12 local-report.md belt-and-suspenders class -- see that file's
+own docstring). TestRegistrar and TestReviewSessionInjectionHardening are
+NOT dropped outright: the enabled-flag-guard half of TestRegistrar is
+covered below by the tasks.py periodic-gate tests (its cron-slot-parsing
+half has no host analog -- procrastinate's cron string is a static
+decorator argument read once from an env var, not built per-call from a
+closure over a JF_CONFIG dict); TestReviewSessionInjectionHardening's
+CLI-argv-escape mechanism no longer exists as an attack surface (no
+subprocess, no `--repo` flag -- see review_stage.py's PORT-SEAM), but the
+property it protects -- attacker-influenced issue title/body can never
+redirect which repo an issue lands in -- is re-asserted below against the
+real REST call construction in issue_filer.file_issue.
 """
 
 from __future__ import annotations
 
+import random
 from datetime import datetime, timedelta
 
 import procrastinate
@@ -686,6 +705,162 @@ def test_d12_state_records_filed_issues_on_success(
 
 
 @requires_postgres
+def test_run_records_per_issue_outcomes_when_review_proposes_multiple_issues(
+    db_conn, monkeypatch, _nightly_procrastinate_schema
+):
+    """Host analog of private's TestFiledIssuesArtifact all-succeed/
+    all-fail/partial-fail cases (#1568), collapsed into one test since the
+    ``filed`` accumulation loop in morning_driver._run is the same code
+    path regardless of outcome mix -- exercises multi-issue accumulation,
+    which test_d12_state_records_filed_issues_on_success (a single-issue
+    happy path) does not."""
+    from jobcannon.host.nightly import morning_driver, state as nightly_state
+
+    monkeypatch.setenv("JC_NIGHTLY_ISSUE_REPO", "example-org/example-repo")
+    monkeypatch.setenv("JC_NIGHTLY_GH_TOKEN", "ghp_dummy")
+
+    monkeypatch.setattr(
+        morning_driver, "run_audit_stage", lambda *a, **kw: {"audited": 0, "disputes": 0}
+    )
+    monkeypatch.setattr(morning_driver, "build_nightly_error_budget", lambda *a, **kw: {})
+    monkeypatch.setattr(morning_driver, "markdown_section", lambda budget: "")
+    monkeypatch.setattr(
+        morning_driver,
+        "list_open_issues",
+        lambda repo, token: {"status": "ok", "reason": None, "issues": []},
+    )
+    monkeypatch.setattr(
+        morning_driver,
+        "run_review_stage",
+        lambda **kw: {
+            "incomplete": False,
+            "report_md": "# stub report",
+            "issues_to_file": [
+                {"title": "fix(x): a", "body": "body a", "labels": ["automated-ready"]},
+                {"title": "fix(y): b", "body": "body b", "labels": []},
+            ],
+        },
+    )
+
+    def _file_issue(repo, token, title, body, labels):
+        if title == "fix(x): a":
+            return {
+                "title": title,
+                "labels": labels,
+                "outcome": "created",
+                "url": "https://github.com/x/y/issues/1",
+                "number": 1,
+                "reason": None,
+            }
+        return {
+            "title": title,
+            "labels": labels,
+            "outcome": "failed",
+            "url": None,
+            "number": None,
+            "reason": "GitHub issue create returned 422",
+        }
+
+    monkeypatch.setattr(morning_driver, "file_issue", _file_issue)
+
+    now = datetime(2026, 7, 19, 5, 30, 0)
+    result = morning_driver._run(db_conn, _now=now)
+
+    # issues_filed is len(filed) -- every ATTEMPTED filing, success or
+    # failure, not just the ones that actually created an issue (matches
+    # morning_driver._run's own "filed.append(file_issue(...))" loop,
+    # unconditional on outcome).
+    assert result["issues_filed"] == 2
+    state = nightly_state.load_state(db_conn)
+    filed_by_title = {e["title"]: e for e in state["last_filed_issues"]}
+    assert len(filed_by_title) == 2
+    assert filed_by_title["fix(x): a"]["outcome"] == "created"
+    assert filed_by_title["fix(x): a"]["url"]
+    assert filed_by_title["fix(y): b"]["outcome"] == "failed"
+    assert filed_by_title["fix(y): b"]["reason"]
+
+
+@requires_postgres
+def test_run_preserves_prior_filed_issues_when_filing_skipped_entirely(
+    db_conn, monkeypatch, _nightly_procrastinate_schema
+):
+    """When repo/token/open_issues gating skips filing entirely (see
+    morning_driver.py's ``if repo and token and open_issues... status ==
+    "ok"`` guard), ``last_filed_issues`` must NOT be reset to [] -- doing so
+    would erase the previous night's dedup reference that
+    cross_check_prior_filings needs on the NEXT run. Deliberate behavioral
+    difference from private's filed_issues.json (which always wrote a
+    fresh artifact, including an empty one, every run -- see
+    TestFiledIssuesArtifact::test_open_issues_unavailable_writes_skipped_
+    entries in the private original); disclosed in the landing PR body."""
+    from jobcannon.host.nightly import morning_driver, state as nightly_state
+
+    monkeypatch.setenv("JC_NIGHTLY_ISSUE_REPO", "example-org/example-repo")
+    monkeypatch.setenv("JC_NIGHTLY_GH_TOKEN", "ghp_dummy")
+
+    monkeypatch.setattr(
+        morning_driver, "run_audit_stage", lambda *a, **kw: {"audited": 0, "disputes": 0}
+    )
+    monkeypatch.setattr(morning_driver, "build_nightly_error_budget", lambda *a, **kw: {})
+    monkeypatch.setattr(morning_driver, "markdown_section", lambda budget: "")
+
+    seed_state = nightly_state.load_state(db_conn)
+    nightly_state.save_state(
+        db_conn,
+        {
+            **seed_state,
+            "last_filed_issues": [
+                {
+                    "title": "prior night's issue",
+                    "labels": [],
+                    "outcome": "created",
+                    "url": "https://github.com/x/y/issues/1",
+                    "number": 1,
+                    "reason": None,
+                }
+            ],
+        },
+        base=None,
+    )
+
+    monkeypatch.setattr(
+        morning_driver,
+        "list_open_issues",
+        lambda repo, token: {"status": "unavailable", "reason": "network", "issues": []},
+    )
+    monkeypatch.setattr(
+        morning_driver,
+        "run_review_stage",
+        lambda **kw: {
+            "incomplete": False,
+            "report_md": "# stub report",
+            "issues_to_file": [{"title": "new proposal", "body": "b", "labels": []}],
+        },
+    )
+
+    def _boom(*a, **kw):
+        raise AssertionError("file_issue must not be called when open_issues fetch failed")
+
+    monkeypatch.setattr(morning_driver, "file_issue", _boom)
+
+    now = datetime(2026, 7, 19, 5, 30, 0)
+    result = morning_driver._run(db_conn, _now=now)
+
+    assert result["issues_filed"] == 0
+    state = nightly_state.load_state(db_conn)
+    assert state["last_filed_issues"] == [
+        {
+            "title": "prior night's issue",
+            "labels": [],
+            "outcome": "created",
+            "url": "https://github.com/x/y/issues/1",
+            "number": 1,
+            "reason": None,
+        }
+    ]
+
+
+@requires_postgres
 def test_run_does_not_file_issues_when_open_issues_fetch_unavailable(
     db_conn, monkeypatch, _nightly_procrastinate_schema
 ):
@@ -728,3 +903,344 @@ def test_run_does_not_file_issues_when_open_issues_fetch_unavailable(
     assert result["issues_filed"] == 0
     state = nightly_state.load_state(db_conn)
     assert state["last_report_date"] == "2026-07-19"
+
+
+# ---------------------------------------------------------------------------
+# audit_stage.run_audit_stage -- random.sample under JC_NIGHTLY_AUDIT_MAX_JOBS
+# (design note item 5). New relative to private, per ledger L-0387's own
+# seam text ("NEW sampling + per-night-ceiling tests added for the reworked
+# score audit") -- private sampled top-N by axis_sum descending, so it had
+# no equivalent ceiling-vs-cohort-size test to port.
+# ---------------------------------------------------------------------------
+
+
+def _audit_cfg(*, max_jobs):
+    return {
+        "score_threshold": 20,
+        "lookback_days": 3,
+        "max_jobs": max_jobs,
+        "batch_size": 5,
+        "max_batch_input_chars": 40_000,
+        "max_skip_attempts": 2,
+        "max_batch_retries": 1,
+        "coverage_alarm_threshold": 0.80,
+        "failed_batch_fraction_alarm_threshold": 0.75,
+    }
+
+
+def _insert_eligible_posting(db_conn, dedup_key):
+    """Minimal eligible-posting insert for audit_stage sampling tests --
+    axis_sum 22 (above the default score_threshold=20), first_seen defaults
+    to now() (inside the default 3-day lookback)."""
+    from psycopg.types.json import Jsonb
+
+    company = f"co-{dedup_key}"
+    db_conn.execute("INSERT INTO companies (name) VALUES (%s)", (company,))
+    cid = db_conn.execute("SELECT id FROM companies WHERE name = %s", (company,)).fetchone()["id"]
+    db_conn.execute(
+        "INSERT INTO postings "
+        "(dedup_key, company_id, title, company, location, jd_full, sub_scores_json) "
+        "VALUES (%s, %s, 'Data Scientist', %s, 'Remote', "
+        "'A meaningful job description body.', %s)",
+        (
+            dedup_key,
+            cid,
+            company,
+            Jsonb(
+                {
+                    "title_fit": 4,
+                    "location_fit": 4,
+                    "comp_fit": 3,
+                    "domain_match": 4,
+                    "seniority_match": 3,
+                    "skills_match": 4,
+                }
+            ),
+        ),
+    )
+
+
+@requires_postgres
+def test_run_audit_stage_samples_exactly_ceiling_when_cohort_exceeds_it(
+    db_conn, _nightly_procrastinate_schema
+):
+    from jobcannon.db.pool import EngineCompatConnection
+    from jobcannon.host.nightly.audit_stage import run_audit_stage
+
+    for i in range(5):
+        _insert_eligible_posting(db_conn, f"cohort-big-{i}")
+
+    summary = run_audit_stage(
+        EngineCompatConnection(db_conn),
+        {"audit": _audit_cfg(max_jobs=3)},
+        call_model=None,
+        config={},
+        rng=random.Random(1),
+    )
+    assert summary["total_candidates"] == 3
+
+
+@requires_postgres
+def test_run_audit_stage_takes_whole_cohort_when_smaller_than_ceiling(
+    db_conn, _nightly_procrastinate_schema
+):
+    """random.sample(pop, k) raises ValueError when k > len(pop) --
+    run_audit_stage's min(ceiling, len(eligible)) guard must prevent that
+    whenever the eligible pool is smaller than the configured ceiling."""
+    from jobcannon.db.pool import EngineCompatConnection
+    from jobcannon.host.nightly.audit_stage import run_audit_stage
+
+    for i in range(2):
+        _insert_eligible_posting(db_conn, f"cohort-small-{i}")
+
+    summary = run_audit_stage(
+        EngineCompatConnection(db_conn),
+        {"audit": _audit_cfg(max_jobs=15)},
+        call_model=None,
+        config={},
+        rng=random.Random(1),
+    )
+    assert summary["total_candidates"] == 2
+
+
+@requires_postgres
+def test_run_audit_stage_max_jobs_zero_samples_nothing_and_never_dispatches(
+    db_conn, _nightly_procrastinate_schema
+):
+    """config.py clamps JC_NIGHTLY_AUDIT_MAX_JOBS at floor 0 (not 1) -- a
+    zeroed ceiling must empty the cohort even when eligible postings exist,
+    and must never reach the call_model dispatcher (asserted via a
+    call_model stub that raises if invoked)."""
+    from jobcannon.db.pool import EngineCompatConnection
+    from jobcannon.host.nightly.audit_stage import run_audit_stage
+
+    _insert_eligible_posting(db_conn, "cohort-zero-ceiling")
+
+    def _boom(*a, **kw):
+        raise AssertionError("call_model must not be invoked when max_jobs clamps to 0")
+
+    summary = run_audit_stage(
+        EngineCompatConnection(db_conn),
+        {"audit": _audit_cfg(max_jobs=0)},
+        call_model=_boom,
+        config={},
+        rng=random.Random(1),
+    )
+    assert summary["total_candidates"] == 0
+    assert summary["audited"] == 0
+
+
+@requires_postgres
+def test_run_audit_stage_empty_eligible_pool_is_a_clean_noop(
+    db_conn, _nightly_procrastinate_schema
+):
+    """No eligible postings at all (design note Q1) -- must return a clean
+    zeroed summary, not raise, and never reach the model dispatcher."""
+    from jobcannon.db.pool import EngineCompatConnection
+    from jobcannon.host.nightly.audit_stage import run_audit_stage
+
+    def _boom(*a, **kw):
+        raise AssertionError("call_model must not be invoked over an empty eligible pool")
+
+    summary = run_audit_stage(
+        EngineCompatConnection(db_conn),
+        {"audit": _audit_cfg(max_jobs=15)},
+        call_model=_boom,
+        config={},
+        rng=random.Random(1),
+    )
+    assert summary["total_candidates"] == 0
+    assert summary["unavailable"] is False
+
+
+# ---------------------------------------------------------------------------
+# tasks.py periodic wrappers -- JC_NIGHTLY_MONITOR_ENABLED gate fires before
+# any import, mirroring test_nightly_sampler.py's identical-shape test for
+# nightly_sampler (ledger L-0471). Host analog of private's TestRegistrar::
+# test_guard_reads_enabled_flag (its cron-slot-parsing half has no host
+# analog -- see this module's docstring).
+# ---------------------------------------------------------------------------
+
+
+def test_nightly_review_task_skips_when_disabled_and_touches_no_db(monkeypatch):
+    monkeypatch.delenv("JC_NIGHTLY_MONITOR_ENABLED", raising=False)
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("connection_factory must not be called when disabled")
+
+    monkeypatch.setattr("jobcannon.db.connection_factory", _boom)
+    from jobcannon.host import tasks
+
+    assert tasks.nightly_review(0) == {"skipped": "disabled"}
+
+
+def test_nightly_deadman_task_skips_when_disabled_and_touches_no_db(monkeypatch):
+    monkeypatch.delenv("JC_NIGHTLY_MONITOR_ENABLED", raising=False)
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("connection_factory must not be called when disabled")
+
+    monkeypatch.setattr("jobcannon.db.connection_factory", _boom)
+    from jobcannon.host import tasks
+
+    assert tasks.nightly_deadman(0) == {"skipped": "disabled"}
+
+
+# ---------------------------------------------------------------------------
+# issue_filer.list_open_issues / file_issue -- GitHub REST client (design
+# note item 6). Private's TestListOpenIssues / TestFileIssue drove these
+# through a mocked `_gh` CLI subprocess seam that no longer exists (see
+# issue_filer.py's own PORT-SEAM); these drive the real `requests` call
+# construction instead, mocking only requests.get/requests.post.
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self, status_code, json_data=None, text="", links=None, content=b"x"):
+        self.status_code = status_code
+        self._json_data = json_data
+        self.text = text
+        self.links = links or {}
+        self.content = content
+
+    def json(self):
+        return self._json_data
+
+
+def test_list_open_issues_success_filters_pull_requests(monkeypatch):
+    from jobcannon.host.nightly import issue_filer
+
+    page = [
+        {"number": 1, "title": "a bug", "body": "b", "html_url": "https://x/issues/1"},
+        {"number": 2, "title": "a pr", "pull_request": {}, "html_url": "https://x/pull/2"},
+    ]
+    monkeypatch.setattr(
+        issue_filer.requests, "get", lambda *a, **kw: _FakeResponse(200, json_data=page, links={})
+    )
+    result = issue_filer.list_open_issues("owner/repo", "tok")
+    assert result["status"] == "ok"
+    assert [i["number"] for i in result["issues"]] == [1]
+
+
+def test_list_open_issues_non_200_returns_unavailable(monkeypatch):
+    from jobcannon.host.nightly import issue_filer
+
+    monkeypatch.setattr(
+        issue_filer.requests, "get", lambda *a, **kw: _FakeResponse(403, text="rate limited")
+    )
+    result = issue_filer.list_open_issues("owner/repo", "tok")
+    assert result["status"] == "unavailable"
+    assert result["issues"] == []
+
+
+def test_list_open_issues_network_exception_returns_unavailable(monkeypatch):
+    import requests as _requests
+
+    from jobcannon.host.nightly import issue_filer
+
+    def _raise(*a, **kw):
+        raise _requests.RequestException("connection reset")
+
+    monkeypatch.setattr(issue_filer.requests, "get", _raise)
+    result = issue_filer.list_open_issues("owner/repo", "tok")
+    assert result["status"] == "unavailable"
+    assert "connection reset" in result["reason"]
+
+
+def test_file_issue_success_returns_created_record(monkeypatch):
+    from jobcannon.host.nightly import issue_filer
+
+    captured = {}
+
+    def _post(url, *, headers, json, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        return _FakeResponse(
+            201, json_data={"html_url": "https://github.com/owner/repo/issues/9", "number": 9}
+        )
+
+    monkeypatch.setattr(issue_filer.requests, "post", _post)
+    record = issue_filer.file_issue("owner/repo", "tok", "a title", "a body", ["automated-ready"])
+    assert record["outcome"] == "created"
+    assert record["url"] == "https://github.com/owner/repo/issues/9"
+    assert record["number"] == 9
+    assert record["reason"] is None
+    assert captured["url"] == "https://api.github.com/repos/owner/repo/issues"
+
+
+def test_file_issue_non_201_returns_failed_with_reason(monkeypatch):
+    from jobcannon.host.nightly import issue_filer
+
+    monkeypatch.setattr(
+        issue_filer.requests, "post", lambda *a, **kw: _FakeResponse(422, text="Validation Failed")
+    )
+    record = issue_filer.file_issue("owner/repo", "tok", "t", "b", [])
+    assert record["outcome"] == "failed"
+    assert record["url"] is None
+    assert "422" in record["reason"]
+
+
+def test_file_issue_network_exception_returns_failed_with_reason(monkeypatch):
+    import requests as _requests
+
+    from jobcannon.host.nightly import issue_filer
+
+    def _raise(*a, **kw):
+        raise _requests.RequestException("timed out")
+
+    monkeypatch.setattr(issue_filer.requests, "post", _raise)
+    record = issue_filer.file_issue("owner/repo", "tok", "t", "b", [])
+    assert record["outcome"] == "failed"
+    assert "timed out" in record["reason"]
+
+
+def test_file_issue_title_and_body_are_stripped_and_clipped(monkeypatch):
+    from jobcannon.host.nightly import issue_filer
+
+    captured = {}
+
+    def _post(url, *, headers, json, timeout):
+        captured["json"] = json
+        return _FakeResponse(201, json_data={"html_url": "https://x/issues/1", "number": 1})
+
+    monkeypatch.setattr(issue_filer.requests, "post", _post)
+    long_title = "  " + ("t" * (issue_filer._ISSUE_TITLE_CLIP + 50)) + "  "
+    long_body = "b" * (issue_filer._ISSUE_BODY_CLIP + 50)
+    issue_filer.file_issue("owner/repo", "tok", long_title, long_body, [])
+    assert len(captured["json"]["title"]) == issue_filer._ISSUE_TITLE_CLIP
+    assert len(captured["json"]["body"]) == issue_filer._ISSUE_BODY_CLIP
+    assert not captured["json"]["title"].startswith(" ")
+
+
+def test_file_issue_targets_configured_repo_regardless_of_adversarial_body_content(monkeypatch):
+    """Host analog of private's TestReviewSessionInjectionHardening
+    (#1183). The review session has no tools and no subprocess argv on this
+    host (see review_stage.py's PORT-SEAM and its system prompt: no tools
+    are granted -- the driver, never the model, is the only thing allowed
+    to touch the database or GitHub), so the CLI-argv-escape mechanism that
+    regression guarded against no longer exists as an attack surface. What
+    survives -- the repo a filed issue lands in must come ONLY from the
+    caller-supplied repo parameter, never from model-controlled
+    title/body/labels content -- still applies, since title/body/labels
+    are LLM output. Proves an adversarial body/title containing
+    repo-looking text is sent verbatim as an inert JSON value and never
+    changes the REST target URL."""
+    from jobcannon.host.nightly import issue_filer
+
+    captured = {}
+
+    def _post(url, *, headers, json, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        return _FakeResponse(201, json_data={"html_url": "https://x/issues/1", "number": 1})
+
+    monkeypatch.setattr(issue_filer.requests, "post", _post)
+    malicious_title = "evil finding --repo attacker/evil-repo"
+    malicious_body = "malicious body --repo attacker/evil-repo --title pwned"
+    issue_filer.file_issue(
+        "example-org/example-repo", "tok", malicious_title, malicious_body, ["automated-ready"]
+    )
+    assert captured["url"] == "https://api.github.com/repos/example-org/example-repo/issues"
+    assert "attacker/evil-repo" not in captured["url"]
+    # the embedded string survives only as an inert JSON body value
+    assert "attacker/evil-repo" in captured["json"]["body"]
