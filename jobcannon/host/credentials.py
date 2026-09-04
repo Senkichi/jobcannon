@@ -21,19 +21,35 @@ run that doesn't set it). Instead every resolve_credential(provider) call
 returns None, which the adapter constructor's existing "raise ValueError on
 missing credential" contract turns into "provider unavailable" -- the
 cascade already treats that as skip-and-advance.
+
+build_mailbox_resolver (L-0115, design note "design-aggregators-imap.md"
+§1.3) reuses this SAME KEK envelope (AES-256-GCM, JC_BYO_KEY_KEK, nonce ||
+ciphertext) rather than minting a second key-management scheme for a
+second per-tenant secret type -- the mailbox address and app-password are
+combined into one JSON plaintext before encryption (one crypto call site
+per credential; see encrypt_mailbox_secret). Consent
+(jobcannon.db._events.read_mailbox_consent) is checked BEFORE the
+credential row, fail-closed even when an active row exists.
 """
 
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 from typing import Any
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from jobcannon.db import _mailbox_credentials
 from jobcannon.db._byo_key_credentials import get_credential, touch_last_used
-from jobcannon.engine.model_types import CredentialResolver
+from jobcannon.db._events import read_mailbox_consent
+from jobcannon.engine.model_types import (
+    CredentialResolver,
+    MailboxCredential,
+    MailboxCredentialResolver,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -136,3 +152,90 @@ def build_credential_resolver(conn: Any, user_id: str) -> CredentialResolver:
         return plaintext
 
     return resolve_credential
+
+
+def encrypt_mailbox_secret(address: str, secret: str, *, kek: bytes | None = None) -> bytes:
+    """Encrypt (address, secret) as ONE ciphertext for
+    mailbox_credentials.encrypted_secret.
+
+    The mailbox address itself is PII (design note §1.1); combining it with
+    the app-password into a single JSON plaintext before one AES-256-GCM
+    call keeps this the ONE crypto call site for a mailbox credential,
+    rather than two separately-nonced columns. Raises KekNotConfiguredError
+    if `kek` is omitted and JC_BYO_KEY_KEK is unset -- same fail-hard write
+    path as encrypt_api_key (no settings UI wired to this yet -- see this
+    PR's Modularity note).
+    """
+    key = kek if kek is not None else _kek()
+    plaintext = json.dumps({"address": address, "secret": secret})
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(_NONCE_LEN)
+    ciphertext = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
+    return nonce + ciphertext
+
+
+def _decrypt_mailbox_secret(blob: bytes, *, kek: bytes) -> tuple[str, str]:
+    plaintext = _decrypt(blob, kek=kek)
+    data = json.loads(plaintext)
+    return data["address"], data["secret"]
+
+
+def build_mailbox_resolver(conn: Any, user_id: str) -> MailboxCredentialResolver:
+    """Return a MailboxCredentialResolver bound to `user_id`.
+
+    Arity is `() -> MailboxCredential | None` (design note §1.3) -- a
+    tenant has at most one mailbox credential, so there is no
+    provider-name parameter the way build_credential_resolver has one.
+    Order of checks matters: consent is read FIRST, before the credential
+    row is even queried -- fail-closed on absent consent even when an
+    active row exists, so revoking consent makes a tenant intake-ineligible
+    immediately without needing a separate row deactivation. A successful
+    resolve stamps last_used_at (best-effort, non-fatal on failure to
+    touch) -- mirrors build_credential_resolver.
+    """
+
+    def resolve_mailbox_credential() -> MailboxCredential | None:
+        if not read_mailbox_consent(conn, user_id):
+            return None
+
+        try:
+            kek = _kek()
+        except KekNotConfiguredError:
+            logger.warning(
+                "%s unset -- mailbox credentials unavailable for user_id=%s",
+                _KEK_ENV_VAR,
+                user_id,
+            )
+            return None
+
+        row = _mailbox_credentials.get_active_for_user(conn, user_id)
+        if row is None:
+            return None
+
+        try:
+            address, secret = _decrypt_mailbox_secret(row["encrypted_secret"], kek=kek)
+        except Exception:
+            logger.warning(
+                "mailbox_credentials decrypt failed for user_id=%s "
+                "(corrupt row or KEK mismatch) -- treating as no credential",
+                user_id,
+            )
+            return None
+
+        try:
+            _mailbox_credentials.touch_last_used(conn, user_id)
+        except Exception:
+            logger.warning(
+                "mailbox_credentials last_used_at touch failed for user_id=%s (non-fatal)",
+                user_id,
+            )
+
+        return MailboxCredential(
+            address=address,
+            secret=secret,
+            imap_host=row["imap_host"],
+            imap_port=row["imap_port"],
+            folder=row["folder"],
+        )
+
+    return resolve_mailbox_credential
