@@ -22,10 +22,9 @@
 # or the ollama/claude_code_cli/anthropic dispatch branches -- all
 # private-only surfaces per the module docstring above. See this PR's body
 # for the itemized list.
-from dataclasses import FrozenInstanceError
-
 import pytest
 
+# PORT-SEAM: `import requests` dropped -- unused by any surviving test.
 from jobcannon.engine.model_types import BaseProvider, ModelResult
 
 
@@ -49,6 +48,8 @@ def test_model_result_fields():
 
 
 def test_model_result_is_frozen():
+    from dataclasses import FrozenInstanceError
+
     result = ModelResult(
         data={"score": 75},
         cost_usd=0.01,
@@ -62,6 +63,9 @@ def test_model_result_is_frozen():
         result.data = {"score": 99}
 
 
+# PORT-SEAM: dropped the private file's `# --- ModelResult tests ---` /
+# `# --- BaseProvider tests ---` section-separator comments (cosmetic, not
+# semantic).
 def test_base_provider_is_abstract():
     with pytest.raises(TypeError):
         BaseProvider()
@@ -73,3 +77,8 @@ def test_base_provider_subclass_must_implement_call():
 
     with pytest.raises(TypeError):
         IncompleteProvider()
+
+
+# PORT-SEAM: resolve_provider_config / resolve_workload_routing / call_model
+# dispatcher tests (104 functions) dropped here -- private-only surfaces per
+# the module header above; itemized in this PR's body.
