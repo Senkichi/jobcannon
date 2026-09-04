@@ -157,8 +157,7 @@ def advance_uid_highwater(
     raw = conn.raw if hasattr(conn, "raw") else conn
     _set_tenant(raw, user_id)
     raw.execute(
-        "UPDATE mailbox_credentials SET uid_highwater = %s, uid_validity = %s "
-        "WHERE user_id = %s",
+        "UPDATE mailbox_credentials SET uid_highwater = %s, uid_validity = %s WHERE user_id = %s",
         (uid_highwater, uid_validity, user_id),
     )
     commit_unless_nested(raw)
