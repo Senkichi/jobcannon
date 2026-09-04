@@ -112,6 +112,7 @@ import os
 from jobcannon.db import _companies, _direct_link, _jd_full, _jobs
 from jobcannon.db import pool as pool_mod
 from jobcannon.engine import extraction_health, runtime_config, services
+from jobcannon.engine.ats_scanner import _scan_log
 from jobcannon.host import model_provider as _model_provider
 from jobcannon.host import posthog_admin, posthog_client, task_app
 from jobcannon.host.config import HostConfig
@@ -180,6 +181,19 @@ def build_scan_services(host_config: HostConfig) -> services.ScanServices:
         # jobcannon.host.model_provider.call_model's docstring).
         call_model=_model_provider.call_model,
         record_cost=_model_provider.record_cost,
+        # L-0465: bind the already-landed engine-side single writer for
+        # company_scan_log (jobcannon.engine.ats_scanner._scan_log, ledger
+        # L-0077) rather than re-porting it under careers_crawler — its own
+        # module docstring names this exact caller as "ready for it the
+        # moment that module ports". Host importing an engine submodule
+        # directly (rather than only the engine's top-level `services`
+        # module, as every other build_scan_services import does) is new
+        # here; it is the plain function reference the seam field expects,
+        # and stays qmark-dialect-correct because the connection this
+        # receives is always an EngineCompatConnection from
+        # pool_mod.connection_factory (see _scan_log.py's own PORT-SEAM
+        # note on its package placement).
+        record_scan_outcome=_scan_log.record_scan_outcome,
     )
 
 
