@@ -296,6 +296,12 @@ def nightly_monitor_config() -> dict:
             # import time, so an unset value never breaks a disabled deployment
             # or the boundary/import-all tests.
             "repo": (os.environ.get("JC_NIGHTLY_ISSUE_REPO") or "").strip() or None,
+            # Fine-grained PAT, issues:write scope only (design note Q5).
+            # Never logged, never a committed literal -- render.yaml declares
+            # this ``sync: false`` (Render dashboard secret), same treatment
+            # as every other credential in that file (CLERK_SECRET_KEY,
+            # POSTHOG_PERSONAL_API_KEY, ...).
+            "token": (os.environ.get("JC_NIGHTLY_GH_TOKEN") or "").strip() or None,
         },
     }
 
@@ -314,3 +320,20 @@ def require_issue_repo() -> str:
             "JC_NIGHTLY_ISSUE_REPO is not set -- required to file nightly review issues"
         )
     return repo
+
+
+def require_issue_token() -> str:
+    """The configured GitHub issue-filing token, or raise if unset.
+
+    Mirrors ``require_issue_repo()`` -- same lazy-read, fail-loud contract,
+    kept as a separate accessor (not folded into ``require_issue_repo``) so
+    a caller that only needs the repo (e.g. ``list_open_issues`` for a
+    read-only dedup check that has degraded gracefully) is not forced to
+    also have a filing-capable token configured.
+    """
+    token = nightly_monitor_config()["review"]["token"]
+    if not token:
+        raise RuntimeError(
+            "JC_NIGHTLY_GH_TOKEN is not set -- required to file nightly review issues"
+        )
+    return token
