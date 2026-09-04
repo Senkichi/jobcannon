@@ -11,7 +11,7 @@ Task shapes (`scan`, `expiry_check`, `stale_detect`) and the nine periodics
 `@app.periodic` + `@app.task` below) all live here — this ONE
 `procrastinate.App` instance (constructed below) is the sole periodic-task
 scheduling mechanism in this codebase; a new periodic task is another peer
-registered on it, never a second scheduler. An eighth periodic,
+registered on it, never a second scheduler. A ninth periodic,
 `enqueue_imap_ingest` (L-0188), lives in the sibling
 `jobcannon.host.ingestion_tasks` module rather than here — same `app`
 instance, imported separately by `jobcannon/worker/__main__.py` purely for
