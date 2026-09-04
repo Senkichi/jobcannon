@@ -39,12 +39,35 @@ up outside this file).
 # dedup, here guarding repeat scan_health_log ERROR rows the sampler writes
 # on a FAIL verdict or fail-severity signature); _merge_state (pure dict
 # logic, unchanged).
+#
+# L-0387 (morning audit/review/deadman) extends _DEFAULT_STATE with the
+# fields the comment above named as belonging to "a later ledger unit":
+# last_report_at/last_report_date/last_morning_status/last_audit_summary/
+# last_missed_report_dates (report writer, morning_driver.py/report.py),
+# disagreement_rate_history/disagreement_baseline_prior (audit stage, D13/
+# #1619 baseline -- jobcannon.host.nightly.disagreement_baseline), and
+# last_filed_issues (issue_filer.py's cross_check_prior_filings dedup
+# reference, #1506 -- replaces private's filed_issues.json/window_dirs
+# read). Every key MUST be listed in _DEFAULT_STATE: _load_state_unsafe and
+# save_state's three-way-merge both reconstruct ``fresh`` by filtering the
+# stored row down to _DEFAULT_STATE's keys, so an unlisted key would be
+# written once and then silently dropped on the very next load.
+#
+# morning_deadline (below) is shared verbatim between deadman.py and any
+# future in-process report-missing check, matching private's own
+# docstring for the identical function in _state.py. Per the design note's
+# Q2 (store-UTC/render-local): Render runs UTC, so morning_hour/
+# morning_minute here are UTC integers describing the same slot
+# JC_NIGHTLY_REVIEW_CRON fires at (operators keep the two in sync; see the
+# nightly flag docs) -- unlike private, there is no local-timezone
+# conversion in this function at all.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+from datetime import datetime, timedelta
 from typing import Any
 
 from jobcannon.db.pool import commit_unless_nested
@@ -66,7 +89,41 @@ _DEFAULT_STATE: dict = {
     "scan_health_watermark_id": 0,
     "procrastinate_watermark_id": 0,
     "notified": [],
+    # L-0387: morning report / audit-baseline / issue-filing state (see the
+    # module docstring's L-0387 note for why every key must be listed here).
+    "last_report_at": None,
+    "last_report_date": None,
+    "last_morning_status": None,
+    "last_audit_summary": None,
+    "last_missed_report_dates": [],
+    "disagreement_rate_history": [],
+    "disagreement_baseline_prior": [],
+    "last_filed_issues": [],
 }
+
+# Fixed grace period past the configured morning slot before the deadman
+# considers a report late. A module constant, not config -- byte-identical
+# to private's _MORNING_GRACE_MIN (_deadman.py / _state.py).
+_MORNING_GRACE_MIN = 90
+
+
+def morning_deadline(monitor_cfg: dict, now: datetime) -> datetime:
+    """UTC deadline for "today's" morning report: morning_hour:morning_minute
+    plus a fixed grace period, on *now*'s UTC calendar day.
+
+    Shared verbatim between jobcannon.host.nightly.deadman and any future
+    in-process report-missing check, matching private's own docstring for
+    the identical function. All-UTC (design note Q2): no local-timezone
+    conversion, unlike private's local-clock version -- morning_hour/
+    morning_minute are already UTC integers (jobcannon.host.nightly.config).
+    """
+    slot = now.replace(
+        hour=int(monitor_cfg["morning_hour"]),
+        minute=int(monitor_cfg["morning_minute"]),
+        second=0,
+        microsecond=0,
+    )
+    return slot + timedelta(minutes=_MORNING_GRACE_MIN)
 
 
 def _raw(conn: Any):
