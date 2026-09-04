@@ -94,7 +94,7 @@ def _csv_env(name: str, default: frozenset) -> frozenset:
 
 
 def nightly_monitor_config() -> dict:
-    """Fully-defaulted nightly-monitor tunables for design-step-4 callers.
+    """Fully-defaulted nightly-monitor tunables for the sampler/checkpoint callers.
 
     # PORT-SEAM: private's ``get_nightly_monitor_config`` took a ``config``
     # dict and merged/coerced a ``nightly_monitor:`` sub-block. This env-var
