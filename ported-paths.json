@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T07:07:25Z",
+  "generated_at": "2026-09-04T07:13:13Z",
   "roots": [
     "engine",
     "db",
@@ -1022,6 +1022,20 @@
       ]
     },
     {
+      "path": "jobcannon/engine/careers_crawler/_autoheal_seam.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/_autoheal_seam.py @ 6fc7fb1b50d3ff1fe880614471cda8303a68be35 (private job-cannon). Ledger L-0469."
+        },
+        {
+          "line": 44,
+          "text": "# (job_finder.web.autoheal.careers_source_key) (L-0469)"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/careers_crawler/_bench_predicate.py",
       "root": "engine",
       "markers": [
@@ -1032,12 +1046,36 @@
       ]
     },
     {
+      "path": "jobcannon/engine/careers_crawler/_cohort_legitimacy.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/_cohort_legitimacy.py @ 1af9001b887b04aca0701614a0a208ee4aa02238 (private job-cannon). Ledger L-0464."
+        },
+        {
+          "line": 16,
+          "text": "see `job_finder.config._RAW_COMPANY_DENYLIST` and `m103`/`m205994845`) but"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/careers_crawler/_persistence.py",
       "root": "engine",
       "markers": [
         {
           "line": 1,
           "text": "# PORTED from job_finder/web/careers_crawler/_persistence.py @ 23644885615a78d509d73c8b1c640b7d49b4a089 (private job-cannon). Ledger L-0465."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/careers_crawler/_static_tier.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/_static_tier.py @ 6a2af961fbffb78564ce8783277d916d60ad0906 (private job-cannon). Ledger L-0443 (umbrella -- no ledger row of its own; carried by L-0464/L-0469 because _cohort_legitimacy.py imports _extract_jsonld_postings/_location_from_jsonld from this module at module scope; see PR body)."
         }
       ]
     },
@@ -2076,6 +2114,22 @@
         {
           "line": 135,
           "text": "# this same private module."
+        },
+        {
+          "line": 235,
+          "text": "#   matches job_finder.web.autoheal.override_loader.careers_recipe(source)"
+        },
+        {
+          "line": 237,
+          "text": "#   (ported inline as a private function in _autoheal_seam.py -- see"
+        },
+        {
+          "line": 240,
+          "text": "#   matches job_finder.web.autoheal.recipe_extractor.careers_recipe_extract("
+        },
+        {
+          "line": 243,
+          "text": "#   matches job_finder.web.autoheal.health_monitor.record_extraction(conn,"
         }
       ]
     },
