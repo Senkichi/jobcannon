@@ -43,7 +43,6 @@ up outside this file).
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 from typing import Any
@@ -75,9 +74,11 @@ def _raw(conn: Any):
 
 
 def _load_state_unsafe(conn: Any) -> dict:
-    row = _raw(conn).execute(
-        "SELECT value FROM nightly_monitor_state WHERE key = %s", (_STATE_KEY,)
-    ).fetchone()
+    row = (
+        _raw(conn)
+        .execute("SELECT value FROM nightly_monitor_state WHERE key = %s", (_STATE_KEY,))
+        .fetchone()
+    )
     raw = row["value"] if row else {}
     if not isinstance(raw, dict):
         raw = {}

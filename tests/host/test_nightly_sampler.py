@@ -122,7 +122,9 @@ def test_run_sampler_tick_swallows_connection_failure(monkeypatch):
 
 
 @requires_postgres
-def test_tick_processes_succeeded_job_and_advances_watermark(db_conn, _nightly_procrastinate_schema):
+def test_tick_processes_succeeded_job_and_advances_watermark(
+    db_conn, _nightly_procrastinate_schema
+):
     from jobcannon.host.nightly import sampler, state as nightly_state
 
     job_id = _insert_terminal_job(db_conn, task_name="nightly_tick_ok", status="succeeded")

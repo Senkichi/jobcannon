@@ -90,10 +90,9 @@ def out_of_band(
 ) -> Literal["fast", "slow"] | None:
     """Return the direction of an out-of-band duration, or None if in band.
 
-    A run is flagged only when it deviates by more than the relative
-    tolerance *and* by more than the absolute floor (whichever threshold is
-    larger), so marginal runs and sub-few-second noise on short jobs are
-    ignored.
+    A run is flagged only when it deviates by more than the relative tolerance
+    *and* by more than the absolute floor (whichever threshold is larger), so
+    marginal runs and sub-few-second noise on short jobs are ignored.
     """
     if tolerance is None:
         tolerance = DEFAULT_NIGHTLY_OUT_OF_BAND_TOLERANCE

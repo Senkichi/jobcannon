@@ -99,7 +99,9 @@ def test_call_model_default_none_yields_verdict_unavailable():
 
 def test_call_model_raising_yields_verdict_unavailable_with_exception_detail():
     packet = _packet()
-    result = checkpoint_verdict(packet, call_model=_raising_model(RuntimeError("cascade exhausted")))
+    result = checkpoint_verdict(
+        packet, call_model=_raising_model(RuntimeError("cascade exhausted"))
+    )
     assert result["verdict"] == VERDICT_UNAVAILABLE
     assert result["reasons"] == ["verdict call failed: RuntimeError: cascade exhausted"]
 

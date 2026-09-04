@@ -74,9 +74,17 @@ fabricated by ``_sanitize_verdict``, ``_guard_in_band_duration``,
 substitution in ``_guard_ambiguous_only_evidence`` is a structural downgrade,
 not a falsified-reason rejection, and does not add to the count). This whole
 chain is a fidelity anchor for this port: it is a set of pure functions over
-whatever the packet carries and diffs clean against the private original
-except for the two seams noted above (call_model injection, jd_full_loss_excess
-removal) and the success_count_keys config source (below).
+whatever the packet carries, and its logic carries over from the private
+original unchanged function-for-function -- verified by a name-and-body
+extraction diff against the private source at the pinned SHA (all 29
+top-level functions from _checkpoint.py present by name across this file and
+checkpoint_packet.py, zero body drift beyond the documented seams: call_model
+injection, jd_full_loss_excess removal, and the success_count_keys config
+source below). Docstrings and comments are NOT verbatim: they are rewrapped
+to this repo's line length and re-cited to its ``issue #N`` convention
+(private used bare ``#N``; see e.g. jobcannon/host/model_provider.py), so a
+raw text diff against the private original is expected to show prose-only
+hunks beyond the split itself.
 """
 
 from __future__ import annotations

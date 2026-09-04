@@ -179,9 +179,7 @@ def _as_run_end_event(job_row: dict) -> dict:
     }
 
 
-def _new_scan_health_hits(
-    conn: Any, since_id: int, registry: list[dict]
-) -> tuple[list[dict], int]:
+def _new_scan_health_hits(conn: Any, since_id: int, registry: list[dict]) -> tuple[list[dict], int]:
     """Match ``registry`` against new scan_health_log payloads since ``since_id``.
 
     Returns ``(hits, new_watermark)``. Each hit carries the row's own
@@ -275,9 +273,7 @@ def _tick(conn: Any) -> dict:
 
         own_hits = [h for h in hits if h.get("source") == job_name]
         log_excerpt_status = (
-            LOG_EXCERPT_STATUS_CAPTURED_NON_EMPTY
-            if own_hits
-            else LOG_EXCERPT_STATUS_CAPTURED_EMPTY
+            LOG_EXCERPT_STATUS_CAPTURED_NON_EMPTY if own_hits else LOG_EXCERPT_STATUS_CAPTURED_EMPTY
         )
         log_excerpt = "\n".join(str(h) for h in own_hits)
 

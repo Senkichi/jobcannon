@@ -15,7 +15,10 @@ from jobcannon.host.nightly.signatures import match_signatures, worst_severity
 
 
 def test_match_signatures_empty_inputs_yield_no_hits():
-    assert match_signatures({}, [{"field": "status", "op": "eq", "value": "ok", "severity": "fail"}]) == []
+    assert (
+        match_signatures({}, [{"field": "status", "op": "eq", "value": "ok", "severity": "fail"}])
+        == []
+    )
     assert match_signatures({"status": "ok"}, []) == []
 
 

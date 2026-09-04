@@ -6,6 +6,15 @@ Checkpoint evidence-packet assembly. checkpoint_verdict.py (the other half
 of this port's file split) consumes build_packet's output and calls the
 injected verdict model.
 
+"Unchanged" / "byte-identical" below refer to logic, verified by a
+name-and-body extraction diff of every top-level function against the
+private _checkpoint.py source at the pinned SHA (zero body drift beyond the
+documented seams). Docstrings and comments are NOT verbatim -- they are
+rewrapped to this repo's line length and re-cited to its ``issue #N``
+convention (private used bare ``#N``) -- so a raw text diff against the
+private original is expected to show prose-only hunks beyond the split
+itself.
+
 # PORT-SEAM: private's build_packet took a single run_end: dict, assembled
 # from job_finder/web/run_events.jsonl by an event writer outside
 # nightly_monitor/. There is no run_events.jsonl on this host; the hosted

@@ -64,9 +64,7 @@ def test_only_nightly_state_module_writes_nightly_monitor_state_table():
         f"walk never visited {_SANCTIONED_WRITER} under ROOTS={ROOTS} "
         f"(repo root resolved to {_REPO_ROOT}) -- scan is vacuous, not clean"
     )
-    assert not offenders, (
-        f"raw nightly_monitor_state-table SQL outside state.py: {offenders}"
-    )
+    assert not offenders, f"raw nightly_monitor_state-table SQL outside state.py: {offenders}"
 
 
 def test_forbidden_nightly_state_sql_predicate():
@@ -75,9 +73,7 @@ def test_forbidden_nightly_state_sql_predicate():
     )
     assert _is_forbidden_nightly_state_sql("UPDATE nightly_monitor_state SET value = %s")
     # A read of the table is fine (the sanctioned reader lives in state.py):
-    assert not _is_forbidden_nightly_state_sql(
-        "SELECT * FROM nightly_monitor_state WHERE key = %s"
-    )
+    assert not _is_forbidden_nightly_state_sql("SELECT * FROM nightly_monitor_state WHERE key = %s")
     assert not _is_forbidden_nightly_state_sql("SELECT * FROM scan_health_log")
     # normalization: quoted / schema-qualified / newline variants still caught
     assert _is_forbidden_nightly_state_sql(
