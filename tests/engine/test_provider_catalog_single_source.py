@@ -1,4 +1,4 @@
-# PORTED from tests/test_provider_catalog_single_source.py @ e6c17c32051602be4b565becb71486f2a4c10ed1 (private job-cannon). Ledger L-0549.
+# PORTED from tests/test_provider_catalog_single_source.py @ 6b797a8bf492184243247376e9de18643570e146 (private job-cannon). Ledger L-0549.
 """Guard: the LLM provider roster has ONE source of truth (provider_catalog).
 
 # PORT-SEAM: private's four derived-enumeration consumers were
@@ -16,6 +16,17 @@
 # internal to the catalog module itself and holds unchanged against
 # jobcannon.host.provider_catalog, whose roster and derivation logic are
 # byte-identical to private's.
+#
+# PORT-SEAM (re-carry, round 2): private main advanced to 6b797a8b (#2085)
+# after the first carry SHA e6c17c32, adding a `secret_key_name` field to
+# ProviderSpec plus `secret_key_name_for()` and 3 new tests pinning them
+# (test_secret_key_name_pins,
+# test_secret_key_name_for_returns_value_for_keyed_providers,
+# test_secret_key_name_for_returns_none_for_keyless_providers). That surface
+# has NOT been ported to jobcannon.host.provider_catalog (L-0051 predates
+# #2085) -- not a DIES verdict, just not-yet-ported; porting the feature
+# itself is out of scope for this test-carry PR. Dropped here; flagged in
+# this PR's body for a future L-0051 refresh.
 
 (test_model_provider already pins _make_adapter <-> _SUPPORTED_PROVIDERS and
 _PROVIDER_DEFAULTS <= _SUPPORTED_PROVIDERS; those become structural here.)
@@ -132,3 +143,12 @@ def test_require_cli_binary_raises_for_provider_with_no_cli_binary():
         cat.require_cli_binary("gemini")
     with pytest.raises(ValueError, match="cli_binary"):
         cat.require_cli_binary("not_a_real_provider")
+
+
+# PORT-SEAM: dropped from here to EOF (private #2085, carry SHA 6b797a8b) --
+# test_secret_key_name_pins,
+# test_secret_key_name_for_returns_value_for_keyed_providers,
+# test_secret_key_name_for_returns_none_for_keyless_providers (all assert on
+# ProviderSpec.secret_key_name / cat.secret_key_name_for(), a surface
+# jobcannon.host.provider_catalog does not yet carry -- see module docstring
+# PORT-SEAM note).
