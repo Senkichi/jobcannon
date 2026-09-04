@@ -63,8 +63,17 @@ from jobcannon.engine.normalizers import body_mentions_any_stem, significant_tok
 # _RELATIVE_POSTED_RE). Anchors the TryApplyNow aggregator listing-tile
 # corruption (company_id=4925: PwC/Amazon/Meta/NOAA/Chase/PNNL/Diva postings all
 # scraped under the wrong company). The bump re-sweeps that legacy corpus.
+#
+# v4: Issue #2017 — the re-sweep now also DETECTS + REPORTS rows whose title
+# carries a self-duplicated trailing comma-delimited segment (e.g. Amazon's
+# PRIMAS title where the subtitle appeared twice). The detection is reporting-
+# only (no collapse / no re-key — #1866 owns the standing re-key question);
+# new rows are collapsed at the ingestion write boundary by
+# collapse_duplicated_suffix in ParsedJob.from_job. The bump re-arms the
+# re-sweep so existing affected rows are enumerated in the runs row on the
+# next startup.
 # ---------------------------------------------------------------------------
-TITLE_HYGIENE_VERSION: int = 3
+TITLE_HYGIENE_VERSION: int = 4
 
 # Reason codes emitted into jobs.unresolved_reasons (the m078 quarantine surface).
 TITLE_INVALID_SHAPE: str = "title_invalid_shape"
