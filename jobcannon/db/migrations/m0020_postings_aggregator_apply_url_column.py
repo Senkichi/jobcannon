@@ -1,4 +1,4 @@
-"""Migration 18 -- postings aggregator apply url column (L-0075).
+"""Migration 20 -- postings aggregator apply url column (L-0075).
 
 Backs jobcannon/db/_jobs.py::annotate_posting_apply_url, ported (flat
 re-adaptation) from private's job_finder/db/_postings.py::annotate_posting_apply_url
@@ -20,7 +20,7 @@ from __future__ import annotations
 from jobcannon.db.migrations.types import Migration
 
 MIGRATION = Migration(
-    version=18,
+    version=20,
     description="postings aggregator apply url column (L-0075)",
     sql=[
         "ALTER TABLE postings ADD COLUMN IF NOT EXISTS aggregator_apply_url text",

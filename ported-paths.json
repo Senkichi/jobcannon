@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T00:23:16Z",
+  "generated_at": "2026-09-04T00:35:38Z",
   "roots": [
     "engine",
     "db",
@@ -452,7 +452,7 @@
       ]
     },
     {
-      "path": "jobcannon/db/migrations/m0018_postings_aggregator_apply_url_column.py",
+      "path": "jobcannon/db/migrations/m0020_postings_aggregator_apply_url_column.py",
       "root": "db",
       "markers": [
         {

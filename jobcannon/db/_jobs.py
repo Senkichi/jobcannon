@@ -595,9 +595,13 @@ def set_source_id_if_free(
 # current postings JSON inside it before merging, specifically so a
 # concurrent upsert_posting write to a DIFFERENT descriptor in the same
 # array would survive this write untouched. aggregator_apply_url is a
-# scalar column on this host (m0018) -- there is no sibling descriptor for
+# scalar column on this host (m0020) -- there is no sibling descriptor for
 # a concurrent writer to clobber, so a single UPDATE is already atomic and
 # the re-read-then-merge dance has no target to port.
+#
+# PORT-SEAM: docstring rewritten for the flat-column target -- private's
+# said "attach to the posting descriptor keyed (ats_platform,
+# source_id) on jobs.postings"; there is no descriptor here to key.
 def annotate_posting_apply_url(
     conn: Any,  # PORT-SEAM: no sqlite3 dialect on this host (psycopg only)
     dedup_key: str,
@@ -605,21 +609,15 @@ def annotate_posting_apply_url(
     # block comment above) -- dedup_key alone identifies the flat row.
     aggregator_apply_url: str,
 ) -> bool:
-    """Sanctioned single writer for ``postings.aggregator_apply_url`` (m0018).
-    # PORT-SEAM: docstring rewritten for the flat-column target -- private's
-    # said "attach to the posting descriptor keyed (ats_platform,
-    # source_id) on jobs.postings"; there is no descriptor here to key.
+    """Sanctioned single writer for ``postings.aggregator_apply_url`` (m0020).
 
     Attaches an aggregator-sourced apply link to the posting row -- a
     distinct provenance from ``direct_url``/``direct_url_confidence``
     (m0017, ``_direct_link.py``'s no-downgrade company-site writer; not
-    overloaded here, see m0018's migration docstring).
+    overloaded here, see m0020's migration docstring).
 
     Returns True if a row was matched and written, False if *dedup_key* /
     *aggregator_apply_url* is falsy or no row matches.
-    # PORT-SEAM: private only guarded dedup_key falsiness; the
-    # aggregator_apply_url guard is added below since this host's arity-
-    # reduced signature has no descriptor lookup to no-op on instead.
 
     Args:
         conn: pooled connection (``.raw`` unwrapped) or a bare psycopg
@@ -627,9 +625,12 @@ def annotate_posting_apply_url(
         dedup_key: The posting's natural key.
         aggregator_apply_url: The aggregator-sourced apply link to attach.
     """
+    # PORT-SEAM: private only guarded dedup_key falsiness; the
+    # aggregator_apply_url guard is added below since this host's arity-
+    # reduced signature has no descriptor lookup to no-op on instead.
     if (
         not dedup_key or not aggregator_apply_url
-    ):  # PORT-SEAM: added aggregator_apply_url guard, see docstring note above
+    ):  # PORT-SEAM: added aggregator_apply_url guard, see comment above
         return False
 
     raw = (
