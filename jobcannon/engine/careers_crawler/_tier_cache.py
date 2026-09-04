@@ -38,7 +38,8 @@ def _try_cached_tier(
     title_exclusions: list[str],
     search_keywords: list[str],
     config: dict,
-    db_path: str,
+    # PORT-SEAM: db_path param dropped -- _cache_api_endpoint is zero-db_path,
+    # svc.connection_factory() is self-seamed (L-0443)
     company_id: int,
     local_summary: dict,
 ) -> list[dict]:
@@ -82,7 +83,7 @@ def _try_cached_tier(
                 if pw_jobs:
                     local_summary["playwright_rendered"] += 1
                     if discovered_api:
-                        _cache_api_endpoint(db_path, company_id, discovered_api)
+                        _cache_api_endpoint(company_id, discovered_api)
                     return pw_jobs
             else:
                 pw_jobs = _try_playwright_extract(
