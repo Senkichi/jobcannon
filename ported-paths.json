@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T00:38:19Z",
+  "generated_at": "2026-09-04T00:53:46Z",
   "roots": [
     "engine",
     "db",
@@ -48,20 +48,20 @@
           "text": "The malformed-name predicate is isalnum()-based like the private original"
         },
         {
-          "line": 16,
-          "text": "Two gaps specifically: (1) company_state_history — the private repo now"
+          "line": 24,
+          "text": "(2) merge-survivor resolution (#1913) — STILL OPEN. The private repo's"
         },
         {
-          "line": 19,
-          "text": "resolution (#1913) — the private repo's merged-loser handling picks a"
-        },
-        {
-          "line": 33,
+          "line": 45,
           "text": "Recorded divergence (Wave-1, name-collision scope ruling): the private"
         },
         {
-          "line": 34,
+          "line": 46,
           "text": "original's full name-normalization + denylist identity work is Phase-2"
+        },
+        {
+          "line": 137,
+          "text": "# L-0040) -- mirrors how private's job_finder/web/ats_company.py wraps"
         }
       ]
     },
@@ -84,6 +84,28 @@
         {
           "line": 72,
           "text": ")  # PORT-SEAM: json_utils.utc_now_iso/private _company_state imports dropped -- see below and module docstring"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/_company_state.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/db/_company_state.py"
+        },
+        {
+          "line": 5,
+          "text": "# job_finder.json_utils.utc_now_iso both dropped (see record_state_change's"
+        },
+        {
+          "line": 9,
+          "text": "# this repo's grouped test-class layout, not private's flat function."
+        },
+        {
+          "line": 20,
+          "text": "# layout (private guarded a flat function at the bare module path)."
         }
       ]
     },
@@ -478,6 +500,38 @@
         {
           "line": 4,
           "text": "re-adaptation) from private's job_finder/db/_postings.py::annotate_posting_apply_url"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/migrations/m0021_wi13_scan_lane_columns.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 7,
+          "text": "(m0003). Mirrors the split the private repo made in"
+        },
+        {
+          "line": 8,
+          "text": "``job_finder/web/migrations/m209604315_per_source_scan_enabled.py`` (WI-13,"
+        },
+        {
+          "line": 54,
+          "text": "instrumentation (job_finder/db/_company_state.py's own docstring: \"every"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/migrations/m0022_company_state_history.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/migrations/m209616158_company_state_history.py"
+        },
+        {
+          "line": 2,
+          "text": "@ f20c5b927308f288888fd068a1d3e7af64b644be (private job-cannon). Ledger L-0040."
         }
       ]
     },
