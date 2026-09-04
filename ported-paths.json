@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T00:35:38Z",
+  "generated_at": "2026-09-04T00:38:19Z",
   "roots": [
     "engine",
     "db",
@@ -320,6 +320,16 @@
       ]
     },
     {
+      "path": "jobcannon/db/_score_audits.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/db/_score_audits.py"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/db/_unresolved_reasons.py",
       "root": "db",
       "markers": [
@@ -452,7 +462,17 @@
       ]
     },
     {
-      "path": "jobcannon/db/migrations/m0020_postings_aggregator_apply_url_column.py",
+      "path": "jobcannon/db/migrations/m0018_score_audits.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/migrations/m206169048_add_score_audits_table.py"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/migrations/m0019_postings_aggregator_apply_url_column.py",
       "root": "db",
       "markers": [
         {

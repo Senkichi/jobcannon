@@ -595,7 +595,7 @@ def set_source_id_if_free(
 # current postings JSON inside it before merging, specifically so a
 # concurrent upsert_posting write to a DIFFERENT descriptor in the same
 # array would survive this write untouched. aggregator_apply_url is a
-# scalar column on this host (m0020) -- there is no sibling descriptor for
+# scalar column on this host (m0019) -- there is no sibling descriptor for
 # a concurrent writer to clobber, so a single UPDATE is already atomic and
 # the re-read-then-merge dance has no target to port.
 #
@@ -609,12 +609,12 @@ def annotate_posting_apply_url(
     # block comment above) -- dedup_key alone identifies the flat row.
     aggregator_apply_url: str,
 ) -> bool:
-    """Sanctioned single writer for ``postings.aggregator_apply_url`` (m0020).
+    """Sanctioned single writer for ``postings.aggregator_apply_url`` (m0019).
 
     Attaches an aggregator-sourced apply link to the posting row -- a
     distinct provenance from ``direct_url``/``direct_url_confidence``
     (m0017, ``_direct_link.py``'s no-downgrade company-site writer; not
-    overloaded here, see m0020's migration docstring).
+    overloaded here, see m0019's migration docstring).
 
     Returns True if a row was matched and written, False if *dedup_key* /
     *aggregator_apply_url* is falsy or no row matches.
