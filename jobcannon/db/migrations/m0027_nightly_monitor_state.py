@@ -3,7 +3,7 @@ state.json shape
 @ e1f47695b07f928e6c91cc64767c97a99645d68f (private job-cannon).
 Ledger L-0471.
 
-Migration 23 -- nightly monitor state.
+Migration 27 -- nightly monitor state.
 
 # PORT-SEAM: private's nightly monitor kept its whole state blob in a single
 # state.json file (Win32-locked, atomic os.replace on write). This table
@@ -30,7 +30,7 @@ from __future__ import annotations
 from jobcannon.db.migrations.types import Migration
 
 MIGRATION = Migration(
-    version=23,
+    version=27,
     description="nightly_monitor_state table (dark; sampler/checkpoint state, unwired until JC_NIGHTLY_MONITOR_ENABLED)",
     sql=[
         """

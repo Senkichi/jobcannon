@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T17:35:52Z",
+  "generated_at": "2026-09-04T17:36:03Z",
   "roots": [
     "engine",
     "db",
@@ -608,16 +608,6 @@
       ]
     },
     {
-      "path": "jobcannon/db/migrations/m0023_nightly_monitor_state.py",
-      "root": "db",
-      "markers": [
-        {
-          "line": 1,
-          "text": "\"\"\"PORTED (schema-only) from job_finder/web/nightly_monitor/_state.py's"
-        }
-      ]
-    },
-    {
       "path": "jobcannon/db/migrations/m0025_mailbox_credentials.py",
       "root": "db",
       "markers": [
@@ -650,6 +640,16 @@
         {
           "line": 46,
           "text": "Note (pre-existing, NOT fixed by this port): the private repo's"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/migrations/m0027_nightly_monitor_state.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED (schema-only) from job_finder/web/nightly_monitor/_state.py's"
         }
       ]
     },

@@ -4,7 +4,7 @@ single state.json file plus a Win32 file lock, not a shared table). Mirrors
 tests/host/test_score_audits_single_writer.py's shape exactly, retargeted at
 the nightly_monitor_state table and its sole sanctioned writer,
 jobcannon/host/nightly/state.py (ledger L-0471) -- both state.py's own
-module docstring and jobcannon/db/migrations/m0023_nightly_monitor_state.py's
+module docstring and jobcannon/db/migrations/m0027_nightly_monitor_state.py's
 docstring assert this guard exists; this file is that assertion made real.
 
 AST guard: jobcannon/host/nightly/state.py is the ONLY module allowed to
