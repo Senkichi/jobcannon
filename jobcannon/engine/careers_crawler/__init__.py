@@ -108,6 +108,75 @@ def __getattr__(name: str):
 
 
 # ---------------------------------------------------------------------------
+# Lane query builders
+# ---------------------------------------------------------------------------
+#
+# Extracted to module level (rather than inlined in crawl_careers_batch)
+# so tests/host/test_crawl_batch_pg_predicates.py can import and execute the
+# ACTUAL production SQL string instead of a hand-copied duplicate that could
+# silently drift from it (#380 review round 1, finding B1).
+#
+# PORT-SEAM: three shared re-shapes vs. the private SQLite queries, applied
+# identically in both lanes (#380). These notes are deliberately kept as
+# Python comments OUTSIDE the SQL string, never inside it: EngineCompatConnection
+# .execute() (db/pool.py) runs engine_sql_to_host() on the whole string with no
+# comment stripping, so a `?` quoted literally inside a `--` SQL comment gets
+# counted by qmark_to_format's placeholder rewrite (db/compat.py) same as a
+# real bind placeholder (#380 review round 1, finding B1: an earlier revision
+# of this fix put the datetime note below inside the SQL text and broke Lane 1
+# at execute time with "the query has 2 placeholders but 1 parameters").
+#   - `ats_probe_status IS NOT 'hit'` -> `IS DISTINCT FROM 'hit'`
+#     (Postgres-valid null-safe form; SQLite's IS NOT accepts any RHS,
+#     Postgres's IS [NOT] only accepts {TRUE,FALSE,UNKNOWN,NULL}).
+#   - `merged_into_id IS NULL` omitted (L-0461; same carve-out as
+#     L-0018/L-0019/L-0020 -- column absent from the public schema).
+#   - Lane 1's `datetime('now', ? || ' days')` (bound with a pre-negated
+#     string) is rewritten to `datetime('now', '-' || ? || ' days')` (bound
+#     with a plain positive int) -- the shape db/compat.py engine_sql_to_host()
+#     translates for Postgres via _DATETIME_REWRITES.
+
+
+def _lane1_query_sql(select_cols: str, bench_predicate_sql: str) -> str:
+    """Lane 1 (re-discovery): proven-relevant companies due for a re-crawl."""
+    return f"""SELECT {select_cols}
+               FROM companies c
+               WHERE c.careers_url IS NOT NULL
+                 AND c.careers_scan_enabled = TRUE
+                 AND c.ats_probe_status IS DISTINCT FROM 'hit'
+                 AND c.careers_crawl_flag_reason IS NULL
+                 AND (c.careers_crawl_last_at IS NULL
+                      OR c.careers_crawl_last_at < datetime('now', '-' || ? || ' days'))
+                 AND EXISTS (
+                     SELECT 1 FROM jobs j
+                     WHERE j.company_id = c.id
+                       AND j.classification IN ('apply', 'consider')
+                 )
+                 AND {bench_predicate_sql}
+               ORDER BY c.careers_crawl_last_at ASC NULLS FIRST"""
+
+
+def _lane2_query_sql(select_cols: str, bench_predicate_sql: str) -> str:
+    """Lane 2 (origination): never-crawled companies with a careers_url and
+    no apply/consider history. Capped by the caller; ordered by id for
+    determinism."""
+    return f"""SELECT {select_cols}
+               FROM companies c
+               WHERE c.careers_url IS NOT NULL
+                 AND c.careers_scan_enabled = TRUE
+                 AND c.ats_probe_status IS DISTINCT FROM 'hit'
+                 AND c.careers_crawl_flag_reason IS NULL
+                 AND c.careers_crawl_last_at IS NULL
+                 AND NOT EXISTS (
+                     SELECT 1 FROM jobs j
+                     WHERE j.company_id = c.id
+                       AND j.classification IN ('apply', 'consider')
+                 )
+                 AND {bench_predicate_sql}
+               ORDER BY c.id ASC
+               LIMIT ?"""
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -181,46 +250,22 @@ def crawl_careers_batch(config: dict) -> dict:
 
         # Lane 1: re-discovery — proven-relevant companies due for a re-crawl.
         rediscovery = conn.execute(
-            f"""SELECT c.id, c.name_raw, c.careers_url, c.careers_api_endpoint,
-                      c.careers_crawl_tier, c.careers_nav_recipe
-               FROM companies c
-               WHERE c.careers_url IS NOT NULL
-                 AND c.careers_scan_enabled = 1
-                 AND c.merged_into_id IS NULL
-                 AND c.ats_probe_status IS NOT 'hit'
-                 AND c.careers_crawl_flag_reason IS NULL
-                 AND (c.careers_crawl_last_at IS NULL
-                      OR c.careers_crawl_last_at < datetime('now', ? || ' days'))
-                 AND EXISTS (
-                     SELECT 1 FROM jobs j
-                     WHERE j.company_id = c.id
-                       AND j.classification IN ('apply', 'consider')
-                 )
-                 AND {bench_predicate_sql}
-               ORDER BY c.careers_crawl_last_at ASC NULLS FIRST""",
-            (f"-{freshness_days}",),
+            _lane1_query_sql(
+                "c.id, c.name_raw, c.careers_url, c.careers_api_endpoint, "
+                "c.careers_crawl_tier, c.careers_nav_recipe",
+                bench_predicate_sql,
+            ),
+            (freshness_days,),
         ).fetchall()
 
         # Lane 2: origination — never-crawled companies with a careers_url and
         # no apply/consider history. Capped and ordered by id for determinism.
         origination = conn.execute(
-            f"""SELECT c.id, c.name_raw, c.careers_url, c.careers_api_endpoint,
-                      c.careers_crawl_tier, c.careers_nav_recipe
-               FROM companies c
-               WHERE c.careers_url IS NOT NULL
-                 AND c.careers_scan_enabled = 1
-                 AND c.merged_into_id IS NULL
-                 AND c.ats_probe_status IS NOT 'hit'
-                 AND c.careers_crawl_flag_reason IS NULL
-                 AND c.careers_crawl_last_at IS NULL
-                 AND NOT EXISTS (
-                     SELECT 1 FROM jobs j
-                     WHERE j.company_id = c.id
-                       AND j.classification IN ('apply', 'consider')
-                 )
-                 AND {bench_predicate_sql}
-               ORDER BY c.id ASC
-               LIMIT ?""",
+            _lane2_query_sql(
+                "c.id, c.name_raw, c.careers_url, c.careers_api_endpoint, "
+                "c.careers_crawl_tier, c.careers_nav_recipe",
+                bench_predicate_sql,
+            ),
             (origination_limit,),
         ).fetchall()
 
