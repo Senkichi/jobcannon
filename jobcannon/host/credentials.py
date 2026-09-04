@@ -55,7 +55,9 @@ def _kek() -> bytes:
     except Exception as exc:
         raise KekNotConfiguredError(f"{_KEK_ENV_VAR} is not valid urlsafe-base64") from exc
     if len(key) != 32:
-        raise KekNotConfiguredError(f"{_KEK_ENV_VAR} must decode to 32 bytes (AES-256), got {len(key)}")
+        raise KekNotConfiguredError(
+            f"{_KEK_ENV_VAR} must decode to 32 bytes (AES-256), got {len(key)}"
+        )
     return key
 
 

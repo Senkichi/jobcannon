@@ -69,6 +69,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import replace
@@ -93,7 +94,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # PORT-SEAM: byte-identical to private's _VALID_WORKLOADS.
-_VALID_WORKLOADS = frozenset({"quick", "score", "triage", "craft"})
+_VALID_WORKLOADS: frozenset[str] = frozenset({"quick", "score", "triage", "craft"})
 
 # design §5: "Recommend {gemini, groq, cerebras} only -- all three are pure
 # REST, no CLI/local-binary dep." Order is the default preference when a
@@ -225,8 +226,6 @@ def _sanitized_result(result: ModelResult, schema: dict | None, provider_name: s
 def _is_malformed_output_error(exc: BaseException) -> bool:
     if isinstance(exc, ProviderTruncationExhaustedError):
         return False
-    import json
-
     return isinstance(exc, json.JSONDecodeError) or isinstance(exc.__cause__, json.JSONDecodeError)
 
 
@@ -523,9 +522,7 @@ def call_model(
     # populated when user_id is truthy -- so user_id is guaranteed truthy here.
     resolve_credential = _credentials.build_credential_resolver(conn, user_id)
 
-    chain: list[dict] = [
-        {"provider": provider_name, "model": model}
-    ] + list(fallback_chain)
+    chain: list[dict] = [{"provider": provider_name, "model": model}] + list(fallback_chain)
 
     logger.info(
         "call_model CASCADE: tier=%s chain=[%s] purpose=%s job_id=%s user_id=%s",
@@ -542,9 +539,6 @@ def call_model(
     for entry in chain:
         entry_provider = entry["provider"]
         entry_model = entry["model"]
-
-        if resolve_credential is None:
-            break  # no tenant identified -- nothing to try
 
         try:
             adapter = _make_adapter(entry_provider, config, resolve_credential)

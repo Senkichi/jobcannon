@@ -8,7 +8,7 @@ _direct_link.py, _profiles.py): one module owns every read and write against
 its table.
 
 ``byo_key_credentials`` is ``FORCE ROW LEVEL SECURITY`` with zero policies
-until ``jobcannon/db/migrations/m0018_byo_key_credentials_rls.py`` runs (see
+until ``jobcannon/db/migrations/m0020_byo_key_credentials_rls.py`` runs (see
 that migration's docstring) -- default-deny for every role, including the
 table owner, until then. That policy's predicate is
 ``user_id = current_setting('app.user_id', true)``; every function below
