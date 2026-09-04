@@ -272,3 +272,32 @@ services:
       # comment for the flip-to-"true" note.
       - key: IMAP_INGEST_ENABLED
         value: "false"
+      # Ledger L-0387: nightly-monitor morning review's issue-filing repo
+      # and GitHub token (jobcannon/host/nightly/config.py,
+      # require_issue_repo/require_issue_token). Deliberately UNSET here,
+      # sync: false, no committed value for either: JC_NIGHTLY_ISSUE_REPO
+      # is an owner-identity-shaped "owner/repo" slug, which must never be
+      # a literal in this public file (same reasoning as
+      # DEFAULT_NIGHTLY_REVIEW_REPO having no port target in config.py),
+      # and JC_NIGHTLY_GH_TOKEN is a fine-grained PAT (design note Q5:
+      # issues:write scope only). Left unset, morning_driver.py's review
+      # stage still runs and reports findings in report_md -- it just
+      # skips filing (see morning_driver.py's "issue(s) proposed but not
+      # filed" log line) until the owner sets both here.
+      #
+      # Also deliberately NOT declared: JC_NIGHTLY_MONITOR_ENABLED (the
+      # master kill switch for nightly_sampler/nightly_review/
+      # nightly_deadman, jobcannon/host/tasks.py) -- design note Q1: this
+      # unit lands dark by default, same as #355's sampler/checkpoint
+      # rollout; flipping it on is a follow-up owner action once the
+      # audit/review/deadman path has been observed for a few runs, not
+      # part of landing the port. Cron overrides
+      # (JC_NIGHTLY_SAMPLER_CRON/JC_NIGHTLY_REVIEW_CRON/
+      # JC_NIGHTLY_DEADMAN_CRON) and every other JC_NIGHTLY_* tunable stay
+      # undeclared too, matching #355's own precedent of relying on code
+      # defaults (jobcannon/host/nightly/config.py's DEFAULT_NIGHTLY_*
+      # constants) rather than duplicating every knob into this file.
+      - key: JC_NIGHTLY_ISSUE_REPO
+        sync: false
+      - key: JC_NIGHTLY_GH_TOKEN
+        sync: false
