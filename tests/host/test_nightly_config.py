@@ -81,6 +81,29 @@ def test_nightly_monitor_config_defaults(monkeypatch):
         "JC_NIGHTLY_SUCCESS_COUNT_KEYS",
         "JC_NIGHTLY_MAX_EVENTS_PER_TICK",
         "JC_NIGHTLY_TICK_BUDGET_SECONDS",
+        "JC_NIGHTLY_MORNING_HOUR",
+        "JC_NIGHTLY_MORNING_MINUTE",
+        "JC_NIGHTLY_COVERAGE_GAP_THRESHOLD_S",
+        "JC_NIGHTLY_AUDIT_SCORE_THRESHOLD",
+        "JC_NIGHTLY_AUDIT_LOOKBACK_DAYS",
+        "JC_NIGHTLY_AUDIT_MAX_JOBS",
+        "JC_NIGHTLY_AUDIT_BATCH_SIZE",
+        "JC_NIGHTLY_AUDIT_MAX_BATCH_INPUT_CHARS",
+        "JC_NIGHTLY_AUDIT_MAX_SKIP_ATTEMPTS",
+        "JC_NIGHTLY_AUDIT_MAX_BATCH_RETRIES",
+        "JC_NIGHTLY_AUDIT_PARALLEL",
+        "JC_NIGHTLY_AUDIT_COVERAGE_ALARM_THRESHOLD",
+        "JC_NIGHTLY_AUDIT_FAILED_BATCH_FRACTION_ALARM_THRESHOLD",
+        "JC_NIGHTLY_MIN_SAMPLE_SIZE_FOR_RATE",
+        "JC_NIGHTLY_DISAGREEMENT_ALARM_RATE",
+        "JC_NIGHTLY_DISAGREEMENT_ALARM_MIN_SAMPLE",
+        "JC_NIGHTLY_DISAGREEMENT_ALARM_ABSOLUTE_CEILING",
+        "JC_NIGHTLY_DISAGREEMENT_BASELINE_WINDOW_NIGHTS",
+        "JC_NIGHTLY_DISAGREEMENT_BASELINE_MIN_NIGHTS",
+        "JC_NIGHTLY_DISAGREEMENT_BASELINE_TOLERANCE",
+        "JC_NIGHTLY_DISAGREEMENT_BASELINE_ABSOLUTE_FLOOR",
+        "JC_NIGHTLY_ISSUE_REPO",
+        "JC_NIGHTLY_GH_TOKEN",
     ):
         monkeypatch.delenv(name, raising=False)
     cfg = nightly_config.nightly_monitor_config()
@@ -92,6 +115,44 @@ def test_nightly_monitor_config_defaults(monkeypatch):
         "success_count_keys": nightly_config.DEFAULT_NIGHTLY_SUCCESS_COUNT_KEYS,
         "max_events_per_tick": nightly_config.DEFAULT_NIGHTLY_MAX_EVENTS_PER_TICK,
         "tick_budget_seconds": nightly_config.DEFAULT_NIGHTLY_TICK_BUDGET_SECONDS,
+        "morning_hour": nightly_config.DEFAULT_NIGHTLY_MORNING_HOUR,
+        "morning_minute": nightly_config.DEFAULT_NIGHTLY_MORNING_MINUTE,
+        "coverage_gap_threshold_s": nightly_config.DEFAULT_NIGHTLY_COVERAGE_GAP_THRESHOLD_S,
+        "audit": {
+            "score_threshold": nightly_config.DEFAULT_NIGHTLY_AUDIT_SCORE_THRESHOLD,
+            "lookback_days": nightly_config.DEFAULT_NIGHTLY_AUDIT_LOOKBACK_DAYS,
+            "max_jobs": nightly_config.DEFAULT_NIGHTLY_AUDIT_MAX_JOBS,
+            "batch_size": nightly_config.DEFAULT_NIGHTLY_AUDIT_BATCH_SIZE,
+            "max_batch_input_chars": nightly_config.DEFAULT_NIGHTLY_AUDIT_MAX_BATCH_INPUT_CHARS,
+            "max_skip_attempts": nightly_config.DEFAULT_NIGHTLY_AUDIT_MAX_SKIP_ATTEMPTS,
+            "max_batch_retries": nightly_config.DEFAULT_NIGHTLY_AUDIT_MAX_BATCH_RETRIES,
+            "parallel": nightly_config.DEFAULT_NIGHTLY_AUDIT_PARALLEL,
+            "coverage_alarm_threshold": nightly_config.DEFAULT_NIGHTLY_AUDIT_COVERAGE_ALARM_THRESHOLD,
+            "failed_batch_fraction_alarm_threshold": (
+                nightly_config.DEFAULT_NIGHTLY_AUDIT_FAILED_BATCH_FRACTION_ALARM_THRESHOLD
+            ),
+            "min_sample_size_for_rate": nightly_config.DEFAULT_NIGHTLY_MIN_SAMPLE_SIZE_FOR_RATE,
+            "disagreement_alarm_rate": nightly_config.DEFAULT_NIGHTLY_DISAGREEMENT_ALARM_RATE,
+            "disagreement_alarm_min_sample": (
+                nightly_config.DEFAULT_NIGHTLY_DISAGREEMENT_ALARM_MIN_SAMPLE
+            ),
+            "disagreement_alarm_absolute_ceiling": (
+                nightly_config.DEFAULT_NIGHTLY_DISAGREEMENT_ALARM_ABSOLUTE_CEILING
+            ),
+            "disagreement_baseline_window_nights": (
+                nightly_config.DEFAULT_NIGHTLY_DISAGREEMENT_BASELINE_WINDOW_NIGHTS
+            ),
+            "disagreement_baseline_min_nights": (
+                nightly_config.DEFAULT_NIGHTLY_DISAGREEMENT_BASELINE_MIN_NIGHTS
+            ),
+            "disagreement_baseline_tolerance": (
+                nightly_config.DEFAULT_NIGHTLY_DISAGREEMENT_BASELINE_TOLERANCE
+            ),
+            "disagreement_baseline_absolute_floor": (
+                nightly_config.DEFAULT_NIGHTLY_DISAGREEMENT_BASELINE_ABSOLUTE_FLOOR
+            ),
+        },
+        "review": {"repo": None, "token": None},
     }
 
 

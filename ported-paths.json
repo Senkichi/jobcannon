@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T21:21:45Z",
+  "generated_at": "2026-09-04T21:30:33Z",
   "roots": [
     "engine",
     "db",
@@ -2676,6 +2676,16 @@
       ]
     },
     {
+      "path": "jobcannon/host/nightly/audit_stage.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_morning.py (run_audit_stage"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/host/nightly/baselines.py",
       "root": "host",
       "markers": [
@@ -2766,12 +2776,124 @@
           "text": "# from job_finder/config.py's DEFAULT_NIGHTLY_* constants so a hosted"
         },
         {
-          "line": 28,
+          "line": 34,
           "text": "# Byte-identical to job_finder/config.py's DEFAULT_NIGHTLY_BASELINE_MIN_HISTORY /"
         },
         {
-          "line": 39,
+          "line": 45,
+          "text": "# L-0387 additions. Byte-identical numeric defaults to job_finder/config.py's"
+        },
+        {
+          "line": 76,
           "text": "# Byte-identical to job_finder/config.py's DEFAULT_NIGHTLY_SUCCESS_COUNT_KEYS."
+        },
+        {
+          "line": 292,
+          "text": "# hardcoded literal in a public repo (private's"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/deadman.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/nightly_monitor/_deadman.py"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/disagreement_baseline.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/nightly_monitor/_disagreement_baseline.py"
+        },
+        {
+          "line": 30,
+          "text": "rate math must diff clean against the private original. Pure functions, no"
+        },
+        {
+          "line": 31,
+          "text": "I/O -- the only change from the private original is this header; the caller"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/error_budget.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_error_budget.py"
+        },
+        {
+          "line": 15,
+          "text": "# a much smaller rewrite than its 866-line private original: it queries"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/issue_filer.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_morning.py (_gh,"
+        },
+        {
+          "line": 24,
+          "text": "# \"prior night\" source changes: private read `filed_issues.json` from the"
+        },
+        {
+          "line": 30,
+          "text": "# list it is given, same signature shape as the pure half of the private"
+        },
+        {
+          "line": 31,
+          "text": "# function."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/model_session.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_sessions.py"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/morning_driver.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_morning.py"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/report.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_morning.py (the report-"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/nightly/review_stage.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_morning.py (the review"
         }
       ]
     },
@@ -2808,7 +2930,7 @@
           "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_state.py"
         },
         {
-          "line": 92,
+          "line": 149,
           "text": "# PORT-SEAM: temp-file + os.replace (private) -> INSERT ... ON CONFLICT"
         }
       ]
