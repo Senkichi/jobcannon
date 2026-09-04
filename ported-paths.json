@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T21:00:44Z",
+  "generated_at": "2026-09-04T21:21:45Z",
   "roots": [
     "engine",
     "db",
@@ -864,6 +864,32 @@
       ]
     },
     {
+      "path": "jobcannon/engine/agentic_enricher.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/agentic_enricher.py @ 307c369c0688763a18c6989adb81b229928e20d0 (private job-cannon). Ledger L-0132."
+        },
+        {
+          "line": 40,
+          "text": "# company_tokens) live in job_finder/web/enrichment_tiers.py privately, which"
+        },
+        {
+          "line": 93,
+          "text": "# PORT-SEAM: Config inlined from job_finder/config.py -- pure config-parsing"
+        },
+        {
+          "line": 286,
+          "text": "# copied verbatim from job_finder/web/enrichment_tiers.py @ 307c369c (ledger"
+        },
+        {
+          "line": 982,
+          "text": "# PORT-SEAM: inlined from job_finder/db/_queries.py -- _SUB_SCORE_SUM_SQL and"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/ats_detection.py",
       "root": "engine",
       "markers": [
@@ -1680,16 +1706,12 @@
           "text": "# PORTED from job_finder/enrichment_states.py @ 307c369c0688763a18c6989adb81b229928e20d0 (private job-cannon). Ledger L-0446."
         },
         {
-          "line": 29,
+          "line": 31,
           "text": "kept separate. ``expired`` belongs in this set deliberately: in the private"
         },
         {
-          "line": 30,
+          "line": 32,
           "text": "original it is reached only after a bounded agentic-exhausted retry budget is"
-        },
-        {
-          "line": 60,
-          "text": "private original: an AGENTIC_EXHAUSTED row that spent its bounded retry budget"
         }
       ]
     },

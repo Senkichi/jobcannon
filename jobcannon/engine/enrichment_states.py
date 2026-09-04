@@ -11,7 +11,9 @@ backfill skip-set). This module owns the vocabulary; every caller imports from h
 
 Two distinct predicates over tiers — they MUST stay distinct:
 (# PORT-SEAM: EXPIRED's writer, the retry/requeue sweep against a hosted LLM
-enricher, is not carried into this port — see the EXPIRED notes below.)
+enricher, lands under L-0132 in agentic_enricher.py's
+``requeue_or_expire_agentic_exhausted`` — see the EXPIRED notes below. It has
+no caller in this engine yet.)
 
   ``TERMINAL`` — "stop re-enriching." A row at one of these tiers is fully drained
       of the enrichment pipeline and is excluded from backfill selection. Includes
@@ -31,10 +33,11 @@ enricher, is not carried into this port — see the EXPIRED notes below.)
       spent with no jd_full ever landing — the cascade gave up exactly like
       ``agentic_exhausted`` does, just after more attempts, so the same low_signal
       rule applies. The retry/expiry state machine that *writes* ``expired`` (a
-      cooldown-gated requeue against a hosted LLM enricher) has no public
-      counterpart yet — see the module docstring note below — so this port carries
-      only the vocabulary member and its membership in both predicate sets.
-      (# PORT-SEAM: writer unported, vocabulary-only carry.)
+      cooldown-gated requeue against a hosted LLM enricher) lands under L-0132 in
+      ``agentic_enricher.py`` — see the module docstring note above — with no
+      caller in this engine yet, so this port's runtime behavior is unchanged
+      even though the writer now exists.
+      (# PORT-SEAM: writer landed under L-0132, gated OFF — no caller yet.)
 
 Legacy tiers (``low`` / ``mid`` / ``high``) are enumerated as terminal members.
 They were written by the deleted haiku/sonnet synthesis tiers and renamed by m050;
@@ -56,10 +59,11 @@ class EnrichmentTier(StrEnum):
 
     Active pipeline tiers (cost-ordered): FREE -> DDG -> SERPAPI -> AGENTIC.
     End-states: EXHAUSTED (all pipeline tiers tried), AGENTIC_EXHAUSTED (written by
-    agentic_enricher after the agentic tier fails to fetch a JD), EXPIRED (in the
-    private original: an AGENTIC_EXHAUSTED row that spent its bounded retry budget
-    with no jd_full ever recovered — the writer for this transition is unported,
-    see the module docstring). (# PORT-SEAM: vocabulary-only carry.)
+    agentic_enricher after the agentic tier fails to fetch a JD), EXPIRED (an
+    AGENTIC_EXHAUSTED row that spent its bounded retry budget with no jd_full
+    ever recovered — the writer for this transition is agentic_enricher.py's
+    ``requeue_or_expire_agentic_exhausted`` (L-0132), see the module docstring).
+    (# PORT-SEAM: writer landed under L-0132, gated OFF — no caller yet.)
     Legacy (m050, terminal): LOW / MID / HIGH — left by the deleted synthesis tiers.
     """
 
