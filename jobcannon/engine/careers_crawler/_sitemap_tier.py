@@ -1,4 +1,4 @@
-# PORTED from job_finder/web/careers_crawler/_sitemap_tier.py @ 6a2af961fbffb78564ce8783277d916d60ad0906 (private job-cannon). Ledger L-0466 (own row, but not in this unit's assigned list; pulled forward from design note PR-5 -- __init__.py imports this module at module scope, so the boundary guard forces it into this unit; see PR body 'L-0466 absorbed'). No DB access in this module -- no connection_factory seam needed.
+# PORTED from job_finder/web/careers_crawler/_sitemap_tier.py @ 0f6b7fc0aa696af95d5bbeb7225cf46f203b67da (private job-cannon). Ledger L-0466 (own row, but not in this unit's assigned list; pulled forward from design note PR-5 -- __init__.py imports this module at module scope, so the boundary guard forces it into this unit; see PR body 'L-0466 absorbed'). No DB access in this module -- no connection_factory seam needed.
 """Sitemap / RSS tier for the careers crawler.
 
 NO-KEY-COMPENSATION Stage 5 lever. Cheap pre-static probe that extracts
