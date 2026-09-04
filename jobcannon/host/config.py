@@ -152,6 +152,18 @@ class HostConfig:
     render_git_commit: str = field(
         default="", metadata={"env": "RENDER_GIT_COMMIT", "declare_on": ()}
     )
+    # BYO-key encryption-at-rest KEK (L-0036, design-providers-byokey.md §3).
+    # jobcannon.host.credentials reads this env var directly (not via this
+    # field) -- declared here purely so test_render_config.py's declare_on
+    # derivation covers it in render.yaml on both services (web AND worker
+    # each build a call_model). Fail-closed, not fail-fast: unset makes
+    # every resolve_credential(...) call return None (provider treated as
+    # unavailable) rather than crashing HostConfig construction -- nothing
+    # invokes hosted scoring yet, so a hard requirement here would break
+    # every existing test/dev run that doesn't set it.
+    byo_key_kek: str | None = field(
+        default=None, metadata={"env": "JC_BYO_KEY_KEK", "declare_on": ("web", "worker")}
+    )
 
 
 def _put_int(mapping: dict, section: str, key: str, env_var: str) -> None:
@@ -214,4 +226,5 @@ def load_host_config() -> HostConfig:
         clerk_authorized_parties=os.environ.get("CLERK_AUTHORIZED_PARTIES", ""),
         clerk_webhook_signing_secret=os.environ.get("CLERK_WEBHOOK_SIGNING_SECRET", ""),
         render_git_commit=os.environ.get("RENDER_GIT_COMMIT", ""),
+        byo_key_kek=(os.environ.get("JC_BYO_KEY_KEK") or "").strip() or None,
     )
