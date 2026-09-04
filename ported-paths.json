@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T18:10:27Z",
+  "generated_at": "2026-09-04T19:07:07Z",
   "roots": [
     "engine",
     "db",
@@ -746,6 +746,28 @@
       ]
     },
     {
+      "path": "jobcannon/engine/_scraper_extract.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_scraper.py @ c2793bb9d3d6e10b9e99958d9a0a05a33e66f2c1 (private job-cannon). Ledger L-0167."
+        },
+        {
+          "line": 22,
+          "text": "# None / []). This also drops the legacy ``from job_finder.web.claude_client"
+        },
+        {
+          "line": 107,
+          "text": "call_model: Injected model-dispatch callable, matching the private"
+        },
+        {
+          "line": 108,
+          "text": "repo's ``model_provider.call_model`` signature (tier, system,"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/ats_detection.py",
       "root": "engine",
       "markers": [
@@ -1022,6 +1044,34 @@
       ]
     },
     {
+      "path": "jobcannon/engine/careers_crawler/__init__.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/__init__.py @ 46d5a2a1f27179d075efc5572efeded3ba2a0266 (private job-cannon). Ledger L-0461."
+        },
+        {
+          "line": 29,
+          "text": "# re-imported here purely so ``job_finder.web.careers_crawler.X`` and test"
+        },
+        {
+          "line": 61,
+          "text": "# empty\" convention and the private source's own established pattern of"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/careers_crawler/_api_cache.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/_api_cache.py @ 6a2af961fbffb78564ce8783277d916d60ad0906 (private job-cannon). Ledger L-0443 (umbrella -- no ledger row of its own; imported at module scope by careers_crawler/__init__.py, so the package is unlandable without it -- see PR body)."
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/careers_crawler/_ats_link_discovery.py",
       "root": "engine",
       "markers": [
@@ -1070,12 +1120,70 @@
       ]
     },
     {
+      "path": "jobcannon/engine/careers_crawler/_embedded_json_tier.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/_embedded_json_tier.py @ 6a2af961fbffb78564ce8783277d916d60ad0906 (private job-cannon). Ledger L-0443 (umbrella -- no ledger row of its own; imported at module scope by careers_crawler/__init__.py, so the package is unlandable without it -- see PR body). No DB access in this module -- no connection_factory seam needed."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/careers_crawler/_escalation.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/__init__.py @ 46d5a2a1f27179d075efc5572efeded3ba2a0266 (private job-cannon). Ledger L-0461."
+        },
+        {
+          "line": 11,
+          "text": "# PORT-SEAM: every ``db_path: str`` parameter this module's private source"
+        },
+        {
+          "line": 41,
+          "text": "# that kwarg has no analog in the private ``careers_crawler`` source this"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/careers_crawler/_persistence.py",
       "root": "engine",
       "markers": [
         {
           "line": 1,
           "text": "# PORTED from job_finder/web/careers_crawler/_persistence.py @ 23644885615a78d509d73c8b1c640b7d49b4a089 (private job-cannon). Ledger L-0465."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/careers_crawler/_playwright_tier.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/_playwright_tier.py @ 6a2af961fbffb78564ce8783277d916d60ad0906 (private job-cannon). Ledger L-0443 (umbrella -- no ledger row of its own; imported at module scope by careers_crawler/__init__.py, so the package is unlandable without it -- see PR body)."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/careers_crawler/_scoring.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/_scoring.py @ 6a2af961fbffb78564ce8783277d916d60ad0906 (private job-cannon). Ledger L-0443 (umbrella -- no ledger row of its own; imported at module scope by careers_crawler/__init__.py, so the package is unlandable without it -- see PR body)."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/careers_crawler/_sitemap_tier.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/_sitemap_tier.py @ 0f6b7fc0aa696af95d5bbeb7225cf46f203b67da (private job-cannon). Ledger L-0466 (own row, but not in this unit's assigned list; pulled forward from design note PR-5 -- __init__.py imports this module at module scope, so the boundary guard forces it into this unit; see PR body 'L-0466 absorbed'). No DB access in this module -- no connection_factory seam needed."
         }
       ]
     },
@@ -1090,12 +1198,56 @@
       ]
     },
     {
+      "path": "jobcannon/engine/careers_crawler/_summary.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/__init__.py @ 46d5a2a1f27179d075efc5572efeded3ba2a0266 (private job-cannon). Ledger L-0461."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/careers_crawler/_tier_cache.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_crawler/_tier_cache.py @ 6a2af961fbffb78564ce8783277d916d60ad0906 (private job-cannon). Ledger L-0443 (umbrella -- no ledger row of its own; imported at module scope by careers_crawler/__init__.py, so the package is unlandable without it -- see PR body)."
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/careers_crawler/_title_contract.py",
       "root": "engine",
       "markers": [
         {
           "line": 14,
           "text": "ingestion chokepoint (``ParsedJob.from_job``). In the private source, a standing"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/careers_page_interactions.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_page_interactions.py @ e218953fefd532d071482e3ff859610a46dd179d (private job-cannon). Ledger L-0166. Clean PORT, engine-local, no ScanServices seam."
+        },
+        {
+          "line": 47,
+          "text": "# block, per private source layout) to the top-of-file import group here."
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/engine/careers_scraper.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "# PORTED from job_finder/web/careers_scraper.py @ c2793bb9d3d6e10b9e99958d9a0a05a33e66f2c1 (private job-cannon). Ledger L-0167."
         }
       ]
     },
@@ -2106,39 +2258,39 @@
           "text": "#   replaces job_finder.config.JD_STORAGE_MAX_CHARS"
         },
         {
-          "line": 86,
+          "line": 94,
           "text": "#   matches job_finder.db._jobs.set_source_id_if_free(conn, dedup_key,"
         },
         {
-          "line": 104,
+          "line": 112,
           "text": "#   Whole-scan runtime budget in seconds. Replaces the private repo's"
         },
         {
-          "line": 112,
+          "line": 120,
           "text": "# -- Wave 2 job_finder/web follow-up (L-0174/L-0182/L-0229) --"
         },
         {
-          "line": 134,
+          "line": 142,
           "text": "# `run_detection` field above, which already covers a third function from"
         },
         {
-          "line": 135,
+          "line": 143,
           "text": "# this same private module."
         },
         {
-          "line": 235,
+          "line": 243,
           "text": "#   matches job_finder.web.autoheal.override_loader.careers_recipe(source)"
         },
         {
-          "line": 237,
+          "line": 245,
           "text": "#   (ported inline as a private function in _autoheal_seam.py -- see"
         },
         {
-          "line": 240,
+          "line": 248,
           "text": "#   matches job_finder.web.autoheal.recipe_extractor.careers_recipe_extract("
         },
         {
-          "line": 243,
+          "line": 251,
           "text": "#   matches job_finder.web.autoheal.health_monitor.record_extraction(conn,"
         }
       ]

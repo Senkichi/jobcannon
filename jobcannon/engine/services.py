@@ -71,7 +71,15 @@ class ScanServices:
     run_heal_pass: Callable[[str, dict, list], None] | None = None
     #   matches pipeline_runner._run_heal_pass(db_path, config, degraded_sources)
     find_careers_url: Callable[..., Any] | None = None
+    #   matches jobcannon.engine.careers_scraper.find_careers_url(homepage_url,
+    #   conn=None, config=None, *, call_model=None) -> str | None. `call_model`
+    #   is OPTIONAL here (unlike job_scorer.score_job's required form) --
+    #   the quick-tier fallback only fires when conn, config, AND call_model
+    #   are all supplied by the host.
     scrape_careers_page: Callable[..., Any] | None = None
+    #   matches jobcannon.engine.careers_scraper.scrape_careers_page(careers_url,
+    #   target_titles, exclusions, conn=None, config=None, *, call_model=None)
+    #   -> tuple[list[dict], int]. Same call_model optionality as above.
     run_homepage_discovery: Callable[..., Any] | None = None
     run_detection: Callable[..., list] | None = None
     #   matches autoheal.health_monitor.run_detection(db_path, config=None)
