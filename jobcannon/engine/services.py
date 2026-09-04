@@ -145,11 +145,15 @@ class ScanServices:
     record_source_error: Callable[..., None] | None = None
     #   matches autoheal.health_monitor.record_source_error(conn, source,
     #   message) -> None
-    # primary_source_tiebreak.tiebreak_primary_posting (L-0230, HOLD). The
-    # module's other public symbol, DEFAULT_MAX_BOARD (=40), is a plain int
-    # constant, not a callable, and is copied verbatim into each ported
-    # caller instead (same treatment as ats_slug_challenge's
-    # TRIGGER_PREFIX_CAREERS_URL, documented above).
+    # primary_source_tiebreak.tiebreak_primary_posting (L-0230, landed). Host
+    # binds this to a partial closing over call_model
+    # (jobcannon/host/wiring.py:build_scan_services) since the callable
+    # itself takes call_model as an injected keyword-only param, not a
+    # ScanServices field of its own -- see primary_source_tiebreak.py's
+    # module docstring. The module's other public symbol,
+    # DEFAULT_MAX_BOARD (=40), is a plain int constant, not a callable, and
+    # is copied verbatim into each ported caller instead (same treatment as
+    # ats_slug_challenge's TRIGGER_PREFIX_CAREERS_URL, documented above).
     tiebreak_primary_posting: Callable[..., Any] | None = None
     # db._jobs.annotate_posting_apply_url (L-0075, landed -- flat
     # re-adaptation, signature (conn, dedup_key, aggregator_apply_url); the

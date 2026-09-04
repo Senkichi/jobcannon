@@ -97,11 +97,15 @@ from jobcannon.engine.services import get_services
 
 # PORT-SEAM: job_finder.web.db_helpers.standalone_connection is DIES ->
 # svc.connection_factory(). job_finder.web.primary_source_tiebreak.
-# tiebreak_primary_posting is L-0230 (HOLD) -> svc.tiebreak_primary_posting(...);
-# its sibling DEFAULT_MAX_BOARD is a plain int constant, not a callable, and
-# is copied verbatim below instead (ats_slug_challenge.TRIGGER_PREFIX_CAREERS_URL
-# precedent). job_finder.db._postings.annotate_posting_apply_url is L-0075
-# (escalated/unlanded) -> svc.annotate_posting_apply_url(...).
+# tiebreak_primary_posting is L-0230 (landed, jobcannon/engine/primary_source_tiebreak.py)
+# -> svc.tiebreak_primary_posting(...); host binds this field to a partial
+# closing over call_model (wiring.py:build_scan_services), since the ported
+# function takes call_model as its own injected keyword-only param rather
+# than this caller threading one through. Its sibling DEFAULT_MAX_BOARD is a
+# plain int constant, not a callable, and is copied verbatim below instead
+# (ats_slug_challenge.TRIGGER_PREFIX_CAREERS_URL precedent). job_finder.db.
+# _postings.annotate_posting_apply_url is L-0075 (escalated/unlanded) ->
+# svc.annotate_posting_apply_url(...).
 DEFAULT_MAX_BOARD = 40
 
 logger = logging.getLogger(__name__)
@@ -428,11 +432,11 @@ def resolve_primary_sources(
                     if (
                         posting is None
                         and tiebreak_enabled
-                        and svc.tiebreak_primary_posting is not None  # PORT-SEAM: L-0230 HOLD
+                        and svc.tiebreak_primary_posting is not None  # PORT-SEAM: L-0230, landed
                     ):
                         stats["llm_checked"] += 1
                         try:
-                            upgraded = svc.tiebreak_primary_posting(  # PORT-SEAM: L-0230 HOLD
+                            upgraded = svc.tiebreak_primary_posting(  # PORT-SEAM: L-0230, landed
                                 result["postings"],
                                 match["title"] or "",
                                 match["location"] or "",

@@ -106,12 +106,14 @@ connection but never answers.
 from __future__ import annotations
 
 import atexit
+import functools
 import logging
 import os
 
 from jobcannon.db import _companies, _direct_link, _jd_full, _jobs
 from jobcannon.db import pool as pool_mod
 from jobcannon.engine import extraction_health, runtime_config, services
+from jobcannon.engine import primary_source_tiebreak as _primary_source_tiebreak
 from jobcannon.engine.ats_scanner import _scan_log
 from jobcannon.host import model_provider as _model_provider
 from jobcannon.host import posthog_admin, posthog_client, task_app
@@ -185,6 +187,17 @@ def build_scan_services(host_config: HostConfig) -> services.ScanServices:
         # jobcannon.host.model_provider.call_model's docstring).
         call_model=_model_provider.call_model,
         record_cost=_model_provider.record_cost,
+        # L-0230: the ported tiebreak_primary_posting takes call_model as its
+        # own injected keyword-only param (not a ScanServices field of its
+        # own -- see primary_source_tiebreak.py's module docstring), so the
+        # host binds a partial that pre-applies the same call_model this
+        # ScanServices instance already carries above. The caller
+        # (primary_source_resolver.py, L-0229) invokes this field with no
+        # call_model of its own -- the host owns the callable's construction.
+        tiebreak_primary_posting=functools.partial(
+            _primary_source_tiebreak.tiebreak_primary_posting,
+            call_model=_model_provider.call_model,
+        ),
         # L-0465: bind the already-landed engine-side single writer for
         # company_scan_log (jobcannon.engine.ats_scanner._scan_log, ledger
         # L-0077) rather than re-porting it under careers_crawler — its own
