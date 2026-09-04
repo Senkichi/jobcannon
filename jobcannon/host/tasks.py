@@ -2,12 +2,13 @@
 periodic enqueue tick, storage-check tick, orphaned-job reclaim tick,
 anon-user reap tick, events-retention reap tick, deletion-reconciliation
 sweep tick, revoked-subjects reap tick, jd-adjudication tick, and
-nightly-monitor sampler tick that fire on a schedule.
+nightly-monitor sampler/review/deadman ticks that fire on a schedule.
 
-Task shapes (`scan`, `expiry_check`, `stale_detect`) and the nine periodics
+Task shapes (`scan`, `expiry_check`, `stale_detect`) and the eleven periodics
 (`enqueue_due_scans`, `db_storage_check`, `reclaim_orphaned_jobs`,
 `reap_anon_users`, `reap_old_events`, `reconcile_deleted_users`,
-`reap_revoked_subjects`, `jd_adjudication`, `nightly_sampler`, each declared with
+`reap_revoked_subjects`, `jd_adjudication`, `nightly_sampler`,
+`nightly_review`, `nightly_deadman`, each declared with
 `@app.periodic` + `@app.task` below) all live here — this ONE
 `procrastinate.App` instance (constructed below) is the sole periodic-task
 scheduling mechanism in this codebase; a new periodic task is another peer
@@ -479,3 +480,52 @@ def nightly_sampler(timestamp: int) -> dict:
     from jobcannon.host.nightly.sampler import run_sampler_tick
 
     return run_sampler_tick() or {"skipped": "tick_failed"}
+
+
+@app.periodic(
+    cron=os.environ.get("JC_NIGHTLY_REVIEW_CRON", "30 5 * * *"),
+    periodic_id="nightly_review",
+)
+@app.task(queue="maintenance", queueing_lock="nightly_review")
+def nightly_review(timestamp: int) -> dict:
+    """Periodic (Ledger L-0387): once-daily morning audit + adversarial
+    review + issue filing, gated OFF by default behind
+    JC_NIGHTLY_MONITOR_ENABLED -- same always-registered/gated-at-call-time
+    shape as nightly_sampler above. Default cron is 05:30 UTC (design note
+    Q2: Render runs UTC, so this fires at a fixed UTC wall-clock time, not
+    a local morning slot -- operators keep JC_NIGHTLY_REVIEW_CRON and
+    JC_NIGHTLY_MORNING_HOUR/JC_NIGHTLY_MORNING_MINUTE
+    (jobcannon/host/nightly/config.py) in sync; see the nightly flag docs).
+    See jobcannon/host/nightly/morning_driver.py's module docstring for
+    what one run does: sample-audit a bounded cohort, build an error-budget
+    digest, run one adversarial review session, file any resulting
+    GitHub issues (JC_NIGHTLY_ISSUE_REPO/JC_NIGHTLY_GH_TOKEN), and persist
+    the report via nightly_monitor_state."""
+    if not nightly_monitor_enabled():
+        return {"skipped": "disabled"}
+    from jobcannon.host.nightly.morning_driver import run_morning_review
+
+    return run_morning_review()
+
+
+@app.periodic(
+    cron=os.environ.get("JC_NIGHTLY_DEADMAN_CRON", "*/15 * * * *"),
+    periodic_id="nightly_deadman",
+)
+@app.task(queue="maintenance", queueing_lock="nightly_deadman")
+def nightly_deadman(timestamp: int) -> dict:
+    """Periodic (Ledger L-0387): out-of-process deadman for the morning
+    report (issue #1267 port) -- registered as its OWN periodic, separate
+    from nightly_review above, so a stuck or crashed review periodic
+    cannot also silence the alarm that is supposed to report it missing
+    (see jobcannon/host/nightly/deadman.py's module docstring). Gated OFF
+    by default behind JC_NIGHTLY_MONITOR_ENABLED, same shape as every other
+    nightly-monitor periodic in this module. Fires every 15 minutes and is
+    a no-op past the fixed per-day fire-once dedup
+    (jobcannon.host.nightly.state's notified list) until the configured
+    morning slot's grace window has actually elapsed."""
+    if not nightly_monitor_enabled():
+        return {"skipped": "disabled"}
+    from jobcannon.host.nightly.deadman import run_deadman_check
+
+    return run_deadman_check()
