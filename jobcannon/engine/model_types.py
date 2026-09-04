@@ -29,7 +29,7 @@ from typing import Protocol
 class CredentialResolver(Protocol):
     """Bound-per-tenant API-key lookup, replacing private's
     ``get_secret("providers.api_keys.<name>", config=config)`` call in each
-    adapter constructor (design §1b).
+    adapter constructor.
 
     Arity is ``(provider) -> str | None`` -- bound to ONE user by closure,
     not ``(user_id, provider) -> str | None``. This makes cross-tenant key

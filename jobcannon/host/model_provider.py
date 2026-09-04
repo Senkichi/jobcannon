@@ -449,10 +449,10 @@ def call_model(
     ``user_id`` -- so ``user_id`` is added here as an OPTIONAL trailing
     parameter (default None), not a new required positional/keyword, and
     that existing call site is unaffected. No caller passes ``user_id``
-    today (design's own load-bearing fact: "not wired to any scoring call
-    site" -- hosted scoring has no live caller yet); when ``user_id`` is
-    None, no tenant is identified, so the tenant's available-provider set is
-    empty and the call fails closed via ProviderCascadeExhaustedError below.
+    today -- hosted scoring has no live caller wired to a tenant yet; when
+    ``user_id`` is None, no tenant is identified, so the tenant's
+    available-provider set is empty and the call fails closed via
+    ProviderCascadeExhaustedError below.
 
     Args:
         tier: Workload class: "quick", "score", "triage", or "craft".

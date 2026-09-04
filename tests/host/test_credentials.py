@@ -144,8 +144,8 @@ def test_resolver_returns_none_for_inactive_credential(db_conn, monkeypatch):
 
 
 def test_resolver_is_bound_to_one_tenant_no_user_id_arity(db_conn, monkeypatch):
-    """design §1b: resolve_credential's arity is (provider) only -- confirm
-    the Protocol shape structurally (a resolver built for tenant A cannot be
+    """resolve_credential's arity is (provider) only -- confirm the
+    Protocol shape structurally (a resolver built for tenant A cannot be
     redirected at tenant B's rows by any argument the caller controls)."""
     monkeypatch.setenv("JC_BYO_KEY_KEK", _fresh_kek_b64())
     _seed_user(db_conn, "cred-u7a")

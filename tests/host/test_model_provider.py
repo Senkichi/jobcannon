@@ -1,10 +1,10 @@
 """jobcannon.host.model_provider -- hosted cascade dispatcher (L-0036 PR-1,
-ADAPT extraction of job_finder/web/model_provider.py, design-providers-
-byokey.md).
+ADAPT extraction of job_finder/web/model_provider.py).
 
-design §6 exempts this file from verbatim fidelity-diff comparison ("verify
-by behavior/tests, and by a structural diff showing the deadline machinery
-carried unchanged") -- this file is that behavioral verification. Pure
+This module is an ADAPT extraction split across two files and is exempt
+from verbatim fidelity-diff comparison; it is verified instead by
+behavior/tests, plus a structural diff showing the deadline machinery
+carried unchanged -- this file is that behavioral verification. Pure
 functions (resolve_hosted_routing, schema validation, degenerate detection)
 get direct unit tests; call_model's cascade orchestration is exercised with
 _make_adapter, get_active_providers, and build_credential_resolver
@@ -23,7 +23,7 @@ from jobcannon.host import model_provider as mp
 
 
 # ---------------------------------------------------------------------------
-# resolve_hosted_routing -- pure function, design §1c
+# resolve_hosted_routing -- pure function
 # ---------------------------------------------------------------------------
 
 
@@ -87,7 +87,7 @@ def test_make_adapter_raises_import_error_until_pr2_adapters_land():
 
 
 def test_make_adapter_never_caches_across_calls(monkeypatch):
-    """design §4 modularity note #1 (HIGH): no memoization -- two calls for
+    """Modularity note item 1 (HIGH): no memoization -- two calls for
     the same provider must not return the same object, since caching by
     provider name alone would hand tenant B tenant A's adapter (and the key
     closed over inside it)."""
@@ -114,7 +114,7 @@ def test_make_adapter_never_caches_across_calls(monkeypatch):
 
 # ---------------------------------------------------------------------------
 # Schema validation / sanitization / degenerate detection -- PORT-SEAM
-# byte-identical to private (design §1d); regression coverage for the port.
+# byte-identical to private; regression coverage for the port.
 # ---------------------------------------------------------------------------
 
 

@@ -65,9 +65,9 @@ def encrypt_api_key(plaintext: str, *, kek: bytes | None = None) -> bytes:
 
     Raises KekNotConfiguredError if `kek` is omitted and JC_BYO_KEY_KEK is
     unset -- unlike resolve_credential (read path), the write path (the
-    BYO-key settings UI, out of this port's scope per design §4 modularity
-    note #3) has no fail-soft option: it cannot store a key it cannot
-    encrypt.
+    BYO-key settings UI, out of this port's scope -- see this PR's
+    Modularity note) has no fail-soft option: it cannot store a key it
+    cannot encrypt.
     """
     key = kek if kek is not None else _kek()
     aesgcm = AESGCM(key)
@@ -85,12 +85,12 @@ def _decrypt(blob: bytes, *, kek: bytes) -> str:
 def build_credential_resolver(conn: Any, user_id: str) -> CredentialResolver:
     """Return a CredentialResolver bound to `user_id`.
 
-    Design §1b: `(provider) -> str | None`, bound to ONE tenant by closure
+    Arity is `(provider) -> str | None`, bound to ONE tenant by closure
     so no call site can pass the wrong user_id -- the arity itself makes
     cross-tenant leakage unrepresentable. A fresh resolver is expected to be
     built per call_model() invocation (jobcannon.host.model_provider.call_model
-    does this); it is never cached across tenants or calls (design §4
-    modularity note #1).
+    does this); it is never cached across tenants or calls -- see this PR's
+    Modularity note.
 
     A successful resolve stamps last_used_at (best-effort, non-fatal on
     failure to touch).
