@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T01:00:20Z",
+  "generated_at": "2026-09-04T01:00:24Z",
   "roots": [
     "engine",
     "db",
@@ -602,24 +602,28 @@
           "text": "# PORTED from job_finder/sources/_pii_scrub.py @ 28c03ab79e04e417741d77f8f181909acedf671f (private job-cannon). Ledger L-0043."
         },
         {
-          "line": 128,
+          "line": 125,
           "text": "# PORT-SEAM: prefix rewritten \"job_finder\" -> \"jobcannon\" (the public"
         },
         {
-          "line": 149,
+          "line": 146,
           "text": "# `job_finder`/`job_finder.*` literal below renamed to `jobcannon` — the"
         },
         {
-          "line": 162,
+          "line": 157,
+          "text": "# `job_finder`/`job_finder.*` literal in this class renamed `jobcannon` —"
+        },
+        {
+          "line": 164,
           "text": "if name.startswith(\"jobcannon\"):  # PORT-SEAM: job_finder -> jobcannon"
         },
         {
-          "line": 171,
+          "line": 173,
           "text": "# PORT-SEAM: default `prefix` renamed \"job_finder\" -> \"jobcannon\" (public"
         },
         {
-          "line": 178,
-          "text": "# PORT-SEAM: job_finder -> jobcannon (see module note above)."
+          "line": 186,
+          "text": "# PORT-SEAM: default `prefix` and every `job_finder`/`_JobFinderLogger`"
         }
       ]
     },
@@ -1192,15 +1196,15 @@
           "text": "# PORTED from job_finder/sources/email_senders.py @ 2dc6c820aff0a3b213e4f6c4c535097f8dd0a816 (private job-cannon). Ledger L-0113."
         },
         {
-          "line": 132,
+          "line": 130,
           "text": "# ported — it belongs to `job_finder/config.py`, out of scope for"
         },
         {
-          "line": 140,
+          "line": 138,
           "text": "# PORT-SEAM: private body opened with `from job_finder.config import"
         },
         {
-          "line": 182,
+          "line": 180,
           "text": "# PORT-SEAM: private body opened with `from job_finder.config import"
         }
       ]

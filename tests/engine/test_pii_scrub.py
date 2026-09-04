@@ -41,9 +41,10 @@ def test_redacts_bare_emails():
 
 def test_default_denylist_is_iterable_of_str():
     # PORT-SEAM: DEFAULT_DENYLIST ships empty publicly — no single tenant's
-    # identity belongs in shared code (see module docstring PORT-SEAM). The
-    # invariant under test (every entry is a str) still holds vacuously.
-    assert all(isinstance(x, str) for x in DEFAULT_DENYLIST)
+    # identity belongs in shared code (see module docstring PORT-SEAM). This
+    # is the public invariant under test: it fails loudly if someone re-seeds
+    # an owner identifier into the shared default.
+    assert DEFAULT_DENYLIST == ()
 
 
 def test_redact_url_secrets_redacts_api_key():

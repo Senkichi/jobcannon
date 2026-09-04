@@ -106,13 +106,11 @@ _OVERRIDABLE_SENDERS: dict[str, str] = {
 def resolve_sender_parsers(config: dict | None = None) -> dict:
     """Return SENDER_PARSERS with any user-overridden FROM addresses swapped in.
 
-    Wires ``sources.imap.senders.<key>`` into the address→parser map. For each
-    # PORT-SEAM: private text read "(saved by the Settings page) into the" —
-    # re-wrapped, no meaning change.
-    overridable sender key, if the config supplies a non-empty address that
-    differs from the default, the default key is *renamed* to the override
-    (its parser function is preserved). Non-overridable senders (greenhouse,
-    indeed-match, trueup, monster) are untouched.
+    Wires ``sources.imap.senders.<key>`` (saved by the Settings page) into the
+    address→parser map. For each overridable sender key, if the config supplies a
+    non-empty address that differs from the default, the default key is *renamed*
+    to the override (its parser function is preserved). Non-overridable senders
+    (greenhouse, indeed-match, trueup, monster) are untouched.
 
     # PORT-SEAM: private docstring also said "This function calls
     # normalize_email_senders internally to heal legacy sources.gmail.senders

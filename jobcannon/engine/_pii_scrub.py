@@ -48,10 +48,7 @@ def scrub_text(text: str, identifiers: tuple[str, ...] | list[str] | None = None
     """Return *text* with recipient headers dropped and PII redacted.
 
     Idempotent and never raises on str input. ``identifiers`` extends (does not
-    replace) DEFAULT_DENYLIST — pass the current tenant's own name/email.
-    # PORT-SEAM: private text read "the local user's name/email from config"
-    # (a single-operator desktop app); hosted, callers resolve each tenant's
-    # own identifiers per-request rather than one process-global config.
+    replace) DEFAULT_DENYLIST — pass the local user's name/email from config.
     """
     if not text:
         return text or ""
@@ -152,9 +149,14 @@ class CredentialRedactionFilter(logging.Filter):
 class _ScrubbedLogger(logging.Logger):
     """Logger subclass that auto-installs CredentialRedactionFilter for jobcannon.* loggers.
 
-    ``logging.setLoggerClass`` must be invoked with this class before any
-    ``jobcannon.*`` logger is instantiated, so every source logger gets the
-    filter without touching individual call sites.  # PORT-SEAM: see above.
+    Any code that calls ``logging.setLoggerClass`` with this class, before a
+    ``jobcannon.*`` logger is first instantiated, causes every such source
+    logger to receive the filter automatically — no call site has to touch it.
+
+    # PORT-SEAM: `_JobFinderLogger` renamed `_ScrubbedLogger` and every
+    # `job_finder`/`job_finder.*` literal in this class renamed `jobcannon` —
+    # the private package name doesn't exist here and would silently protect
+    # zero loggers if left unrewritten.
     """
 
     def __init__(self, name: str, level: int = logging.NOTSET) -> None:
@@ -174,15 +176,20 @@ def _ensure_credential_filter(logger: logging.Logger) -> None:
 def install_credential_redaction_filter(prefix: str = "jobcannon") -> None:
     """Install the credential redaction filter across the ``jobcannon`` logger tree.
 
-    Sets a custom logger class so every future ``jobcannon.*`` logger is born
-    # PORT-SEAM: job_finder -> jobcannon (see module note above).
-    with the filter, and retrofits any logger that already exists in the
-    ``logging.Manager`` logger dictionary. This is the single enforcement point
-    so any source that logs a ``requests.HTTPError`` (which embeds the full
-    request URL) is scrubbed without per-call-site ``str(e)`` wrapping.
+    Any future ``jobcannon.*`` logger is born already wired for redaction,
+    because this installs a custom logger class; existing loggers already
+    present in the ``logging.Manager`` dictionary are retrofitted too. This
+    is the single enforcement point, so any source that logs a
+    ``requests.HTTPError`` (which embeds the full request URL) is scrubbed
+    without per-call-site ``str(e)`` wrapping.
+
+    # PORT-SEAM: default `prefix` and every `job_finder`/`_JobFinderLogger`
+    # literal in this function renamed to `jobcannon`/`_ScrubbedLogger` (see
+    # the class-level PORT-SEAM note above) — the private package name
+    # doesn't exist here and would silently protect zero loggers.
     """
-    logging.setLoggerClass(_ScrubbedLogger)  # PORT-SEAM: see module note above
-    logging.Logger.manager.setLoggerClass(_ScrubbedLogger)
+    logging.setLoggerClass(_ScrubbedLogger)  # PORT-SEAM: see docstring above
+    logging.Logger.manager.setLoggerClass(_ScrubbedLogger)  # PORT-SEAM: see docstring above
     # Retrofit any loggers created before this function was first called.
     manager = logging.Logger.manager
     for name, obj in list(manager.loggerDict.items()):
