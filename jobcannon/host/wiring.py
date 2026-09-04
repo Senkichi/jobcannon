@@ -115,6 +115,7 @@ from jobcannon.engine import extraction_health, runtime_config, services
 from jobcannon.engine.ats_scanner import _scan_log
 from jobcannon.host import model_provider as _model_provider
 from jobcannon.host import posthog_admin, posthog_client, task_app
+from jobcannon.host import scoring_orchestrator as _scoring_orchestrator
 from jobcannon.host.config import HostConfig
 from jobcannon.host.health_recorder import record_scan_health
 
@@ -164,6 +165,9 @@ def build_scan_services(host_config: HostConfig) -> services.ScanServices:
         set_direct_url=_direct_link.set_direct_url,
         stamp_direct_url_checks=_direct_link.stamp_direct_url_checks,
         annotate_posting_apply_url=_jobs.annotate_posting_apply_url,  # PORT-SEAM: L-0075, flat re-adaptation (jobcannon/db/_jobs.py)
+        # PORT-SEAM: L-0259, jobcannon/host/scoring_orchestrator.py -- the
+        # host wiring for the already-declared optional hook slot below.
+        score_and_persist_job=_scoring_orchestrator.score_and_persist_job,
         # Deliberately the SAME object runtime_config.set_config_provider below
         # hands back (not a copy) — one source of truth, so the services
         # snapshot and the live provider can never drift apart.
