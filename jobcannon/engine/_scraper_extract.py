@@ -9,7 +9,7 @@ logic in that module.
 (job_scorer.score_job precedent for the injection shape itself), but kept
 optional here to preserve this module's existing conn/config optionality:
 the low-tier fallback in the caller only fires when conn, config, AND
-call_model are all supplied -- callers that want heuristic-only, zero-cost
+call_model are all supplied — callers that want heuristic-only, zero-cost
 behavior simply omit it.
 
 # PORT-SEAM: the private ``ProviderCascadeExhaustedError`` retry-via-CLI
@@ -49,7 +49,7 @@ _AUTH_WALL_SIGNATURES = [
 
 # Structured output schemas for the two quick-tier call sites below. Both
 # the CLI (Anthropic) and Ollama return the same dict shape when a schema is
-# supplied -- without it, Ollama's forced "format":"json" yields arbitrary
+# supplied — without it, Ollama's forced "format":"json" yields arbitrary
 # keys while the CLI wraps freeform text in {"text": ...}, which would
 # silently produce empty results once a cascade routes the call through
 # Ollama.

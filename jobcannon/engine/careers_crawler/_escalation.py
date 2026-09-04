@@ -16,26 +16,26 @@ opportunistic ATS-link-discovery helpers it calls (``_try_ats_link_promotion``,
 # already dropped it in favor of ``svc.connection_factory()`` (zero-arg) when
 # each was ported/landed (L-0443, L-0464, L-0465, L-0469). This module's own
 # new ATS-link-discovery helpers follow the same package-wide convention for
-# consistency -- every other function in this package already made this
+# consistency — every other function in this package already made this
 # trade, so keeping ``db_path`` on only this one function would be the odd
 # one out, not a fidelity gain.
 
 # PORT-SEAM: the ai-nav tier-4 escalation block (``_try_ai_navigation`` call,
 # guarded by ``ai_nav_enabled``) is DELETED, along with the ``ai_nav_reason``
 # sink variable and its ``failure_reason`` branch. ``ai_career_navigator``
-# DIES (ledger L-0133) -- see also ``_summary.py``'s PORT-SEAM note on the
+# DIES (ledger L-0133) — see also ``_summary.py``'s PORT-SEAM note on the
 # matching ``ai_nav_*`` summary-key deletions.
 
 # PORT-SEAM: ``_try_ats_link_promotion`` accesses ``promote_from_careers_link``
 # via ``get_services().prober_extensions`` directly (matching the sibling
 # ``_autoheal_seam.py``'s direct-seam-access convention within this same
 # package), NOT via ``jobcannon.engine.ats_prober``'s module-global
-# ``set_prober_extensions``/``_prober_extensions`` indirection -- that
+# ``set_prober_extensions``/``_prober_extensions`` indirection — that
 # indirection exists only because ``ats_prober.py`` itself cannot see
 # ScanServices directly (see that module's own docstring); this module has
 # no such constraint. The call is ported faithfully to the private
-# signature -- ``promote_from_careers_link(conn, company_id, platform, slug,
-# page_url=page_url, config=config)`` -- WITHOUT the extra
+# signature — ``promote_from_careers_link(conn, company_id, platform, slug,
+# page_url=page_url, config=config)`` — WITHOUT the extra
 # ``reenable_scan=`` kwarg the sibling ``ats_prober.py`` call sites pass
 # (`jobcannon/engine/ats_prober.py`'s "Fix 3" cohort-based re-enable logic);
 # that kwarg has no analog in the private ``careers_crawler`` source this
@@ -85,7 +85,7 @@ _POLITE_DELAY = 1.0  # Seconds between companies
 
 # Opportunistic ATS-link discovery cooldown (#1931): when the careers landing
 # page has to be fetched specially for ATS-link discovery (no Playwright-rendered
-# DOM available -- e.g. a cheap tier already found jobs), re-fetching it every
+# DOM available — e.g. a cheap tier already found jobs), re-fetching it every
 # crawl for a company with no supported-platform link underneath is wasted
 # work. The crawler stamps ``companies.ats_link_discovery_last_at`` on each
 # attempt and skips the opportunistic fetch when the last attempt is within
@@ -201,7 +201,7 @@ def _stamp_ats_link_discovery(company_id: int) -> None:
     Stamps ``companies.ats_link_discovery_last_at = datetime('now')`` so the
     cooldown gate suppresses a redundant re-fetch on the next crawl. Best-effort:
     a stamp failure is logged at debug and swallowed (it only means the next
-    crawl re-attempts -- a bounded, harmless extra fetch).
+    crawl re-attempts — a bounded, harmless extra fetch).
     """
     svc = get_services()
     try:
@@ -258,7 +258,7 @@ def _try_opportunistic_ats_link_promotion(
 
     HTML sourcing:
       - When ``rendered_html`` is non-empty (Playwright already rendered the
-        page), reuse it at zero marginal fetch cost -- no cooldown gate.
+        page), reuse it at zero marginal fetch cost — no cooldown gate.
       - Otherwise, fetch the landing page via a cheap static GET, gated by the
         per-company cooldown.
 
@@ -308,7 +308,7 @@ def _crawl_companies(
     ordering is preserved within each batch.
 
     Returns:
-        (merged_summary, all_new_keys) -- summary counters and list of new job dedup_keys.
+        (merged_summary, all_new_keys) — summary counters and list of new job dedup_keys.
     """
     from jobcannon.engine.careers_page_interactions import (
         deduplicate_keywords,
@@ -359,7 +359,7 @@ def _crawl_companies(
                     # already attempted it.
                     ats_link_attempted = False
                     # Set when the sitemap tier's cohort-legitimacy gate
-                    # withholds a cohort as aggregator-suspected -- short-
+                    # withholds a cohort as aggregator-suspected — short-
                     # circuits the rest of the escalation chain for this
                     # company this run.
                     legitimacy_flagged = False
@@ -398,7 +398,7 @@ def _crawl_companies(
                         )
 
                         # === Tier cache: try last-successful tier first ===
-                        # Skip cache replay for `static` and `sitemap` -- both
+                        # Skip cache replay for `static` and `sitemap` — both
                         # are cheap pre-static tiers and always run at the top
                         # of the full chain, so cache replay would be redundant.
                         if cached_tier and cached_tier not in ("static", "sitemap"):
@@ -434,7 +434,7 @@ def _crawl_companies(
                                 else:
                                     _clear_api_cache(company_id)
 
-                            # Tier 0.5: Sitemap / RSS -- pre-static cheap
+                            # Tier 0.5: Sitemap / RSS — pre-static cheap
                             # probe. Also runs the cohort-legitimacy gate: a
                             # large cohort whose sampled postings show
                             # positive evidence of belonging to multiple
@@ -461,7 +461,7 @@ def _crawl_companies(
                                     local_summary["legitimacy_flagged"] += 1
                                     logger.warning(
                                         "careers_crawler: %s flagged for cohort-legitimacy "
-                                        "review (%s) -- skipping remaining tiers this run",
+                                        "review (%s) — skipping remaining tiers this run",
                                         company_name,
                                         sitemap_flag[0],
                                     )
@@ -540,7 +540,7 @@ def _crawl_companies(
                             # extraction found 0 jobs. Harvest an outbound
                             # ATS-board link from the already-rendered DOM and
                             # promote the company to the matching existing
-                            # scanner -- no second navigation, no new
+                            # scanner — no second navigation, no new
                             # extractor. On a hit, skip the remaining tiers.
                             if (
                                 not jobs
@@ -606,7 +606,7 @@ def _crawl_companies(
                         # landing page via a cheap static GET (cooldown-gated)
                         # and promotes on a clean supported-platform hit. A
                         # promotion here does NOT discard the current crawl's
-                        # jobs -- they are still imported below.
+                        # jobs — they are still imported below.
                         #
                         # Runs strictly AFTER the #1921 gate above: reading
                         # `jobs` post-gate means a flagged cohort has already
@@ -639,7 +639,7 @@ def _crawl_companies(
                         # gone, every zero-hit here writes the
                         # BENCH_UNATTRIBUTED_ZERO_HIT_REASON sentinel, exactly
                         # as the private code already did for every non-ai_nav
-                        # zero-hit (T2.3, D9) -- no behavior change for the
+                        # zero-hit (T2.3, D9) — no behavior change for the
                         # tiers this port carries.
                         if not jobs:
                             failure_reason = BENCH_UNATTRIBUTED_ZERO_HIT_REASON

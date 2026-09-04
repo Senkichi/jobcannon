@@ -1,13 +1,13 @@
 # PORTED from job_finder/web/careers_crawler/__init__.py @ 46d5a2a1f27179d075efc5572efeded3ba2a0266 (private job-cannon). Ledger L-0461.
-"""Active careers page crawler -- re-discovers and originates job discovery.
+"""Active careers page crawler — re-discovers and originates job discovery.
 
-Provides crawl_careers_batch() -- a daily scheduled job that selects companies
+Provides crawl_careers_batch() — a daily scheduled job that selects companies
 in two lanes (#220):
 1a. RE-DISCOVERY (uncapped): companies that have ever had a high-scoring job
     (classification IN ('apply','consider')), due for a re-crawl.
 1b. ORIGINATION (capped at careers_crawl.origination_batch_limit, default 25):
     never-crawled companies that have a careers_url but no apply/consider
-    history yet -- typically NULL-ATS companies the crawler has never touched.
+    history yet — typically NULL-ATS companies the crawler has never touched.
     This lets the crawler *originate* discovery rather than only re-discover
     proven-relevant companies.
 2. Multi-tier extraction: cached API -> static HTML -> URL param search ->
@@ -22,7 +22,7 @@ Architecture:
   activity-feed entry.
 - Browser launched per invocation (inside ``_escalation._crawl_companies``),
   not kept alive between runs.
-- Zero API cost -- all extraction is mechanical (JSON-LD, link matching,
+- Zero API cost — all extraction is mechanical (JSON-LD, link matching,
   form interaction, API interception).
 
 # PORT-SEAM: the private module's re-export block (every tier/helper symbol
@@ -30,7 +30,7 @@ Architecture:
 # patches on the package namespace resolved) and its ``__all__`` list are
 # DROPPED. Each symbol now lives in, and is imported from, its own definer
 # module directly (``jobcannon.engine.careers_crawler._static_tier``,
-# ``._playwright_tier``, etc.) -- this package has no barrel-file convention
+# ``._playwright_tier``, etc.) — this package has no barrel-file convention
 # (see CLAUDE.md). Any test that patched the package namespace for one of
 # these symbols needs repointing at the real definer module.
 
@@ -51,7 +51,7 @@ Architecture:
 # real cycle exists where ``jobcannon.engine.ats_platforms`` (via
 # ``_platforms_phenom.py``) imports
 # ``jobcannon.engine.careers_crawler._title_filters`` at ITS OWN module
-# scope -- which first runs this package's ``__init__.py``. If this
+# scope — which first runs this package's ``__init__.py``. If this
 # ``__init__.py`` then imported ``_escalation`` (-> ``_cohort_legitimacy``
 # -> ``_static_tier`` -> ``jobcannon.engine.ats_platforms``) at module scope
 # too, that closes the loop on a module still mid-initialization
@@ -132,7 +132,7 @@ def crawl_careers_batch(config: dict) -> dict:
         scored, classified_apply, classified_consider, classified_skip,
         classified_reject, playwright_rendered, errors.
     """
-    # PORT-SEAM: function-scoped, not module-level -- see module docstring.
+    # PORT-SEAM: function-scoped, not module-level — see module docstring.
     from jobcannon.engine.careers_crawler._bench_predicate import (
         build_bench_predicate_sql,
         resolve_bench_decay_days,
@@ -144,7 +144,7 @@ def crawl_careers_batch(config: dict) -> dict:
     from jobcannon.engine.services import get_services
 
     if config.get("TESTING"):
-        logger.debug("crawl_careers_batch: TESTING mode -- skipping")
+        logger.debug("crawl_careers_batch: TESTING mode — skipping")
         return _new_summary()
 
     profile_cfg = config.get("profile", {})
@@ -160,9 +160,9 @@ def crawl_careers_batch(config: dict) -> dict:
     svc = get_services()
 
     # Two-lane company selection (#220):
-    #   Lane 1 -- RE-DISCOVERY (unchanged, uncapped): companies that have ever
+    #   Lane 1 — RE-DISCOVERY (unchanged, uncapped): companies that have ever
     #     had a high-scoring job (classification IN ('apply','consider')).
-    #   Lane 2 -- ORIGINATION (new, capped): never-crawled companies that have a
+    #   Lane 2 — ORIGINATION (new, capped): never-crawled companies that have a
     #     careers_url but NO apply/consider history yet.
     # Both lanes share the same hard gates (careers_url present, scan_enabled,
     # not an ATS 'hit', and not in the 5-strike penalty box). Lane 2 is bounded
@@ -179,7 +179,7 @@ def crawl_careers_batch(config: dict) -> dict:
         bench_decay_days = resolve_bench_decay_days(config)
         bench_predicate_sql = build_bench_predicate_sql(bench_decay_days)
 
-        # Lane 1: re-discovery -- proven-relevant companies due for a re-crawl.
+        # Lane 1: re-discovery — proven-relevant companies due for a re-crawl.
         rediscovery = conn.execute(
             f"""SELECT c.id, c.name_raw, c.careers_url, c.careers_api_endpoint,
                       c.careers_crawl_tier, c.careers_nav_recipe
@@ -201,7 +201,7 @@ def crawl_careers_batch(config: dict) -> dict:
             (f"-{freshness_days}",),
         ).fetchall()
 
-        # Lane 2: origination -- never-crawled companies with a careers_url and
+        # Lane 2: origination — never-crawled companies with a careers_url and
         # no apply/consider history. Capped and ordered by id for determinism.
         origination = conn.execute(
             f"""SELECT c.id, c.name_raw, c.careers_url, c.careers_api_endpoint,

@@ -6,13 +6,13 @@ Provides:
 - scrape_careers_page: extract keyword-matched job listings from static HTML
 
 Wired to the engine's callers via the ScanServices seam
-(``svc.find_careers_url`` / ``svc.scrape_careers_page``) -- see
+(``svc.find_careers_url`` / ``svc.scrape_careers_page``) — see
 ``jobcannon.engine.ats_scanner._run_html`` and
 ``jobcannon.engine.expiry_checker`` for the two existing engine-side
 consumers, and ``jobcannon/engine/services.py`` for the field contract.
 
 Architecture:
-- Static HTML only -- JS-rendered pages return empty list (expected limitation)
+- Static HTML only — JS-rendered pages return empty list (expected limitation)
 - Uses _title_matches from ats_platforms for keyword filtering (shared utility)
 - Research Pitfall 6: After fetching, check r.url for ATS domain redirect before scraping
 
@@ -66,7 +66,7 @@ _CAREERS_PATTERNS = ["/careers", "/jobs", "/join", "/join-us", "/work-with-us", 
 # Aggregator / blog-repost registrable domains that masquerade as employer
 # careers pages. Jobs scraped from these carry the BLOG's brand as the company
 # ("Jobflarely" <- jobflarely.liveblog365.com) and recycle reposts whose cards
-# glue title + date + "View Job ->" CTA together. We never scrape them -- a code
+# glue title + date + "View Job ->" CTA together. We never scrape them — a code
 # blocklist is the durable backstop (config-yaml denylists rot + drift, per the
 # dual-copy CI test). Suffix-matched against the URL host, so any subdomain is
 # covered. Extend this list, not config, when a new repost host surfaces.
@@ -91,7 +91,7 @@ def _host_matches_any(host: str | None, domains) -> bool:
     """True iff *host* IS one of *domains* or a subdomain of one (label-boundary match).
 
     Boundary-anchored on purpose: a bare substring test (``domain in netloc``) is
-    the ``py/incomplete-url-substring-sanitization`` anti-pattern -- it matches a
+    the ``py/incomplete-url-substring-sanitization`` anti-pattern — it matches a
     domain appearing in a path/query or a look-alike host
     (``boards.greenhouse.io.evil.com``, ``notboards.greenhouse.io``).
     """
@@ -130,18 +130,18 @@ def _is_disqualified_careers_host(url: str | None, config: dict | None = None) -
     A company homepage routinely footer-links its OWN LinkedIn / Glassdoor /
     BuiltIn / Indeed "jobs" page, and those URLs carry a careers pattern
     (``/jobs``) in the path. Returning one from find_careers_url writes a
-    multi-employer listing host into ``companies.careers_url`` -- the role.com
-    aggregator-pollution class -- which then misdirects the careers crawler, ATS
+    multi-employer listing host into ``companies.careers_url`` — the role.com
+    aggregator-pollution class — which then misdirects the careers crawler, ATS
     discovery, and the Apply-button target alike. This is the single negative
     gate every find_careers_url result is filtered through (both write paths,
     homepage_discoverer and enrichment_tiers, persist that return value
     verbatim, so gating here protects every downstream consumer at once).
 
-    Composes the codebase's EXISTING host predicates -- no new hardcoded list:
-      * domain_policy.is_aggregator_or_job_board -- BLOCKED_DOMAINS (glassdoor,
+    Composes the codebase's EXISTING host predicates — no new hardcoded list:
+      * domain_policy.is_aggregator_or_job_board — BLOCKED_DOMAINS (glassdoor,
         indeed, ziprecruiter, dice, role.com, ...) plus the non-ATS job boards
         (linkedin, builtin, ...) that is_blocked_domain deliberately omits.
-      * source_registry.is_opaque_redirect_host -- the config-driven republisher
+      * source_registry.is_opaque_redirect_host — the config-driven republisher
         registry (jooble, adzuna, ...). Only fires when a config is available;
         find_careers_url's two write-path callers pass none, in which case the
         aggregator/job-board check alone already covers every named host.
@@ -159,10 +159,10 @@ def _is_disqualified_careers_host(url: str | None, config: dict | None = None) -
 
 def _is_careers_subdomain(host: str | None) -> bool:
     """True iff *host* starts with a careers-indicating subdomain label
-    (``_CAREERS_SUBDOMAINS`` -- e.g. ``careers.``, ``jobs.``).
+    (``_CAREERS_SUBDOMAINS`` — e.g. ``careers.``, ``jobs.``).
 
     Checked against the PARSED hostname (which strips userinfo/port), not
-    ``netloc`` directly -- ``netloc`` can carry a ``user:pass@`` prefix that
+    ``netloc`` directly — ``netloc`` can carry a ``user:pass@`` prefix that
     would make a prefix check on it misreport the real host."""
     if not host:
         return False
@@ -198,7 +198,7 @@ def find_careers_url(
     branch produced the candidate (redirect landing, meta-refresh, <a> scan,
     proactive subdomain probe, or quick-tier fallback), the result is passed
     through _is_disqualified_careers_host, so an aggregator / job board /
-    opaque-redirect host can never be surfaced -- and therefore never persisted
+    opaque-redirect host can never be surfaced — and therefore never persisted
     into companies.careers_url by either write path (homepage_discoverer,
     enrichment_tiers). THE single point of enforcement for that invariant; do
     not scatter the check across the individual branches or the write sites.
@@ -282,7 +282,7 @@ def _find_careers_url_raw(
     parsed = urlparse(final_url)
     if _is_ats_redirect_host(parsed.hostname):
         logger.debug(
-            "find_careers_url('%s'): redirected to ATS domain '%s' -- returning None",
+            "find_careers_url('%s'): redirected to ATS domain '%s' — returning None",
             homepage_url,
             parsed.netloc,
         )
@@ -315,10 +315,10 @@ def _find_careers_url_raw(
             # Resolve relative URL
             refresh_url = urljoin(homepage_url, refresh_url)
             refresh_parsed = urlparse(refresh_url)
-            # Check for ATS domain -- don't follow
+            # Check for ATS domain — don't follow
             if _is_ats_redirect_host(refresh_parsed.hostname):
                 logger.debug(
-                    "find_careers_url('%s'): meta-refresh to ATS domain '%s' -- returning None",
+                    "find_careers_url('%s'): meta-refresh to ATS domain '%s' — returning None",
                     homepage_url,
                     refresh_parsed.netloc,
                 )
@@ -346,7 +346,7 @@ def _find_careers_url_raw(
             continue
 
         # Skip links to a third-party aggregator / job board / opaque-redirect
-        # host and KEEP scanning -- a company's own LinkedIn/Glassdoor/BuiltIn
+        # host and KEEP scanning — a company's own LinkedIn/Glassdoor/BuiltIn
         # "jobs" page carries a careers pattern in its path and would otherwise
         # be returned as careers_url, but a later <a> may be the real employer
         # careers link. Only absolute hrefs can escape the homepage's own host;
@@ -457,7 +457,7 @@ def scrape_careers_page(
 
     Fetches the careers page and looks for <a> tags whose text matches
     target_titles (using _title_matches from ats_platforms). This approach
-    only works on static HTML pages -- JavaScript-rendered pages will return
+    only works on static HTML pages — JavaScript-rendered pages will return
     an empty list (expected limitation documented in Research).
 
     For each matched job, follows the job URL to fetch the full job description
@@ -481,7 +481,7 @@ def scrape_careers_page(
         the number of job links filtered by title exclusions. Empty list on
         error or if no matching jobs found (including JS-rendered pages).
     """
-    # Aggregator/blog repost hosts produce brand-as-company junk -- never scrape
+    # Aggregator/blog repost hosts produce brand-as-company junk — never scrape
     # them. Checked on the requested URL up front (cheap, no fetch).
     if _is_blocklisted_scrape_host(careers_url):
         logger.debug("scrape_careers_page: skipping blocklisted aggregator host %s", careers_url)
@@ -537,7 +537,7 @@ def scrape_careers_page(
             skipped_count += 1
             continue
 
-        # Persist the CLEANED title -- strips the trailing date/CTA card chrome.
+        # Persist the CLEANED title — strips the trailing date/CTA card chrome.
         title = clean_title(raw_title)
         if not title:
             continue

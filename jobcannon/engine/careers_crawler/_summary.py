@@ -12,7 +12,7 @@ return, the top-level orchestrator summary, and each per-worker
 # there is no AI-navigation tier in this port, so nothing ever populates
 # these fields. ``_merge_ai_nav_failure_reasons`` (the private helper that
 # merged the per-reason dict across workers) is dropped entirely along with
-# them -- it has no callers once the dict field it merges is gone.
+# them — it has no callers once the dict field it merges is gone.
 """
 
 from __future__ import annotations
