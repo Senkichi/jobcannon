@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T21:30:33Z",
+  "generated_at": "2026-09-04T22:26:37Z",
   "roots": [
     "engine",
     "db",
@@ -408,15 +408,15 @@
       "root": "db",
       "markers": [
         {
-          "line": 67,
+          "line": 84,
           "text": "surface but a private-schema delta, recorded so the resync surface"
         },
         {
-          "line": 68,
+          "line": 85,
           "text": "stays complete. A private-schema `jobs` column (private migration"
         },
         {
-          "line": 71,
+          "line": 88,
           "text": "by the private location-enrichment chain (`enrichment_tiers.py:818`"
         }
       ]
@@ -668,6 +668,40 @@
         {
           "line": 31,
           "text": "No backfill: NULL means \"never flagged,\" matching private's own migration"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/migrations/m0029_careers_crawler_tier_and_api_endpoint_columns.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 12,
+          "text": "__init__.py``). Absorbs private migration"
+        },
+        {
+          "line": 13,
+          "text": "``job_finder/web/migrations/m035_careers_api_endpoint.py`` (private"
+        },
+        {
+          "line": 21,
+          "text": "both lane SELECTs. Absorbs private migration"
+        },
+        {
+          "line": 22,
+          "text": "``job_finder/web/migrations/m036_careers_crawl_tier.py`` (private"
+        },
+        {
+          "line": 36,
+          "text": "strike candidate) to live the moment this lands. Absorbs private"
+        },
+        {
+          "line": 37,
+          "text": "migration ``job_finder/web/migrations/m023_recalibrate_jobs_found_total.py``"
+        },
+        {
+          "line": 38,
+          "text": "(private ``ALTER TABLE company_scan_log ADD COLUMN jobs_matched INTEGER"
         }
       ]
     },
@@ -1180,6 +1214,14 @@
         {
           "line": 61,
           "text": "# empty\" convention and the private source's own established pattern of"
+        },
+        {
+          "line": 138,
+          "text": "#     #385 fix unit finding, filed separately). The private column"
+        },
+        {
+          "line": 139,
+          "text": "#     (`job_finder/web/migrations/m037_careers_nav_recipe.py`) has zero"
         }
       ]
     },

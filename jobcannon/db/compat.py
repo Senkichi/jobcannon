@@ -17,17 +17,34 @@ but the hosted schema's postings table is named `postings` (m0001). All four
 sites are covered by a single (FROM|UPDATE|INTO|JOIN) jobs -> postings
 rewrite.
 
-Date-function rewrite (PR 5b): the engine writes two SQLite-only date-function
-shapes in `ats_scanner/_run.py` / `ats_scanner/_run_playwright.py` — kept in
-SQLite dialect deliberately, since tests/engine/ exercises this exact SQL
-directly against a bare sqlite3 connection with no translation layer (see
-tests/engine/test_dormancy_cadence.py, tests/engine/test_run_playwright.py).
-This is the ONLY place either shape is rewritten for the hosted path:
-  - `datetime('now', '-' || ? || ' days')` (the dormancy gate's interval
-    arithmetic, `_dormancy_gate_clause`) -> `now() - make_interval(days => ?)`
+Date-function rewrite (PR 5b, extended by the crawler-schema fix unit,
+public #386): the engine writes SQLite-only date-function shapes in
+`ats_scanner/_run.py` / `ats_scanner/_run_playwright.py` and
+`careers_crawler/_bench_predicate.py` — kept in SQLite dialect deliberately,
+since tests/engine/ exercises this exact SQL directly against a bare sqlite3
+connection with no translation layer (see tests/engine/test_dormancy_cadence.py,
+tests/engine/test_run_playwright.py, tests/engine/test_careers_crawler_penalty_box.py).
+This is the ONLY place any of these shapes is rewritten for the hosted path:
+  - `datetime('now', '-' || ? || ' days')` (interval arithmetic —
+    `_dormancy_gate_clause` and `_bench_predicate.build_bench_predicate_sql` /
+    `is_company_benched`) -> `now() - make_interval(days => ?)`
   - bare `datetime('now')` (the retry-eligibility clauses) -> `now()`
-Host-authored SQL never calls SQLite's datetime(), so both rewrites are a
-no-op for it.
+  - bare `datetime(<column>)` (a column-normalizing cast —
+    `_bench_predicate.py`'s `datetime(scanned_at)`, used to make SQLite's
+    text-stored ISO8601 `scanned_at` values sort correctly against
+    `datetime('now', ...)`'s output; see `jobcannon.engine.json_utils.
+    utc_now_iso` for why the stored format needs this on SQLite) -> the bare
+    column, unwrapped. This rewrite's correctness is CONTINGENT on the
+    wrapped column being a genuine temporal type on the hosted schema —
+    `company_scan_log.scanned_at` is `timestamptz` (m0001), which needs no
+    string normalization to compare correctly against another timestamptz
+    value or timestamptz-typed `now()`. Do NOT rely on this rewrite for a
+    column that is `text`/`varchar` on the hosted schema: stripping the
+    wrapper there would silently produce a WRONG comparison (not an error) —
+    verify the hosted column's type before adding a new bare
+    `datetime(<column>)` call to engine SQL.
+Host-authored SQL never calls SQLite's datetime(), so all three rewrites are
+a no-op for it.
 
 KNOWN-UNSUPPORTED (Wave-2 / scan-orchestration PR work — recorded here so
 this shim's coverage claim stays honest). qmark translation, the table
@@ -213,6 +230,13 @@ _DATETIME_REWRITES = (
         "now() - make_interval(days => ?)",
     ),
     (re.compile(r"datetime\(\s*'now'\s*\)"), "now()"),
+    # Bare column cast, e.g. `datetime(scanned_at)` ->  `scanned_at`. Ordered
+    # last: both rules above require a leading single-quote inside the
+    # parens, which this rule's `[A-Za-z_]`-anchored group can never match,
+    # so there is no collision regardless of order. See module docstring for
+    # the contingency this rewrite depends on (wrapped column must be a real
+    # temporal type on the hosted schema).
+    (re.compile(r"datetime\(\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\)"), r"\1"),
 )
 
 

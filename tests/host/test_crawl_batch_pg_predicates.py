@@ -48,50 +48,68 @@ established elsewhere in this codebase rather than novel constructs:
   rewrite needed.
 
 Two SELECT-list columns (``c.careers_api_endpoint``, ``c.careers_crawl_tier``)
-are ALSO undefined on the hosted schema — confirmed empirically while
-building this test (``UndefinedColumn: column c.careers_api_endpoint does
-not exist``). Unlike the WHERE-clause items above, these are read
-downstream by ``_escalation.py``'s per-company worker
-(``company["careers_api_endpoint"]``, ``company["careers_crawl_tier"]``),
-so dropping them from the SELECT would trade ``UndefinedColumn`` for a
-``KeyError`` rather than fix anything — that needs a schema migration and
-a downstream-consumer change, not a query edit, and is out of this PR's
-scope. ``careers_crawl_tier`` is tracked at #347 (filing a comment there:
-its "not an active bug, no reader exists yet" claim is now stale now that
-``crawl_careers_batch`` reads the column). ``careers_api_endpoint`` has no
-existing tracker; filed as a new follow-up issue.
-
-Because of the above, ``crawl_careers_batch`` itself still cannot be
-called end-to-end against Postgres. Mirroring
-``test_m0028_careers_crawl_flag_reason.py``'s scope precedent (landed one
-commit before this test, same file, same tension), this test exercises
-the WHERE clause of each lane directly — with a SELECT list restricted to
-columns that exist — rather than the full function. The bench-decay
-fragment (``_bench_predicate.py``'s ``build_bench_predicate_sql``, whose
-``datetime(scanned_at) < datetime('now', '-N days')`` shape is also
-untranslated by compat.py — a third, separate gap, also filed as a
-follow-up) is stubbed to ``TRUE`` here; ``_bench_predicate.py`` itself is
-not touched by this PR.
+were ALSO undefined on the hosted schema until migration 29 (public #385,
+#347) added them; ``c.careers_nav_recipe`` was dropped from the SELECT list
+entirely (zero readers anywhere in this port — see ``__init__.py``'s own
+PORT-SEAM comment block). The bench-decay fragment (``_bench_predicate.py``'s
+``build_bench_predicate_sql``, public #386) had two further gaps: its
+``datetime(scanned_at) < datetime('now', '-N days')`` shape needed a third
+``db/compat.py`` rewrite rule (bare-column ``datetime(...)`` unwrap — see
+that module's docstring), and its SQL reads ``company_scan_log.jobs_matched``,
+a column no migration had ever added until migration 29 also added it
+(discovered while un-stubbing this very test — see that migration's
+docstring for the full rationale). With all of the above landed, this test
+now exercises the REAL lane queries end-to-end: the real 5-column SELECT
+list, the real bench predicate (no stub), against a live Postgres
+connection.
 
 The two lane queries themselves are NOT hand-copied into this test: both
 are imported from ``jobcannon.engine.careers_crawler`` (``_lane1_query_sql``
-/ ``_lane2_query_sql``) and called with a restricted SELECT list and the
-stubbed bench predicate, so the WHERE clause executed here is byte-identical
-to the one ``crawl_careers_batch`` executes in production (#380 review round
-1, finding B1: an earlier revision hand-copied a comment-stripped duplicate
-of the WHERE clause, which silently diverged from production and did not
-catch the in-SQL-comment regression B1 describes).
+/ ``_lane2_query_sql``) and called with the real ``select_cols`` and the
+real ``build_bench_predicate_sql()`` output, so the WHERE clause executed
+here is byte-identical to the one ``crawl_careers_batch`` executes in
+production (#380 review round 1, finding B1: an earlier revision
+hand-copied a comment-stripped duplicate of the WHERE clause, which
+silently diverged from production and did not catch the in-SQL-comment
+regression B1 describes).
+
+Both lanes place the bench predicate's own ``?`` placeholder at a DIFFERENT
+position relative to their other placeholder (Lane 1: freshness placeholder
+comes first in the WHERE text; Lane 2: bench placeholder comes first,
+``LIMIT ?`` trails) — see ``__init__.py``'s own comments at each lane's
+call site. A param-tuple swap between the two is silent (both values are
+plain ints, no type error), so
+``test_lane2_bench_and_limit_params_bind_to_correct_placeholders`` below
+specifically discriminates the two orderings rather than merely asserting
+one plausible-looking result.
 """
 
 from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
 
 import psycopg
 import pytest
 
 from jobcannon.engine.careers_crawler import _lane1_query_sql, _lane2_query_sql
+from jobcannon.engine.careers_crawler._bench_predicate import (
+    BENCH_CRAWLER_SOURCE,
+    BENCH_STRIKE_THRESHOLD,
+    BENCH_UNATTRIBUTED_ZERO_HIT_REASON,
+    build_bench_predicate_sql,
+)
+from jobcannon.engine.json_utils import utc_now_iso
 from tests.host.conftest import create_throwaway_db, drop_throwaway_db, requires_postgres
 
 pytestmark = requires_postgres
+
+
+def _days_ago_iso(days: int) -> str:
+    """A naive-UTC ISO8601 string *days* in the past, matching
+    utc_now_iso()'s storage convention (bound as a plain parameter, not a
+    SQL datetime() call — the same shape record_scan_outcome's own
+    scanned_at default already uses against this exact column)."""
+    return (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None).isoformat()
 
 
 @pytest.fixture()
@@ -128,12 +146,32 @@ def wired_crawler_services():
         drop_throwaway_db(db_name)
 
 
-def _insert_company(conn, *, name, careers_url, flag_reason=None, careers_crawl_last_at=None):
+def _insert_company(
+    conn,
+    *,
+    name,
+    careers_url,
+    flag_reason=None,
+    careers_crawl_last_at=None,
+    careers_api_endpoint=None,
+    careers_crawl_tier=None,
+):
     row = conn.execute(
         "INSERT INTO companies (name, name_raw, careers_url, careers_scan_enabled, "
-        "ats_probe_status, careers_crawl_flag_reason, careers_crawl_last_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
-        (name, name, careers_url, True, "pending", flag_reason, careers_crawl_last_at),
+        "ats_probe_status, careers_crawl_flag_reason, careers_crawl_last_at, "
+        "careers_api_endpoint, careers_crawl_tier) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+        (
+            name,
+            name,
+            careers_url,
+            True,
+            "pending",
+            flag_reason,
+            careers_crawl_last_at,
+            careers_api_endpoint,
+            careers_crawl_tier,
+        ),
     ).fetchone()
     return row[0]
 
@@ -150,11 +188,33 @@ def _insert_qualifying_posting(conn, *, company_id, dedup_key):
     )
 
 
+def _insert_scan_log_row(
+    conn,
+    *,
+    company_id,
+    jobs_matched=None,
+    failure_reason=None,
+    source=BENCH_CRAWLER_SOURCE,
+    scanned_at=None,
+):
+    """A ``company_scan_log`` row for benching setup. ``scanned_at`` defaults
+    to :func:`utc_now_iso` (matching ``record_scan_outcome``'s own default),
+    well inside any decay window this file exercises."""
+    conn.execute(
+        "INSERT INTO company_scan_log (company_id, source, jobs_matched, failure_reason, "
+        "scanned_at) VALUES (?, ?, ?, ?, ?)",
+        (company_id, source, jobs_matched, failure_reason, scanned_at or utc_now_iso()),
+    )
+
+
 # Lane queries, executed exactly as production builds them (imported above),
-# with the SELECT list restricted to columns that exist on the hosted schema
-# and the bench-decay fragment stubbed to TRUE (see module docstring).
-_LANE1_WHERE_SQL = _lane1_query_sql("c.id, c.name_raw, c.careers_url", "TRUE")
-_LANE2_WHERE_SQL = _lane2_query_sql("c.id, c.name_raw, c.careers_url", "TRUE")
+# with the real SELECT list and the real (un-stubbed) bench predicate — both
+# public #385/#347 (SELECT columns) and #386 (bench predicate) are required
+# for this module to even import cleanly against a live schema.
+_SELECT_COLS = "c.id, c.name_raw, c.careers_url, c.careers_api_endpoint, c.careers_crawl_tier"
+_BENCH_SQL, _BENCH_PARAMS = build_bench_predicate_sql()  # decay_days=21 default
+_LANE1_WHERE_SQL = _lane1_query_sql(_SELECT_COLS, _BENCH_SQL)
+_LANE2_WHERE_SQL = _lane2_query_sql(_SELECT_COLS, _BENCH_SQL)
 
 
 def test_lane1_rediscovery_selects_due_row_excludes_flagged_row(wired_crawler_services):
@@ -172,7 +232,10 @@ def test_lane1_rediscovery_selects_due_row_excludes_flagged_row(wired_crawler_se
         _insert_qualifying_posting(conn, company_id=flagged_id, dedup_key="dk-flagged")
         conn.commit()
 
-        rows = conn.execute(_LANE1_WHERE_SQL, (14,)).fetchall()
+        # Lane 1's freshness placeholder precedes the bench predicate's own
+        # placeholder in the WHERE text (see __init__.py's comment at this
+        # lane's call site), so params are (freshness_days, *bench_params).
+        rows = conn.execute(_LANE1_WHERE_SQL, (14, *_BENCH_PARAMS)).fetchall()
 
     ids = {r[0] for r in rows}
     assert due_id in ids
@@ -193,11 +256,122 @@ def test_lane2_origination_selects_never_crawled_excludes_company_with_existing_
         _insert_qualifying_posting(conn, company_id=already_scored_id, dedup_key="dk-hasjob")
         conn.commit()
 
-        rows = conn.execute(_LANE2_WHERE_SQL, (10,)).fetchall()
+        # Lane 2's bench predicate placeholder precedes the trailing
+        # `LIMIT ?` (see __init__.py's comment at this lane's call site), so
+        # params are (*bench_params, origination_limit).
+        rows = conn.execute(_LANE2_WHERE_SQL, (*_BENCH_PARAMS, 10)).fetchall()
 
     ids = {r[0] for r in rows}
     assert origination_id in ids
     assert already_scored_id not in ids
+
+
+def test_lane2_bench_and_limit_params_bind_to_correct_placeholders(wired_crawler_services):
+    """Discriminates Lane 2's (*bench_params, origination_limit) ordering
+    from its swap (origination_limit, *bench_params) — a swap is otherwise
+    silent, since both values are plain ints and no type error results.
+
+    Setup: a benched company (5 crawler-origin strikes, no hits, all scanned
+    5 days ago) plus two clean, never-crawled companies inserted in
+    ascending id order. decay_days=21 and origination_limit=1 are chosen so
+    a swap flips BOTH halves of the result, not just one:
+
+    Correct binding: decay_days=21 reaches the bench predicate — a 5-day-old
+    strike is well inside a 21-day decay window, so it still counts and the
+    company stays benched (excluded). origination_limit=1 reaches LIMIT —
+    only the lowest-id clean company is returned. Result: exactly 1 row,
+    the smaller-id clean company.
+
+    Swapped binding: decay_days would receive 1 — a 5-day-old strike is
+    OLDER than a 1-day decay window, so it decays away, strikes drop to 0,
+    and the company is no longer benched (included). origination_limit
+    would receive 21 — comfortably above the 3 eligible rows, so LIMIT no
+    longer trims anything. Result under the swap: all 3 companies (including
+    the wrongly-un-benched one), not 1 — this test fails loudly either way
+    a swap occurs, with no timing race (the 5-day offset is computed once,
+    well clear of either decay window's boundary).
+    """
+    svc = wired_crawler_services
+    with svc.connection_factory() as conn:
+        benched_id = _insert_company(
+            conn, name="BenchedCo", careers_url="https://benched.example/careers"
+        )
+        five_days_ago = _days_ago_iso(5)
+        for _ in range(BENCH_STRIKE_THRESHOLD):
+            _insert_scan_log_row(
+                conn,
+                company_id=benched_id,
+                jobs_matched=0,
+                failure_reason=BENCH_UNATTRIBUTED_ZERO_HIT_REASON,
+                scanned_at=five_days_ago,
+            )
+        clean_low_id = _insert_company(
+            conn, name="CleanLowCo", careers_url="https://clean-low.example/careers"
+        )
+        clean_high_id = _insert_company(
+            conn, name="CleanHighCo", careers_url="https://clean-high.example/careers"
+        )
+        conn.commit()
+
+        assert clean_low_id < clean_high_id  # ORDER BY c.id ASC relies on this
+
+        sql, params = build_bench_predicate_sql(21)
+        rows = conn.execute(_lane2_query_sql(_SELECT_COLS, sql), (*params, 1)).fetchall()
+
+    ids = [r[0] for r in rows]
+    assert benched_id not in ids  # decay_days=21 correctly bound to the predicate
+    assert ids == [clean_low_id]  # origination_limit=1 correctly bound to LIMIT
+
+
+def test_bench_predicate_hits_clears_benching_even_with_strikes(wired_crawler_services):
+    """Positive control for the ``hits = 0`` half of the predicate: a
+    company with >= BENCH_STRIKE_THRESHOLD strikes but at least one
+    successful scan (jobs_matched > 0) must NOT be benched."""
+    svc = wired_crawler_services
+    with svc.connection_factory() as conn:
+        company_id = _insert_company(
+            conn, name="RecoveredCo", careers_url="https://recovered.example/careers"
+        )
+        for _ in range(BENCH_STRIKE_THRESHOLD):
+            _insert_scan_log_row(
+                conn,
+                company_id=company_id,
+                jobs_matched=0,
+                failure_reason=BENCH_UNATTRIBUTED_ZERO_HIT_REASON,
+            )
+        _insert_scan_log_row(conn, company_id=company_id, jobs_matched=3)
+        conn.commit()
+
+        sql, params = build_bench_predicate_sql(21)
+        row = conn.execute(
+            f"SELECT {sql} FROM companies c WHERE c.id = ?", (*params, company_id)
+        ).fetchone()
+
+    # The predicate SQL is `NOT EXISTS(<is-benched>)`, so True means the
+    # company is eligible (NOT benched) — one hit clears it despite 5 strikes.
+    assert row[0] is True
+
+
+def test_careers_api_endpoint_and_crawl_tier_round_trip_through_real_select(wired_crawler_services):
+    """Confirms _api_cache.py's writer (careers_api_endpoint) and
+    _escalation.py's readers (both columns) now work against real Postgres
+    (#385, #347): the real lane SELECT list returns the values written."""
+    svc = wired_crawler_services
+    with svc.connection_factory() as conn:
+        company_id = _insert_company(
+            conn,
+            name="WiredCo",
+            careers_url="https://wired.example/careers",
+            careers_api_endpoint="https://wired.example/api/jobs",
+            careers_crawl_tier="static",
+        )
+        conn.commit()
+
+        rows = conn.execute(_LANE2_WHERE_SQL, (*_BENCH_PARAMS, 10)).fetchall()
+
+    row = next(r for r in rows if r[0] == company_id)
+    assert row[3] == "https://wired.example/api/jobs"
+    assert row[4] == "static"
 
 
 def test_ats_probe_status_is_not_hit_would_have_raised_syntax_error_on_postgres(

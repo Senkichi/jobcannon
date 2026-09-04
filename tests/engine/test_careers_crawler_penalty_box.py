@@ -765,10 +765,10 @@ class TestStrikeDecay:
             for _ in range(BENCH_STRIKE_THRESHOLD):
                 _insert_crawler_scan_row(conn, cid, failure_reason="zero_jobs", scanned_at=old_ts)
             conn.commit()
-            predicate = build_bench_predicate_sql()
+            predicate, predicate_params = build_bench_predicate_sql()
             row = conn.execute(
                 f"SELECT c.id FROM companies c WHERE c.id = ? AND {predicate}",
-                (cid,),
+                (cid, *predicate_params),
             ).fetchone()
             assert row is not None, "stale strikes must not exclude the company"
         finally:

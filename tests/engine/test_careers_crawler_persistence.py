@@ -9,7 +9,10 @@ compat.py translation layer. The schema here is
 company_scan_log tables plus the two ``company_scan_log`` columns m0023
 (this row's sibling migration) adds (``source``, ``failure_reason`` --
 ``companies.ats_link_discovery_last_at`` is also added by m0023 but no
-code in this ledger row reads or writes it, so the test schema omits it).
+code in this ledger row reads or writes it, so the test schema omits it),
+plus ``companies.careers_crawl_tier`` (m0029, public #347) -- ``
+_upsert_and_log``'s companies UPDATE now writes it (see ``tier_used``
+below).
 
 ``record_scan_outcome`` is wired to the REAL
 ``jobcannon.engine.ats_scanner._scan_log.record_scan_outcome`` (ledger
@@ -59,6 +62,7 @@ def crawler_db_path(tmp_path):
     create_scan_schema(conn)
     conn.execute("ALTER TABLE company_scan_log ADD COLUMN source TEXT")
     conn.execute("ALTER TABLE company_scan_log ADD COLUMN failure_reason TEXT")
+    conn.execute("ALTER TABLE companies ADD COLUMN careers_crawl_tier TEXT")
     conn.commit()
     conn.close()
 
@@ -101,11 +105,13 @@ def test_success_path_upserts_jobs_and_logs_outcome(crawler_db_path):
         assert len(jobs) == 2
 
         company = conn.execute(
-            "SELECT careers_crawl_last_at, last_scanned_at, jobs_found_total FROM companies WHERE id = ?",
+            "SELECT careers_crawl_last_at, last_scanned_at, careers_crawl_tier, jobs_found_total "
+            "FROM companies WHERE id = ?",
             (company_id,),
         ).fetchone()
         assert company["careers_crawl_last_at"] == "2026-09-03T00:00:00"
         assert company["last_scanned_at"] == "2026-09-03T00:00:00"
+        assert company["careers_crawl_tier"] == "static"
         assert company["jobs_found_total"] == 2
 
         # jobs_matched/jobs_new are NOT selected here: this test's schema

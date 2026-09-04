@@ -5,23 +5,12 @@ After a tier produces a list of `dict` jobs for a company, the
 orchestrator calls these helpers to:
 - Upsert each scraped job (creating a `Job` model object) into the
   `jobs` table.
-- Stamp the company's `careers_crawl_last_at`, `last_scanned_at`, and
-  `jobs_found_total` columns.
-  # PORT-SEAM: careers_crawl_tier dropped, see below (#347)
+- Stamp the company's `careers_crawl_last_at`, `last_scanned_at`,
+  `careers_crawl_tier`, and `jobs_found_total` columns.
 - Append a row to `company_scan_log` for the per-run audit trail via
   `svc.record_scan_outcome`.
 - On a per-company exception, only stamp `careers_crawl_last_at` so a
   consistently-failing company doesn't block stalest-first ordering.
-
-# PORT-SEAM: private also stamps a fourth companies column here,
-# `careers_crawl_tier`. No jobcannon schema (m0001-m0023 checked) carries
-# that column -- it is a pre-existing baseline-port gap unrelated to this
-# row's three HOLD columns (L-0274/L-0276/L-0293, landed by this port's
-# sibling migration m0023), tracked at
-# https://github.com/Senkichi/jobcannon/issues/347. Dropped from the
-# companies UPDATE below rather than silently widening m0023's declared
-# scope; `tier_used` stays a parameter (unused in the body) so the write
-# can be restored with no call-site change once #347 lands.
 
 The `Job` and `ParsedJob` imports are kept lazy inside `_upsert_and_log`,
 matching the sibling `ats_scanner/_run.py` / `_run_html.py` ports' own
@@ -105,7 +94,7 @@ def _upsert_and_log(
     # PORT-SEAM: db_path dropped -- svc.connection_factory() is zero-arg (L-0465)
     summary: dict,
     all_new_job_keys: list[str],
-    tier_used: str,  # PORT-SEAM: unused pending #347 (see module docstring)
+    tier_used: str,
     failure_reason: str | None = None,
 ) -> None:
     """Upsert discovered jobs and update company timestamps.
@@ -195,11 +184,12 @@ def _upsert_and_log(
             """UPDATE companies
                SET careers_crawl_last_at = ?,
                    last_scanned_at = ?,
+                   careers_crawl_tier = ?,
                    jobs_found_total = (
                        SELECT COUNT(*) FROM jobs WHERE company_id = ?
                    )
-               WHERE id = ?""",  # PORT-SEAM: careers_crawl_tier write dropped (#347, see module docstring)
-            (now, now, company_id, company_id),
+               WHERE id = ?""",
+            (now, now, tier_used, company_id, company_id),
         )
         # WI-07 (D10): jobs_found = scraped/found count, jobs_matched = same
         # (the crawler has no post-scrape title filter, so found == matched),

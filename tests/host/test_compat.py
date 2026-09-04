@@ -64,3 +64,34 @@ def test_dormancy_gate_clause_translates_cleanly_end_to_end():
     out = engine_sql_to_host(_dormancy_gate_clause())
     assert "make_interval" in out
     assert "datetime(" not in out
+
+
+def test_bare_column_datetime_rewrite():
+    # public #386: `datetime(scanned_at)` is a column-normalizing cast, valid
+    # only in SQLite (where scanned_at is text-stored ISO8601 — see
+    # careers_crawler/_bench_predicate.py). The hosted `scanned_at` column is
+    # a real `timestamptz` (m0001), so stripping the cast is correct there.
+    from jobcannon.db.compat import engine_sql_to_host
+
+    assert (
+        engine_sql_to_host("datetime(scanned_at) < datetime('now', '-' || ? || ' days')")
+        == "scanned_at < now() - make_interval(days => %s)"
+    )
+
+
+def test_bench_predicate_sql_translates_cleanly_end_to_end():
+    # Regression guard tying the compat rewrite to the actual bench-predicate
+    # SQL text (not a hand-written analog) — same rationale as
+    # test_dormancy_gate_clause_translates_cleanly_end_to_end above, and the
+    # reason tests/host/test_crawl_batch_pg_predicates.py can run the real
+    # crawl_careers_batch lane queries (SELECT list + bench predicate) against
+    # a live Postgres connection instead of a "TRUE" stub (#380 review round
+    # 1, finding B1).
+    from jobcannon.db.compat import engine_sql_to_host
+    from jobcannon.engine.careers_crawler._bench_predicate import build_bench_predicate_sql
+
+    sql, params = build_bench_predicate_sql(21)
+    out = engine_sql_to_host(sql)
+    assert "datetime(" not in out
+    assert "make_interval" in out
+    assert out.count("%s") == len(params) == 1
