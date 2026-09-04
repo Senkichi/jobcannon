@@ -72,6 +72,15 @@ fragment (``_bench_predicate.py``'s ``build_bench_predicate_sql``, whose
 untranslated by compat.py — a third, separate gap, also filed as a
 follow-up) is stubbed to ``TRUE`` here; ``_bench_predicate.py`` itself is
 not touched by this PR.
+
+The two lane queries themselves are NOT hand-copied into this test: both
+are imported from ``jobcannon.engine.careers_crawler`` (``_lane1_query_sql``
+/ ``_lane2_query_sql``) and called with a restricted SELECT list and the
+stubbed bench predicate, so the WHERE clause executed here is byte-identical
+to the one ``crawl_careers_batch`` executes in production (#380 review round
+1, finding B1: an earlier revision hand-copied a comment-stripped duplicate
+of the WHERE clause, which silently diverged from production and did not
+catch the in-SQL-comment regression B1 describes).
 """
 
 from __future__ import annotations
@@ -79,6 +88,7 @@ from __future__ import annotations
 import psycopg
 import pytest
 
+from jobcannon.engine.careers_crawler import _lane1_query_sql, _lane2_query_sql
 from tests.host.conftest import create_throwaway_db, drop_throwaway_db, requires_postgres
 
 pytestmark = requires_postgres
@@ -140,42 +150,11 @@ def _insert_qualifying_posting(conn, *, company_id, dedup_key):
     )
 
 
-# Lane 1 (re-discovery) WHERE clause, matching jobcannon/engine/careers_crawler/
-# __init__.py post-#380 fix verbatim, with the SELECT list restricted to
-# columns that exist on the hosted schema and the bench fragment stubbed to
-# TRUE (see module docstring).
-_LANE1_WHERE_SQL = """SELECT c.id, c.name_raw, c.careers_url
-FROM companies c
-WHERE c.careers_url IS NOT NULL
-  AND c.careers_scan_enabled = TRUE
-  AND c.ats_probe_status IS DISTINCT FROM 'hit'
-  AND c.careers_crawl_flag_reason IS NULL
-  AND (c.careers_crawl_last_at IS NULL
-       OR c.careers_crawl_last_at < datetime('now', '-' || ? || ' days'))
-  AND EXISTS (
-      SELECT 1 FROM jobs j
-      WHERE j.company_id = c.id
-        AND j.classification IN ('apply', 'consider')
-  )
-  AND TRUE
-ORDER BY c.careers_crawl_last_at ASC NULLS FIRST"""
-
-# Lane 2 (origination) WHERE clause, same fix + same restrictions.
-_LANE2_WHERE_SQL = """SELECT c.id, c.name_raw, c.careers_url
-FROM companies c
-WHERE c.careers_url IS NOT NULL
-  AND c.careers_scan_enabled = TRUE
-  AND c.ats_probe_status IS DISTINCT FROM 'hit'
-  AND c.careers_crawl_flag_reason IS NULL
-  AND c.careers_crawl_last_at IS NULL
-  AND NOT EXISTS (
-      SELECT 1 FROM jobs j
-      WHERE j.company_id = c.id
-        AND j.classification IN ('apply', 'consider')
-  )
-  AND TRUE
-ORDER BY c.id ASC
-LIMIT ?"""
+# Lane queries, executed exactly as production builds them (imported above),
+# with the SELECT list restricted to columns that exist on the hosted schema
+# and the bench-decay fragment stubbed to TRUE (see module docstring).
+_LANE1_WHERE_SQL = _lane1_query_sql("c.id, c.name_raw, c.careers_url", "TRUE")
+_LANE2_WHERE_SQL = _lane2_query_sql("c.id, c.name_raw, c.careers_url", "TRUE")
 
 
 def test_lane1_rediscovery_selects_due_row_excludes_flagged_row(wired_crawler_services):
