@@ -1,13 +1,14 @@
 """Procrastinate task-shape declarations for the hosted job taxonomy, plus the
 periodic enqueue tick, storage-check tick, orphaned-job reclaim tick,
 anon-user reap tick, events-retention reap tick, deletion-reconciliation
-sweep tick, and revoked-subjects reap tick that fire on a schedule.
+sweep tick, revoked-subjects reap tick, and jd-adjudication tick that fire on
+a schedule.
 
-Task shapes (`scan`, `expiry_check`, `stale_detect`) and the seven periodics
+Task shapes (`scan`, `expiry_check`, `stale_detect`) and the eight periodics
 (`enqueue_due_scans`, `db_storage_check`, `reclaim_orphaned_jobs`,
 `reap_anon_users`, `reap_old_events`, `reconcile_deleted_users`,
-`reap_revoked_subjects`, each declared with `@app.periodic` + `@app.task`
-below) all live here — this ONE
+`reap_revoked_subjects`, `jd_adjudication`, each declared with
+`@app.periodic` + `@app.task` below) all live here — this ONE
 `procrastinate.App` instance (constructed below) is the sole periodic-task
 scheduling mechanism in this codebase; a new periodic task is another peer
 registered on it, never a second scheduler. 'enrich' is intentionally not defined: no enrich hook exists
@@ -407,3 +408,29 @@ def reap_revoked_subjects(timestamp: int) -> dict:
     with connection_factory() as conn:
         reaped_ids = prune_expired_revocations(conn)
     return {"reaped": len(reaped_ids)}
+
+
+@app.periodic(
+    cron=os.environ.get("JC_JD_ADJUDICATION_CRON", "0 12 * * *"),
+    periodic_id="jd_adjudication",
+)
+@app.task(queue="maintenance", queueing_lock="jd_adjudication")
+def jd_adjudication(timestamp: int) -> dict:
+    """Periodic tick (L-0189, issue #183): adjudicates a bounded batch of
+    AMBIGUOUS jd_full rows via jobcannon.host.jd_adjudication_backfill, so
+    postings.jd_adjudicated_version gets stamped non-NULL for rows the
+    deterministic jd-content contract can't resolve on its own (CLEAN/REJECT).
+
+    This is the writer tests/test_scoring_precheck_wiring_guard.py (#183)
+    requires exist under jobcannon/db/ before any host/db/worker module may
+    wire scoring (score_and_persist_job / job_scorer.score_job /
+    scoring_precheck). Landing this task does NOT itself wire scoring --
+    see jobcannon/host/jd_adjudication_backfill.py's module docstring."""
+    from jobcannon.db import connection_factory
+    from jobcannon.engine import runtime_config
+    from jobcannon.host import model_provider as _model_provider
+    from jobcannon.host.jd_adjudication_backfill import run_jd_adjudication_backfill
+
+    config = runtime_config.get_runtime_config()
+    with connection_factory() as conn:
+        return run_jd_adjudication_backfill(conn, config, call_model=_model_provider.call_model)

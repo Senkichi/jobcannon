@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04T06:59:48Z",
+  "generated_at": "2026-09-04T07:07:25Z",
   "roots": [
     "engine",
     "db",
@@ -154,6 +154,24 @@
         {
           "line": 44,
           "text": "``job_finder/db/_queries.py``'s ``get_filtered_jobs`` allowlist @"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/db/_jd_adjudication.py",
+      "root": "db",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/jd_adjudicator.py @ 0cbf333a (private job-cannon). Ledger L-0189."
+        },
+        {
+          "line": 122,
+          "text": "# so the eligibility invariant stays single-sourced (mirrors the private"
+        },
+        {
+          "line": 123,
+          "text": "# original's `_eligible` string)."
         }
       ]
     },
@@ -1472,6 +1490,20 @@
       ]
     },
     {
+      "path": "jobcannon/engine/jd_adjudicator.py",
+      "root": "engine",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/jd_adjudicator.py @ 0cbf333a (private job-cannon). Ledger L-0189."
+        },
+        {
+          "line": 11,
+          "text": "# PORT-SEAM: the module-level `from job_finder.web.model_provider import"
+        }
+      ]
+    },
+    {
       "path": "jobcannon/engine/jd_content_contract.py",
       "root": "engine",
       "markers": [
@@ -2184,6 +2216,20 @@
         {
           "line": 229,
           "text": "source's ``config`` parameter did -- no per-user override storage is"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/jd_adjudication_backfill.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/web/jd_adjudicator.py @ 0cbf333a (private job-cannon). Ledger L-0189."
+        },
+        {
+          "line": 6,
+          "text": "the caller, matching the private original and the DI-injected ``call_model``"
         }
       ]
     },
