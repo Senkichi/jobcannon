@@ -13,9 +13,11 @@ posting. The fix rejects the tile shape at the source boundary.
 
 Ported from the private repo's tests/test_listing_tile_filter.py. Layer 3
 (the static-tier early-drop, ``_extract_jobs_from_soup`` in
-``job_finder.web.careers_crawler._static_tier``) is NOT ported — that module
-is outside this task's manifest. The denylist seam is adapted: the private
-repo patched load_config/get_company_denylist; the engine port drives
+``jobcannon.engine.careers_crawler._static_tier``) landed with L-0464/
+L-0469 (crawler-3, riding the L-0443 umbrella) but is exercised through its
+own module's tests, not this file — this file stays scoped to the pure
+predicate, unchanged. The denylist seam is adapted: the private repo
+patched load_config/get_company_denylist; the engine port drives
 parsed_job.set_denylist_provider instead (Step 7a).
 """
 

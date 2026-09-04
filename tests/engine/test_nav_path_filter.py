@@ -3,17 +3,16 @@
 Ported from the private repo's tests/test_careers_crawler.py
 (`test_filters_nav_segments_nested_under_portal_prefix`), which exercises
 this logic indirectly through `_extract_jobs_from_soup` on the static-tier
-crawler. That consumer (`job_finder.web.careers_crawler._static_tier` /
-`_extract_jobs_from_soup`) is outside this task's manifest — the engine's
-`careers_crawler` package is only the `_title_contract` / `_title_filters`
-subpackage, not the full crawler. The port therefore targets the pure
-predicate directly rather than the HTML-extraction path around it; the
-assertions are the same (segment-nested nav paths are rejected, a real job
-path is not).
+crawler. That consumer (`jobcannon.engine.careers_crawler._static_tier` /
+`_extract_jobs_from_soup`) landed with L-0464/L-0469 (crawler-3, riding the
+L-0443 umbrella), but this file stays scoped to the pure predicate rather
+than switching to the HTML-extraction path around it; the assertions are
+the same (segment-nested nav paths are rejected, a real job path is not).
 
-`_is_nav_path` currently has no caller inside the public engine package —
-this file exists to keep the predicate's behavior pinned (manifest sync)
-ahead of a future crawler-tier port that will wire it up.
+`_is_nav_path` now has a caller inside the public engine package
+(`_static_tier._extract_candidates`, via `_static_tier`'s own import of
+`_title_filters`) — this file continues to pin the predicate's behavior
+directly.
 """
 
 from __future__ import annotations

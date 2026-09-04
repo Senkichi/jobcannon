@@ -224,6 +224,29 @@ class ScanServices:
     # company_scan_log row, not the job upsert.
     record_scan_outcome: Callable[..., int] | None = None
 
+    # L-0469. Careers-crawler per-company autoheal-override seam
+    # (careers_crawler/_autoheal_seam.py). Flat optional fields rather than
+    # a single "autoheal service handle" -- this ledger row's own `seam`
+    # text names the latter, but the wave-3 crawler-cascade design note
+    # supersedes it: three independently-optional hooks so a host can wire
+    # override-loading and extraction-recording separately, and so the
+    # bare-sqlite3 tests/engine/ harness can fake either half alone.
+    load_careers_override: Callable[..., Any] | None = None
+    #   matches job_finder.web.autoheal.override_loader.careers_recipe(source)
+    #   -> HtmlRecipe | None. `source` is the pure `careers:{hostname}` key
+    #   (ported inline as a private function in _autoheal_seam.py -- see
+    #   that module's own docstring; not a seam, per the design note).
+    extract_careers_recipe: Callable[..., Any] | None = None
+    #   matches job_finder.web.autoheal.recipe_extractor.careers_recipe_extract(
+    #   recipe, html, base_url) -> list[dict]
+    record_careers_extraction: Callable[..., None] | None = None
+    #   matches job_finder.web.autoheal.health_monitor.record_extraction(conn,
+    #   source, surface, raw_text, job_count, *, scrub_identifiers=None,
+    #   detect=True, legacy_count=None, extractor="legacy", filtered_count=None)
+    #   -> None. `conn` comes from `svc.connection_factory()` inside the port
+    #   (private opened its own `standalone_connection(db_path)`) -- db_path
+    #   dropped, matching the record_scan_outcome/L-0465 convention above.
+
 
 _active: ScanServices | None = None
 
