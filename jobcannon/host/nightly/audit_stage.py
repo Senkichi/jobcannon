@@ -218,7 +218,9 @@ def _aggregate_jd_quality_flag(summary: dict, dedup_key: str, flag: Any) -> None
         return
     value = str(flag)
     if value not in _VALID_JD_QUALITY_FLAGS:
-        logger.warning("nightly audit entry %r has unrecognized jd_quality_flag: %r", dedup_key, value)
+        logger.warning(
+            "nightly audit entry %r has unrecognized jd_quality_flag: %r", dedup_key, value
+        )
     summary["jd_quality_flags"][value] = summary["jd_quality_flags"].get(value, 0) + 1
     summary["jd_quality_flagged"] += 1
     summary["jd_quality_flagged_keys"].append(dedup_key)
@@ -233,7 +235,9 @@ def _aggregate_jd_content_verdict(summary: dict, dedup_key: str, verdict: Any) -
         return
     value = str(verdict)
     if value not in _VALID_JD_CONTENT_VERDICTS:
-        logger.warning("nightly audit entry %r has unrecognized jd_content_verdict: %r", dedup_key, value)
+        logger.warning(
+            "nightly audit entry %r has unrecognized jd_content_verdict: %r", dedup_key, value
+        )
     summary["jd_content_verdicts"][value] = summary["jd_content_verdicts"].get(value, 0) + 1
 
 
@@ -259,7 +263,9 @@ def _truncate_job_for_budget(job: dict, max_batch_chars: int) -> dict:
     return truncated
 
 
-def _build_batches(candidates: list[dict], batch_size: int, max_batch_chars: int) -> list[list[dict]]:
+def _build_batches(
+    candidates: list[dict], batch_size: int, max_batch_chars: int
+) -> list[list[dict]]:
     """Split *candidates* into batches bounded by both item count
     (*batch_size*) and serialized-size budget (*max_batch_chars*).
     """
@@ -331,10 +337,14 @@ def run_audit_stage(
 
     if call_model is None:
         summary["unavailable"] = True
-        summary["unavailable_reason"] = "no call_model dispatcher wired (owner-tenant identity unresolved)"
+        summary["unavailable_reason"] = (
+            "no call_model dispatcher wired (owner-tenant identity unresolved)"
+        )
         return summary
 
-    batches = _build_batches(candidates, audit_cfg["batch_size"], audit_cfg["max_batch_input_chars"])
+    batches = _build_batches(
+        candidates, audit_cfg["batch_size"], audit_cfg["max_batch_input_chars"]
+    )
     summary["total_batches"] = len(batches)
     retries = audit_cfg["max_batch_retries"]
 
@@ -363,7 +373,9 @@ def run_audit_stage(
                 model="score",
                 verdict=verdict,
                 audited_sub_scores_json=job_record["sub_scores_json"],
-                axis_deltas_json=json.dumps(deltas) if isinstance(deltas, dict) and deltas else None,
+                axis_deltas_json=json.dumps(deltas)
+                if isinstance(deltas, dict) and deltas
+                else None,
                 jd_quality_flag=str(flag) if flag else None,
                 notes=str(notes)[:_NOTES_CLIP] if notes else None,
             )
@@ -474,7 +486,8 @@ def run_audit_stage(
     else:
         summary["coverage_failure"] = (
             summary["total_candidates"] > 0
-            and (summary["audited"] / summary["total_candidates"]) < audit_cfg["coverage_alarm_threshold"]
+            and (summary["audited"] / summary["total_candidates"])
+            < audit_cfg["coverage_alarm_threshold"]
         ) or summary["failed_batch_fraction"] > audit_cfg["failed_batch_fraction_alarm_threshold"]
 
     return summary

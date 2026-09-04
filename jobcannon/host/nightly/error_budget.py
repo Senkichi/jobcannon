@@ -102,9 +102,7 @@ def _per_source_counts(conn: Any, window_start: datetime, window_end: datetime) 
     return {r["source"]: r["n"] for r in rows}
 
 
-def _signature_patterns(
-    conn: Any, window_start: datetime, window_end: datetime
-) -> dict[str, int]:
+def _signature_patterns(conn: Any, window_start: datetime, window_end: datetime) -> dict[str, int]:
     """Counts keyed "source:kind" -- the structured analog of private's
     log-line-text signature-pattern grouping (config-driven {pattern,
     severity} regexes matched over free text). ``kind`` is whatever string
