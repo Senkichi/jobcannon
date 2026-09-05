@@ -1,30 +1,37 @@
 """ADAPTED from job_finder/web/nightly_monitor/_checkpoint.py (verdict half)
-@ e1f47695b07f928e6c91cc64767c97a99645d68f (private job-cannon).
-Ledger L-0471, L-0585.
+@ 5221e7e6518c67e62996219e1c7c56747f10dd8f (private job-cannon).
+Ledger L-0471, L-0585, L-0607. (5221e7e6 is the commit on the private #2120
+worker branch that never opened a PR; the orchestrator salvaged the same
+diff onto private main as 1ecb8bb78bf6c9460dc1e6d7e7f90ae788b3d89e --
+confirmed byte-identical for both this file and the carried test below -- so
+a fidelity run pinned to 5221e7e6 reports 1 stale commit against private
+main, which is this salvage landing, not further drift.)
 
 Checkpoint verdict: given an evidence packet from checkpoint_packet.py
 (the other half of this port's file split), call the injected verdict
 model and run the packet-falsification guard chain over its answer.
 
-Two forced rules run BEFORE any model call: disposition=failed (the
-authoritative per-run signal) is a FAIL regardless of model opinion, and
+Three forced rules run BEFORE any model call: disposition=failed (the
+authoritative per-run signal) is a FAIL regardless of model opinion,
 disposition=orphaned (a run that ended with no terminal outcome -- no
-duration, result, or error) is an ANOMALY regardless of model opinion, so it
-can never silently resolve to PASS. A fail-severity signature is NOT forced
--- hits are matched over the whole tick's log window and carry no run_id, so
-forcing FAIL would blame every job sharing the tick with another job's
-failure line; the hits go into the packet and the attribution-aware model
-adjudicates. These are the private implementation's own rules, stated in its
-docstring (private #2107), and this port preserves them byte-identical --
-disposition=failed and disposition=orphaned only; the forced path keeps an
-orphan out of the post-return reason filter's reach, since the filter can
-empty a bare packet's reason list and would otherwise downgrade ANOMALY to
-PASS. Otherwise the verdict comes from the injected ``call_model`` at
-workload tier "quick". Unparseable model output => ANOMALY; verdict-call
-failures (missing call_model, provider/transport/cascade exhausted) =>
-VERDICT_UNAVAILABLE -- both are fail-safe and not alarming, but only the
-latter carries the infra-failure signal so morning review can separate job
-anomalies from scorer outages (issue #1402).
+duration, result, or error) is an ANOMALY regardless of model opinion, and
+disposition=degraded with a non-null ``error`` (private #2120) is an ANOMALY
+regardless of model opinion, so none of the three can silently resolve to
+PASS. A fail-severity signature is NOT forced -- hits are matched over the
+whole tick's log window and carry no run_id, so forcing FAIL would blame
+every job sharing the tick with another job's failure line; the hits go into
+the packet and the attribution-aware model adjudicates. These are the
+private implementation's own rules, stated in its docstring (private #2107,
+#2120), and this port preserves them byte-identical -- disposition=failed,
+disposition=orphaned, and disposition=degraded+error only; forcing these
+verdicts pre-model keeps them out of the post-return reason filter's reach,
+since the filter can empty a bare packet's reason list and would otherwise
+downgrade ANOMALY to PASS. Otherwise the verdict comes from the injected
+``call_model`` at workload tier "quick". Unparseable model output => ANOMALY;
+verdict-call failures (missing call_model, provider/transport/cascade
+exhausted) => VERDICT_UNAVAILABLE -- both are fail-safe and not alarming, but
+only the latter carries the infra-failure signal so morning review can
+separate job anomalies from scorer outages (issue #1402).
 
 # PORT-SEAM: call_model is an injected optional keyword parameter
 # (default None), matching jobcannon.engine.job_scorer.score_job's
@@ -51,7 +58,19 @@ anomalies from scorer outages (issue #1402).
 # path modeled on jobcannon.host.tasks.reclaim_orphaned_jobs), matching how
 # call_model above is ported unwired ahead of its caller.
 #
-# jd_full_loss_excess (private's third forced rule, ANOMALY on a
+# PORT-SEAM: disposition=degraded+error reachability (private #2120) -- the
+# same sampler.py ``_STATUS_TO_DISPOSITION`` map has no "degraded" entry
+# either, and procrastinate has no "degraded" job status, so no current host
+# caller emits this disposition value today (baselines.py's own
+# ``_TERMINAL_OK = ("completed", "degraded")`` shows "degraded" is already a
+# recognized terminal-outcome token elsewhere in this module tree -- it is
+# simply not yet wired to a producer that emits it as a checkpoint packet's
+# ``disposition``). The forced branch is ported anyway, byte-identical to the
+# private rule, dormant and safe to ship ahead of a producer -- matching how
+# the orphaned branch above and the call_model seam are both ported unwired
+# ahead of their callers.
+#
+# jd_full_loss_excess (private's fourth forced rule, ANOMALY on a
 # jd_full-loss invariant violation) is DROPPED, not ported: it imports
 # `job_finder.web.run_events.jd_full_loss_excess`, a module outside
 # nightly_monitor/ with no host analog, and it operates on `db_delta`,
@@ -59,11 +78,12 @@ anomalies from scorer outages (issue #1402).
 # docstring). A stub that always returns 0 would look implemented when it
 # is not, so the branch is absent rather than inert. Forced verdicts here
 # are scoped to exactly what the private code's own docstring specifies:
-# disposition=failed (FAIL) and disposition=orphaned (ANOMALY) only -- no
-# other disposition value is forced. A fail-severity signature is
-# adjudicated by the model like any other packet evidence, matching the
-# private implementation -- FAIL escalation to a recorded health-log ERROR
-# is a sampler-level concern, not this function's internal forcing rule.
+# disposition=failed (FAIL), disposition=orphaned (ANOMALY), and
+# disposition=degraded+error (ANOMALY) only -- no other disposition value
+# is forced. A fail-severity signature is adjudicated by the model like any
+# other packet evidence, matching the private implementation -- FAIL
+# escalation to a recorded health-log ERROR is a sampler-level concern, not
+# this function's internal forcing rule.
 
 The packet that reaches the model is a *semantic* view of the run. Raw
 ``db_delta`` integers are replaced by a precomputed ``db_delta_summary`` that
@@ -962,8 +982,9 @@ def checkpoint_verdict(
     config: dict | None = None,
 ) -> dict:
     """Forced verdicts on the authoritative per-run signals: disposition=failed
-    (FAIL) and disposition=orphaned (ANOMALY); everything else is
-    model-adjudicated (private #2107; see module docstring).
+    (FAIL), disposition=orphaned (ANOMALY), and disposition=degraded with a
+    non-null ``error`` (ANOMALY); everything else is model-adjudicated
+    (private #2107, #2120; see module docstring).
 
     A fail-severity signature is deliberately NOT a forced FAIL: hits are matched
     over the whole tick's log window and carry no run_id, so forcing FAIL here
@@ -984,6 +1005,20 @@ def checkpoint_verdict(
     PASS -- recording a run that never reported an outcome as passing.
     Forcing pre-model bypasses the reason filter entirely, exactly as
     ``failed`` does.
+
+    ``disposition=degraded`` with a non-null ``error`` is forced to ANOMALY
+    pre-model (private #2120): ``degraded`` means the runner detected a
+    partial failure and the ``error`` string is the runner's own description
+    of what went wrong, so a run whose packet carries such an error is by
+    definition not clean and must never resolve to PASS. Without a forced
+    path the verdict fell to the model and the same post-return reason
+    guards, which can empty the reason list on such a packet and downgrade
+    ANOMALY to PASS -- recording a run whose own packet says something failed
+    as clean. Forcing pre-model and carrying the packet's own ``error`` into
+    ``reasons`` bypasses the reason filter entirely, exactly as ``failed`` and
+    ``orphaned`` do. A degraded run with a null/empty ``error`` is NOT forced:
+    the runner signalled degradation but supplied no specific failure
+    description, so the model adjudicates from the rest of the packet.
 
     Every return path carries ``rejected_reasons``: the count of model-supplied
     reasons dropped by the deterministic post-verdict guards as fabricated
@@ -1015,6 +1050,18 @@ def checkpoint_verdict(
                 "disposition=orphaned (run ended with no terminal event; "
                 "process was reaped or wedged before reporting an outcome)"
             ],
+            "forced": True,
+            "rejected_reasons": 0,
+        }
+    if packet.get("disposition") == "degraded" and packet.get("error"):
+        # PORT-SEAM: private #2120 -- a degraded run whose packet carries a
+        # non-null error cannot be adjudicated PASS. Force ANOMALY pre-model
+        # so the reason filter cannot empty the reason list and downgrade to
+        # PASS, exactly as disposition=failed and disposition=orphaned force
+        # their verdicts above.
+        return {
+            "verdict": "ANOMALY",
+            "reasons": [f"disposition=degraded (error={packet.get('error')})"],
             "forced": True,
             "rejected_reasons": 0,
         }
