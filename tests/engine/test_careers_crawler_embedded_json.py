@@ -30,7 +30,7 @@ class TestEmbeddedJsonTier:
 
         # URLs should be resolved
         urls = [job["url"] for job in result]
-        assert all(url.startswith("https://example.com") for url in urls)
+        assert all(url.startswith("https://example.com/") for url in urls)
 
     def test_extracts_from_nuxt_fixture(self):
         """Walker extracts jobs from __NUXT__ fixture."""
