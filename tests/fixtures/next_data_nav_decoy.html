@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Company Careers</title>
+    <!--
+      REALISTIC false-positive decoy: a department/category navigation menu whose
+      objects DO carry genuine title + url keys (unlike next_data_decoy.html, whose
+      product objects lack them). This exercises the meaningful guard — the
+      role-aware _title_matches() filter — rather than the coarse title+url key gate.
+      A homogeneous {title, url} nav array PASSES the key gate and is selected by the
+      walker, so the tier must reject it downstream on title semantics, not structure.
+    -->
+    <script id="__NEXT_DATA__" type="application/json">
+    {
+        "props": {
+            "pageProps": {
+                "navigation": [
+                    {
+                        "title": "Engineering",
+                        "url": "/departments/engineering"
+                    },
+                    {
+                        "title": "Data Science",
+                        "url": "/departments/data-science"
+                    },
+                    {
+                        "title": "Design",
+                        "url": "/departments/design"
+                    },
+                    {
+                        "title": "Marketing",
+                        "url": "/departments/marketing"
+                    },
+                    {
+                        "title": "Product Management",
+                        "url": "/departments/product"
+                    },
+                    {
+                        "title": "Sales",
+                        "url": "/departments/sales"
+                    }
+                ]
+            }
+        }
+    }
+    </script>
+</head>
+<body>
+    <div id="__next"></div>
+</body>
+</html>
