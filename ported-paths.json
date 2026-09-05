@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-05T00:25:27Z",
+  "generated_at": "2026-09-05T18:13:14Z",
   "roots": [
     "engine",
     "db",
@@ -2788,23 +2788,23 @@
           "text": "\"\"\"ADAPTED from job_finder/web/nightly_monitor/_checkpoint.py (verdict half)"
         },
         {
-          "line": 56,
+          "line": 75,
           "text": "# `job_finder.web.run_events.jd_full_loss_excess`, a module outside"
         },
         {
-          "line": 95,
+          "line": 115,
           "text": "whatever the packet carries, and its logic carries over from the private"
         },
         {
-          "line": 96,
+          "line": 116,
           "text": "original unchanged function-for-function -- verified by a name-and-body"
         },
         {
-          "line": 97,
+          "line": 117,
           "text": "extraction diff against the private source at the pinned SHA (all 29"
         },
         {
-          "line": 104,
+          "line": 124,
           "text": "raw text diff against the private original is expected to show prose-only"
         }
       ]
