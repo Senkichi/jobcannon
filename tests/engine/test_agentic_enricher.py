@@ -645,7 +645,9 @@ class TestEnrichSingleJob:
             # company domain and mask what this test targets. Pin the fetch
             # order explicitly: the generic landing page must be tried FIRST
             # (and rejected) before the loop reaches the real posting.
-            patch("jobcannon.engine.agentic_enricher._search_ddg") as mock_ddg,  # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
+            patch(
+                "jobcannon.engine.agentic_enricher._search_ddg"
+            ) as mock_ddg,  # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
             patch("jobcannon.engine.agentic_enricher._rank_urls") as mock_rank,
             patch(
                 "jobcannon.engine.agentic_enricher._fetch_page_text"
@@ -679,10 +681,10 @@ class TestEnrichSingleJob:
         )  # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
         assert "Responsibilities" in result
         assert "Welcome to Acme Corp Careers" not in result
+        # Both pages clear the jd_content_reject pre-filter (neither hits a
+        # deterministic REJECT signal), so _validate_page is reached for both —
+        # the shape gate rejects the generic page's LLM "match" afterward.
         assert mock_validate.call_count == 2
-
-    # PORT-SEAM: explanatory comment on the jd_content_reject pre-filter trimmed for the public port (behavior/assertions unchanged)
-    # PORT-SEAM: adapted for the public ScanServices/call_model seam (see module docstring)
 
     def test_concurrent_ddg_queries_merge_and_deduplicate(self):
         """All generated DDG queries are searched concurrently and their results
@@ -732,9 +734,9 @@ class TestEnrichSingleJob:
         mock_time = MagicMock(wraps=_real_time)
 
         with (
+            # PORT-SEAM: call_model kwarg replaces the private
+            # OllamaProvider/model_provider.call_model patch
             patch("jobcannon.engine.agentic_enricher._search_ddg") as mock_ddg,
-            # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
-            # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
             patch("jobcannon.engine.agentic_enricher._fetch_page_text") as mock_fetch,
             patch("jobcannon.engine.agentic_enricher._validate_page") as mock_validate,
             patch("jobcannon.engine.agentic_enricher.time", mock_time),
@@ -807,9 +809,9 @@ class TestEnrichSingleJob:
             ]
 
         with (
+            # PORT-SEAM: call_model kwarg replaces the private
+            # OllamaProvider/model_provider.call_model patch
             patch("jobcannon.engine.agentic_enricher._search_ddg") as mock_ddg,
-            # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
-            # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
             patch("jobcannon.engine.agentic_enricher._fetch_page_text") as mock_fetch,
             patch("jobcannon.engine.agentic_enricher._validate_page") as mock_validate,
         ):
@@ -854,9 +856,9 @@ class TestEnrichSingleJob:
             return [{"href": "https://example.com/job/1", "title": "t", "body": "b"}]
 
         with (
+            # PORT-SEAM: call_model kwarg replaces the private
+            # OllamaProvider/model_provider.call_model patch
             patch("jobcannon.engine.agentic_enricher._search_ddg") as mock_ddg,
-            # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
-            # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
             patch("jobcannon.engine.agentic_enricher._fetch_page_text") as mock_fetch,
             patch("jobcannon.engine.agentic_enricher._validate_page") as mock_validate,
         ):
@@ -918,13 +920,21 @@ class TestEnrichSingleJob:
 
         assert (
             enrich_single_job(
-                {"title": "", "company": "Acme"}, page, conn=None, config={}, call_model=call_model  # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
+                {"title": "", "company": "Acme"},
+                page,
+                conn=None,
+                config={},
+                call_model=call_model,  # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
             )
             is None
         )
         assert (
             enrich_single_job(
-                {"title": "DS", "company": ""}, page, conn=None, config={}, call_model=call_model  # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
+                {"title": "DS", "company": ""},
+                page,
+                conn=None,
+                config={},
+                call_model=call_model,  # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
             )
             is None
         )
@@ -968,13 +978,15 @@ class TestFetchPageTextLinkedinRouting:
         from jobcannon.engine.agentic_enricher import _fetch_page_text
 
         page = MagicMock()
+        # Mock Playwright returning HTML
         page.content.return_value = "<html><body><p>Job description</p></body></html>"
-        # PORT-SEAM: adapted for the public ScanServices/call_model seam (see module docstring)
 
         with (
             patch("jobcannon.engine.agentic_enricher.fetch_linkedin_jd") as mock_li,
             patch("jobcannon.engine.agentic_enricher.is_short_auth_page", return_value=False),
-            patch("jobcannon.engine.agentic_enricher.is_chrome_or_login_page", return_value=False),  # PORT-SEAM: patch target moves to agentic_enricher (public module consolidates the private enrichment_tiers helpers)
+            patch(
+                "jobcannon.engine.agentic_enricher.is_chrome_or_login_page", return_value=False
+            ),  # PORT-SEAM: patch target moves to agentic_enricher (public module consolidates the private enrichment_tiers helpers)
         ):
             mock_li.return_value = None  # LinkedIn extractor fails  # PORT-SEAM: patch target moves to agentic_enricher (public module consolidates the private enrichment_tiers helpers)
 
@@ -994,7 +1006,9 @@ class TestFetchPageTextLinkedinRouting:
         with (
             patch("jobcannon.engine.agentic_enricher.fetch_linkedin_jd") as mock_li,
             patch("jobcannon.engine.agentic_enricher.is_short_auth_page", return_value=False),
-            patch("jobcannon.engine.agentic_enricher.is_chrome_or_login_page", return_value=False),  # PORT-SEAM: patch target moves to agentic_enricher (public module consolidates the private enrichment_tiers helpers)
+            patch(
+                "jobcannon.engine.agentic_enricher.is_chrome_or_login_page", return_value=False
+            ),  # PORT-SEAM: patch target moves to agentic_enricher (public module consolidates the private enrichment_tiers helpers)
         ):
             mock_li.return_value = None  # PORT-SEAM: patch target moves to agentic_enricher (public module consolidates the private enrichment_tiers helpers)
 
@@ -1022,7 +1036,9 @@ class TestFetchPageTextNetworkidle:
         with (
             patch("jobcannon.engine.agentic_enricher.fetch_linkedin_jd", return_value=None),
             patch("jobcannon.engine.agentic_enricher.is_short_auth_page", return_value=False),
-            patch("jobcannon.engine.agentic_enricher.is_chrome_or_login_page", return_value=False),  # PORT-SEAM: patch target moves to agentic_enricher (public module consolidates the private enrichment_tiers helpers)
+            patch(
+                "jobcannon.engine.agentic_enricher.is_chrome_or_login_page", return_value=False
+            ),  # PORT-SEAM: patch target moves to agentic_enricher (public module consolidates the private enrichment_tiers helpers)
         ):
             _fetch_page_text(
                 page, "https://boards.greenhouse.io/acme/jobs/1"
@@ -1052,7 +1068,9 @@ class TestFetchPageTextNetworkidle:
 
         page = MagicMock()
         page.content.return_value = "<html><body>" + "A" * 500 + "</body></html>"
-        page.wait_for_load_state.side_effect = TimeoutError("timeout")  # PORT-SEAM: builtin TimeoutError replaces PlaywrightTimeoutError (playwright not installed in this dev venv)
+        page.wait_for_load_state.side_effect = TimeoutError(
+            "timeout"
+        )  # PORT-SEAM: builtin TimeoutError replaces PlaywrightTimeoutError (playwright not installed in this dev venv)
 
         with (
             patch(
@@ -1073,11 +1091,16 @@ class TestAgenticEnricherImportWithoutPlaywright:
     pytest-playwright); every playwright import in this module must be lazy and
     guarded so a non-dev install never crashes on module import.
 
+    # PORT-SEAM: private-only regression narrative (a private PR/issue pair
+    # and a private scheduler module with no public equivalent) redacted here.
+
     Simulates absence via a fake site-packages directory prepended to
     PYTHONPATH, containing a ``playwright`` stub that raises ImportError on
     import. Runs in a subprocess so the fake package genuinely shadows any
     real playwright install and no playwright state leaks into other tests
     via sys.modules.
+    # PORT-SEAM: private cross-file test reference (test_main_cli.py) redacted;
+    # that test module does not exist publicly.
     """
 
     def test_import_and_fetch_survive_missing_playwright(
@@ -1187,6 +1210,9 @@ class TestEnrichSingleJobObservability:
         jd_content_contract.py's own comments for the full #1892/#1813
         rationale -- both issue numbers are already public there, since it
         documents the already-landed public module's own behavior).
+        # PORT-SEAM: private-only mechanism narrative (company_absent stem
+        # derivation internals) redacted; jd_content_contract.py's own
+        # comments carry the #1892/#1813 rationale.
         """
         from jobcannon.engine.agentic_enricher import enrich_single_job
 
@@ -1203,6 +1229,9 @@ class TestEnrichSingleJobObservability:
         job_row = {
             "title": "Data Scientist",
             "company": "Zo",
+            # PORT-SEAM: private-only "was 0 stems under #1813" detail dropped
+            # from the trailing comment below; both issue numbers stay public
+            # via jd_content_contract.py's own comments.
         }  # 2-char company → "zo" stem under #1892 (see jd_content_contract.py)
         page = MagicMock()
 
@@ -1249,9 +1278,10 @@ class TestEnrichSingleJobObservability:
         # PORT-SEAM: logger name moves with the module.
         with caplog.at_level(logging.INFO, logger="jobcannon.engine.agentic_enricher"):
             with (
+                # PORT-SEAM: call_model kwarg replaces the private
+                # OllamaProvider/model_provider.call_model patch
                 patch("jobcannon.engine.agentic_enricher._search_ddg") as mock_ddg,
                 patch("jobcannon.engine.agentic_enricher._fetch_page_text") as mock_fetch,
-                # PORT-SEAM: call_model kwarg replaces the private OllamaProvider/model_provider.call_model patch
             ):
                 mock_ddg.return_value = [
                     {"href": "https://example.com/job/1", "title": "t", "body": "b"},
@@ -1276,13 +1306,22 @@ class TestEnrichSingleJobObservability:
         )
 
 
+# PORT-SEAM: TestRunAgenticBackfillIsolation class body deleted from this
+# position -- it is relocated in full below, unchanged, immediately after
+# this section header.
+
 # ---------------------------------------------------------------------------
 # _is_social_post_url() and _rank_urls() — social-surface URL filtering  # PORT-SEAM: test class relocated later in the file during the port (unchanged content -- see TestRunAgenticBackfillIsolation below); private issue cross-reference redacted from public prose
 # ---------------------------------------------------------------------------
 
 
+# PORT-SEAM: the private per-job-isolation section header that used to close
+# here is consolidated into the single header above.
 class TestSocialPostUrlFilter:
-    """Social-post URL path patterns are filtered by _rank_urls."""
+    """Social-post URL path patterns are filtered by _rank_urls.
+
+    # PORT-SEAM: private issue cross-reference redacted from public prose.
+    """
 
     def test_linkedin_posts_url_is_social(self):
         from jobcannon.engine.agentic_enricher import _is_social_post_url
@@ -1381,6 +1420,8 @@ class TestSearchDdg:
 # ---------------------------------------------------------------------------
 # requeue_or_expire_agentic_exhausted() — bounded retry + expiry (T2.9 / D21,
 # already public in agentic_enricher.py's own comments)
+# PORT-SEAM: header reworded; T2.9/D21 stay public via agentic_enricher.py's
+# own comments (see also data_enricher.py's precedent).
 # ---------------------------------------------------------------------------
 
 
@@ -1390,6 +1431,9 @@ class TestRequeueOrExpireAgenticExhausted:
     requeue_or_expire_agentic_exhausted(conn, config) takes a raw sqlite3
     connection directly — no ScanServices seam — so these tests need no
     _install_services() call beyond the autouse default.
+
+    # PORT-SEAM: private-only backlog narrative (row counts, ages) redacted;
+    # T2.9/D21 stay public via agentic_enricher.py's own comments.
     """
 
     @staticmethod
