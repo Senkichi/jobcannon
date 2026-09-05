@@ -307,10 +307,20 @@ class TestModelVerdict:
     def test_ai_nav_failure_does_not_force_fail_when_degraded(
         self,
     ):  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
-        """A degraded careers_crawl run still surfaces ai_nav counts but lets the model adjudicate.
+        """A degraded careers_crawl run with a non-null error is forced ANOMALY,
+        never FAIL -- preserving the #1367 invariant under the private #2120
+        forced path.
 
-        Issue #1367: the run is now ``degraded`` rather than ``failed`` so partial
+        Issue #1367: the run is ``degraded`` rather than ``failed`` so partial
         crawl results are preserved and the checkpoint is not forced into FAIL.
+        Private #2120: a degraded run whose packet carries a non-null ``error``
+        is forced to ANOMALY pre-model (it is by definition not clean),
+        bypassing the reason filter so it can never be downgraded to PASS. The
+        two issues compose: degraded+error is forced ANOMALY (not FAIL, not
+        PASS), and the model is never consulted. This test injects a
+        call_model that would return FAIL as a regression sentinel -- if the
+        forced path is ever removed, the model would be consulted and return
+        FAIL, and this test would fail on ``verdict != "FAIL"``.
         """
         # PORT-SEAM: migrated_db*/conn fixture dropped -- checkpoint_verdict() takes call_model directly, no DB connection required
         error_msg = (
@@ -318,14 +328,19 @@ class TestModelVerdict:
         )
         p = _packet(run_end={"disposition": "degraded", "error": error_msg})
         assert "10/10" in p["error"]
-        result = _FakeResult({"verdict": "ANOMALY", "reasons": ["ai_nav failure rate high"]})
+        result = _FakeResult({"verdict": "FAIL", "reasons": ["ai_nav failure rate high"]})
         mock_cm = MagicMock(return_value=result)
         v = checkpoint_verdict(
             p, call_model=mock_cm
         )  # PORT-SEAM: call_model injected as a keyword (mock_cm = MagicMock(...)) instead of a module-level unittest.mock.patch context manager
-        mock_cm.assert_called_once()
+        # The forced path fires pre-model; the model is never consulted.
+        mock_cm.assert_not_called()
+        # #1367 invariant preserved: degraded is never forced to FAIL.
+        assert v["verdict"] != "FAIL"
+        # Private #2120: degraded+error is forced ANOMALY, never PASS.
         assert v["verdict"] == "ANOMALY"
-        assert v["forced"] is False
+        assert v["forced"] is True
+        assert v["rejected_reasons"] == 0
 
 
 class TestBuildPacketInBand:
