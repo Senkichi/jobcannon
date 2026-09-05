@@ -43,11 +43,13 @@ chain) the moment the module is loaded.
 from __future__ import annotations
 
 import ast
+from collections.abc import Mapping
 import importlib.metadata
 import pathlib
 import re
 import sys
 import tomllib
+
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 LOCK_PATH = REPO_ROOT / "uv.lock"
@@ -138,7 +140,7 @@ def _collect_top_level_import_roots(py_root: pathlib.Path) -> dict[str, list[str
 def _find_closure_violations(
     imports: dict[str, list[str]],
     closure: set[str],
-    distributions: dict[str, list[str]],
+    distributions: Mapping[str, list[str]],
 ) -> list[str]:
     """Return one formatted offender string per module not covered by
     *closure*, each naming the module and its first use site."""
@@ -170,6 +172,23 @@ def test_no_prod_dependency_closure_violations():
     closure = _main_dependency_closure(packages)
     imports = _collect_top_level_import_roots(JOBCANNON_ROOT)
     distributions = importlib.metadata.packages_distributions()
+
+    # Guard against passing vacuously: if the lock resolved no main deps, or
+    # the source walk found no top-level imports at all (e.g. JOBCANNON_ROOT
+    # stopped resolving to the real package after a rename/relocation), there
+    # is nothing left to violate the closure and the assertion below would
+    # pass for the wrong reason -- fail loudly instead, naming the path that
+    # came up empty.
+    assert closure, (
+        f"main-dependencies closure resolved empty from {LOCK_PATH} -- "
+        "lock file missing/malformed, or jobcannon's own [[package]] entry "
+        "has no `dependencies` -- this guard cannot verify anything"
+    )
+    assert imports, (
+        f"found no top-level imports under {JOBCANNON_ROOT} -- package root "
+        "missing/renamed/empty, which would make the closure check below "
+        "pass vacuously instead of actually scanning any source"
+    )
 
     offenders = _find_closure_violations(imports, closure, distributions)
     assert not offenders, "production dependency closure violations:\n" + "\n".join(offenders)
