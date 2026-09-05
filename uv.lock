@@ -958,6 +958,7 @@ dependencies = [
     { name = "google-genai" },
     { name = "gunicorn" },
     { name = "imapclient" },
+    { name = "jsonschema" },
     { name = "markdown" },
     { name = "markupsafe" },
     { name = "pgvector" },
@@ -979,7 +980,6 @@ playwright = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "jsonschema" },
     { name = "lifelines" },
     { name = "matplotlib" },
     { name = "pandas" },
@@ -1005,6 +1005,7 @@ requires-dist = [
     { name = "google-genai", specifier = ">=1.0.0" },
     { name = "gunicorn", specifier = ">=23,<24" },
     { name = "imapclient", specifier = ">=3.0" },
+    { name = "jsonschema", specifier = ">=4.0.0" },
     { name = "markdown", specifier = ">=3.6" },
     { name = "markupsafe", specifier = ">=2.1" },
     { name = "pgvector", specifier = ">=0.3,<1.0" },
@@ -1023,7 +1024,6 @@ provides-extras = ["playwright"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "jsonschema", specifier = ">=4.0.0" },
     { name = "lifelines", specifier = ">=0.29" },
     { name = "matplotlib", specifier = ">=3.9" },
     { name = "pandas", specifier = ">=2.2" },
