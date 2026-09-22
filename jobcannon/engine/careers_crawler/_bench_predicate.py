@@ -87,6 +87,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from jobcannon.engine._sql_dialect import sqlite_now_minus_days
+
 #: Minimum total crawler scans before the benching gate can fire.
 BENCH_STRIKE_THRESHOLD = 5
 
@@ -193,8 +195,9 @@ def build_bench_predicate_sql(
     benching (#1725, W4; decay does not apply to hits — see module docstring).
 
     Returns ``(sql, params)``. The decay-window comparison is bound via a
-    single ``?`` placeholder using the canonical parameterized shape
-    ``datetime('now', '-' || ? || ' days')`` (public #386) — the same shape
+    single ``?`` placeholder using the canonical parameterized shape emitted
+    by :func:`jobcannon.engine._sql_dialect.sqlite_now_minus_days` (public
+    #386, centralized #401) — the same fragment
     ``ats_scanner/_run.py``'s ``_dormancy_gate_clause`` uses and the only one
     ``jobcannon/db/compat.py``'s ``_DATETIME_REWRITES`` translates for
     Postgres — bound with *decay_days* itself (a plain positive int), not a
@@ -209,7 +212,7 @@ def build_bench_predicate_sql(
         "                        SELECT SUM(CASE WHEN jobs_matched > 0 THEN 1 ELSE 0 END) AS hits,\n"
         "                               SUM(CASE WHEN jobs_matched > 0 THEN 0\n"
         f"                                        WHEN failure_reason IN ({_CLEAN_REASONS_SQL}) THEN 0\n"
-        "                                        WHEN datetime(scanned_at) < datetime('now', '-' || ? || ' days') THEN 0\n"
+        f"                                        WHEN datetime(scanned_at) < {sqlite_now_minus_days()} THEN 0\n"
         "                                        ELSE 1 END) AS strikes\n"
         "                        FROM company_scan_log\n"
         "                        WHERE company_id = c.id\n"
@@ -249,15 +252,16 @@ def is_company_benched(
     successful scan (``jobs_matched > 0``), at any age, still clears benching
     (#1725, W4).
 
-    Uses the same canonical ``datetime('now', '-' || ? || ' days')`` shape as
-    :func:`build_bench_predicate_sql` (public #386), bound with *decay_days*
-    directly rather than a pre-negated string.
+    Uses the same canonical fragment as :func:`build_bench_predicate_sql`,
+    emitted by :func:`jobcannon.engine._sql_dialect.sqlite_now_minus_days`
+    (public #386, centralized #401), bound with *decay_days* directly rather
+    than a pre-negated string.
     """
     hits, strikes = conn.execute(
         "SELECT SUM(CASE WHEN jobs_matched > 0 THEN 1 ELSE 0 END), "
         "SUM(CASE WHEN jobs_matched > 0 THEN 0 "
         f"WHEN failure_reason IN ({_CLEAN_REASONS_SQL}) THEN 0 "
-        "WHEN datetime(scanned_at) < datetime('now', '-' || ? || ' days') THEN 0 "
+        f"WHEN datetime(scanned_at) < {sqlite_now_minus_days()} THEN 0 "
         "ELSE 1 END) "
         "FROM company_scan_log WHERE company_id = ? "
         f"AND source = '{BENCH_CRAWLER_SOURCE}'",

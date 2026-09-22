@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import date, datetime
 
 from jobcannon.engine import ats_prober
+from jobcannon.engine._sql_dialect import sqlite_now_minus_days
 from jobcannon.engine.classification import derive_classification
 from jobcannon.engine.json_utils import utc_now_iso
 from jobcannon.engine.ats_platforms import SCANNERS_BY_NAME
@@ -217,12 +218,14 @@ def _dormancy_gate_clause() -> str:
     tests/engine/test_dormancy_cadence.py) with no translation layer. The ONLY
     Postgres-translation seam is jobcannon/db/compat.py's engine_sql_to_host(),
     which every hosted call routes through via EngineCompatConnection — it
-    rewrites this exact `datetime('now', '-' || ? || ' days')` shape to
-    Postgres's `now() - make_interval(days => ?)` (see compat.py's
-    _DATETIME_REWRITES). Do NOT hand-roll Postgres-only syntax here; it would
-    silently break every tests/engine/ fixture that calls this function against
-    SQLite (verified empirically: `make_interval(days => ?)`'s `=>` token is a
-    SQLite parse error, not just a missing function).
+    rewrites the `datetime('now', '-' || ? || ' days')` shape emitted by
+    jobcannon/engine/_sql_dialect.py's `sqlite_now_minus_days()` (the single
+    emitter for this fragment, #401) to Postgres's
+    `now() - make_interval(days => ?)` (see compat.py's _DATETIME_REWRITES).
+    Do NOT hand-roll Postgres-only syntax here; it would silently break every
+    tests/engine/ fixture that calls this function against SQLite (verified
+    empirically: `make_interval(days => ?)`'s `=>` token is a SQLite parse
+    error, not just a missing function).
 
     Use with two bind parameters: threshold (int) and interval_days (int).
 
@@ -232,10 +235,10 @@ def _dormancy_gate_clause() -> str:
     but never permanently disabled. A non-zero yield resets the counter
     (instant promotion back to every-scan cadence).
     """
-    return """(
+    return f"""(
         consecutive_empty_scans <= ?
         OR last_scanned_at IS NULL
-        OR last_scanned_at < datetime('now', '-' || ? || ' days')
+        OR last_scanned_at < {sqlite_now_minus_days()}
     )"""
 
 
