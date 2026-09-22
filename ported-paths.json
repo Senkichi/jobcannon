@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-05T18:13:14Z",
+  "generated_at": "2026-09-22T01:53:34Z",
   "roots": [
     "engine",
     "db",
@@ -2250,15 +2250,15 @@
           "text": "# PORTED from job_finder/web/primary_source_resolver.py @ c6e37b72c6706e6f547c63d0a697b9ef645c2dff (private job-cannon). Ledger L-0229."
         },
         {
-          "line": 98,
+          "line": 100,
           "text": "# PORT-SEAM: job_finder.web.db_helpers.standalone_connection is DIES ->"
         },
         {
-          "line": 99,
+          "line": 101,
           "text": "# svc.connection_factory(). job_finder.web.primary_source_tiebreak."
         },
         {
-          "line": 106,
+          "line": 108,
           "text": "# (ats_slug_challenge.TRIGGER_PREFIX_CAREERS_URL precedent). job_finder.db."
         }
       ]
