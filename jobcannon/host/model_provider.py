@@ -98,6 +98,11 @@ _VALID_WORKLOADS: frozenset[str] = frozenset({"quick", "score", "triage", "craft
 # Order is the default preference when a tenant has multiple active
 # credentials: gemini first (is_free=True on the tenant's own Google
 # quota), then groq/cerebras (billed).
+# LOCKSTEP: this tuple and provider_catalog's PROVIDERS roster are pinned
+# together (both directions, plus per-tier defaults and _make_adapter
+# dispatch coverage) by tests/host/test_provider_roster_lockstep.py -- a
+# provider added to one side and not the other fails there, not silently
+# at call time (issue #331).
 HOSTED_ELIGIBLE_PROVIDERS: tuple[str, ...] = ("gemini", "groq", "cerebras")
 
 

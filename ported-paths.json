@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T04:03:11Z",
+  "generated_at": "2026-09-22T04:45:41Z",
   "roots": [
     "engine",
     "db",
@@ -2720,7 +2720,7 @@
           "text": "#     claude_client.py) do not carry: those gate an OWNER's daily spend"
         },
         {
-          "line": 232,
+          "line": 237,
           "text": "# canonical location) rather than job_finder.constants."
         }
       ]
