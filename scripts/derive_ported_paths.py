@@ -64,6 +64,22 @@ Detector contract
     known-provenance ground truth — for what this detector's recall claim
     actually rests on.
 
+Serialization (issue #328)
+    The manifest is written with ONE ENTRY PER LINE inside ``entries`` and
+    carries no volatile metadata (no ``generated_at`` timestamp), so the
+    file is a pure function of the tree: two derivations of the same tree
+    are byte-identical. Every concurrent port PR rewrites this file, and
+    under the old ``json.dump(indent=2)`` shape plus a per-run timestamp
+    every pair of such PRs conflicted textually — the timestamp line
+    alone guaranteed it — so each landed port PR marked every other one
+    DIRTY (O(N^2) manual rebases). With one line per entry, git's default
+    three-way merge resolves disjoint additions cleanly (verified against
+    ``git merge-file``: insertions at distinct positions — even adjacent
+    boundaries — merge without conflict and stay valid JSON). The
+    remaining conflict case, two PRs inserting different entries at the
+    same sorted position, is rare and resolves by rerunning derive; a
+    ``git merge-file`` regression test pins the disjoint-addition case.
+
 Modes
     derive (default)   Rewrite ``ported-paths.json`` from a fresh scan.
     --check             Read-only. Exits non-zero if the checked-in
@@ -86,10 +102,14 @@ import json
 import re
 import sys
 import tokenize
-from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+# Version 2: one entry per line and no volatile `generated_at` field, so
+# two derivations of the same tree are byte-identical and disjoint
+# additions merge cleanly (issue #328). Any stale version-1 manifest —
+# still carrying a timestamp — fails --check on schema_version alone,
+# which forces a regeneration into the merge-friendly format.
+SCHEMA_VERSION = 2
 PACKAGE_ROOTS = ("engine", "db", "host", "web", "worker")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -268,7 +288,6 @@ def build_manifest(repo_root: Path) -> dict:
     found = find_provenance_files(repo_root)
     return {
         "schema_version": SCHEMA_VERSION,
-        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "roots": list(PACKAGE_ROOTS),
         "entries": [
             {"path": path, "root": path.split("/")[1], "markers": found[path]}
@@ -278,9 +297,25 @@ def build_manifest(repo_root: Path) -> dict:
 
 
 def write_manifest(manifest: dict, manifest_path: Path) -> None:
+    """Serialize *manifest* with each entry on its own single line.
+
+    Deliberately NOT ``json.dump(indent=2)``: a line-based three-way merge
+    treats each entry as one atomic line, so entries added at disjoint
+    sorted positions land in separate diff hunks and merge cleanly, while
+    an indent=2 spread turns the same additions into overlapping
+    multi-line hunks. See "Serialization" in the module docstring.
+    """
+    entries = manifest["entries"]
     with open(manifest_path, "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(manifest, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
+        fh.write("{\n")
+        fh.write(f'  "schema_version": {manifest["schema_version"]},\n')
+        fh.write(f'  "roots": {json.dumps(manifest["roots"])},\n')
+        fh.write('  "entries": [\n')
+        for i, entry in enumerate(entries):
+            fh.write("    " + json.dumps(entry, ensure_ascii=False))
+            fh.write(",\n" if i < len(entries) - 1 else "\n")
+        fh.write("  ]\n")
+        fh.write("}\n")
 
 
 def check(repo_root: Path, manifest_path: Path) -> tuple[bool, list[str]]:

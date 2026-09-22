@@ -31,7 +31,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
+import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = REPO_ROOT / "scripts" / "derive_ported_paths.py"
@@ -83,7 +89,7 @@ def test_checker_catches_provenance_file_missing_from_manifest(tmp_path):
     )
     empty_manifest = tmp_path / "ported-paths.json"
     empty_manifest.write_text(
-        json.dumps({"schema_version": 1, "generated_at": "x", "roots": [], "entries": []}),
+        json.dumps({"schema_version": dpp.SCHEMA_VERSION, "roots": [], "entries": []}),
         encoding="utf-8",
     )
 
@@ -111,7 +117,7 @@ def test_checker_catches_wrapped_provenance_phrase(tmp_path):
     )
     empty_manifest = tmp_path / "ported-paths.json"
     empty_manifest.write_text(
-        json.dumps({"schema_version": 1, "generated_at": "x", "roots": [], "entries": []}),
+        json.dumps({"schema_version": dpp.SCHEMA_VERSION, "roots": [], "entries": []}),
         encoding="utf-8",
     )
 
@@ -136,7 +142,7 @@ def test_checker_catches_novel_noun_phrase(tmp_path):
     )
     empty_manifest = tmp_path / "ported-paths.json"
     empty_manifest.write_text(
-        json.dumps({"schema_version": 1, "generated_at": "x", "roots": [], "entries": []}),
+        json.dumps({"schema_version": dpp.SCHEMA_VERSION, "roots": [], "entries": []}),
         encoding="utf-8",
     )
 
@@ -312,8 +318,7 @@ def test_checker_catches_stale_entry(tmp_path):
     manifest_path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
-                "generated_at": "x",
+                "schema_version": dpp.SCHEMA_VERSION,
                 "roots": [],
                 "entries": [
                     {
@@ -360,3 +365,105 @@ def test_provenance_regex_accepts_known_phrasings():
     ]
     for line in provenance_lines:
         assert dpp.PROVENANCE_RE.search(line), line
+
+
+def _synthetic_tree(repo_root: Path, *filenames: str) -> None:
+    """Populate *repo_root*/jobcannon/engine with provenance-bearing stubs."""
+    pkg = repo_root / "jobcannon" / "engine"
+    pkg.mkdir(parents=True)
+    for name in filenames:
+        (pkg / name).write_text(
+            f'"""Ported from the private repo\'s {name}."""\n',
+            encoding="utf-8",
+        )
+
+
+def test_manifest_is_byte_identical_across_derivations(tmp_path, monkeypatch):
+    """Regression for #328's guaranteed-conflict line: the manifest used to
+    stamp a per-run ``generated_at``, so ANY two branches that regenerated
+    it disagreed on that line and git could never merge them cleanly —
+    every landed port PR dirtied every other open one, unconditionally.
+
+    The clock is pinned to two distinct values so a regression that
+    reintroduces volatile metadata fails here deterministically instead of
+    depending on a second boundary. (raising=False: the fixed module no
+    longer imports datetime at all.)"""
+    _synthetic_tree(tmp_path, "thing.py")
+    stamps = iter([datetime(2001, 1, 1, tzinfo=UTC), datetime(2002, 2, 2, tzinfo=UTC)])
+    monkeypatch.setattr(
+        dpp, "datetime", SimpleNamespace(now=lambda tz=None: next(stamps)), raising=False
+    )
+
+    first, second = tmp_path / "m1.json", tmp_path / "m2.json"
+    dpp.write_manifest(dpp.build_manifest(tmp_path), first)
+    dpp.write_manifest(dpp.build_manifest(tmp_path), second)
+
+    assert first.read_bytes() == second.read_bytes()
+    assert "generated_at" not in first.read_text(encoding="utf-8")
+
+
+def test_manifest_writes_one_entry_per_line(tmp_path):
+    """Format half of the #328 fix: every entry must occupy exactly one
+    line so git's line-based merge sees disjoint additions as disjoint
+    hunks. An indent=2 respread (the old shape) splits each entry across
+    ~10+ lines and puts every write within merge-context distance of its
+    neighbors."""
+    _synthetic_tree(tmp_path, "a.py", "b.py", "c.py")
+    manifest_path = tmp_path / "ported-paths.json"
+    manifest = dpp.build_manifest(tmp_path)
+    dpp.write_manifest(manifest, manifest_path)
+
+    raw = manifest_path.read_text(encoding="utf-8")
+    lines = raw.splitlines()
+    start = lines.index('  "entries": [') + 1
+    end = lines.index("  ]")
+    entry_lines = lines[start:end]
+
+    assert len(entry_lines) == len(manifest["entries"]) == 3
+    for line, entry in zip(entry_lines, manifest["entries"], strict=True):
+        assert json.loads(line.strip().rstrip(",")) == entry
+    # The whole file must still be plain valid JSON round-tripping to the
+    # same manifest.
+    assert json.loads(raw) == manifest
+
+
+def test_disjoint_entry_additions_merge_cleanly(tmp_path, monkeypatch):
+    """End-to-end regression for #328: two port PRs adding disjoint entries
+    (the normal case) must merge under git's default driver and stay valid
+    JSON — that is what keeps mergeStateStatus clean when a sibling lands.
+
+    Uses the real ``git merge-file`` three-way merge rather than a
+    reimplementation, since the property under test is git's line-merge
+    behavior on this exact serialization. The clock is pinned to distinct
+    values per derivation so a reintroduced ``generated_at`` turns this
+    into a guaranteed same-line conflict and the test goes red."""
+    if shutil.which("git") is None:
+        pytest.skip("git binary not on PATH")
+
+    stamps = iter(datetime(2001, 1, day, tzinfo=UTC) for day in range(1, 4))
+    monkeypatch.setattr(
+        dpp, "datetime", SimpleNamespace(now=lambda tz=None: next(stamps)), raising=False
+    )
+
+    base_dir, ours_dir, theirs_dir = (tmp_path / d for d in ("base", "ours", "theirs"))
+    _synthetic_tree(base_dir, "keep_b.py", "keep_d.py")
+    _synthetic_tree(ours_dir, "keep_a.py", "keep_b.py", "keep_d.py")
+    _synthetic_tree(theirs_dir, "keep_b.py", "keep_d.py", "keep_e.py")
+    base_p, ours_p, theirs_p = (tmp_path / f"{n}.json" for n in ("base", "ours", "theirs"))
+    dpp.write_manifest(dpp.build_manifest(base_dir), base_p)
+    dpp.write_manifest(dpp.build_manifest(ours_dir), ours_p)
+    dpp.write_manifest(dpp.build_manifest(theirs_dir), theirs_p)
+
+    proc = subprocess.run(
+        ["git", "merge-file", "-p", str(ours_p), str(base_p), str(theirs_p)],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    merged = json.loads(proc.stdout)
+    assert [e["path"] for e in merged["entries"]] == [
+        "jobcannon/engine/keep_a.py",
+        "jobcannon/engine/keep_b.py",
+        "jobcannon/engine/keep_d.py",
+        "jobcannon/engine/keep_e.py",
+    ]
