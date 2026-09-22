@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T04:31:40Z",
+  "generated_at": "2026-09-22T06:35:45Z",
   "roots": [
     "engine",
     "db",
@@ -1469,42 +1469,50 @@
         },
         {
           "line": 48,
-          "text": "# seams, but they also call job_finder.web.autoheal.agentic_enricher"
+          "text": "# seams, but they also call job_finder.web.agentic_enricher, which at the time"
         },
         {
-          "line": 87,
+          "line": 57,
+          "text": "# job_finder.web.autoheal.agentic_enricher path and find_query_candidate /"
+        },
+        {
+          "line": 58,
+          "text": "# run_agentic_fetch functions that never existed in the private repo --"
+        },
+        {
+          "line": 94,
           "text": "# PORT-SEAM: job_finder.web.enrichment_tiers is L-0178. 7 of its 8 functions"
         },
         {
-          "line": 95,
+          "line": 102,
           "text": "# job_finder.sources._error_envelope is L-0111"
         },
         {
-          "line": 99,
+          "line": 106,
           "text": "# job_finder.web.autoheal.health_monitor has no ledger row in this port's"
         },
         {
-          "line": 102,
+          "line": 109,
           "text": "# job_finder.db._jd_full.set_jd_full is the required ScanServices.set_jd_full"
         },
         {
-          "line": 105,
+          "line": 112,
           "text": "# jobcannon.db import). job_finder.config.JD_STORAGE_MAX_CHARS is"
         },
         {
-          "line": 1210,
+          "line": 1219,
           "text": "# PORT-SEAM: job_finder.db._jobs._reconcile_salary_for_write has no"
         },
         {
-          "line": 1363,
+          "line": 1372,
           "text": "# This is a SEPARATE write path from job_finder.db._jobs.upsert_job (this"
         },
         {
-          "line": 1389,
+          "line": 1398,
           "text": "# PORT-SEAM: job_finder.db._persistence.update_pipeline_status -> svc.update_pipeline_status"
         },
         {
-          "line": 1398,
+          "line": 1407,
           "text": "# PORT-SEAM: job_finder.db._persistence.update_pipeline_status has"
         }
       ]
