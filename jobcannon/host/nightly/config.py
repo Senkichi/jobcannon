@@ -290,7 +290,7 @@ def nightly_monitor_config() -> dict:
         "review": {
             # No default: an owner-identity-shaped repo slug must never be a
             # hardcoded literal in a public repo (private's
-            # DEFAULT_NIGHTLY_REVIEW_REPO="Senkichi/job-cannon" has no port
+            # DEFAULT_NIGHTLY_REVIEW_REPO upstream default has no port
             # target for exactly this reason). Required only when review/
             # issue-filing actually runs -- callers read this lazily, not at
             # import time, so an unset value never breaks a disabled deployment
