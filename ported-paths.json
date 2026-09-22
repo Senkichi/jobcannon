@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T03:47:20Z",
+  "generated_at": "2026-09-22T05:57:20Z",
   "roots": [
     "engine",
     "db",
@@ -88,11 +88,11 @@
           "text": "Private source: ``job_finder/db/_company_attribution.py`` @"
         },
         {
-          "line": 43,
+          "line": 45,
           "text": "# (job_finder/db/_company_state.py, WI-08) to record the transition in"
         },
         {
-          "line": 75,
+          "line": 77,
           "text": ")  # PORT-SEAM: json_utils.utc_now_iso/private _company_state imports dropped -- see below and module docstring"
         }
       ]
