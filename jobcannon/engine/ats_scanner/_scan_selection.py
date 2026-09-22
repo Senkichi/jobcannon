@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from jobcannon.engine._sql_dialect import sqlite_now_minus_days
 from jobcannon.engine.json_utils import utc_now_iso
 
 
@@ -95,10 +96,12 @@ def prune_selection_log(conn: sqlite3.Connection, keep_days: int) -> int:
     # jobcannon/db/compat.py's date-function rewrite translates this exact
     # `datetime('now', '-<n> days')` shape to Postgres's
     # `now() - make_interval(days => ?)` for engine callers, so it needs no
-    # further seam adaptation on the hosted path.
+    # further seam adaptation on the hosted path. The fragment is emitted by
+    # engine/_sql_dialect.py's `sqlite_now_minus_days()` (#401), the single
+    # emitter for the canonical shape compat.py rewrites.
     """
     cursor = conn.execute(
-        "DELETE FROM scan_selection_log WHERE created_at < datetime('now', '-' || ? || ' days')",
+        f"DELETE FROM scan_selection_log WHERE created_at < {sqlite_now_minus_days()}",
         (int(keep_days),),
     )
     return int(cursor.rowcount)
