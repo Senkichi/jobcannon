@@ -35,19 +35,19 @@ locally, Playwright + Chromium installed.
 # nightly consumers ... thread it down explicitly as a parameter ... do NOT
 # each read ScanServices themselves").
 #
-# PORT-SEAM: 5 helper functions this module needs (fetch_linkedin_jd,
+# PORT-SEAM: the 5 helper functions this module needs (fetch_linkedin_jd,
 # is_chrome_or_login_page, is_short_auth_page, company_name_in_text,
-# company_tokens) live in job_finder/web/enrichment_tiers.py privately, which
-# is ledger row L-0178 -- unlanded, and the design note gives this module no
-# seam for them (its own fidelity table marks agentic_enricher as "recommend
-# DIES", so it never designed one). Per the boundary-guard rule's second
-# option ("include the module in this unit and say so in the PR body"), the 5
-# functions plus their 4 supporting constants are inlined below as private
-# module-scope helpers rather than imported, each block separately marked
-# PORT-SEAM. This mirrors the existing precedent for borrowing a helper from a
-# DIFFERENT private module into a port (services.py's load_careers_override /
-# TRIGGER_PREFIX_CAREERS_URL / DEFAULT_MAX_BOARD comments). See the PR body's
-# Modularity note for the de-duplication follow-up once L-0178 lands.
+# company_tokens) live in job_finder/web/enrichment_tiers.py privately --
+# ledger row L-0178. That row was unlanded at this port's time and the
+# design note gave this module no seam for them (its fidelity table marks
+# agentic_enricher as "recommend DIES"), so PR #378 inlined the 5 functions
+# plus their 4 supporting constants under the boundary-guard rule's second
+# option. L-0178 has since landed as a 5-way split of enrichment_tiers.py;
+# the helpers are now imported below from the landed modules
+# (jobcannon.engine._enrichment_ddg_web_tier for fetch_linkedin_jd /
+# is_chrome_or_login_page / company_name_in_text / company_tokens and
+# jobcannon.engine._enrichment_jd_fetch for is_short_auth_page) and the
+# inlined copies and constants are deleted (issue #379 de-duplication).
 
 Usage:
     from jobcannon.engine.agentic_enricher import run_agentic_backfill
@@ -81,7 +81,18 @@ from jobcannon.engine.jd_content_contract import JdVerdict, classify_jd_content
 # verbatim below (see run_agentic_backfill section) -- no host counterpart.
 from jobcannon.engine.enrichment_states import EnrichmentTier
 from jobcannon.engine.json_utils import utc_now_iso
-from jobcannon.engine._http_constants import _REQUEST_TIMEOUT, _TIMEOUT
+from jobcannon.engine._http_constants import _TIMEOUT
+
+# PORT-SEAM: enrichment_tiers helpers imported from the landed L-0178 split
+# modules -- replaces the inlined copies PR #378 carried while L-0178 was
+# unlanded (issue #379; see module docstring).
+from jobcannon.engine._enrichment_ddg_web_tier import (
+    company_name_in_text,
+    company_tokens,
+    fetch_linkedin_jd,
+    is_chrome_or_login_page,
+)
+from jobcannon.engine._enrichment_jd_fetch import is_short_auth_page
 
 # PORT-SEAM: new import -- ScanServices.get_services() seam (L-0132)
 from jobcannon.engine.services import get_services
@@ -281,172 +292,6 @@ def _rank_urls(search_results: list[dict]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# PORT-SEAM: enrichment_tiers helpers inlined below -- see module docstring's boundary-
-# guard note above -- these 5 functions and their 4 supporting constants are
-# copied verbatim from job_finder/web/enrichment_tiers.py @ 307c369c (ledger
-# L-0178, unlanded) because this port's own row has no other sanctioned way to
-# reach them. Follow-up: de-duplicate once L-0178 lands (see PR body).
-# ---------------------------------------------------------------------------
-
-# Browser-like headers for sites that block bot UAs
-_BROWSER_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/131.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-}
-
-# Chrome/login page detection signals
-_CHROME_SIGNALS = [
-    "download google chrome",
-    "update your browser",
-    "browser not supported",
-    "enable cookies",
-    "cookies are disabled",
-    "accept cookies to continue",
-]
-
-_LOGIN_PAGE_SIGNALS = [
-    "create your free account",
-    "sign up for free",
-    "start your free trial",
-    "register to view",
-    "join now to view",
-]
-
-_COMPANY_STOP_WORDS = frozenset(
-    {
-        "inc",
-        "llc",
-        "ltd",
-        "corp",
-        "co",
-        "the",
-        "and",
-        "group",
-        "holdings",
-        "international",
-        "services",
-        "solutions",
-        "technologies",
-    }
-)
-
-
-def is_short_auth_page(text: str) -> bool:
-    """Return True if text looks like a short auth-wall or CAPTCHA page.
-
-    Detection: page is under 2000 chars AND the first 500 chars contain
-    an auth/bot signal keyword.
-    """
-    if not text or len(text) >= 2000:
-        return False
-    prefix = text[:500].lower()
-    signals = [
-        "sign in",
-        "log in",
-        "login",
-        "captcha",
-        "just a moment",
-        "access denied",
-        "verify you are human",
-        "verify you are a human",
-    ]
-    return any(s in prefix for s in signals)
-
-
-def company_tokens(company_name: str) -> list[str]:
-    """Extract meaningful tokens from a company name, filtering stop words.
-
-    Returns lowercase tokens that are >= 2 chars and not in the stop list.
-    """
-    if not company_name:
-        return []
-    raw_tokens = re.split(r"[\s.,;:!?&/|()]+", company_name.lower())
-    return [t for t in raw_tokens if len(t) >= 2 and t not in _COMPANY_STOP_WORDS]
-
-
-def company_name_in_text(company_name: str, text: str) -> bool:
-    """Check whether any meaningful company token appears in the text."""
-    tokens = company_tokens(company_name)
-    if not tokens:
-        return False
-    text_lower = text.lower()
-    return any(t in text_lower for t in tokens)
-
-
-def is_chrome_or_login_page(text: str) -> bool:
-    """Return True if text looks like a browser upgrade or login/signup page.
-
-    Checks for Chrome download prompts, browser upgrade notices, cookie
-    consent walls, and generic signup gates.
-
-    Args:
-        text: Cleaned page text to check.
-
-    Returns:
-        True if the page is a Chrome/browser page or login gate.
-    """
-    if not text:
-        return False
-
-    text_lower = text[:2000].lower()
-    if any(sig in text_lower for sig in _CHROME_SIGNALS):
-        return True
-    return bool(any(sig in text_lower for sig in _LOGIN_PAGE_SIGNALS))
-
-
-def fetch_linkedin_jd(url: str) -> str | None:
-    """Extract job description from a LinkedIn guest job page.
-
-    LinkedIn guest pages serve full JD content inside a specific container
-    even though the surrounding page chrome contains login prompts that
-    trip the generic auth-wall detector.
-
-    Args:
-        url: A LinkedIn job URL (e.g. linkedin.com/jobs/view/...).
-
-    Returns:
-        Cleaned JD text up to jd_storage_max_chars, or None if extraction fails.
-    """
-    # PORT-SEAM: requests / fetch_with_deadline / extract_clean_jd imported
-    # locally (private module-level) -- fetch_with_deadline and
-    # extract_clean_jd are already-landed engine imports; requests is a
-    # direct third-party dependency, matching the rest of this module's
-    # lazy-import style for network helpers.
-    import requests
-
-    from jobcannon.engine.http_fetch import fetch_with_deadline
-    from jobcannon.engine.platform_extractor import extract_clean_jd
-
-    try:
-        response = fetch_with_deadline(
-            url, getter=requests.get, headers=_BROWSER_HEADERS, timeout=_REQUEST_TIMEOUT
-        )
-        response.raise_for_status()
-
-        # LinkedIn scoping now lives in the single chokepoint (extract_clean_jd
-        # selects div.show-more-less-html__markup / div.description__text and
-        # strips page chrome). This function stays as the LinkedIn-specific
-        # entry point — browser headers + the existing callers (DDG tier, the
-        # agentic Playwright shortcut) — but delegates the actual extraction so
-        # there is exactly one definition of "what a LinkedIn JD looks like".
-        text = extract_clean_jd(url, response.text)
-        if not text or not text.strip():
-            logger.debug("LinkedIn JD container not found for '%s'", url)
-            return None
-
-        return text[: get_services().jd_storage_max_chars]
-
-    except Exception as e:
-        logger.debug("LinkedIn JD fetch failed for '%s': %s", url, e)
-        return None
-
-
-# ---------------------------------------------------------------------------
 # Page fetching (Playwright)
 # ---------------------------------------------------------------------------
 
@@ -505,8 +350,8 @@ def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> str | None:
     # LinkedIn shortcut: try lightweight extractor first (no Playwright needed)
     if "linkedin.com/jobs/" in url:
         try:
-            # PORT-SEAM: fetch_linkedin_jd is the inlined enrichment_tiers
-            # helper above (L-0178 boundary-guard block), not an import.
+            # fetch_linkedin_jd is imported from _enrichment_ddg_web_tier
+            # (L-0178, landed) at module level.
             li_text = fetch_linkedin_jd(url)
             if li_text and len(li_text) >= 300:
                 return li_text[
@@ -522,8 +367,8 @@ def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> str | None:
 
         html = page.content()
 
-        # PORT-SEAM: is_chrome_or_login_page / is_short_auth_page are the
-        # inlined enrichment_tiers helpers above, not an import.
+        # is_chrome_or_login_page / is_short_auth_page are imported from the
+        # landed L-0178 modules at module level.
         from jobcannon.engine.platform_extractor import extract_clean_jd
 
         # Single chokepoint: platform-scoped + chrome-stripped extraction. Passing
@@ -801,10 +646,9 @@ def enrich_single_job(
 
         # Quick heuristic: verify at least one meaningful company token appears in
         # the page before paying Ollama inference cost.
-        # Uses shared company_tokens() + company_name_in_text() from enrichment_tiers
-        # (same logic used by fetch_ddg_jds for DDG tier validation).
-        # PORT-SEAM: company_name_in_text / company_tokens are the inlined
-        # enrichment_tiers helpers above, not an import.
+        # Uses shared company_tokens() + company_name_in_text() imported from
+        # _enrichment_ddg_web_tier (L-0178, landed) at module level — the same
+        # functions fetch_ddg_jds uses for DDG tier validation.
         tokens = company_tokens(company)
         if not tokens:
             # DEFECT 015 FIX: fail CLOSED — degenerate company name (all stop-words).
