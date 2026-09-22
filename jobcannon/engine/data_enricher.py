@@ -45,14 +45,21 @@ Exports:
 # _run_inline_agentic_pass (private data_enricher.py:562-860) are NOT ported here.
 # They are scheduler-driven batch wrappers whose own DIES-hop imports
 # (job_finder.web.db_helpers.standalone_connection) are covered by this port's
-# seams, but they also call job_finder.web.autoheal.agentic_enricher
-# (find_query_candidate / run_agentic_fetch), which has no ledger row in the
-# read scope for this port (L-0174/L-0182/L-0229) and no ScanServices seam yet.
-# Per the ADAPT rule, calls into an un-adjudicated module are never invented as a
-# copied module or a guessed seam -- left for a follow-up row once agentic_enricher
-# is adjudicated. enrich_job() itself (the ledger's stated crux) does not reach
-# the agentic tier directly ("Deliberately NOT run per-row" -- see enrich_job
-# docstring below) so this scope cut does not affect it.
+# seams, but they also call job_finder.web.agentic_enricher, which at the time
+# of this port had no ledger row in the read scope (L-0174/L-0182/L-0229) and
+# no ScanServices seam. Per the ADAPT rule, calls into an un-adjudicated
+# module are never invented as a copied module or a guessed seam -- the
+# wrappers were left for a follow-up row once agentic_enricher was
+# adjudicated. That row has since landed: L-0132 ported it as
+# jobcannon/engine/agentic_enricher.py (public entry points
+# run_agentic_backfill / enrich_single_job), so porting these wrappers is now
+# an unblocked follow-up. (An earlier revision of this comment cited a
+# job_finder.web.autoheal.agentic_enricher path and find_query_candidate /
+# run_agentic_fetch functions that never existed in the private repo --
+# corrected under issue #377.) enrich_job() itself (the ledger's stated
+# crux) does not reach the agentic tier directly ("Deliberately NOT run
+# per-row" -- see enrich_job docstring below) so this scope cut does not
+# affect it.
 """
 
 import json
@@ -619,7 +626,9 @@ def enrich_job(
 
 # PORT-SEAM: _run_inline_agentic_pass / run_enrichment_backfill /
 # run_location_extraction_backfill dropped from this port -- see module
-# docstring (L-0174 agentic_enricher blocker) for why.
+# docstring for why (the agentic_enricher dependency it cites has since
+# landed as jobcannon/engine/agentic_enricher.py, L-0132; the wrappers
+# themselves remain an unported follow-up).
 
 
 def _is_stub_jd(
