@@ -227,12 +227,14 @@ def build_scan_services(host_config: HostConfig) -> services.ScanServices:
         # company_scan_log (jobcannon.engine.ats_scanner._scan_log, ledger
         # L-0077) rather than re-porting it under careers_crawler — its own
         # module docstring names this exact caller as "ready for it the
-        # moment that module ports". Host importing an engine submodule
-        # directly (rather than only the engine's top-level `services`
-        # module, as every other build_scan_services import does) is new
-        # here; it is the plain function reference the seam field expects,
-        # and stays qmark-dialect-correct because the connection this
-        # receives is always an EngineCompatConnection from
+        # moment that module ports". Like the _enrichment_* /
+        # primary_source_tiebreak bindings above, this imports the
+        # implementation from where it lives in the engine tree (one
+        # package level deeper, inside ats_scanner/) — the documented
+        # host-binding convention per services.py's module docstring
+        # (#357). It is the plain function reference the seam field
+        # expects, and stays qmark-dialect-correct because the connection
+        # this receives is always an EngineCompatConnection from
         # pool_mod.connection_factory (see _scan_log.py's own PORT-SEAM
         # note on its package placement).
         record_scan_outcome=_scan_log.record_scan_outcome,

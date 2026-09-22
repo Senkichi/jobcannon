@@ -10,7 +10,23 @@ by the host at startup via set_services().
 Required callables MUST match the signatures of the private-repo functions
 they replace (documented per field). Optional hooks default to None; engine
 call sites check for None and skip that behavior (the skip semantics per
-hook are specified in the Phase 1A plan, Task 3 Step 4).
+hook are specified in the Phase 1A plan, Task 3 Step 4). The repeated
+``if svc.X is None: return`` / ``if svc.X is not None: svc.X(...)`` guard
+shape at every optional-hook call site is deliberate, not a dedup
+candidate: a ``call_if_wired(name, *a, **kw)``-style dispatch helper was
+considered and rejected (issue #357) because a name-keyed getattr erases
+static checking of both the field name and the callable's signature on
+this frozen dataclass, while a callable-passing variant saves only the
+guard line at the cost of an unfamiliar idiom.
+
+Host binding convention (issue #357): ScanServices fields are plain
+callables, so a host imports each bound implementation from wherever it
+lives -- host modules (jobcannon.host.*), jobcannon.db.*, top-level engine
+modules (primary_source_tiebreak, _enrichment_*), or nested engine
+packages (jobcannon.engine.ats_scanner._scan_log's record_scan_outcome,
+L-0465). Nothing requires a binding to route through this module's
+namespace, and a re-export here is NOT needed for a binding to be
+conventional.
 
 Identity trio / prober_extensions note: ``identity_reconcile_settings``,
 ``owner_identity_passes``, and ``resolve_slug_collision`` appear BOTH as
