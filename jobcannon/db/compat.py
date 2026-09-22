@@ -25,9 +25,14 @@ since tests/engine/ exercises this exact SQL directly against a bare sqlite3
 connection with no translation layer (see tests/engine/test_dormancy_cadence.py,
 tests/engine/test_run_playwright.py, tests/engine/test_careers_crawler_penalty_box.py).
 This is the ONLY place any of these shapes is rewritten for the hosted path:
-  - `datetime('now', '-' || ? || ' days')` (interval arithmetic —
-    `_dormancy_gate_clause` and `_bench_predicate.build_bench_predicate_sql` /
-    `is_company_benched`) -> `now() - make_interval(days => ?)`
+  - `datetime('now', '-' || ? || ' days')` (interval arithmetic — emitted
+    everywhere by `jobcannon/engine/_sql_dialect.py`'s
+    `sqlite_now_minus_days()` (#401): `_dormancy_gate_clause`, the
+    `crawl_careers_batch` lane-1 query,
+    `_bench_predicate.build_bench_predicate_sql` / `is_company_benched`,
+    `ats_scanner/_scan_selection.prune_selection_log`, and
+    `ats_scanner/_scan_log.prune_title_outcomes`) ->
+    `now() - make_interval(days => ?)`
   - bare `datetime('now')` (the retry-eligibility clauses) -> `now()`
   - bare `datetime(<column>)` (a column-normalizing cast —
     `_bench_predicate.py`'s `datetime(scanned_at)`, used to make SQLite's

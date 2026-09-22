@@ -68,6 +68,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from jobcannon.engine._sql_dialect import sqlite_now_minus_days
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -133,7 +135,9 @@ def __getattr__(name: str):
 #   - Lane 1's `datetime('now', ? || ' days')` (bound with a pre-negated
 #     string) is rewritten to `datetime('now', '-' || ? || ' days')` (bound
 #     with a plain positive int) -- the shape db/compat.py engine_sql_to_host()
-#     translates for Postgres via _DATETIME_REWRITES.
+#     translates for Postgres via _DATETIME_REWRITES. Emitted via
+#     engine/_sql_dialect.py's `sqlite_now_minus_days()` (#401), the single
+#     emitter for this canonical fragment.
 #   - `c.careers_nav_recipe` dropped from both lane SELECT lists (public
 #     #385 fix unit finding, filed separately). The private column
 #     (`job_finder/web/migrations/m037_careers_nav_recipe.py`) has zero
@@ -155,7 +159,7 @@ def _lane1_query_sql(select_cols: str, bench_predicate_sql: str) -> str:
                  AND c.ats_probe_status IS DISTINCT FROM 'hit'
                  AND c.careers_crawl_flag_reason IS NULL
                  AND (c.careers_crawl_last_at IS NULL
-                      OR c.careers_crawl_last_at < datetime('now', '-' || ? || ' days'))
+                      OR c.careers_crawl_last_at < {sqlite_now_minus_days()})
                  AND EXISTS (
                      SELECT 1 FROM jobs j
                      WHERE j.company_id = c.id

@@ -52,11 +52,14 @@ Every test class ports; nothing is dropped wholesale. What changed and why:
      guards).
   5. Patch targets collapse onto one module: the private repo's
      `job_finder.web.enrichment_tiers
-     .{fetch_linkedin_jd,is_short_auth_page,is_chrome_or_login_page}` are
-     inlined into agentic_enricher.py itself (L-0178 boundary-guard note in
-     the module docstring), so patches retarget to
-     `jobcannon.engine.agentic_enricher.<name>`. `_http_constants._TIMEOUT`
-     moves from `job_finder.web` to `jobcannon.engine`.
+     .{fetch_linkedin_jd,is_short_auth_page,is_chrome_or_login_page}` were
+     inlined into agentic_enricher.py at port time (L-0178 boundary-guard
+     note in the module docstring); L-0178 has since landed as the
+     `_enrichment_*` split modules and agentic_enricher now imports the
+     helpers into its own namespace (issue #379), so patches still
+     retarget to `jobcannon.engine.agentic_enricher.<name>`.
+     `_http_constants._TIMEOUT` moves from `job_finder.web` to
+     `jobcannon.engine`.
   6. `_MAX_JD_CHARS` (private module constant `= JD_STORAGE_MAX_CHARS`) has
      no public alias — `get_services().jd_storage_max_chars` reads it
      instead (agentic_enricher.py's own PORT-SEAM comment). Assertions
@@ -958,8 +961,8 @@ class TestFetchPageTextLinkedinRouting:
         long_jd = "D" * 500
 
         # PORT-SEAM: patch target collapses onto the same module --
-        # fetch_linkedin_jd is inlined into agentic_enricher.py (L-0178
-        # boundary-guard note), not imported from enrichment_tiers.
+        # fetch_linkedin_jd is imported into agentic_enricher's namespace
+        # from _enrichment_ddg_web_tier (L-0178, landed; issue #379).
         with patch("jobcannon.engine.agentic_enricher.fetch_linkedin_jd") as mock_li:
             mock_li.return_value = long_jd
 
@@ -2111,3 +2114,46 @@ class TestRunAgenticBackfill:
         finally:
             if os.path.exists(path):
                 os.remove(path)
+
+
+# ---------------------------------------------------------------------------
+# De-duplicated enrichment_tiers helpers (issue #379)
+# ---------------------------------------------------------------------------
+
+
+class TestEnrichmentTiersHelpersAreSharedImports:
+    """agentic_enricher's 5 enrichment_tiers helpers are the landed L-0178
+    modules' own function objects — not re-inlined copies.
+
+    PR #378 inlined the helpers (plus 4 supporting constants) while L-0178
+    was unlanded; once L-0178 landed as the `_enrichment_*` split modules,
+    the inlined block was deleted in favor of real imports (issue #379).
+    The `is` assertions pin object identity — a re-inlined copy would be a
+    different function object and fail.
+    """
+
+    def test_ddg_web_tier_helpers_are_the_landed_objects(self):
+        import jobcannon.engine._enrichment_ddg_web_tier as ddg_tier
+        import jobcannon.engine.agentic_enricher as ae
+
+        assert ae.fetch_linkedin_jd is ddg_tier.fetch_linkedin_jd
+        assert ae.is_chrome_or_login_page is ddg_tier.is_chrome_or_login_page
+        assert ae.company_tokens is ddg_tier.company_tokens
+        assert ae.company_name_in_text is ddg_tier.company_name_in_text
+
+    def test_is_short_auth_page_is_the_landed_object(self):
+        import jobcannon.engine._enrichment_jd_fetch as jd_fetch
+        import jobcannon.engine.agentic_enricher as ae
+
+        assert ae.is_short_auth_page is jd_fetch.is_short_auth_page
+
+    def test_inlined_supporting_constants_deleted(self):
+        import jobcannon.engine.agentic_enricher as ae
+
+        for name in (
+            "_BROWSER_HEADERS",
+            "_CHROME_SIGNALS",
+            "_LOGIN_PAGE_SIGNALS",
+            "_COMPANY_STOP_WORDS",
+        ):
+            assert not hasattr(ae, name), f"stale inlined constant still present: {name}"

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T06:35:45Z",
+  "generated_at": "2026-09-22T17:05:28Z",
   "roots": [
     "engine",
     "db",
@@ -88,11 +88,11 @@
           "text": "Private source: ``job_finder/db/_company_attribution.py`` @"
         },
         {
-          "line": 43,
+          "line": 45,
           "text": "# (job_finder/db/_company_state.py, WI-08) to record the transition in"
         },
         {
-          "line": 75,
+          "line": 77,
           "text": ")  # PORT-SEAM: json_utils.utc_now_iso/private _company_state imports dropped -- see below and module docstring"
         }
       ]
@@ -408,15 +408,15 @@
       "root": "db",
       "markers": [
         {
-          "line": 84,
+          "line": 89,
           "text": "surface but a private-schema delta, recorded so the resync surface"
         },
         {
-          "line": 85,
+          "line": 90,
           "text": "stays complete. A private-schema `jobs` column (private migration"
         },
         {
-          "line": 88,
+          "line": 93,
           "text": "by the private location-enrichment chain (`enrichment_tiers.py:818`"
         }
       ]
@@ -907,18 +907,14 @@
         },
         {
           "line": 40,
-          "text": "# company_tokens) live in job_finder/web/enrichment_tiers.py privately, which"
+          "text": "# company_tokens) live in job_finder/web/enrichment_tiers.py privately --"
         },
         {
-          "line": 93,
+          "line": 104,
           "text": "# PORT-SEAM: Config inlined from job_finder/config.py -- pure config-parsing"
         },
         {
-          "line": 286,
-          "text": "# copied verbatim from job_finder/web/enrichment_tiers.py @ 307c369c (ledger"
-        },
-        {
-          "line": 982,
+          "line": 826,
           "text": "# PORT-SEAM: inlined from job_finder/db/_queries.py -- _SUB_SCORE_SUM_SQL and"
         }
       ]
@@ -1098,15 +1094,15 @@
       "root": "engine",
       "markers": [
         {
-          "line": 180,
+          "line": 181,
           "text": "The private original summed six per-candidate LLM owner-fit axes from"
         },
         {
-          "line": 251,
+          "line": 254,
           "text": "`threshold` is accepted for call-site parity with the private source but is"
         },
         {
-          "line": 392,
+          "line": 395,
           "text": "the private source beyond the ScanServices seam rewires below.\"\"\""
         }
       ]
@@ -1144,19 +1140,19 @@
           "text": "\"\"\"PORTED from job_finder/db/_scan_log.py @ 6b17d78cb770cf53cb21b5e0b34c2cc7cd203136"
         },
         {
-          "line": 165,
+          "line": 166,
           "text": "versioned by migration and m0001 carries no ``source`` column yet,"
         },
         {
-          "line": 166,
+          "line": 167,
           "text": "unlike private's one fixed dev schema); ``scanned_at`` defaults to"
         },
         {
-          "line": 173,
+          "line": 174,
           "text": "# PORT-SEAM: private said \"always written\" -- private's ``company_id``"
         },
         {
-          "line": 174,
+          "line": 175,
           "text": "# and ``source`` are both fixed columns on its single dev schema, so"
         }
       ]
@@ -1216,11 +1212,11 @@
           "text": "# empty\" convention and the private source's own established pattern of"
         },
         {
-          "line": 138,
+          "line": 142,
           "text": "#     #385 fix unit finding, filed separately). The private column"
         },
         {
-          "line": 139,
+          "line": 143,
           "text": "#     (`job_finder/web/migrations/m037_careers_nav_recipe.py`) has zero"
         }
       ]
@@ -1724,15 +1720,15 @@
           "text": "# PORTED from job_finder/sources/email_senders.py @ 2dc6c820aff0a3b213e4f6c4c535097f8dd0a816 (private job-cannon). Ledger L-0113."
         },
         {
-          "line": 130,
+          "line": 172,
           "text": "# ported — it belongs to `job_finder/config.py`, out of scope for"
         },
         {
-          "line": 138,
+          "line": 180,
           "text": "# PORT-SEAM: private body opened with `from job_finder.config import"
         },
         {
-          "line": 180,
+          "line": 214,
           "text": "# PORT-SEAM: private body opened with `from job_finder.config import"
         }
       ]
@@ -2540,20 +2536,6 @@
         {
           "line": 154,
           "text": "# earlier port wave — not in the private source at this row's declared SHA."
-        }
-      ]
-    },
-    {
-      "path": "jobcannon/engine/sources/__init__.py",
-      "root": "engine",
-      "markers": [
-        {
-          "line": 1,
-          "text": "# PORTED from job_finder/sources/__init__.py @ e4c6d2e243ca561de7a30b0acd29470f89f0c18c (private job-cannon). Ledger L-0042."
-        },
-        {
-          "line": 13,
-          "text": "The private original doc'd this as \"Job sources - IMAP, SerpAPI, DataForSEO,"
         }
       ]
     },

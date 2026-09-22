@@ -103,6 +103,48 @@ _OVERRIDABLE_SENDERS: dict[str, str] = {
 }
 
 
+def _resolve_overrides(base_map: dict, config: dict | None) -> dict[str, str]:
+    """Return ``{default_address: override_address}`` for each valid senders override.
+
+    Shared override-resolution loop for ``resolve_sender_parsers`` and
+    ``resolve_sender_label`` (issue #336 — both public resolvers ran the same
+    ``_OVERRIDABLE_SENDERS`` scan; this helper is an engine-side dedup added
+    after the port, so nothing upstream corresponds to it).
+
+    A ``sources.imap.senders.<key>`` entry counts as a valid override only
+    when it is a non-empty string, differs from that sender's default
+    address, and the default is still a key in *base_map* (the map being
+    resolved — ``SENDER_PARSERS`` or ``SENDER_LABEL``). The caller applies
+    each returned pair to its own copy of the base map, so membership of a
+    default address can never have changed between resolution and
+    application (application only renames or adds keys; it never removes a
+    different sender's default).
+
+    Args:
+        base_map: The address→value map being resolved (a caller-owned copy
+            of ``SENDER_PARSERS`` or ``SENDER_LABEL``).
+        config: Per-user sender-override dict, or None. Reads
+            ``sources.imap.senders``.
+
+    Returns:
+        A dict mapping each overridable sender's default address to its
+        override address, in ``_OVERRIDABLE_SENDERS`` order. Empty when the
+        config supplies no valid overrides.
+    """
+    senders = (config or {}).get("sources", {}).get("imap", {}).get("senders", {}) or {}
+    overrides: dict[str, str] = {}
+    for sender_key, default in _OVERRIDABLE_SENDERS.items():
+        override = senders.get(sender_key)
+        if (
+            isinstance(override, str)
+            and override.strip()
+            and override != default
+            and default in base_map
+        ):
+            overrides[default] = override
+    return overrides
+
+
 def resolve_sender_parsers(config: dict | None = None) -> dict:
     """Return SENDER_PARSERS with any user-overridden FROM addresses swapped in.
 
@@ -139,16 +181,8 @@ def resolve_sender_parsers(config: dict | None = None) -> dict:
     # normalize_email_senders` + a legacy-config heal call — not ported, see
     # the Args note above.
     parsers = dict(SENDER_PARSERS)
-    senders = (config or {}).get("sources", {}).get("imap", {}).get("senders", {}) or {}
-    for sender_key, default in _OVERRIDABLE_SENDERS.items():
-        override = senders.get(sender_key)
-        if (
-            isinstance(override, str)
-            and override.strip()
-            and override != default
-            and default in parsers
-        ):
-            parsers[override] = parsers.pop(default)
+    for default, override in _resolve_overrides(parsers, config).items():
+        parsers[override] = parsers.pop(default)
     return parsers
 
 
@@ -181,16 +215,8 @@ def resolve_sender_label(config: dict | None = None) -> dict:
     # normalize_email_senders` + a legacy-config heal call — not ported, see
     # the Args note above.
     labels = dict(SENDER_LABEL)
-    senders = (config or {}).get("sources", {}).get("imap", {}).get("senders", {}) or {}
-    for sender_key, default in _OVERRIDABLE_SENDERS.items():
-        override = senders.get(sender_key)
-        if (
-            isinstance(override, str)
-            and override.strip()
-            and override != default
-            and default in labels
-        ):
-            labels[override] = labels[default]
+    for default, override in _resolve_overrides(labels, config).items():
+        labels[override] = labels[default]
     return labels
 
 
