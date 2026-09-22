@@ -21,9 +21,10 @@ seen on both an aggregator feed and a direct ATS scan is 'ats_confirmed'):
   6. unrecognized      - a source string that matches none of classes 1-4
                          above - a drift guard, not a real class. Excluded
                          from the primary result (see the label-set comment
-                         below: this repo cannot import the private
-                         pipeline's code, so the taxonomy here is a verified
-                         point-in-time snapshot, not a live import).
+                         below: the taxonomy here is a verified snapshot of
+                         the private pipeline's vocabulary, except
+                         ATS_CONFIRMED_LABELS, which now derives live from
+                         the ported scanner registries).
 
 This is a corrected, registry-derived version of an ad hoc classification
 used in the scoping exploration (explore2.py's `is_ats_like`/`is_portal_like`):
@@ -41,25 +42,31 @@ from sqlite3 import Connection
 
 import pandas as pd
 
+from jobcannon.engine.ats_platforms import PLAYWRIGHT_SCANNERS, SCANNERS_BY_NAME
+
 # ---------------------------------------------------------------------------
 # Provenance label sets.
 #
-# This analysis repo is deliberately host-agnostic (see tests/engine's import
-# guard) and carries no dependency on the private `job_finder` pipeline, so
-# these sets cannot be a live import - they are a verified snapshot of that
-# pipeline's own source-tag vocabulary, captured 2026-07-16 against the live
-# corpus. Provenance for each set (private-repo paths, for anyone auditing
-# this snapshot against the pipeline later):
+# These began as a verified point-in-time snapshot of the private
+# `job_finder` pipeline's source-tag vocabulary, captured 2026-07-16 against
+# the live corpus, because this analysis package could not import that
+# pipeline's code. One set has since graduated to a live import: the
+# platform scanners were ported into this repo (jobcannon.engine.
+# ats_platforms), so ATS_CONFIRMED_LABELS is derived below from the same
+# registry union the snapshot was taken of. The rest remain snapshots;
+# private-repo provenance is kept here for anyone auditing them against the
+# pipeline later:
 #
-#   ATS_CONFIRMED_LABELS: every PlatformScanner.company_source /
-#     PlaywrightPlatformScanner.company_source string in
-#     job_finder/web/ats_platforms/_platforms_*.py, unioned via
-#     job_finder.web.ats_platforms.SCANNERS_BY_NAME + .PLAYWRIGHT_SCANNERS.
-#     This is the set of display-cased labels a *direct* ATS-scanner sighting
-#     writes into jobs.sources - distinct in case from the lowercase labels
-#     an email alert about the same platform would write (see EMAIL_ALERT
-#     'greenhouse' below), which is the load-bearing signal that keeps the
-#     two channels from colliding.
+#   ATS_CONFIRMED_LABELS: the union of every PlatformScanner.company_source /
+#     PlaywrightPlatformScanner.company_source over
+#     jobcannon.engine.ats_platforms.SCANNERS_BY_NAME + .PLAYWRIGHT_SCANNERS
+#     (the port of job_finder/web/ats_platforms/_platforms_*.py this snapshot
+#     was originally taken from), plus _LEGACY_ATS_LABELS. This is the set of
+#     display-cased labels a *direct* ATS-scanner sighting writes into
+#     jobs.sources - distinct in case from the lowercase labels an email
+#     alert about the same platform would write (see EMAIL_ALERT 'greenhouse'
+#     below), which is the load-bearing signal that keeps the two channels
+#     from colliding.
 #   EMAIL_ALERT_LABELS: every SenderSpec.label in
 #     job_finder/sources/email_senders.py's SENDERS registry (one row per
 #     inbox alert sender the IMAP pipeline parses).
@@ -95,38 +102,25 @@ import pandas as pd
 # result) rather than being silently absorbed into the wrong bucket.
 # ---------------------------------------------------------------------------
 
-ATS_CONFIRMED_LABELS: frozenset[str] = frozenset(
-    {
-        "ADP",
-        "Amazon",
-        "Ashby",
-        "BambooHR",
-        "Breezy",
-        "Eightfold",
-        "Google",
-        "Greenhouse",
-        "IBM",
-        "JazzHR",
-        "Jobvite",
-        "Lever",
-        "Microsoft Careers",
-        "Oracle Cloud",
-        "Paylocity",
-        "Personio",
-        "Phenom",
-        "Pinpoint",
-        "Recruitee",
-        "Rippling",
-        "SmartRecruiters",
-        "SuccessFactors",
-        "Teamtailor",
-        "Tesla",
-        "UltiPro",
-        "Workable",
-        "Workday",
-        "iCIMS",
-    }
+# Every registered scanner's `company_source` - the display-cased label a
+# direct ATS-scanner sighting writes into jobs.sources. Deriving live (rather
+# than freezing the captured snapshot) is correct because the corpus itself
+# is re-pulled from the live DB on each run: a newly added platform scanner's
+# label flows in automatically instead of drifting to 'unrecognized'.
+_SCANNER_ATS_LABELS: frozenset[str] = frozenset(
+    scanner.company_source
+    for scanner in (*SCANNERS_BY_NAME.values(), *PLAYWRIGHT_SCANNERS.values())
 )
+
+# Display labels whose scanners have since LEFT the registries. A removed
+# scanner's tag still sits on historical corpus rows (the `thordata`
+# precedent in AGGREGATOR_EXTRA_LABELS below), so it must keep classifying
+# ats_confirmed - add the scanner's company_source here when it is deleted.
+# Empty today; pinned against vocabulary shrinkage by
+# tests/test_corpus_honesty_extract.py.
+_LEGACY_ATS_LABELS: frozenset[str] = frozenset()
+
+ATS_CONFIRMED_LABELS: frozenset[str] = _SCANNER_ATS_LABELS | _LEGACY_ATS_LABELS
 
 EMAIL_ALERT_LABELS: frozenset[str] = frozenset(
     {

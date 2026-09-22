@@ -1,9 +1,13 @@
 from analyses.common.db import open_readonly
 from analyses.corpus_honesty.extract import (
+    _LEGACY_ATS_LABELS,
+    _SCANNER_ATS_LABELS,
+    ATS_CONFIRMED_LABELS,
     classify_source,
     load_exclusion_counts,
     load_provenance_records,
 )
+from jobcannon.engine.ats_platforms import PLAYWRIGHT_SCANNERS, SCANNERS_BY_NAME
 from tests.fixtures import build_fixture_db
 
 COMPANIES = [{"id": 1, "name": "A", "ats_platform": "greenhouse"}]
@@ -77,6 +81,79 @@ def test_exclude_param_drops_one_tag_before_classifying():
     )
     # Excluding a tag that isn't present is a no-op.
     assert classify_source(["Greenhouse"], exclude="portal_jooble") == "ats_confirmed"
+
+
+# ---------------------------------------------------------------------------
+# ATS_CONFIRMED_LABELS - live-derived from the scanner registries (#290).
+# ---------------------------------------------------------------------------
+
+# The ATS source-tag vocabulary captured for this analysis (2026-07-16):
+# every display-cased `company_source` a direct ATS-scanner sighting has
+# written into jobs.sources. This pin is why a scanner REMOVED from the
+# registries (or a company_source rename) cannot silently reclassify its
+# historical corpus rows to 'unrecognized' - the label moves to
+# extract._LEGACY_ATS_LABELS instead of dropping out of the taxonomy.
+_SNAPSHOT_ATS_LABELS: frozenset[str] = frozenset(
+    {
+        "ADP",
+        "Amazon",
+        "Ashby",
+        "BambooHR",
+        "Breezy",
+        "Eightfold",
+        "Google",
+        "Greenhouse",
+        "IBM",
+        "JazzHR",
+        "Jobvite",
+        "Lever",
+        "Microsoft Careers",
+        "Oracle Cloud",
+        "Paylocity",
+        "Personio",
+        "Phenom",
+        "Pinpoint",
+        "Recruitee",
+        "Rippling",
+        "SmartRecruiters",
+        "SuccessFactors",
+        "Teamtailor",
+        "Tesla",
+        "UltiPro",
+        "Workable",
+        "Workday",
+        "iCIMS",
+    }
+)
+
+
+def _live_scanner_labels() -> frozenset[str]:
+    return frozenset(
+        s.company_source for s in (*SCANNERS_BY_NAME.values(), *PLAYWRIGHT_SCANNERS.values())
+    )
+
+
+def test_ats_confirmed_labels_is_exactly_live_plus_legacy():
+    """Derivation contract: the set is exactly the live scanner-label union
+    plus the explicit legacy set - a hand-added straggler, or a regression to
+    a frozen literal that drifts from the registries, fails here."""
+    assert _SCANNER_ATS_LABELS == _live_scanner_labels()
+    assert ATS_CONFIRMED_LABELS == _live_scanner_labels() | _LEGACY_ATS_LABELS
+
+
+def test_ats_confirmed_labels_retains_snapshot_vocabulary():
+    """The captured vocabulary never shrinks: a scanner leaving the
+    registries must have its label moved to _LEGACY_ATS_LABELS so historical
+    corpus rows keep classifying ats_confirmed (the thordata precedent)."""
+    assert _SNAPSHOT_ATS_LABELS <= ATS_CONFIRMED_LABELS
+
+
+def test_every_live_scanner_label_classifies_ats_confirmed():
+    """End-to-end: every label the scanners can currently write lands in the
+    ats_confirmed bucket, including the display-name variants
+    ('Microsoft Careers', 'Oracle Cloud') that are not PLATFORMS keys."""
+    for label in _live_scanner_labels():
+        assert classify_source([label]) == "ats_confirmed", label
 
 
 # ---------------------------------------------------------------------------
