@@ -18,7 +18,7 @@ Pipeline per run:
      authoritative fields (primary_source_merge); a loose match records the
      link only — the contamination invariant from Phase 2.
 
-Attempt semantics (m092 columns):
+Attempt semantics (m092 columns; PORT-SEAM: this host's m0017):
   - direct_url_checked_at / direct_url_attempts stamp once per board-match
     attempt via db._direct_link.stamp_direct_url_checks (single writer).
   - An empty board fetch counts as an attempt for all of that company's
@@ -45,8 +45,11 @@ Company gating is strict (pitfall P2): only ats_probe_status='hit' rows are
 consulted; the resolver never probes speculatively, keeping the
 speculative-miss cohort's ~29% FP rate quarantined in the probe subsystem.
 
-Runs on its own sqlite3 connection (APScheduler thread; stale_detector
-pattern). Careers-page (non-ATS) resolution intentionally stays in the free
+Runs on its own ScanServices.connection_factory() connection (worker thread;
+stale_detector pattern — the sqlite3-shaped EngineCompatConnection facade, so
+the qmark/`jobs`-table SQL below is engine-dialect on purpose and translates
+through jobcannon/db/compat.py's engine_sql_to_host on the hosted path).
+Careers-page (non-ATS) resolution intentionally stays in the free
 enrichment tier: per-job HTML scraping is exactly the N-fetches-per-company
 shape this module exists to eliminate.
 
@@ -84,7 +87,6 @@ from typing import Any
 # rather than a direct import -- Postgres-native SQL cannot run against the
 # bare sqlite3 connections tests/engine/ uses, even though it is safe against
 # a real connection_factory connection in production (internal conn.raw unwrap).
-from jobcannon.engine.json_utils import utc_now_iso
 
 # PORT-SEAM: db_helpers.standalone_connection (DIES) -> svc.connection_factory()
 from jobcannon.engine.direct_link import (
@@ -104,7 +106,10 @@ from jobcannon.engine.services import get_services
 # than this caller threading one through. Its sibling DEFAULT_MAX_BOARD is a
 # plain int constant, not a callable, and is copied verbatim below instead
 # (ats_slug_challenge.TRIGGER_PREFIX_CAREERS_URL precedent). job_finder.db.
-# _postings.annotate_posting_apply_url is L-0075 (escalated/unlanded) ->
+# _postings.annotate_posting_apply_url is L-0075 (landed as a flat
+# re-adaptation, signature (conn, dedup_key, aggregator_apply_url) — the
+# private (ats_platform, source_id) descriptor keying has no target on this
+# host's flat postings table, see jobcannon/db/_jobs.py) ->
 # svc.annotate_posting_apply_url(...).
 DEFAULT_MAX_BOARD = 40
 
@@ -121,6 +126,17 @@ _MAX_PARALLEL_WORKERS = 6
 # re-eligibility. Closed/expired rows are excluded — resolving a dead
 # posting's Apply target is wasted board traffic. ISO-8601 naive-UTC strings
 # compare correctly as text.
+# PORT-SEAM (flat-schema adaptation, issue #322): two private-SQL shapes had
+# no representable hosted target and are rewritten/dropped here --
+#   * COALESCE(j.direct_url_checked_at, '') < ? relied on text-typed storage:
+#     postings.direct_url_checked_at is timestamptz (m0017), where COALESCE
+#     against a '' literal is a type error. The NULL arm is spelled out
+#     instead -- same semantics on both dialects (NULL -> re-eligible, since
+#     '' sorts below any ISO cutoff on SQLite).
+#   * the j.pipeline_status NOT IN (...) exclusion is dropped: this host's
+#     pipeline_status is a per-user table (m0001), not a postings column, so
+#     no single-user verdict can gate the shared-corpus resolver -- a posting
+#     one user dismissed still needs its direct_url resolved for the rest.
 _CANDIDATE_SQL = """
     SELECT j.dedup_key, j.title, j.location, j.company_id,
            COALESCE(j.description, substr(j.jd_full, 1, 400)) AS snippet,
@@ -132,10 +148,9 @@ _CANDIDATE_SQL = """
       AND c.ats_platform IS NOT NULL
       AND c.ats_slug IS NOT NULL AND c.ats_slug != ''
       AND (COALESCE(j.direct_url_attempts, 0) < ?
-           OR COALESCE(j.direct_url_checked_at, '') < ?)
+           OR j.direct_url_checked_at IS NULL
+           OR j.direct_url_checked_at < ?)
       AND (j.expiry_status IS NULL OR j.expiry_status != 'expired')
-      AND (j.pipeline_status IS NULL OR j.pipeline_status NOT IN
-           ('archived', 'rejected', 'withdrawn', 'dismissed'))
     ORDER BY j.company_id, j.last_seen DESC
 """
 
@@ -170,19 +185,6 @@ def _parse_source_urls(raw: Any) -> list[str]:
     except (TypeError, ValueError):
         return []
     return [u for u in parsed if isinstance(u, str)] if isinstance(parsed, list) else []
-
-
-def _parse_postings(raw: Any) -> list[dict]:
-    """Parse the jobs.postings JSON column, tolerating NULL / junk."""
-    if isinstance(raw, list):
-        return raw
-    if not raw:
-        return []
-    try:
-        parsed = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return []
-    return parsed if isinstance(parsed, list) else []
 
 
 def _resolve_company(
@@ -311,7 +313,9 @@ def resolve_primary_sources(
     Keys: scanned (NULL-direct_url rows examined for promotion), promoted,
     companies_scanned, companies_skipped (platform without a public API /
     unknown — no attempt burned), jobs_checked (board-match attempts),
-    resolved, strict, loose, merged (strict matches whose fields folded in),
+    resolved, strict, loose, annotated (strict matches that also recorded an
+    aggregator apply link — additive flat-row write, not a resolution path
+    of its own), merged (strict matches whose fields folded in),
     llm_checked (loose matches sent to the quick-tier tie-breaker),
     llm_upgraded (tie-breaker verdicts that promoted loose -> strict).
     """
@@ -319,7 +323,6 @@ def resolve_primary_sources(
     settings = _resolver_settings(config)
     if max_companies is None:
         max_companies = settings["max_companies_per_run"]
-    now = utc_now_iso()
     decay_cutoff = (
         datetime.now(UTC).replace(tzinfo=None) - timedelta(days=settings["recheck_days"])
     ).isoformat()
@@ -333,6 +336,7 @@ def resolve_primary_sources(
         "resolved": 0,
         "strict": 0,
         "loose": 0,
+        "annotated": 0,
         "merged": 0,
         "llm_checked": 0,
         "llm_upgraded": 0,
@@ -410,14 +414,15 @@ def resolve_primary_sources(
                     if match["url"] is None and not tiebreak_enabled:
                         continue
 
-                    # Phase 5 (#643): Check if the row has postings sub-entities.
-                    # If so, a strict match to a board posting should annotate the
-                    # corresponding descriptor instead of the row-level direct_url.
+                    # Re-read the row's source_urls for the aggregator apply
+                    # link. PORT-SEAM (issue #322): private also selected a
+                    # `postings` JSON column here (the descriptor sub-entity
+                    # array) — this host's flat postings table has no such
+                    # column, so the read shrinks to source_urls only.
                     row = conn.execute(
-                        "SELECT dedup_key, postings, source_urls FROM jobs WHERE dedup_key = ?",
+                        "SELECT source_urls FROM jobs WHERE dedup_key = ?",
                         (dedup_key,),
                     ).fetchone()
-                    descriptors = _parse_postings(row["postings"]) if row else []
                     source_urls = _parse_source_urls(row["source_urls"]) if row else []
                     aggregator_url = source_urls[0] if source_urls else None
 
@@ -462,33 +467,32 @@ def resolve_primary_sources(
                             source_tag = "primary_source_llm"
                             stats["llm_upgraded"] += 1
 
-                    # Phase 5 (#643): If we have a strict match and the row has descriptors,
-                    # try to annotate the matching descriptor instead of row-level merge.
-                    if posting is not None and confidence == "strict" and descriptors:
-                        ats_platform = result["platform"]
-                        source_id = posting.get("source_id")
-                        if source_id and aggregator_url:
-                            # Strict match to a specific descriptor — annotate it via the
-                            # atomic keyed-union writer (db._postings.annotate_posting_apply_url).
-                            # This re-reads the current postings inside an IMMEDIATE transaction,
-                            # so concurrent upsert_posting additions to OTHER descriptors survive.
-                            if (
-                                svc.annotate_posting_apply_url is not None  # PORT-SEAM: L-0075
-                                and svc.annotate_posting_apply_url(
-                                    conn, dedup_key, ats_platform, source_id, aggregator_url
-                                )
-                            ):
-                                stats["resolved"] += 1
-                                stats["strict"] += 1
-                                # Continue to next job — no row-level merge needed.
-                                # NOTE: Phase 5 scope deliberately skips merge_primary_posting_fields
-                                # on the descriptor-annotation path. Row-level salary/posted_date/location
-                                # folding is deferred to a later phase when those fields are added to the
-                                # descriptor shape (the descriptor currently has only
-                                # locations_structured + workplace_type from Phase 1).
-                                continue
+                    # Phase 5 (#643), flat re-adaptation (issue #322): private
+                    # annotated the matching `postings`-JSON descriptor INSTEAD
+                    # of the row-level direct_url when the row had descriptor
+                    # sub-entities. This host has no descriptor sub-entity —
+                    # dedup_key alone identifies the single flat postings row
+                    # (the same "no sub-entity" ruling L-0075 applied to
+                    # annotate_posting_apply_url's own signature), so the
+                    # (ats_platform, source_id) descriptor keying and the
+                    # `descriptors` gate are gone. aggregator_apply_url is a
+                    # separate provenance column on that same row (m0019, not
+                    # overloaded onto m0017's direct_url), so a strict match
+                    # records the aggregator apply link AND falls through to
+                    # the row-level direct_url write + merge — additive, not a
+                    # replacement path (private's `continue` would skip the
+                    # direct_url this resolver exists to write).
+                    if (
+                        posting is not None
+                        and confidence == "strict"
+                        and aggregator_url
+                        and svc.annotate_posting_apply_url is not None  # PORT-SEAM: L-0075
+                        and svc.annotate_posting_apply_url(conn, dedup_key, aggregator_url)
+                    ):
+                        stats["annotated"] += 1
 
-                    # No strict descriptor match or no descriptors — fall through to row-level
+                    # Row-level writes — every match (strict or loose) lands
+                    # here on the flat schema; the annotate above is additive.
                     if (
                         svc.set_direct_url is not None
                         and svc.set_direct_url(  # PORT-SEAM: db._direct_link.set_direct_url seam
@@ -512,19 +516,24 @@ def resolve_primary_sources(
                 if (
                     svc.stamp_direct_url_checks is not None
                 ):  # PORT-SEAM: db._direct_link.stamp_direct_url_checks seam
-                    svc.stamp_direct_url_checks(conn, checked, now)
+                    # PORT-SEAM (issue #322): landed signature is (conn,
+                    # dedup_keys) — private's third now_iso arg was dropped in
+                    # the port for a server-side now() (db/_direct_link.py).
+                    svc.stamp_direct_url_checks(conn, checked)
 
     logger.info("resolve_primary_sources: %s", stats)
     return stats
 
 
 def run_primary_source_resolution(db_path: str, config: dict) -> dict:
-    """Scheduler entry point — own connection (APScheduler thread safety).
+    """Scheduler entry point — own connection (worker-thread safety).
 
-    Uses ``standalone_connection`` so this 5:45 AM job gets WAL +
-    busy_timeout=30000 and waits (rather than raising "database is locked")
-    when it contends with the 5:00 careers_crawl / company_linkage jobs or
-    Flask HTMX polling.
+    # PORT-SEAM: private's ``standalone_connection(db_path)`` (WAL +
+    # busy_timeout pragmas) is DIES — the host binds the Postgres target
+    # inside ScanServices.connection_factory and yields the sqlite3-shaped
+    # EngineCompatConnection facade. ``db_path`` is kept for call-site parity
+    # with the private signature but is unused here (same treatment as
+    # stale_detector.run_stale_detection's own vestigial db_path).
     """
     svc = get_services()  # PORT-SEAM: ScanServices seam (L-0229)
     with svc.connection_factory() as conn:  # PORT-SEAM: ScanServices seam
