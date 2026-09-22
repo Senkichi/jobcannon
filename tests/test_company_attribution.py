@@ -2,17 +2,21 @@
 """Tests for ``jobcannon.db._company_attribution.set_company_attribution``.
 
 # PORT-SEAM: private's docstring described careers_scan_enabled=1 /
-# careers_crawl_flag_reason=NULL and company_state_history recording -- both
-# dropped on this host (see below); rewritten to match.
+# careers_crawl_flag_reason=NULL and company_state_history recording -- the
+# flag clear is now ported (#397, column exists as of m0028); the
+# careers_scan_enabled split and history recording remain dropped (see
+# below); rewritten to match.
 Covers:
 - The invariant bundle (``ats_probe_status='pending'``, ``consecutive_empty_scans=0``,
   ``retry_count=0``, ``retry_after=NULL``, ``miss_reason=NULL``) is applied on
   every call.
 - The ``careers_url`` write path sets ``scan_enabled=true`` (this host merges
-  private's careers_scan_enabled/ats_scan_enabled split into one column, and
-  has no careers_crawl_flag_reason column to clear -- see
+  private's careers_scan_enabled/ats_scan_enabled split into one column -- the
+  split columns exist as of m0021 but no writer co-writes them yet) and clears
+  ``careers_crawl_flag_reason`` (restored in #397; see
   jobcannon/db/_company_attribution.py's own module docstring).
-# PORT-SEAM: careers_url bullet rewritten for the scan_enabled collapse.
+# PORT-SEAM: careers_url bullet rewritten for the scan_enabled collapse and
+# the #397 flag-clear restoration.
 - The ``_UNSET`` sentinel: fields not passed are left untouched (``None`` clears
   to NULL, ``_UNSET`` preserves the existing value).
 - ``AttributionCollisionError`` on UNIQUE(ats_platform, ats_slug) conflict.
@@ -62,7 +66,8 @@ def _insert_company(
     retry_after=None,
     consecutive_empty_scans=0,
     careers_url=None,
-    scan_enabled=True,  # PORT-SEAM: replaces private's careers_scan_enabled/careers_crawl_flag_reason params (dropped, see module docstring)
+    scan_enabled=True,  # PORT-SEAM: replaces private's careers_scan_enabled param (collapsed column, see module docstring)
+    careers_crawl_flag_reason=None,  # restored in #397 (column exists as of m0028)
 ):
     """Insert a company row with all attribution-relevant fields. Returns id."""
     # PORT-SEAM: RETURNING id / fetchone() replaces sqlite3 cursor.lastrowid;
@@ -70,15 +75,15 @@ def _insert_company(
     # so no now bind params.
     row = conn.execute(
         # PORT-SEAM: schema-adapted INSERT -- drops ats_scan_enabled/
-        # careers_scan_enabled/careers_crawl_flag_reason/created_at/updated_at
-        # columns (collapsed/server-defaulted on this host, see module
+        # careers_scan_enabled/created_at/updated_at columns
+        # (collapsed/server-defaulted on this host, see module
         # docstring); RETURNING id replaces sqlite3 cursor.lastrowid.
         "INSERT INTO companies "
         "(name, name_raw, ats_platform, ats_slug, "
         "ats_probe_status, scan_enabled, "
         "miss_reason, retry_count, retry_after, "
-        "consecutive_empty_scans, careers_url) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        "consecutive_empty_scans, careers_url, careers_crawl_flag_reason) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
         "RETURNING id",
         (
             name,
@@ -92,7 +97,8 @@ def _insert_company(
             retry_after,
             consecutive_empty_scans,
             careers_url,
-            # PORT-SEAM: careers_crawl_flag_reason/now/now params dropped (see above).
+            careers_crawl_flag_reason,
+            # PORT-SEAM: now/now params dropped (see above).
         ),
     ).fetchone()  # PORT-SEAM: fetchone() replaces cursor.lastrowid; no commit() (db_conn fixture owns the transaction)
     return row["id"]
@@ -155,16 +161,17 @@ class TestSetCompanyAttributionCareersUrl:
 
     def test_sets_careers_url_and_enables_scan(self, migrated_db_mem):
         conn = migrated_db_mem
-        # PORT-SEAM: careers_scan_enabled/careers_crawl_flag_reason kwargs
-        # dropped -- collapsed into scan_enabled (see module docstring).
+        # PORT-SEAM: careers_scan_enabled kwarg collapsed into scan_enabled
+        # (see module docstring); careers_crawl_flag_reason restored (#397).
         company_id = _insert_company(
             conn,
             scan_enabled=False,
+            careers_crawl_flag_reason="aggregator_suspected:test",
         )
         set_company_attribution(conn, company_id, careers_url="https://acme.com/careers")
         row = _fetch_company(conn, company_id)
         assert row["careers_url"] == "https://acme.com/careers"
-        # PORT-SEAM: careers_crawl_flag_reason assertion dropped -- no column.
+        assert row["careers_crawl_flag_reason"] is None
         assert row["scan_enabled"] is True
 
     def test_careers_url_alone_does_not_clobber_ats_fields(self, migrated_db_mem):
@@ -178,13 +185,18 @@ class TestSetCompanyAttributionCareersUrl:
 
     def test_careers_url_none_clears_to_null(self, migrated_db_mem):
         conn = migrated_db_mem
-        company_id = _insert_company(conn, careers_url="https://old.example.com/careers")
+        company_id = _insert_company(
+            conn,
+            careers_url="https://old.example.com/careers",
+            careers_crawl_flag_reason="aggregator_suspected:test",
+        )
         set_company_attribution(conn, company_id, careers_url=None)
         row = _fetch_company(conn, company_id)
         assert row["careers_url"] is None
         # PORT-SEAM: scan_enabled is still set true (the invariant applies when
-        # careers_url is explicitly provided, even if the value is None).
-        # PORT-SEAM: careers_crawl_flag_reason assertion dropped -- no column.
+        # careers_url is explicitly provided, even if the value is None) --
+        # and careers_crawl_flag_reason is cleared on that same branch.
+        assert row["careers_crawl_flag_reason"] is None
         assert row["scan_enabled"] is True
 
 
@@ -209,12 +221,19 @@ class TestSetCompanyAttributionSentinel:
 
     def test_careers_url_unset_preserves_existing(self, migrated_db_mem):
         conn = migrated_db_mem
-        company_id = _insert_company(conn, careers_url="https://acme.com/careers")
+        company_id = _insert_company(
+            conn,
+            careers_url="https://acme.com/careers",
+            careers_crawl_flag_reason="aggregator_suspected:test",
+        )
         set_company_attribution(conn, company_id, ats_platform="lever", ats_slug="acme")
         row = _fetch_company(conn, company_id)
         assert row["careers_url"] == "https://acme.com/careers"
-        # PORT-SEAM: scan_enabled not touched when careers_url is _UNSET
+        # PORT-SEAM: scan_enabled not touched when careers_url is _UNSET --
+        # and careers_crawl_flag_reason is preserved too (only the
+        # careers_url branch clears it).
         assert row["scan_enabled"] is True
+        assert row["careers_crawl_flag_reason"] == "aggregator_suspected:test"
 
 
 class TestSetCompanyAttributionCollision:

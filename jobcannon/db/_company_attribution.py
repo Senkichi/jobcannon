@@ -28,25 +28,27 @@ The invariant bundle applied on every call, unchanged from private:
 When ``careers_url`` is explicitly provided (not ``_UNSET``):
 
 # PORT-SEAM: private additionally sets careers_scan_enabled=1 and clears
-# careers_crawl_flag_reason on this branch. `careers_scan_enabled` does not
-# exist on this host: m0001's companies table has one merged `scan_enabled`
-# boolean (not private's split ats_scan_enabled/careers_scan_enabled -- see
-# L-0040's seam, which needs that split landed first). This port sets the
-# host's single `scan_enabled = true` as the nearest available re-enable
-# signal. `careers_crawl_flag_reason` DOES exist on this host as of m0028
-# (#370) but is deliberately left un-cleared here -- whether this port
-# should also clear it, matching private, is filed as a Modularity-note
-# follow-up (#370's PR) rather than applied inline. Revisit both once the
-# WI-13 split (L-0040) lands.
+# careers_crawl_flag_reason on this branch. `careers_crawl_flag_reason`
+# exists on this host as of m0028 (#370) and IS cleared here, matching
+# private (#397): a manual careers_url write is the human-override path
+# that re-admits a flagged company to crawl_careers_batch's
+# `careers_crawl_flag_reason IS NULL` lanes (m0028's docstring: excluded
+# "until a human clears the flag" -- this function is that clearing
+# write). `careers_scan_enabled` also exists now (m0021, WI-13) but no
+# writer co-writes the split columns yet -- per m0021's docstring that
+# per-writer co-write instrumentation is a separate tracked follow-up, so
+# this port keeps setting only the host's merged `scan_enabled = true` as
+# the re-enable signal rather than half-starting the cutover in one
+# writer.
 
 # PORT-SEAM: private also calls snapshot_tracked/record_state_diff
 # (job_finder/db/_company_state.py, WI-08) to record the transition in
-# company_state_history, inside the same commit. No company_state_history
-# table exists on this host yet -- that table is itself L-0040's ADAPT
-# scope, escalated (blocked on the same WI-13 precondition; see
-# verification.md). This port omits the history write entirely rather than
-# half-porting a two-column split it can't observe; a future PR wires
-# record_state_diff here once L-0040 lands.
+# company_state_history, inside the same commit. The table and
+# jobcannon/db/_company_state.py now exist on this host (m0022, L-0040;
+# already wired into _companies.py's upsert_company), but wiring
+# record_state_diff into THIS writer -- including private's changed_by
+# param -- is a separate follow-up outside #397's flag-clear scope. This
+# port still omits the history write.
 
 **Sentinel vs None.** ``None`` means "clear the column to NULL"; ``_UNSET``
 means "leave the column untouched" -- unchanged from private, and the same
@@ -133,7 +135,8 @@ def set_company_attribution(
     ats_slug: str | None = _UNSET,
     careers_url: str | None = _UNSET,
     # PORT-SEAM: private's changed_by param (company_state_history tag) is
-    # dropped -- no history table on this host yet, see module docstring.
+    # dropped -- history write not wired into this writer yet, see module
+    # docstring.
 ) -> None:
     """Set manual company attribution fields and reset the invariant bundle.
 
@@ -145,9 +148,10 @@ def set_company_attribution(
     Always resets ``ats_probe_status='pending'``,
     ``consecutive_empty_scans=0``, ``retry_count=0``, ``retry_after=NULL``,
     ``miss_reason=NULL``. When ``careers_url`` is explicitly provided, also
-    sets ``scan_enabled=true`` (see module docstring's PORT-SEAM for why
-    this differs from private's split careers_scan_enabled +
-    careers_crawl_flag_reason clear). (# PORT-SEAM: private's Args also
+    sets ``scan_enabled=true`` and clears ``careers_crawl_flag_reason``
+    (see module docstring's PORT-SEAM for why the re-enable still differs
+    from private's split careers_scan_enabled write). (# PORT-SEAM:
+    private's Args also
     documented Records the tracked-field transition via record_state_diff
     -- dropped, see module docstring.)
 
@@ -199,7 +203,10 @@ def set_company_attribution(
         params.append(careers_url)
         set_parts.append(
             "scan_enabled = true"
-        )  # PORT-SEAM: replaces private's careers_scan_enabled=1 + careers_crawl_flag_reason=NULL, see module docstring
+        )  # PORT-SEAM: replaces private's careers_scan_enabled=1, see module docstring
+        set_parts.append(
+            "careers_crawl_flag_reason = NULL"
+        )  # PORT-SEAM: restored private's flag clear now that m0028 backs the column (#397)
 
     params.append(company_id)
     sql = f"UPDATE companies SET {', '.join(set_parts)} WHERE id = %s"  # PORT-SEAM: %s placeholder; private's before=snapshot_tracked(...) dropped, see module docstring

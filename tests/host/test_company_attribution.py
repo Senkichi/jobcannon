@@ -34,7 +34,8 @@ def _insert_company(db_conn, name, **kwargs):
 def _row(db_conn, cid):
     return db_conn.execute(
         "SELECT ats_platform, ats_slug, careers_url, ats_probe_status, "
-        "consecutive_empty_scans, retry_count, retry_after, miss_reason, scan_enabled "
+        "consecutive_empty_scans, retry_count, retry_after, miss_reason, scan_enabled, "
+        "careers_crawl_flag_reason "
         "FROM companies WHERE id = %s",
         (cid,),
     ).fetchone()
@@ -74,6 +75,33 @@ def test_unset_fields_left_untouched(db_conn):
     assert row["ats_platform"] == "greenhouse"
     assert row["ats_slug"] == "only"
     assert row["scan_enabled"] is True
+
+
+def test_careers_url_clears_crawl_flag_reason(db_conn):
+    """#397: an explicit careers_url write clears careers_crawl_flag_reason
+    (m0028's column; private clears it on the same branch), while an ATS-only
+    write leaves the flag untouched."""
+    conn = _svc_conn(db_conn)
+    cid = _insert_company(
+        db_conn,
+        "Flagged Careers",
+        careers_crawl_flag_reason="aggregator_suspected:test",
+    )
+    set_company_attribution(conn, cid, careers_url="https://example.com/careers")
+
+    row = _row(db_conn, cid)
+    assert row["careers_url"] == "https://example.com/careers"
+    assert row["careers_crawl_flag_reason"] is None
+
+    cid2 = _insert_company(
+        db_conn,
+        "Still Flagged",
+        careers_crawl_flag_reason="aggregator_suspected:test",
+    )
+    set_company_attribution(conn, cid2, ats_platform="lever", ats_slug="still")
+
+    row2 = _row(db_conn, cid2)
+    assert row2["careers_crawl_flag_reason"] == "aggregator_suspected:test"
 
 
 def test_none_clears_column(db_conn):
