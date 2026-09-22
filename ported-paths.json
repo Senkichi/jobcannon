@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T06:55:01Z",
+  "generated_at": "2026-09-22T08:04:30Z",
   "roots": [
     "engine",
     "db",
@@ -907,18 +907,14 @@
         },
         {
           "line": 40,
-          "text": "# company_tokens) live in job_finder/web/enrichment_tiers.py privately, which"
+          "text": "# company_tokens) live in job_finder/web/enrichment_tiers.py privately --"
         },
         {
-          "line": 93,
+          "line": 104,
           "text": "# PORT-SEAM: Config inlined from job_finder/config.py -- pure config-parsing"
         },
         {
-          "line": 286,
-          "text": "# copied verbatim from job_finder/web/enrichment_tiers.py @ 307c369c (ledger"
-        },
-        {
-          "line": 982,
+          "line": 826,
           "text": "# PORT-SEAM: inlined from job_finder/db/_queries.py -- _SUB_SCORE_SUM_SQL and"
         }
       ]
