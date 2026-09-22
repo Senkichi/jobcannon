@@ -1,5 +1,7 @@
-"""DB-free regression tests for #388: qmark_to_format must not translate a
-`?` that lives inside a SQL comment.
+"""DB-free regression tests for #388 (qmark_to_format must not translate a
+`?` that lives inside a SQL comment) and #391 (the same scanner must track
+double-quoted identifiers, so comment-like text inside `"..."` cannot open
+a comment and a `?` inside one is never counted).
 
 SQLite (and every other SQL dialect) treats a `?` inside a `--` line comment
 or `/* */` block comment as inert text, never a placeholder. Before this
@@ -46,6 +48,31 @@ def test_double_dash_inside_string_literal_is_not_a_comment():
     assert out.count("%s") == 1
 
 
+def test_double_dash_inside_quoted_identifier_is_not_a_comment():
+    # #391: '--' inside a double-quoted identifier is identifier text, not
+    # a line-comment start — the inverse of the single-quoted case above.
+    # Before this fix _iter_sql_regions tracked '...' literals but not
+    # "..." identifiers, so the '--' inside "a--b" opened a line comment
+    # that swallowed the rest of the line, leaving the real '?' a literal
+    # and under-counting %s against the caller's params tuple.
+    sql = 'SELECT 1 FROM postings WHERE "a--b" = ? AND id = ?'
+    out = qmark_to_format(sql)
+    assert out == 'SELECT 1 FROM postings WHERE "a--b" = %s AND id = %s'
+    assert out.count("%s") == 2
+
+
+def test_qmark_inside_quoted_identifier_is_not_translated():
+    # The other direction of #391: a '?' that is identifier content must
+    # not count as a placeholder. '""' is the standard SQL escaped-quote
+    # doubling inside a quoted identifier and must not end the region
+    # early — "c""d--e" is one identifier, so its '--' still cannot open
+    # a comment that would swallow the trailing placeholder.
+    sql = 'SELECT 1 FROM postings WHERE "a?b" = ? AND "c""d--e" = ?'
+    out = qmark_to_format(sql)
+    assert out == 'SELECT 1 FROM postings WHERE "a?b" = %s AND "c""d--e" = %s'
+    assert out.count("%s") == 2
+
+
 def test_percent_in_comments_is_still_escaped():
     # psycopg's %s substitution scans the whole query text, comments
     # included, so a bare '%' left un-escaped inside a comment would still
@@ -75,6 +102,27 @@ def test_sabotage_mixed_placeholder_count_end_to_end():
     assert "consecutive_empty_scans <= ?" not in out  # the comment is stripped, not just skipped
     assert "legacy seam" not in out
     assert "'what?'" in out  # string-literal '?' survives untouched
+    assert "UPDATE postings" in out and "UPDATE jobs" not in out
+
+
+def test_sabotage_placeholder_count_with_quoted_identifiers():
+    # Sabotage-style assertion for #391, mirroring
+    # test_sabotage_mixed_placeholder_count_end_to_end: a realistic mixed
+    # sample must translate to exactly the number of REAL placeholders.
+    # Real placeholders, left to right: comp_data_json=?, "a--b"=?,
+    # dedup_key=? -> exactly 3. The '--' inside "a--b" must not open a
+    # comment (which would swallow the rest of the line and under-count),
+    # the '?' inside "b?c" must not count (over-count), and the '?' inside
+    # the trailing line comment stays inert.
+    sql = (
+        "UPDATE jobs SET comp_data_json = ? "
+        'WHERE "a--b" = ? AND "b?c" IS NOT NULL AND dedup_key = ? -- was this ?'
+    )
+    out = engine_sql_to_host(sql)
+    assert out.count("%s") == 3
+    assert '"a--b"' in out  # the identifier survives intact, not blanked as a comment
+    assert '"b?c"' in out  # identifier '?' survives untouched
+    assert "was this ?" not in out  # the real line comment is still stripped
     assert "UPDATE postings" in out and "UPDATE jobs" not in out
 
 

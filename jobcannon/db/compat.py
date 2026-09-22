@@ -116,40 +116,47 @@ from typing import Iterator
 def _iter_sql_regions(sql: str) -> Iterator[tuple[str, str]]:
     """Single scanner behind every comment/string-aware pass in this module
     (`qmark_to_format` and `_strip_comments`) — walk `sql` once and yield
-    `(chunk, region)` pairs, `region` in `{"code", "string", "line_comment",
-    "block_comment"}`. `code` chunks are always one character; `string`
-    chunks are one character except a doubled `''` escape, which is yielded
-    as a single two-character chunk; comment chunks span the whole comment
-    (`--` to end of line, or `/* ... */`, not nested — SQLite doesn't nest
-    block comments and this shim only ever sees SQLite-dialect engine SQL).
+    `(chunk, region)` pairs, `region` in `{"code", "string", "identifier",
+    "line_comment", "block_comment"}`. `code` chunks are always one
+    character; `string` and `identifier` chunks are one character except a
+    doubled `''`/`""` escape, which is yielded as a single two-character
+    chunk; comment chunks span the whole comment (`--` to end of line, or
+    `/* ... */`, not nested — SQLite doesn't nest block comments and this
+    shim only ever sees SQLite-dialect engine SQL).
 
-    String state is checked before comment state, so a `--` or `/*` inside a
-    single-quoted string literal is NOT treated as a comment start (matches
-    every SQL dialect's actual lexing order, and is exactly what #388's
-    literal-scanner reuse is meant to guarantee stays true for comments too).
-    An unterminated string or block comment runs to end-of-input rather than
-    raising — same permissiveness the prior implementation had for
-    unterminated strings.
+    `string` covers single-quoted literals, `identifier` double-quoted
+    identifiers (`"a--b"` is a legal name on both SQLite and Postgres).
+    Quoted-region state is checked before comment state, so a `--` or `/*`
+    inside either kind of quoted region is NOT treated as a comment start
+    (matches every SQL dialect's actual lexing order, and is exactly what
+    #388's literal-scanner reuse is meant to guarantee stays true for
+    comments too; #391 extends the same guarantee to double-quoted
+    identifiers, where a `--` inside a name like `"a--b"` would otherwise
+    swallow the rest of the line as a comment). An unterminated string,
+    identifier, or block comment runs to end-of-input rather than raising —
+    same permissiveness the prior implementation had for unterminated
+    strings.
     """
     n = len(sql)
-    in_string = False
+    quote: str | None = None  # "'" in a string literal, '"' in a quoted identifier
     i = 0
     while i < n:
         ch = sql[i]
-        if in_string:
-            if ch == "'":
-                # '' inside a string is an escaped quote, stay in-string
-                if i + 1 < n and sql[i + 1] == "'":
-                    yield sql[i : i + 2], "string"
+        if quote is not None:
+            region = "string" if quote == "'" else "identifier"
+            if ch == quote:
+                # '' or "" inside a quoted region is an escaped quote, stay in
+                if i + 1 < n and sql[i + 1] == quote:
+                    yield sql[i : i + 2], region
                     i += 2
                     continue
-                in_string = False
-            yield ch, "string"
+                quote = None
+            yield ch, region
             i += 1
             continue
-        if ch == "'":
-            in_string = True
-            yield ch, "string"
+        if ch == "'" or ch == '"':
+            quote = ch
+            yield ch, "string" if ch == "'" else "identifier"
             i += 1
             continue
         if sql[i : i + 2] == "--":
@@ -170,8 +177,9 @@ def _iter_sql_regions(sql: str) -> Iterator[tuple[str, str]]:
 
 def qmark_to_format(sql: str) -> str:
     """Translate '?' placeholders to '%s' and escape literal '%' to '%%',
-    skipping single-quoted string literals (standard SQL '' escaping), '--'
-    line comments, and '/* */' block comments.
+    skipping single-quoted string literals (standard SQL '' escaping),
+    double-quoted identifiers (standard SQL "" escaping), '--' line
+    comments, and '/* */' block comments.
 
     Comments matter here because SQLite (like every SQL dialect) never
     treats a '?' inside a comment as a placeholder — it's inert text — but
@@ -183,7 +191,11 @@ def qmark_to_format(sql: str) -> str:
     parameters` at execute time (#388). '%' still gets escaped inside
     comments for the same reason: psycopg's scan doesn't skip comments
     either, so a stray '%' there would otherwise be misread as a
-    placeholder introducer.
+    placeholder introducer. Double-quoted identifiers matter for the
+    mirror-image reason (#391): a '--' inside `"a--b"` is identifier text,
+    not a comment start — reading it as one would swallow the rest of the
+    line and leave a real '?' untranslated, under-counting %s against the
+    caller's params tuple the same way.
     """
     out: list[str] = []
     for chunk, region in _iter_sql_regions(sql):
