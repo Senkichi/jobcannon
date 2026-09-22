@@ -79,6 +79,67 @@ def test_bare_column_datetime_rewrite():
     )
 
 
+def test_now_minus_days_helper_output_translates_for_postgres():
+    # #401: engine/_sql_dialect.py's sqlite_now_minus_days() is the single
+    # emitter for the canonical interval fragment. Pin the emitted text to
+    # the _DATETIME_REWRITES[0] contract so an edit to the helper that
+    # produces a shape the rewrite does not recognize (e.g. the pre-negated
+    # `? || ' days'` variant from #380) fails here instead of as a live
+    # Postgres `datetime(...)` undefined-function error.
+    from jobcannon.db.compat import engine_sql_to_host
+    from jobcannon.engine._sql_dialect import sqlite_now_minus_days
+
+    out = engine_sql_to_host(f"last_scanned_at < {sqlite_now_minus_days()}")
+    assert out == "last_scanned_at < now() - make_interval(days => %s)"
+
+
+def test_now_minus_days_helper_is_used_by_all_canonical_shape_sites():
+    # #401 adoption guard: every engine site that emits the canonical
+    # `datetime('now', '-' || ? || ' days')` interval fragment must do so
+    # through sqlite_now_minus_days() — a re-inlined literal (or a drifted
+    # variant) at any of these sites reintroduces the duplication the
+    # helper exists to eliminate. inspect.getsource on the *function*
+    # (not the module) keeps this check scoped to the emitting code.
+    import inspect
+
+    from jobcannon.engine import careers_crawler
+    from jobcannon.engine.ats_scanner import _run, _scan_log, _scan_selection
+    from jobcannon.engine.careers_crawler import _bench_predicate
+
+    for fn in (
+        _run._dormancy_gate_clause,
+        careers_crawler._lane1_query_sql,
+        _bench_predicate.build_bench_predicate_sql,
+        _bench_predicate.is_company_benched,
+        _scan_selection.prune_selection_log,
+        _scan_log.prune_title_outcomes,
+    ):
+        # Strip the docstring: several of these functions *mention* the
+        # helper in their docstrings, and the check must assert the call in
+        # executable code, not the prose.
+        code = inspect.getsource(fn).replace(fn.__doc__ or "", "")
+        assert "sqlite_now_minus_days" in code, (
+            f"{fn.__qualname__} no longer emits the interval fragment via "
+            "sqlite_now_minus_days() — the canonical shape must come from "
+            "engine/_sql_dialect.py, not an inline literal (#401)"
+        )
+
+
+def test_now_minus_days_helper_appears_in_generated_sql():
+    # Output-level pin: the builders that emit SQL without a live
+    # connection must produce the canonical fragment text, byte-identical
+    # to what _DATETIME_REWRITES[0] matches.
+    from jobcannon.engine._sql_dialect import sqlite_now_minus_days
+    from jobcannon.engine.ats_scanner import _run
+    from jobcannon.engine.careers_crawler import _lane1_query_sql
+    from jobcannon.engine.careers_crawler._bench_predicate import build_bench_predicate_sql
+
+    fragment = sqlite_now_minus_days()
+    assert fragment in _run._dormancy_gate_clause()
+    assert fragment in build_bench_predicate_sql()[0]
+    assert fragment in _lane1_query_sql("c.id", "TRUE")
+
+
 def test_bench_predicate_sql_translates_cleanly_end_to_end():
     # Regression guard tying the compat rewrite to the actual bench-predicate
     # SQL text (not a hand-written analog) — same rationale as

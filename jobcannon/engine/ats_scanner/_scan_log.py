@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from jobcannon.engine._sql_dialect import sqlite_now_minus_days
 from jobcannon.engine.json_utils import utc_now_iso
 
 #: Columns this writer knows how to populate, in a stable canonical order. The
@@ -302,8 +303,11 @@ def prune_title_outcomes(conn: sqlite3.Connection, keep_days: int) -> int:
     naive-UTC-ISO ``seen_at``) — jobcannon/db/compat.py's date-function
     rewrite translates this exact shape to Postgres's
     ``now() - make_interval(days => ?)`` for engine callers, so this needs no
-    seam adaptation. Returns the number of rows deleted. Pure delete; does not
-    commit — mirrors ``prune_selection_log`` in ``_scan_selection.py``.
+    seam adaptation. The fragment is emitted by engine/_sql_dialect.py's
+    ``sqlite_now_minus_days()`` (#401), the single emitter for the canonical
+    shape compat.py rewrites. Returns the number of rows deleted. Pure
+    delete; does not commit — mirrors ``prune_selection_log`` in
+    ``_scan_selection.py``.
 
     # PORT-SEAM: "SQLite's datetime(...)" (private's wording) is replaced
     # with "the datetime(...) shape" plus an explicit cite of compat.py's
@@ -311,7 +315,7 @@ def prune_title_outcomes(conn: sqlite3.Connection, keep_days: int) -> int:
     # Postgres before it runs -- it is no longer SQLite-specific in effect.
     """
     cursor = conn.execute(
-        "DELETE FROM scan_title_outcomes WHERE seen_at < datetime('now', '-' || ? || ' days')",
+        f"DELETE FROM scan_title_outcomes WHERE seen_at < {sqlite_now_minus_days()}",
         (int(keep_days),),
     )
     return int(cursor.rowcount)
