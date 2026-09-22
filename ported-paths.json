@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T03:47:20Z",
+  "generated_at": "2026-09-22T04:31:40Z",
   "roots": [
     "engine",
     "db",
@@ -2448,59 +2448,59 @@
           "text": "Required callables MUST match the signatures of the private-repo functions"
         },
         {
-          "line": 49,
+          "line": 65,
           "text": "#   matches job_finder.db._jobs.upsert_job(conn, parsed, *, company_id=None,"
         },
         {
-          "line": 52,
+          "line": 68,
           "text": "#   matches job_finder.db._jd_full.set_jd_full(conn, dedup_key, text, *,"
         },
         {
-          "line": 55,
+          "line": 71,
           "text": "#   matches job_finder.web.ats_company.upsert_company(conn, name, ...) -> int;"
         },
         {
-          "line": 61,
+          "line": 77,
           "text": "#   matches job_finder.secrets.get_secret(name, *, config=None)"
         },
         {
-          "line": 63,
+          "line": 79,
           "text": "#   replaces job_finder.config.JD_STORAGE_MAX_CHARS"
         },
         {
-          "line": 94,
+          "line": 110,
           "text": "#   matches job_finder.db._jobs.set_source_id_if_free(conn, dedup_key,"
         },
         {
-          "line": 112,
+          "line": 128,
           "text": "#   Whole-scan runtime budget in seconds. Replaces the private repo's"
         },
         {
-          "line": 120,
+          "line": 136,
           "text": "# -- Wave 2 job_finder/web follow-up (L-0174/L-0182/L-0229) --"
         },
         {
-          "line": 145,
+          "line": 161,
           "text": "# `run_detection` field above, which already covers a third function from"
         },
         {
-          "line": 146,
+          "line": 162,
           "text": "# this same private module."
         },
         {
-          "line": 250,
+          "line": 266,
           "text": "#   matches job_finder.web.autoheal.override_loader.careers_recipe(source)"
         },
         {
-          "line": 252,
+          "line": 268,
           "text": "#   (ported inline as a private function in _autoheal_seam.py -- see"
         },
         {
-          "line": 255,
+          "line": 271,
           "text": "#   matches job_finder.web.autoheal.recipe_extractor.careers_recipe_extract("
         },
         {
-          "line": 258,
+          "line": 274,
           "text": "#   matches job_finder.web.autoheal.health_monitor.record_extraction(conn,"
         }
       ]
