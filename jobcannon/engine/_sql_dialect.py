@@ -24,7 +24,7 @@ import it safely at module level.
 def sqlite_now_minus_days() -> str:
     """Canonical engine-dialect "now minus N days" expression.
 
-    Returns ``datetime('now', ? || ' days')`` — the ONLY interval
+    Returns ``datetime('now', '-' || ? || ' days')`` — the ONLY interval
     shape ``jobcannon/db/compat.py``'s ``_DATETIME_REWRITES[0]`` translates
     for Postgres (to ``now() - make_interval(days => %s)``). Bind the
     fragment's single ``?`` placeholder with a plain positive day count —

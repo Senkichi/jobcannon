@@ -93,6 +93,24 @@ def test_now_minus_days_helper_output_translates_for_postgres():
     assert out == "last_scanned_at < now() - make_interval(days => %s)"
 
 
+def test_now_minus_days_docstring_documents_emitted_shape():
+    # The helper's docstring is the single point of truth for the canonical
+    # fragment's contract — its Returns line must name the emitted text
+    # byte-identically. Stating the pre-negated `? || ' days'` shape there
+    # (the #380 defect class the same docstring warns against) is a
+    # self-contradiction that invites copy-paste of the forbidden variant.
+    import inspect
+
+    from jobcannon.engine._sql_dialect import sqlite_now_minus_days
+
+    returns_line = next(
+        line
+        for line in inspect.getdoc(sqlite_now_minus_days).splitlines()
+        if line.startswith("Returns")
+    )
+    assert sqlite_now_minus_days() in returns_line
+
+
 def test_now_minus_days_helper_is_used_by_all_canonical_shape_sites():
     # #401 adoption guard: every engine site that emits the canonical
     # `datetime('now', '-' || ? || ' days')` interval fragment must do so
