@@ -64,6 +64,24 @@ Detector contract
     known-provenance ground truth — for what this detector's recall claim
     actually rests on.
 
+Marker form (issue #278)
+    The header convention is a line-1 ``#`` comment — ``# PORTED from
+    <item> @ <sha> (private job-cannon). Ledger <row>.`` — never a second,
+    back-to-back triple-quoted PORTED docstring stacked before the
+    module's original docstring. A bare string is still a statement: a
+    following ``from __future__ import`` then lands after real code and
+    raises SyntaxError ("from __future__ imports must occur at the
+    beginning of the file"), and without one the marker silently becomes
+    ``__doc__`` while the original docstring degrades to a dead string
+    literal — the version of the bug nothing else catches. A marker fused
+    into the single module docstring's first line (the form most
+    already-landed ports carry) stays legal — the docstring still leads
+    the file — but new ports use the comment form so the module docstring
+    stays verbatim-identical to its private source for fidelity diffs.
+    ``find_misplaced_provenance_headers`` and its test in
+    tests/test_ported_paths_manifest.py enforce the boundary across the
+    port surface (the five package roots plus tests/).
+
 Modes
     derive (default)   Rewrite ``ported-paths.json`` from a fresh scan.
     --check             Read-only. Exits non-zero if the checked-in
@@ -81,6 +99,7 @@ Modes
 from __future__ import annotations
 
 import argparse
+import ast
 import io
 import json
 import re
@@ -152,6 +171,14 @@ PROVENANCE_RE = re.compile(
     rf"|{_FILE_LIKE_SIGNAL}{_TIGHT_GAP_NO_DOT}\bprivate\b",
     re.IGNORECASE,
 )
+
+# The convention word itself, for spotting a PORTED header that names neither
+# job_finder nor a "private"-proximity artifact (e.g. "PORTED from
+# tests/test_x.py @ <sha>. Ledger L-0001."). Only consulted on string literals
+# that are already in a suspicious position (a dead module-level statement),
+# not run over whole files — a bare "PORTED" in ordinary prose is not a
+# provenance signal on its own.
+_PORTED_WORD_RE = re.compile(r"\bPORTED\b")
 
 
 def _match_spans_to_lines(text: str, matches: list[re.Match]) -> set[int]:
@@ -262,6 +289,95 @@ def find_provenance_files(repo_root: Path) -> dict[str, list[dict]]:
             if markers:
                 found[py_file.relative_to(repo_root).as_posix()] = markers
     return found
+
+
+def _is_bare_string_statement(node: ast.stmt) -> bool:
+    """True for a module-level statement that is just a string literal — the
+    module docstring itself, or the dead-string shape a misplaced provenance
+    header takes (issue #278)."""
+    return (
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    )
+
+
+def _is_provenance_marker(text: str) -> bool:
+    return bool(PROVENANCE_RE.search(text) or _PORTED_WORD_RE.search(text))
+
+
+def _is_future_import(node: ast.stmt) -> bool:
+    return isinstance(node, ast.ImportFrom) and node.module == "__future__"
+
+
+def find_misplaced_provenance_headers(repo_root: Path) -> list[str]:
+    """Scan the port surface for provenance markers in dead-string position.
+
+    A marker is legal in a ``#`` comment or inside the single module
+    docstring. Written as a SECOND triple-quoted statement stacked before
+    (or after) the original docstring it is a plain expression statement:
+    any following ``from __future__ import`` then raises SyntaxError, and
+    without one the stack still compiles — the marker steals ``__doc__``
+    while the original docstring becomes dead text (issue #278). Both
+    shapes are caught: ast.parse surfaces the future-import failure
+    directly, and the statement walk flags a marker-bearing dead string or
+    a marker-bearing docstring whose original docstring was displaced into
+    a dead slot behind it — including the "move the ``from __future__``
+    import up" variant, where the displaced string lands after the import
+    but is still dead text (and a ``-``-only hunk to fidelity diffs).
+    Scans ``jobcannon/{PACKAGE_ROOTS}`` plus ``tests/`` — ported test
+    files carry the same headers and the same hazard.
+
+    Returns sorted ``"path:line: reason"`` strings; empty means clean.
+    """
+    offenders: list[str] = []
+    scan_dirs = [repo_root / "jobcannon" / root for root in PACKAGE_ROOTS]
+    tests_dir = repo_root / "tests"
+    if tests_dir.is_dir():
+        scan_dirs.append(tests_dir)
+
+    for scan_dir in scan_dirs:
+        if not scan_dir.is_dir():
+            continue
+        for py_file in sorted(scan_dir.rglob("*.py")):
+            rel = py_file.relative_to(repo_root).as_posix()
+            try:
+                tree = ast.parse(py_file.read_text(encoding="utf-8"))
+            except SyntaxError as exc:
+                # A marker-stacked header that precedes `from __future__`
+                # never reaches the statement walk — it fails here first.
+                if "from __future__" in str(exc):
+                    offenders.append(f"{rel}:{exc.lineno}: {exc.msg}")
+                continue
+            body = tree.body
+            # The module docstring is a legal marker position — but a second
+            # string statement while still in header position (only
+            # `from __future__` imports between it and the docstring) is the
+            # original docstring displaced into a dead slot: the issue-#278
+            # stack, including its "move the future import up" variant. The
+            # displaced string carries no marker of its own, so it is only
+            # reachable through the docstring. A dead string AFTER any real
+            # statement is a different matter (e.g. the variable-docstring
+            # idiom) and is not this convention's concern.
+            docstring_marked = (
+                bool(body)
+                and _is_bare_string_statement(body[0])
+                and _is_provenance_marker(body[0].value.value)
+            )
+            for i, node in enumerate(body):
+                if i == 0 or not _is_bare_string_statement(node):
+                    continue
+                if _is_provenance_marker(node.value.value):
+                    reason = "provenance marker in a dead module-level string statement"
+                elif docstring_marked and all(_is_future_import(n) for n in body[1:i]):
+                    reason = "module docstring displaced by a provenance docstring above it"
+                else:
+                    continue
+                offenders.append(
+                    f"{rel}:{node.lineno}: {reason} — `from __future__` after it is a "
+                    "SyntaxError; use a `# PORTED` line-1 comment instead (issue #278)"
+                )
+    return sorted(offenders)
 
 
 def build_manifest(repo_root: Path) -> dict:
