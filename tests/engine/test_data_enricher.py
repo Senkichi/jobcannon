@@ -32,14 +32,17 @@ landed except scrape_careers_tier). What did NOT port, and why:
   - TestRunEnrichmentBackfillSelect (5 tests): all target
     run_enrichment_backfill, one of the three functions this port
     deliberately drops (see data_enricher.py's own module docstring /
-    PORT-SEAM comment) because it calls
-    job_finder.web.autoheal.agentic_enricher, which has no ledger row or
-    ScanServices seam in this port's read scope. Dropped wholesale rather
-    than skipped: unlike the migration/L-0178 classes above (which reference
-    real functions that exist elsewhere and now have a landed seam),
-    run_enrichment_backfill itself does not exist post-port, so there is no
-    ledger-preserving value in keeping empty stub methods that reference a
-    deleted function.
+    PORT-SEAM comment) because it calls the private
+    job_finder.web.agentic_enricher module, which had no ledger row or
+    ScanServices seam in this port's read scope at the time. That module
+    has since landed as jobcannon/engine/agentic_enricher.py (L-0132;
+    public entry points run_agentic_backfill / enrich_single_job), so
+    porting the wrappers is now an unblocked follow-up. Dropped wholesale
+    rather than skipped: unlike the migration/L-0178 classes above (which
+    reference real functions that exist elsewhere and now have a landed
+    seam), run_enrichment_backfill itself does not exist post-port, so
+    there is no ledger-preserving value in keeping empty stub methods that
+    reference a deleted function.
 
 Everything else ports with unchanged assertions except:
 
