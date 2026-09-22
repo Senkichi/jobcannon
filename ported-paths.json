@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T06:37:17Z",
+  "generated_at": "2026-09-22T07:32:26Z",
   "roots": [
     "engine",
     "db",
@@ -1720,15 +1720,15 @@
           "text": "# PORTED from job_finder/sources/email_senders.py @ 2dc6c820aff0a3b213e4f6c4c535097f8dd0a816 (private job-cannon). Ledger L-0113."
         },
         {
-          "line": 130,
+          "line": 172,
           "text": "# ported — it belongs to `job_finder/config.py`, out of scope for"
         },
         {
-          "line": 138,
+          "line": 180,
           "text": "# PORT-SEAM: private body opened with `from job_finder.config import"
         },
         {
-          "line": 180,
+          "line": 214,
           "text": "# PORT-SEAM: private body opened with `from job_finder.config import"
         }
       ]
@@ -2536,20 +2536,6 @@
         {
           "line": 154,
           "text": "# earlier port wave — not in the private source at this row's declared SHA."
-        }
-      ]
-    },
-    {
-      "path": "jobcannon/engine/sources/__init__.py",
-      "root": "engine",
-      "markers": [
-        {
-          "line": 1,
-          "text": "# PORTED from job_finder/sources/__init__.py @ e4c6d2e243ca561de7a30b0acd29470f89f0c18c (private job-cannon). Ledger L-0042."
-        },
-        {
-          "line": 13,
-          "text": "The private original doc'd this as \"Job sources - IMAP, SerpAPI, DataForSEO,"
         }
       ]
     },
