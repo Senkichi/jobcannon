@@ -120,7 +120,7 @@ from typing import Any, Literal
 
 from psycopg.types.json import Jsonb
 
-from jobcannon.db.pool import commit_unless_nested
+from jobcannon.db.pool import with_write_txn
 from jobcannon.engine.jd_content_contract import JD_CONTENT_REASON_CODES
 from jobcannon.engine.parsed_job import ParsedJob, UnresolvedParsedJob
 
@@ -244,7 +244,7 @@ def upsert_job(
             }
             for i, src in enumerate(parsed.sources)
         ]
-        with raw.transaction():
+        with with_write_txn(raw):
             raw.execute(
                 """
                 INSERT INTO postings (
@@ -289,7 +289,6 @@ def upsert_job(
                     Jsonb(list(parsed.unresolved_reasons)),
                 ),
             )
-        commit_unless_nested(raw)
         return UpsertResult("inserted", parsed.dedup_key, list(parsed.unresolved_reasons))
 
     # ---- UPDATE branch ----
@@ -393,7 +392,7 @@ def upsert_job(
         reason for reason in parsed.unresolved_reasons if reason not in JD_CONTENT_REASON_CODES
     ]
 
-    with raw.transaction():
+    with with_write_txn(raw):
         cur = raw.execute(
             """
             UPDATE postings SET
@@ -447,7 +446,6 @@ def upsert_job(
                 matched_dedup_key,
             ),
         )
-    commit_unless_nested(raw)
     # RETURNING captures what THIS statement actually persisted — honest
     # even under the #235 race, unlike re-using the (possibly by-now-stale)
     # `existing` SELECT or the raw `parsed.unresolved_reasons` value.
@@ -543,12 +541,12 @@ def set_source_id_if_free(
     # note above this function for why the except clause below is kept as
     # documented dead code rather than removed.
     try:
-        with raw.transaction():  # PORT-SEAM: sqlite3 conn.execute/commit -> raw.transaction()+commit_unless_nested (matches upsert_job's own transaction pattern)
+        # PORT-SEAM: sqlite3 conn.execute/commit -> with_write_txn (matches upsert_job's own transaction pattern)
+        with with_write_txn(raw):
             raw.execute(
                 "UPDATE postings SET source_id = %s WHERE dedup_key = %s",
                 (source_id, dedup_key),
             )
-        commit_unless_nested(raw)
     except Exception as exc:  # pragma: no cover -- PORT-SEAM: sqlite3.IntegrityError -> Exception (no schema backstop, see note above)
         _logger.warning("source_id write rejected for %s: %s", dedup_key, exc)
         return False
@@ -633,19 +631,14 @@ def annotate_posting_apply_url(
     ):  # PORT-SEAM: added aggregator_apply_url guard, see comment above
         return False
 
-    raw = (
-        conn.raw if hasattr(conn, "raw") else conn
-    )  # PORT-SEAM: EngineCompatConnection unwrap, matches set_source_id_if_free
-
-    with raw.transaction():
+    # PORT-SEAM: private's conn.execute("COMMIT") inside its own BEGIN
+    # IMMEDIATE block is subsumed by with_write_txn's commit_unless_nested.
+    with with_write_txn(conn) as raw:
         cursor = raw.execute(
             "UPDATE postings SET aggregator_apply_url = %s WHERE dedup_key = %s",  # PORT-SEAM: jobs.postings JSON merge -> scalar-column UPDATE; ? -> %s
             (aggregator_apply_url, dedup_key),
         )
         rowcount = cursor.rowcount
-    commit_unless_nested(
-        raw
-    )  # PORT-SEAM: replaces private's conn.execute("COMMIT") inside its own BEGIN IMMEDIATE block
     return rowcount > 0
 
 
