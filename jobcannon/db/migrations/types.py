@@ -9,6 +9,25 @@ Differences from the private (SQLite) original, all deliberate:
   transactional): all sql statements + the optional py hook + the ledger
   INSERT commit atomically, so a mid-migration crash leaves no half-applied
   migration.
+
+Column-type convention -- verbatim-JSON ``text``: JSON-valued columns are
+``jsonb`` by default (m0001's dominant pattern -- ``locations_raw``,
+``sightings``, ``salary_observations``, ``unresolved_reasons``, ...). A
+column stays ``text`` only when byte-level fidelity of the stored string is
+itself load-bearing, never for convenience or habit. Two sanctioned
+sub-rationales exist so far:
+
+(a) snapshot equality -- the column is compared as an opaque string against
+    another column's ``jsonb::text`` rendering, so jsonb's key-order/
+    whitespace-normalizing round trip (and psycopg's missing str->jsonb
+    assignment cast) would break the equality contract:
+    score_audits.audited_sub_scores_json / axis_deltas_json (m0018).
+(b) verbatim external payload -- the column retains a third-party API
+    response exactly as received, parsed on read, with no jsonb-operator
+    consumer: postings.comp_data_json (m0001).
+
+A new ``text``-typed JSON column must name which sub-rationale applies (or
+argue a third) in its own migration docstring; anything else is ``jsonb``.
 """
 
 from __future__ import annotations
