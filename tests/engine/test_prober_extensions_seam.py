@@ -8,6 +8,7 @@ owner on a collision, always stamps a fresh claim provisional).
 """
 
 import sqlite3
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -114,6 +115,79 @@ def test_static_fallthrough_tier2_co_writes_careers_scan_enabled(conn):
 
     assert result["status"] == "miss"
     assert result["reason"] == "static_fallthrough_tier2_jobs_persisted"
+    row = conn.execute(
+        "SELECT scan_enabled, ats_scan_enabled, careers_scan_enabled FROM companies WHERE id = 1"
+    ).fetchone()
+    assert row["scan_enabled"] == 1
+    assert row["careers_scan_enabled"] == 1
+    assert row["ats_scan_enabled"] == 0
+
+
+def test_static_fallthrough_tier4_co_writes_careers_scan_enabled(conn):
+    """WI-13 (#329): the tier-4 (Playwright) jobs-persisted UPDATE re-enables
+    the careers lane — scan_enabled AND careers_scan_enabled go TRUE in the
+    same statement. ats_scan_enabled stays untouched: the write marks a
+    custom careers page, not a resurrected ATS board.
+
+    playwright is an optional extra not installed in this dev venv, so the
+    tier4 `from playwright.sync_api import sync_playwright` has no real
+    target — inject fake `playwright`/`playwright.sync_api` modules into
+    sys.modules (same technique as tests/engine/test_run_playwright.py) and
+    drive the stub ext bundle through tiers 2/3 (None => fall through) into
+    the tier4 jobs-persisted branch.
+    """
+
+    class _FakeBrowser:
+        def close(self):
+            pass
+
+    class _FakePW:
+        class chromium:
+            @staticmethod
+            def launch(headless=True):
+                return _FakeBrowser()
+
+    class _FakePlaywrightCM:
+        def __enter__(self):
+            return _FakePW()
+
+        def __exit__(self, *exc):
+            return False
+
+    fake_sync_api = type(sys)("playwright.sync_api")
+    fake_sync_api.sync_playwright = lambda: _FakePlaywrightCM()
+    fake_playwright_pkg = type(sys)("playwright")
+    fake_playwright_pkg.sync_api = fake_sync_api
+
+    stub = SimpleNamespace(
+        try_static_extract=lambda *a, **k: None,  # JS-heavy signal -> tier3
+        try_embedded_json_extract=lambda *a, **k: None,  # no embedded JSON -> tier4
+        try_playwright_extract=lambda *a, **k: [{"title": "Engineer"}],
+    )
+    ats_prober.set_prober_extensions(stub)
+    _insert_company(conn, 1, scan_enabled=0, ats_scan_enabled=0, careers_scan_enabled=0)
+
+    with (
+        patch.dict(
+            sys.modules,
+            {"playwright": fake_playwright_pkg, "playwright.sync_api": fake_sync_api},
+        ),
+        patch(
+            "jobcannon.engine.ats_prober.fetch_with_deadline",
+            side_effect=ConnectionError("offline"),
+        ),
+    ):
+        result = ats_prober._try_static_first_fallthrough(
+            company_id=1,
+            company_name="Acme",
+            careers_url="https://acme.example/careers",
+            conn=conn,
+            config={},
+            now="2026-07-16T00:00:00Z",
+        )
+
+    assert result["status"] == "miss"
+    assert result["reason"] == "static_fallthrough_tier4_jobs_persisted"
     row = conn.execute(
         "SELECT scan_enabled, ats_scan_enabled, careers_scan_enabled FROM companies WHERE id = 1"
     ).fetchone()
