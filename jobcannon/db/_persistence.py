@@ -49,7 +49,7 @@ from psycopg.types.json import (
 )  # PORT-SEAM: replaces private's json.dumps text column (metadata is jsonb here)
 
 from jobcannon.db.pool import (
-    commit_unless_nested,
+    with_write_txn,
 )  # PORT-SEAM: replaces private's _assessment_writer re-export block (persist_job_assessment/invalidate_job_score are not ported by this module)
 
 _log = logging.getLogger(__name__)
@@ -75,8 +75,7 @@ def log_run(
         scored: Number of jobs scored.
         metadata: Optional dict for funnel reconciliation identity (issue #587).
     """
-    raw = conn.raw if hasattr(conn, "raw") else conn
-    with raw.transaction():
+    with with_write_txn(conn) as raw:
         raw.execute(
             # PORT-SEAM: run_at avoids a reserved-word column name (timestamp), matching m0001's created_at/last_seen naming convention
             "INSERT INTO runs (run_at, source, jobs_fetched, jobs_new, jobs_scored, metadata) "
@@ -89,7 +88,6 @@ def log_run(
                 Jsonb(metadata or {}),
             ),  # PORT-SEAM: Jsonb(...) replaces json.dumps(metadata) if metadata else "{}"
         )
-    commit_unless_nested(raw)
 
 
 def persist_job_expiry_state(
@@ -134,10 +132,8 @@ def persist_job_expiry_state(
             here the way there was for private's naive-UTC-only sqlite3
             TEXT columns.)
     """
-    raw = (
-        conn.raw if hasattr(conn, "raw") else conn
-    )  # PORT-SEAM: replaces private's naive-UTC normalize_iso_string_to_naive_utc(checked_at) call, see Args above
-
+    # PORT-SEAM: private's naive-UTC normalize_iso_string_to_naive_utc(checked_at)
+    # call is dropped, see Args above.
     if expiry_status == "live":
         sql = (
             "UPDATE postings SET expiry_status = %s, expiry_checked_at = %s, "
@@ -153,8 +149,7 @@ def persist_job_expiry_state(
         sql = "UPDATE postings SET expiry_status = %s WHERE dedup_key = %s"  # PORT-SEAM: postings replaces private's jobs table
         params = (expiry_status, dedup_key)
 
-    with raw.transaction():
+    with with_write_txn(conn) as raw:
         raw.execute(
             sql, params
         )  # PORT-SEAM: private's 3-attempt "database is locked" retry/backoff loop dropped here, see module docstring
-    commit_unless_nested(raw)

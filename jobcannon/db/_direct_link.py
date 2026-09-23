@@ -50,7 +50,7 @@ from __future__ import annotations
 from typing import Any  # PORT-SEAM: no sqlite3 dialect on this host (psycopg only)
 
 from jobcannon.db.pool import (
-    commit_unless_nested,
+    with_write_txn,
 )  # PORT-SEAM: replaces private's bare conn.commit() calls, matching _persistence.py/_jobs.py's transaction-boundary convention
 
 _VALID_CONFIDENCE = ("strict", "loose")
@@ -107,14 +107,14 @@ def set_direct_url(
         if existing == "strict":
             return False  # strict slot is stable
 
-    with raw.transaction():
+    # PORT-SEAM: strict-write archive-reopen side effect dropped here (see
+    # module docstring); with_write_txn's commit replaces private's bare
+    # conn.commit().
+    with with_write_txn(raw):
         raw.execute(
             "UPDATE postings SET direct_url = %s, direct_url_confidence = %s WHERE dedup_key = %s",
             (url, confidence, dedup_key),
         )
-    commit_unless_nested(
-        raw
-    )  # PORT-SEAM: strict-write archive-reopen side effect dropped here (see module docstring); replaces private's bare conn.commit()
     return True
 
 
@@ -148,13 +148,10 @@ def stamp_direct_url_checks(
     if not dedup_keys:
         return
 
-    raw = conn.raw if hasattr(conn, "raw") else conn
-
-    with raw.transaction():
+    with with_write_txn(conn) as raw:
         raw.execute(
             "UPDATE postings SET direct_url_checked_at = now(), "  # PORT-SEAM: jobs -> postings; server-side now() replaces private's now_iso param
             "direct_url_attempts = COALESCE(direct_url_attempts, 0) + 1 "
             "WHERE dedup_key = ANY(%s)",  # PORT-SEAM: single ANY(%s) UPDATE replaces private's conn.executemany loop
             (dedup_keys,),
         )
-    commit_unless_nested(raw)

@@ -78,7 +78,7 @@ import re
 import psycopg  # PORT-SEAM: replaces private's sqlite3 import -- no sqlite3 dialect on this host
 from psycopg.types.json import Jsonb
 
-from jobcannon.db.pool import commit_unless_nested
+from jobcannon.db.pool import with_write_txn
 from jobcannon.engine.location_canonical import (
     JobLocation,
     dedupe_locations,
@@ -318,7 +318,8 @@ def apply_location_observation(
     # COALESCE/NULLIF guard as upsert_job so an UNSPECIFIED observation never
     # downgrades a previously-determined workplace type.
     try:
-        with raw.transaction():  # PORT-SEAM: SAVEPOINT-based recovery replaces private's conn.execute()/conn.rollback() pair -- matching _companies.py/_jobs.py's transaction discipline
+        # PORT-SEAM: SAVEPOINT-based recovery replaces private's conn.execute()/conn.rollback() pair -- matching _companies.py/_jobs.py's transaction discipline
+        with with_write_txn(raw):
             raw.execute(
                 "UPDATE postings SET "
                 "locations_raw = %s, "
@@ -348,9 +349,9 @@ def apply_location_observation(
             exc,
         )
         return False
-    commit_unless_nested(
-        raw
-    )  # PORT-SEAM: replaces private's conn.commit() -- no-op inside an ambient transaction (tests/host/conftest.py), a real commit otherwise
+    # PORT-SEAM: private's conn.commit() is subsumed by with_write_txn's
+    # commit_unless_nested -- a no-op inside an ambient transaction
+    # (tests/host/conftest.py), a real commit otherwise.
     _logger.info(
         "apply_location_observation: merged %r [source=%s key=%s] -> %d raw segments",
         raw_location,
