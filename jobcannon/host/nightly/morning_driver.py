@@ -68,6 +68,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from jobcannon.db.pool import unwrap_raw
 from jobcannon.host.health_recorder import record_scan_health
 from jobcannon.host.nightly import state as _state
 from jobcannon.host.nightly.audit_stage import run_audit_stage
@@ -112,15 +113,11 @@ def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _raw(conn: Any):
-    return conn.raw if hasattr(conn, "raw") else conn
-
-
 def _sampler_tick_timestamps(
     conn: Any, window_start: datetime, window_end: datetime
 ) -> list[datetime]:
     rows = (
-        _raw(conn)
+        unwrap_raw(conn)
         .execute(
             """
             SELECT MAX(e.at) AS finished_at
@@ -153,7 +150,7 @@ def _sampler_tick_timestamps(
 
 def _fail_count(conn: Any, window_start: datetime, window_end: datetime) -> int:
     row = (
-        _raw(conn)
+        unwrap_raw(conn)
         .execute(
             """
             SELECT count(*) AS n

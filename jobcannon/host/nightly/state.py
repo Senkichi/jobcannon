@@ -70,7 +70,7 @@ import threading
 from datetime import datetime, timedelta
 from typing import Any
 
-from jobcannon.db.pool import commit_unless_nested
+from jobcannon.db.pool import commit_unless_nested, unwrap_raw
 
 logger = logging.getLogger(__name__)
 
@@ -126,13 +126,9 @@ def morning_deadline(monitor_cfg: dict, now: datetime) -> datetime:
     return slot + timedelta(minutes=_MORNING_GRACE_MIN)
 
 
-def _raw(conn: Any):
-    return conn.raw if hasattr(conn, "raw") else conn
-
-
 def _load_state_unsafe(conn: Any) -> dict:
     row = (
-        _raw(conn)
+        unwrap_raw(conn)
         .execute("SELECT value FROM nightly_monitor_state WHERE key = %s", (_STATE_KEY,))
         .fetchone()
     )
@@ -152,7 +148,7 @@ def _write_state_unsafe(conn: Any, state: dict) -> None:
     # leave a dangling .tmp file).
     from psycopg.types.json import Jsonb
 
-    _raw(conn).execute(
+    unwrap_raw(conn).execute(
         "INSERT INTO nightly_monitor_state (key, value, updated_at) "
         "VALUES (%s, %s, now()) "
         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()",
@@ -204,7 +200,7 @@ def save_state(conn: Any, state: dict, base: dict | None = None) -> None:
     """
     try:
         with _thread_lock:
-            raw = _raw(conn)
+            raw = unwrap_raw(conn)
             if base is not None:
                 with raw.transaction():
                     row = raw.execute(
