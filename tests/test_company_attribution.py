@@ -3,20 +3,21 @@
 
 # PORT-SEAM: private's docstring described careers_scan_enabled=1 /
 # careers_crawl_flag_reason=NULL and company_state_history recording -- the
-# flag clear is now ported (#397, column exists as of m0028); the
-# careers_scan_enabled split and history recording remain dropped (see
-# below); rewritten to match.
+# flag clear is now ported (#397, column exists as of m0028) and the
+# careers_scan_enabled co-write is wired as of #329 (column exists as of
+# m0021); history recording remains dropped (see below); rewritten to match.
 Covers:
 - The invariant bundle (``ats_probe_status='pending'``, ``consecutive_empty_scans=0``,
   ``retry_count=0``, ``retry_after=NULL``, ``miss_reason=NULL``) is applied on
   every call.
-- The ``careers_url`` write path sets ``scan_enabled=true`` (this host merges
-  private's careers_scan_enabled/ats_scan_enabled split into one column -- the
-  split columns exist as of m0021 but no writer co-writes them yet) and clears
+- The ``careers_url`` write path sets ``scan_enabled=true`` AND
+  ``careers_scan_enabled=true`` in the same statement (WI-13 co-write restored
+  in #329 — the careers lane is the one this re-enable is about, so
+  ``ats_scan_enabled`` is left untouched) and clears
   ``careers_crawl_flag_reason`` (restored in #397; see
   jobcannon/db/_company_attribution.py's own module docstring).
-# PORT-SEAM: careers_url bullet rewritten for the scan_enabled collapse and
-# the #397 flag-clear restoration.
+# PORT-SEAM: careers_url bullet rewritten for the #397 flag-clear restoration
+# and the #329 careers_scan_enabled co-write.
 - The ``_UNSET`` sentinel: fields not passed are left untouched (``None`` clears
   to NULL, ``_UNSET`` preserves the existing value).
 - ``AttributionCollisionError`` on UNIQUE(ats_platform, ats_slug) conflict.
@@ -66,7 +67,9 @@ def _insert_company(
     retry_after=None,
     consecutive_empty_scans=0,
     careers_url=None,
-    scan_enabled=True,  # PORT-SEAM: replaces private's careers_scan_enabled param (collapsed column, see module docstring)
+    scan_enabled=True,
+    ats_scan_enabled=True,
+    careers_scan_enabled=True,  # restored in #329 alongside private's param (m0021 backs the column)
     careers_crawl_flag_reason=None,  # restored in #397 (column exists as of m0028)
 ):
     """Insert a company row with all attribution-relevant fields. Returns id."""
@@ -74,16 +77,15 @@ def _insert_company(
     # %s replaces ?; updated_at/created_at are server-side defaults (m0001)
     # so no now bind params.
     row = conn.execute(
-        # PORT-SEAM: schema-adapted INSERT -- drops ats_scan_enabled/
-        # careers_scan_enabled/created_at/updated_at columns
-        # (collapsed/server-defaulted on this host, see module
-        # docstring); RETURNING id replaces sqlite3 cursor.lastrowid.
+        # PORT-SEAM: schema-adapted INSERT -- drops created_at/updated_at
+        # (server-defaulted on this host, see module docstring); RETURNING
+        # id replaces sqlite3 cursor.lastrowid.
         "INSERT INTO companies "
         "(name, name_raw, ats_platform, ats_slug, "
-        "ats_probe_status, scan_enabled, "
+        "ats_probe_status, scan_enabled, ats_scan_enabled, careers_scan_enabled, "
         "miss_reason, retry_count, retry_after, "
         "consecutive_empty_scans, careers_url, careers_crawl_flag_reason) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
         "RETURNING id",
         (
             name,
@@ -91,7 +93,9 @@ def _insert_company(
             ats_platform,
             ats_slug,
             ats_probe_status,
-            scan_enabled,  # PORT-SEAM: replaces careers_scan_enabled (collapsed column)
+            scan_enabled,
+            ats_scan_enabled,
+            careers_scan_enabled,
             miss_reason,
             retry_count,
             retry_after,
@@ -161,11 +165,13 @@ class TestSetCompanyAttributionCareersUrl:
 
     def test_sets_careers_url_and_enables_scan(self, migrated_db_mem):
         conn = migrated_db_mem
-        # PORT-SEAM: careers_scan_enabled kwarg collapsed into scan_enabled
-        # (see module docstring); careers_crawl_flag_reason restored (#397).
+        # careers_crawl_flag_reason restored in #397; careers_scan_enabled
+        # co-write restored in #329.
         company_id = _insert_company(
             conn,
             scan_enabled=False,
+            careers_scan_enabled=False,
+            ats_scan_enabled=False,
             careers_crawl_flag_reason="aggregator_suspected:test",
         )
         set_company_attribution(conn, company_id, careers_url="https://acme.com/careers")
@@ -173,6 +179,10 @@ class TestSetCompanyAttributionCareersUrl:
         assert row["careers_url"] == "https://acme.com/careers"
         assert row["careers_crawl_flag_reason"] is None
         assert row["scan_enabled"] is True
+        assert row["careers_scan_enabled"] is True
+        # careers_url write is a careers-lane re-enable only -- the ATS lane
+        # stays off (a prior ATS demotion is not silently resurrected).
+        assert row["ats_scan_enabled"] is False
 
     def test_careers_url_alone_does_not_clobber_ats_fields(self, migrated_db_mem):
         conn = migrated_db_mem
@@ -188,16 +198,19 @@ class TestSetCompanyAttributionCareersUrl:
         company_id = _insert_company(
             conn,
             careers_url="https://old.example.com/careers",
+            careers_scan_enabled=False,
             careers_crawl_flag_reason="aggregator_suspected:test",
         )
         set_company_attribution(conn, company_id, careers_url=None)
         row = _fetch_company(conn, company_id)
         assert row["careers_url"] is None
-        # PORT-SEAM: scan_enabled is still set true (the invariant applies when
-        # careers_url is explicitly provided, even if the value is None) --
-        # and careers_crawl_flag_reason is cleared on that same branch.
+        # scan_enabled + careers_scan_enabled are still set true (the
+        # invariant applies when careers_url is explicitly provided, even if
+        # the value is None) -- and careers_crawl_flag_reason is cleared on
+        # that same branch.
         assert row["careers_crawl_flag_reason"] is None
         assert row["scan_enabled"] is True
+        assert row["careers_scan_enabled"] is True
 
 
 class TestSetCompanyAttributionSentinel:
@@ -224,15 +237,18 @@ class TestSetCompanyAttributionSentinel:
         company_id = _insert_company(
             conn,
             careers_url="https://acme.com/careers",
+            careers_scan_enabled=False,
             careers_crawl_flag_reason="aggregator_suspected:test",
         )
         set_company_attribution(conn, company_id, ats_platform="lever", ats_slug="acme")
         row = _fetch_company(conn, company_id)
         assert row["careers_url"] == "https://acme.com/careers"
-        # PORT-SEAM: scan_enabled not touched when careers_url is _UNSET --
-        # and careers_crawl_flag_reason is preserved too (only the
-        # careers_url branch clears it).
+        # scan_enabled/careers_scan_enabled not touched when careers_url is
+        # _UNSET (careers_scan_enabled stays at its seeded False) -- and
+        # careers_crawl_flag_reason is preserved too (only the careers_url
+        # branch touches all three).
         assert row["scan_enabled"] is True
+        assert row["careers_scan_enabled"] is False
         assert row["careers_crawl_flag_reason"] == "aggregator_suspected:test"
 
 

@@ -9,6 +9,7 @@ owner on a collision, always stamps a fresh claim provisional).
 
 import sqlite3
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -31,6 +32,9 @@ CREATE TABLE companies (
     ats_evidence_reconciled_at TEXT,
     ats_evidence_provisional INTEGER,
     consecutive_empty_scans INTEGER DEFAULT 0,
+    scan_enabled INTEGER DEFAULT 1,
+    ats_scan_enabled INTEGER DEFAULT 1,
+    careers_scan_enabled INTEGER DEFAULT 1,
     UNIQUE(ats_platform, ats_slug)
 );
 """
@@ -82,6 +86,40 @@ def test_static_fallthrough_no_extensions_is_miss(conn):
     ).fetchone()
     assert row["ats_probe_status"] == "miss"
     assert row["miss_reason"] == "static_fallthrough_unavailable"
+
+
+def test_static_fallthrough_tier2_co_writes_careers_scan_enabled(conn):
+    """WI-13 (#329): the tier-2 jobs-persisted UPDATE re-enables the careers
+    lane — scan_enabled AND careers_scan_enabled go TRUE in the same
+    statement. ats_scan_enabled stays untouched: the write marks a custom
+    careers page, not a resurrected ATS board."""
+    stub = SimpleNamespace(
+        try_static_extract=lambda *a, **k: [{"title": "Engineer"}],
+    )
+    ats_prober.set_prober_extensions(stub)
+    _insert_company(conn, 1, scan_enabled=0, ats_scan_enabled=0, careers_scan_enabled=0)
+
+    with patch(
+        "jobcannon.engine.ats_prober.fetch_with_deadline",
+        side_effect=ConnectionError("offline"),
+    ):
+        result = ats_prober._try_static_first_fallthrough(
+            company_id=1,
+            company_name="Acme",
+            careers_url="https://acme.example/careers",
+            conn=conn,
+            config={},
+            now="2026-07-16T00:00:00Z",
+        )
+
+    assert result["status"] == "miss"
+    assert result["reason"] == "static_fallthrough_tier2_jobs_persisted"
+    row = conn.execute(
+        "SELECT scan_enabled, ats_scan_enabled, careers_scan_enabled FROM companies WHERE id = 1"
+    ).fetchone()
+    assert row["scan_enabled"] == 1
+    assert row["careers_scan_enabled"] == 1
+    assert row["ats_scan_enabled"] == 0
 
 
 def test_speculative_hit_no_extensions_clean_slug_is_provisional(conn):
