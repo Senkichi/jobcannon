@@ -94,7 +94,7 @@ import json
 # PORT-SEAM: sqlite3 import dropped; dispatch goes through psycopg's conn.raw.
 from typing import Any
 
-from jobcannon.db.pool import commit_unless_nested, unwrap_raw
+from jobcannon.db.pool import unwrap_raw, with_write_txn
 from jobcannon.engine.constants import SUB_SCORE_KEYS
 # PORT-SEAM: get_effective_location_fit / utc_now_iso imports dropped -- see
 # module docstring PORT-SEAM (location fields dropped entirely; audited_at
@@ -200,8 +200,7 @@ def record_score_audit(
         raise ValueError(f"verdict must be one of {_VALID_VERDICTS}, got {verdict!r}")
     # PORT-SEAM: ? -> %s; RETURNING id (psycopg) replaces cur.lastrowid
     # (SQLite); audited_at omitted -- DEFAULT now() fills it (see docstring).
-    raw = unwrap_raw(conn)
-    with raw.transaction():
+    with with_write_txn(conn) as raw:
         row = raw.execute(
             "INSERT INTO score_audits "
             "(dedup_key, model, verdict, audited_sub_scores_json, "
@@ -217,7 +216,6 @@ def record_score_audit(
                 notes,
             ),
         ).fetchone()
-    commit_unless_nested(raw)
     return int(row["id"])
 
 

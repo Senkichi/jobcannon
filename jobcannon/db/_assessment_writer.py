@@ -96,7 +96,7 @@ from typing import Any  # PORT-SEAM: sqlite3 import dropped, see module docstrin
 
 from psycopg.types.json import Jsonb
 
-from jobcannon.db.pool import commit_unless_nested
+from jobcannon.db.pool import with_write_txn
 from jobcannon.engine.classification import (
     DEFAULT_APPLY_MEAN_FLOOR,
     DEFAULT_APPLY_MIN_STRONG_AXES,
@@ -264,7 +264,7 @@ def persist_job_assessment(
         k: assessment.sub_scores[k] for k in _SUB_SCORE_KEYS if k in assessment.sub_scores
     }
 
-    with raw.transaction():
+    with with_write_txn(raw):
         raw.execute(
             "UPDATE postings SET "  # PORT-SEAM: single UPDATE replaces private's dynamic set_clauses/params list-building (materialized rank/sum + location_policy_* columns dropped, see module docstring)
             "classification = %s, "
@@ -282,7 +282,6 @@ def persist_job_assessment(
                 dedup_key,
             ),
         )
-    commit_unless_nested(raw)
     return final_classification
 
 
@@ -309,8 +308,7 @@ def invalidate_job_score(conn: Any, dedup_key: str) -> bool:
         True if a row was matched and its scoring tuple cleared; False if
         *dedup_key* matched no row.
     """
-    raw = conn.raw if hasattr(conn, "raw") else conn
-    with raw.transaction():
+    with with_write_txn(conn) as raw:
         cursor = raw.execute(
             "UPDATE postings SET "
             "classification = NULL, "
@@ -321,5 +319,4 @@ def invalidate_job_score(conn: Any, dedup_key: str) -> bool:
             (dedup_key,),
         )
         rowcount = cursor.rowcount  # PORT-SEAM: condensed invalidate_job_score body -- see this function's own docstring PORT-SEAM note and the module docstring for the dropped jd_content_verdict/rule_version/rank/sum columns
-    commit_unless_nested(raw)
     return rowcount > 0

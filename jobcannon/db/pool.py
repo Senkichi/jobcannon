@@ -563,3 +563,28 @@ def commit_unless_nested(raw: psycopg.Connection) -> None:
     """
     if getattr(raw, "_num_transactions", 0) == 0:
         raw.commit()
+
+
+@contextlib.contextmanager
+def with_write_txn(conn: EngineCompatConnection | psycopg.Connection):
+    """The DB writers' standard write unit: unwrap + transaction + commit.
+
+    Accepts either an ``EngineCompatConnection`` facade or a bare psycopg
+    connection (the ``unwrap_raw`` contract, kept here so call sites no
+    longer repeat it), yields the raw psycopg connection inside
+    ``raw.transaction()``, then runs ``commit_unless_nested(raw)`` on
+    clean exit.
+
+    ``raw.transaction()`` is the SAVEPOINT-recovery wrapper the writer
+    modules' docstrings describe: a real transaction when the connection
+    carries none, a savepoint nested inside an ambient one. The trailing
+    ``commit_unless_nested`` supplies the durable commit — a no-op when
+    nested inside a caller-owned ``with conn.transaction():`` block (e.g.
+    tests/host/conftest.py's db_conn fixture), a real commit otherwise. On a
+    body exception the transaction rolls back (to its savepoint when nested)
+    and the commit never runs — exactly the inlined pattern's behavior.
+    """
+    raw = unwrap_raw(conn)
+    with raw.transaction():
+        yield raw
+    commit_unless_nested(raw)
