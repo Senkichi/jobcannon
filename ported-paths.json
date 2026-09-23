@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T17:05:28Z",
+  "generated_at": "2026-09-23T17:47:44Z",
   "roots": [
     "engine",
     "db",
@@ -30,7 +30,7 @@
           "text": "# (mirroring the private original's ``fit_analysis_payload[\"location_policy\"]``"
         },
         {
-          "line": 297,
+          "line": 298,
           "text": "(matches the private original's rationale: it is re-stamped via"
         }
       ]
@@ -166,11 +166,11 @@
           "text": "\"\"\"PORTED from job_finder/web/jd_adjudicator.py @ 0cbf333a (private job-cannon). Ledger L-0189."
         },
         {
-          "line": 122,
+          "line": 125,
           "text": "# so the eligibility invariant stays single-sourced (mirrors the private"
         },
         {
-          "line": 123,
+          "line": 126,
           "text": "# original's `_eligible` string)."
         }
       ]
@@ -204,32 +204,48 @@
           "text": "A second Wave-1 divergence, same shape: the private original also resets a"
         },
         {
-          "line": 164,
+          "line": 146,
+          "text": "adjudication heal leg — the private original's ``_heal_offsite`` — is the OTHER"
+        },
+        {
+          "line": 182,
           "text": "# common opening block tags. Ported verbatim from the private original"
         },
         {
-          "line": 165,
+          "line": 183,
           "text": "# (job_finder/db/_jd_full.py's _HTML_SIGNAL_RE, READ-ONLY reference) --"
         },
         {
-          "line": 196,
+          "line": 214,
           "text": "Content-contract side effects (parity with the private original's I-18"
         },
         {
-          "line": 210,
+          "line": 228,
           "text": "See this module's docstring for the ``enrichment_tier`` reset the private"
         },
         {
-          "line": 211,
+          "line": 229,
           "text": "original also performs, which has no column to act on in the Wave-1"
         },
         {
-          "line": 233,
+          "line": 251,
           "text": "# opening-tag-shaped bodies. Matches the private original's"
         },
         {
-          "line": 340,
+          "line": 358,
           "text": "Mirrors the private original's ``_record_jd_content_reject``, minus the"
+        },
+        {
+          "line": 401,
+          "text": "The content-side half of the private original's ``_heal_offsite``"
+        },
+        {
+          "line": 421,
+          "text": "Premise-guarded exactly like ``_jd_adjudication.stamp_adjudicated``"
+        },
+        {
+          "line": 422,
+          "text": "(private issue #1060, Blocker 1): the UPDATE only fires while ``jd_full``"
         }
       ]
     },

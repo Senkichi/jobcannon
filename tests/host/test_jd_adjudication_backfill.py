@@ -34,13 +34,15 @@ Dropped from the private suite (not ported), each for a stated reason:
     for L-0189 (not part of the design addendum's three-way split) and is
     not ported.
 
-Adapted for the heal-leg peel (see jobcannon/host/jd_adjudication_backfill.py's
-module docstring PORT-SEAM): `heal_offsite` is not shipped in this unit. Tests
-that exercised the private heal path (`test_backfill_state_machine`'s
-AMBIGUOUS-NO assertions, `test_backfill_reclassifies_row_with_unrelated_
-unresolved_reason`'s post-heal assertions) are adapted to assert the new
-counted-but-unapplied behavior: the row is left completely untouched and
-`rejected` is incremented, rather than asserting a cleared/quarantined row.
+Heal-leg update (issue #360): `heal_offsite` now lands as
+`jobcannon.db._jd_full.clear_jd_full` + `_assessment_writer.invalidate_job_score`
+composed by the driver under one ambient transaction (see that module's
+docstring PORT-SEAM). The tests that were adapted to the peeled behavior in
+L-0189 (`test_backfill_state_machine`'s AMBIGUOUS-NO assertions,
+`test_backfill_reclassifies_row_with_unrelated_unresolved_reason`'s post-heal
+assertions) are restored to assert the healed outcome -- the row is cleared
+and quarantined, matching the private original's semantics at the new
+residence split.
 """
 
 from __future__ import annotations
@@ -91,13 +93,12 @@ def _insert(
     unresolved_reasons=None,
     first_seen=None,
     jd_content_verdict=None,
+    scoring_model=None,
 ):
-    """Insert a posting row shaped for these tests. Unlike the private `_insert`
-    helper, `scoring_model` is never set here -- no test in this port needs a
-    scored row's `scoring_model` value (heal, the only path that nulled it, is
-    peeled), so the m0015 `postings_scoring_model_requires_classification`
-    CHECK (scoring_model IS NULL OR classification IS NOT NULL) is trivially
-    satisfied."""
+    """Insert a posting row shaped for these tests. `scoring_model` is only
+    accepted alongside a non-NULL `classification` (the m0015
+    `postings_scoring_model_requires_classification` CHECK) and exists for the
+    heal tests, which assert the stale score is retracted."""
     cols = ["dedup_key", "company_id", "title", "company", "jd_full", "classification"]
     vals = [dedup_key, company_id, title, "Acme Corp", jd, classification]
     if unresolved_reasons is not None:
@@ -109,6 +110,9 @@ def _insert(
     if jd_content_verdict is not None:
         cols.append("jd_content_verdict")
         vals.append(jd_content_verdict)
+    if scoring_model is not None:
+        cols.append("scoring_model")
+        vals.append(scoring_model)
     placeholders = ", ".join(["%s"] * len(cols))
     db_conn.execute(
         f"INSERT INTO postings ({', '.join(cols)}) VALUES ({placeholders})",
@@ -118,8 +122,8 @@ def _insert(
 
 def _row(db_conn, dedup_key):
     return db_conn.execute(
-        "SELECT jd_full, jd_adjudicated_version, unresolved_reasons, classification "
-        "FROM postings WHERE dedup_key = %s",
+        "SELECT jd_full, jd_adjudicated_version, unresolved_reasons, classification, "
+        "scoring_model, jd_content_verdict FROM postings WHERE dedup_key = %s",
         (dedup_key,),
     ).fetchone()
 
@@ -199,14 +203,15 @@ def test_backfill_state_machine(monkeypatch, db_conn, company):
     assert yes["jd_adjudicated_version"] == JD_CONTENT_VERSION
     assert yes["jd_full"] is not None
 
-    # AMBIGUOUS-NO: heal is peeled in this unit (see module docstring PORT-SEAM)
-    # -- counted in `rejected` above, but the row is left COMPLETELY untouched
-    # (unlike the private original, which healed it here). It naturally
-    # re-selects and re-classifies next tick once the heal fast-follow lands.
+    # AMBIGUOUS-NO: healed (issue #360) -- jd_full cleared, the stale score
+    # retracted (classification nulled), and the row quarantined with the
+    # generic offsite reason (an LLM "no" carries no deterministic reason).
     no = _row(db_conn, "acme|no")
-    assert no["jd_full"] == _AMBIGUOUS_JD
+    assert no["jd_full"] is None
     assert no["jd_adjudicated_version"] is None
-    assert no["classification"] == "apply"
+    assert no["jd_content_verdict"] is None
+    assert no["classification"] is None
+    assert no["unresolved_reasons"] == [JD_OFFSITE]
 
     # AMBIGUOUS-undetermined: left unstamped for retry, body intact.
     maybe = _row(db_conn, "acme|maybe")
@@ -270,16 +275,15 @@ def test_backfill_reclassifies_row_with_unrelated_unresolved_reason(monkeypatch,
     assert summary["llm_calls"] == 1
     assert summary["rejected"] == 1
 
-    # Heal is peeled in this unit: the row is left untouched (not healed), so
-    # the pre-existing unrelated reason survives unchanged and no jd-content
-    # reason is added (that append is heal_offsite's job, deferred).
+    # Heal (issue #360) leaves the pre-existing UNRELATED reason untouched and
+    # appends the jd-content quarantine code after it -- the append-dedupe
+    # idiom only touches the reason it adds.
     row = db_conn.execute(
         "SELECT jd_full, unresolved_reasons FROM postings WHERE dedup_key = %s",
         ("acme|location-quarantined",),
     ).fetchone()
-    assert row["unresolved_reasons"] == ["location_missing"]
-    assert JD_OFFSITE not in row["unresolved_reasons"]
-    assert row["jd_full"] == _AMBIGUOUS_JD
+    assert row["unresolved_reasons"] == ["location_missing", JD_OFFSITE]
+    assert row["jd_full"] is None
 
 
 def test_backfill_still_skips_row_already_jd_content_quarantined(monkeypatch, db_conn, company):
@@ -414,3 +418,176 @@ def test_backfill_partition_small_unscored_cohort_returns_capacity_to_scored(
     )
     assert summary["scanned"] == 4  # 1 unscored + 3 scored
     assert summary["kept"] == 4
+
+
+# ---------------------------------------------------------------------------
+# heal leg (issue #360) -- REJECT decisions are applied via
+# _jd_full.clear_jd_full + _assessment_writer.invalidate_job_score
+# ---------------------------------------------------------------------------
+
+# Deterministic-REJECT body (same shape as test_jd_full.py's WIKI_JD):
+# jd_content_reject -> ("jd_full_offsite", "head_block_or_wiki"), so the
+# driver heals it without spending an LLM call.
+_WIKI_JD = "From Wikipedia, the free encyclopedia. City in California. " * 8
+
+
+def test_backfill_heals_deterministic_reject_without_llm(monkeypatch, db_conn, company):
+    """A stored body the deterministic contract REJECTs is healed with its
+    contract reason (jd_full_offsite) and never reaches the LLM. The row was
+    scored (classification + scoring_model set -- the scored-retraction sweep
+    cohort), so the stale score must be retracted too."""
+    from jobcannon.host import jd_adjudication_backfill
+    from jobcannon.host.jd_adjudication_backfill import run_jd_adjudication_backfill
+
+    _insert(
+        db_conn,
+        company,
+        "acme|wiki",
+        title="Data Platform Engineer",
+        jd=_WIKI_JD,
+        scoring_model="test-model",
+    )
+
+    calls = {"n": 0}
+
+    def counting_adjudicate(conn, title, company_name, jd_full, *, call_model, config):
+        calls["n"] += 1
+        return True
+
+    monkeypatch.setattr(jd_adjudication_backfill, "adjudicate_jd", counting_adjudicate)
+    summary = run_jd_adjudication_backfill(
+        _svc_conn(db_conn), {}, call_model=lambda **k: None, limit=50
+    )
+
+    assert summary["scanned"] == 1
+    assert summary["llm_calls"] == 0  # deterministic REJECT: no LLM call
+    assert calls["n"] == 0
+    assert summary["rejected"] == 1
+    assert summary["skipped_stale"] == 0
+
+    row = _row(db_conn, "acme|wiki")
+    assert row["jd_full"] is None
+    assert row["unresolved_reasons"] == [JD_OFFSITE]
+    assert row["classification"] is None  # stale score retracted
+    assert row["scoring_model"] is None
+    assert row["jd_content_verdict"] is None
+    assert row["jd_adjudicated_version"] is None
+
+
+def test_backfill_heal_skips_stale_premise(monkeypatch, db_conn, company):
+    """#1060 Blocker 1 on the heal leg: a concurrent writer that rewrites
+    jd_full between classification and write-back must make the heal's CAS
+    guard miss -- the new (unseen) body is kept, the score is NOT retracted,
+    and the miss lands in skipped_stale."""
+    from jobcannon.host import jd_adjudication_backfill
+    from jobcannon.host.jd_adjudication_backfill import run_jd_adjudication_backfill
+
+    _insert(
+        db_conn,
+        company,
+        "acme|stale-heal",
+        title="Data Platform Engineer",
+        jd=_AMBIGUOUS_JD,
+        scoring_model="test-model",
+    )
+    rewritten = "a completely different body, rewritten concurrently " * 5
+
+    def rewriting_adjudicate(conn, title, company_name, jd_full, *, call_model, config):
+        # Simulates the racing writer landing between our SELECT/classify and
+        # the post-loop write-back (same-connection injection, mirroring
+        # test_jd_full.py's interleaved-write pattern).
+        db_conn.execute(
+            "UPDATE postings SET jd_full = %s WHERE dedup_key = %s",
+            (rewritten, "acme|stale-heal"),
+        )
+        return False  # NO on the OLD body -> heal decision queued on a stale premise
+
+    monkeypatch.setattr(jd_adjudication_backfill, "adjudicate_jd", rewriting_adjudicate)
+
+    summary = run_jd_adjudication_backfill(
+        _svc_conn(db_conn), {}, call_model=lambda **k: None, limit=50
+    )
+
+    assert summary["rejected"] == 1  # decision was still a reject
+    assert summary["skipped_stale"] == 1  # but the write-back missed
+    row = _row(db_conn, "acme|stale-heal")
+    assert row["jd_full"] == rewritten  # new content NOT deleted
+    assert row["unresolved_reasons"] == []  # not quarantined
+    assert row["classification"] == "apply"  # score NOT retracted
+    assert row["scoring_model"] == "test-model"
+
+
+def test_backfill_healed_row_is_not_reselected(monkeypatch, db_conn, company):
+    """The cost consequence #360 exists to close: once a REJECT is applied,
+    the row must leave the eligibility cohort permanently -- the peeled
+    behavior re-selected (and re-paid the LLM call for) the same row every
+    tick. Second run must scan nothing and call nothing."""
+    from jobcannon.host import jd_adjudication_backfill
+    from jobcannon.host.jd_adjudication_backfill import run_jd_adjudication_backfill
+
+    _insert(db_conn, company, "acme|no-once", title="Data Platform Engineer", jd=_AMBIGUOUS_JD)
+
+    calls = {"n": 0}
+
+    def fake_adjudicate(conn, title, company_name, jd_full, *, call_model, config):
+        calls["n"] += 1
+        return False
+
+    monkeypatch.setattr(jd_adjudication_backfill, "adjudicate_jd", fake_adjudicate)
+
+    svc = _svc_conn(db_conn)
+    first = run_jd_adjudication_backfill(svc, {}, call_model=lambda **k: None, limit=50)
+    assert first["rejected"] == 1
+    assert calls["n"] == 1
+
+    second = run_jd_adjudication_backfill(svc, {}, call_model=lambda **k: None, limit=50)
+    assert second["scanned"] == 0
+    assert second["llm_calls"] == 0
+    assert calls["n"] == 1  # no second adjudication paid
+
+
+def test_backfill_heal_commits_durably_on_bare_connection(postgres_test_dsn):
+    """Production durability path for the heal leg: every other test here runs
+    under db_conn's ambient transaction (nested-savepoint + rollback), but the
+    scheduled task runs on a bare pooled connection where the driver's
+    `with raw.transaction():` block degrades to a savepoint over the implicit
+    transaction the SELECTs opened and the trailing commit_unless_nested does
+    the real commit. A second connection must observe the heal as committed."""
+    import psycopg
+    from psycopg.rows import dict_row
+
+    from jobcannon.host.jd_adjudication_backfill import run_jd_adjudication_backfill
+
+    dedup_key = "bare-co|wikipedia"
+    conn_a = psycopg.connect(postgres_test_dsn, row_factory=dict_row)
+    conn_b = psycopg.connect(postgres_test_dsn, row_factory=dict_row, autocommit=True)
+    try:
+        cid = conn_a.execute(
+            "INSERT INTO companies (name) VALUES ('bare-co') RETURNING id"
+        ).fetchone()["id"]
+        conn_a.execute(
+            "INSERT INTO postings (dedup_key, company_id, title, company, jd_full, "
+            "classification) VALUES (%s, %s, 'Engineer', 'bare-co', %s, 'apply')",
+            (dedup_key, cid, _WIKI_JD),
+        )
+        conn_a.commit()
+
+        summary = run_jd_adjudication_backfill(conn_a, {}, call_model=lambda **k: None, limit=50)
+        assert summary["rejected"] == 1
+
+        row = conn_b.execute(
+            "SELECT jd_full, unresolved_reasons, classification FROM postings WHERE dedup_key = %s",
+            (dedup_key,),
+        ).fetchone()
+        assert row["jd_full"] is None
+        assert row["unresolved_reasons"] == [JD_OFFSITE]
+        assert row["classification"] is None
+    finally:
+        try:
+            conn_a.rollback()
+            conn_a.execute("DELETE FROM postings WHERE dedup_key = %s", (dedup_key,))
+            conn_a.execute("DELETE FROM companies WHERE name = 'bare-co'")
+            conn_a.commit()
+        finally:
+            conn_a.close()
+            conn_b.close()

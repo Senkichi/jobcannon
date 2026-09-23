@@ -441,7 +441,9 @@ def jd_adjudication(timestamp: int) -> dict:
     """Periodic tick (L-0189, issue #183): adjudicates a bounded batch of
     AMBIGUOUS jd_full rows via jobcannon.host.jd_adjudication_backfill, so
     postings.jd_adjudicated_version gets stamped non-NULL for rows the
-    deterministic jd-content contract can't resolve on its own (CLEAN/REJECT).
+    deterministic jd-content contract can't resolve on its own (CLEAN/REJECT)
+    -- and REJECTed rows (deterministic or LLM "no") are healed: body cleared,
+    quarantine reason appended, stale score retracted (#360).
 
     This is the writer tests/test_scoring_precheck_wiring_guard.py (#183)
     requires exist under jobcannon/db/ before any host/db/worker module may
