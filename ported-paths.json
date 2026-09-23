@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T17:05:28Z",
+  "generated_at": "2026-09-23T04:53:22Z",
   "roots": [
     "engine",
     "db",
@@ -2704,6 +2704,10 @@
         {
           "line": 237,
           "text": "# canonical location) rather than job_finder.constants."
+        },
+        {
+          "line": 374,
+          "text": "# module docstring), so there is no private-repo counterpart to carry."
         }
       ]
     },
