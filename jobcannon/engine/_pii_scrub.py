@@ -3,7 +3,7 @@
 
 Strips recipient headers, bare emails, sensitive URL query-string secrets, and
 caller-supplied identifiers before any capture persists — see
-``host/ingestion/capture.py`` (design-aggregators-imap.md §6) for the sole
+``host/ingestion/_parse_log.py`` (design-aggregators-imap.md §6) for the sole
 INSERT chokepoint this module protects.
 
 # PORT-SEAM: DEFAULT_DENYLIST ships empty here. The private denylist seeded

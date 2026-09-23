@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T17:05:28Z",
+  "generated_at": "2026-09-23T17:50:15Z",
   "roots": [
     "engine",
     "db",
@@ -2586,7 +2586,17 @@
       ]
     },
     {
-      "path": "jobcannon/host/ingestion/capture.py",
+      "path": "jobcannon/host/ingestion/_alert_parse.py",
+      "root": "host",
+      "markers": [
+        {
+          "line": 1,
+          "text": "\"\"\"PORTED from job_finder/sources/imap_source.py @ bc30befa311b5c78868ece3dddd60b44d018f444"
+        }
+      ]
+    },
+    {
+      "path": "jobcannon/host/ingestion/_parse_log.py",
       "root": "host",
       "markers": [
         {
@@ -2610,15 +2620,15 @@
           "text": "# function stored `last_error` (a parser exception's str(e)) with NO"
         },
         {
-          "line": 95,
+          "line": 101,
           "text": "host/ingestion/imap_intake.py builds per message (mirrors the private"
         },
         {
-          "line": 96,
+          "line": 102,
           "text": "ImapSource.extraction_records entries)."
         },
         {
-          "line": 102,
+          "line": 108,
           "text": "private function's contract). Commits on write, best-effort."
         }
       ]
@@ -2636,11 +2646,11 @@
           "text": "# imported ``job_finder.web.autoheal.override_loader`` /"
         },
         {
-          "line": 228,
+          "line": 190,
           "text": "resolve_sender_parsers/resolve_sender_label exactly as the private"
         },
         {
-          "line": 229,
+          "line": 191,
           "text": "source's ``config`` parameter did -- no per-user override storage is"
         }
       ]
