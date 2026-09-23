@@ -179,6 +179,14 @@ def _upsert_and_log(
                 summary["errors"].append(error_msg)
                 logger.warning("careers_crawler job error: %s", error_msg)
 
+    # Second of two sequential transactions per company (upserts above,
+    # stamps + scan log here) -- the same two-phase shape
+    # ats_scanner/_run_html.py's _scan_one_company_via_html uses. A shared
+    # with_two_phase_commit-style helper was adjudicated premature in #357:
+    # only two writers use the shape, and their phase-2 connection sources
+    # differ (a fresh factory conn here vs. the caller's conn there), so a
+    # helper would need a per-phase connection policy. Revisit if a third
+    # writer lands.
     with svc.connection_factory() as ts_conn:  # PORT-SEAM: seam (L-0465)
         ts_conn.execute(
             """UPDATE companies
