@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T17:05:28Z",
+  "generated_at": "2026-09-23T02:18:23Z",
   "roots": [
     "engine",
     "db",
@@ -30,7 +30,7 @@
           "text": "# (mirroring the private original's ``fit_analysis_payload[\"location_policy\"]``"
         },
         {
-          "line": 297,
+          "line": 296,
           "text": "(matches the private original's rationale: it is re-stamped via"
         }
       ]
@@ -166,11 +166,11 @@
           "text": "\"\"\"PORTED from job_finder/web/jd_adjudicator.py @ 0cbf333a (private job-cannon). Ledger L-0189."
         },
         {
-          "line": 122,
+          "line": 120,
           "text": "# so the eligibility invariant stays single-sourced (mirrors the private"
         },
         {
-          "line": 123,
+          "line": 121,
           "text": "# original's `_eligible` string)."
         }
       ]
@@ -228,7 +228,7 @@
           "text": "# opening-tag-shaped bodies. Matches the private original's"
         },
         {
-          "line": 340,
+          "line": 339,
           "text": "Mirrors the private original's ``_record_jd_content_reject``, minus the"
         }
       ]
@@ -254,31 +254,31 @@
           "text": "# original's cap; oldest entries are dropped first once the cap is hit)."
         },
         {
-          "line": 472,
+          "line": 470,
           "text": "# PORTED from job_finder/db/_jobs.py @ b1f69f3e10a452cc498527f830959b852108f5e9"
         },
         {
-          "line": 478,
+          "line": 476,
           "text": "# PORT-SEAM: set_source_id_if_free's IntegrityError backstop has no schema"
         },
         {
-          "line": 479,
+          "line": 477,
           "text": "# analog here. Private's UPDATE relies on the I-11 partial UNIQUE index on"
         },
         {
-          "line": 581,
+          "line": 579,
           "text": "# PORTED from job_finder/db/_postings.py @ 175d0e1024eee45a279522868798fb7b4777a952"
         },
         {
-          "line": 585,
+          "line": 583,
           "text": "# subsumed, not ported -- see the PORT-SEAM block above this function)."
         },
         {
-          "line": 586,
+          "line": 584,
           "text": "#"
         },
         {
-          "line": 587,
+          "line": 585,
           "text": "# PORT-SEAM: private keyed the write on (ats_platform, source_id) to find"
         }
       ]
@@ -328,11 +328,11 @@
           "text": "# PORT-SEAM: private's job_finder.db.__init__ re-export paragraph dropped --"
         },
         {
-          "line": 113,
+          "line": 111,
           "text": "private-repo incident detail, not load-bearing for this port.)"
         },
         {
-          "line": 130,
+          "line": 128,
           "text": "job_finder.json_utils.normalize_iso_string_to_naive_utc before"
         }
       ]
