@@ -69,7 +69,7 @@ from typing import Any
 
 import psycopg
 
-from jobcannon.db.pool import commit_unless_nested
+from jobcannon.db.pool import with_write_txn
 
 logger = logging.getLogger(
     __name__
@@ -214,7 +214,7 @@ def set_company_attribution(
     sql = f"UPDATE companies SET {', '.join(set_parts)} WHERE id = %s"  # PORT-SEAM: %s placeholder; private's before=snapshot_tracked(...) dropped, see module docstring
 
     try:
-        with raw.transaction():
+        with with_write_txn(raw):
             raw.execute(sql, params)
     except psycopg.errors.UniqueViolation:  # PORT-SEAM: replaces sqlite3.IntegrityError
         # m0001's UNIQUE(ats_platform, ats_slug) gate. The inner
@@ -240,7 +240,6 @@ def set_company_attribution(
             ats_platform=plat,
             ats_slug=slug,
         ) from None
-
-    commit_unless_nested(
-        raw
-    )  # PORT-SEAM: replaces private's after=snapshot_tracked/record_state_diff/conn.commit() -- see module docstring
+    # PORT-SEAM: private's after=snapshot_tracked/record_state_diff/conn.commit()
+    # tail is replaced by with_write_txn's commit_unless_nested on block exit --
+    # see module docstring.

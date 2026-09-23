@@ -77,3 +77,59 @@ def test_executemany_translates_qmarks(opened_pool):
             ("many-co-1", "many-co-2"),
         ).fetchall()
     assert {row["name"] for row in rows} == {"many-co-1", "many-co-2"}
+
+
+def test_with_write_txn_commits_durably_through_facade(opened_pool):
+    """with_write_txn unwraps the EngineCompatConnection facade, yields the
+    raw psycopg connection, and lands a durable commit visible to a second
+    connection."""
+    from jobcannon.db.pool import connection_factory, with_write_txn
+
+    with connection_factory() as conn:
+        with with_write_txn(conn) as raw:
+            assert not hasattr(raw, "raw")  # yields the raw psycopg conn
+            raw.execute("INSERT INTO companies (name) VALUES (%s)", ("wtx-co",))
+    with connection_factory() as conn2:
+        row = conn2.execute("SELECT name FROM companies WHERE name = ?", ("wtx-co",)).fetchone()
+    assert row["name"] == "wtx-co"
+
+
+def test_with_write_txn_rolls_back_on_body_error(opened_pool):
+    """Accepts a bare psycopg connection too; a body exception rolls the
+    transaction back and commit_unless_nested never runs — the write is
+    invisible to a second connection."""
+    from jobcannon.db.pool import get_pool, with_write_txn
+
+    with (
+        get_pool().connection() as raw,
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        with with_write_txn(raw) as yielded:
+            assert yielded is raw
+            yielded.execute("INSERT INTO companies (name) VALUES (%s)", ("wtx-rb",))
+            raise RuntimeError("boom")
+    with get_pool().connection() as other:
+        assert (
+            other.execute("SELECT name FROM companies WHERE name = %s", ("wtx-rb",)).fetchone()
+            is None
+        )
+
+
+def test_with_write_txn_nested_in_ambient_txn_defers_commit(opened_pool):
+    """Inside a caller-owned `raw.transaction()` the helper's commit is a
+    no-op (commit_unless_nested sees _num_transactions > 0) — rolling back
+    the ambient block erases the write."""
+    from psycopg import Rollback
+
+    from jobcannon.db.pool import get_pool, with_write_txn
+
+    with get_pool().connection() as raw:
+        with raw.transaction() as tx:
+            with with_write_txn(raw) as yielded:
+                yielded.execute("INSERT INTO companies (name) VALUES (%s)", ("wtx-nested",))
+            raise Rollback(tx)  # swallowed by the ambient transaction's __exit__
+    with get_pool().connection() as other:
+        assert (
+            other.execute("SELECT name FROM companies WHERE name = %s", ("wtx-nested",)).fetchone()
+            is None
+        )
