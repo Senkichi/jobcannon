@@ -24,7 +24,12 @@ surface:
     actually present in the checked-in manifest, so a future regression in
     the detector (not just a stale manifest) fails loudly;
   * positive/negative controls on PROVENANCE_RE itself, since the whole
-    guard is only as good as that regex's precision and recall.
+    guard is only as good as that regex's precision and recall;
+  * the marker-FORM guard (issue #278): a provenance header must be a `#`
+    comment or live inside the single module docstring — never a second,
+    back-to-back triple-quoted PORTED docstring, which is a SyntaxError
+    the moment `from __future__` follows it and a silent `__doc__`
+    displacement when it doesn't.
 """
 
 from __future__ import annotations
@@ -360,3 +365,96 @@ def test_provenance_regex_accepts_known_phrasings():
     ]
     for line in provenance_lines:
         assert dpp.PROVENANCE_RE.search(line), line
+
+
+def test_no_misplaced_provenance_headers():
+    """Real-tree guard for the issue-#278 header convention: no file on the
+    port surface may carry its provenance marker in a second, back-to-back
+    docstring (or any other dead module-level string statement)."""
+    offenders = dpp.find_misplaced_provenance_headers(REPO_ROOT)
+    assert not offenders, "misplaced provenance header(s):\n" + "\n".join(offenders)
+
+
+def test_misplaced_header_guard_flags_second_docstring(tmp_path):
+    """Positive/negative controls for find_misplaced_provenance_headers.
+
+    Flagged (the issue-#278 convention violations):
+      * a PORTED docstring stacked before the original docstring with a
+        following `from __future__` — the literal SyntaxError shape;
+      * the same stack WITHOUT a future import — compiles cleanly while
+        the original docstring silently becomes dead text, the version of
+        the bug nothing else catches;
+      * the "move the future import up" workaround variant — still dead
+        text (and a `-`-only hunk to fidelity diffs);
+      * a marker-bearing string statement anywhere else at module level.
+
+    Not flagged (the legal forms this guard must not outlaw):
+      * the `# PORTED` line-1 comment convention the issue recommends;
+      * the fused single docstring (marker as the docstring's first line)
+        most already-landed ports carry;
+      * the variable-docstring idiom in a fused-header file — a dead
+        string after a real statement is not a displaced docstring.
+    """
+    pkg = tmp_path / "jobcannon" / "engine"
+    pkg.mkdir(parents=True)
+    (pkg / "broken_future.py").write_text(
+        '"""PORTED from job_finder/x.py @ abc123 (private job-cannon). Ledger L-1."""\n'
+        '"""Original docstring."""\n\n'
+        "from __future__ import annotations\n",
+        encoding="utf-8",
+    )
+    (pkg / "silent_theft.py").write_text(
+        '"""PORTED from job_finder/x.py @ abc123 (private job-cannon). Ledger L-1."""\n'
+        '"""Original docstring."""\n\n'
+        "X = 1\n",
+        encoding="utf-8",
+    )
+    (pkg / "moved_future.py").write_text(
+        '"""PORTED from job_finder/x.py @ abc123 (private job-cannon). Ledger L-1."""\n'
+        "from __future__ import annotations\n\n"
+        '"""Original docstring."""\n\n'
+        "X = 1\n",
+        encoding="utf-8",
+    )
+    (pkg / "dead_marker.py").write_text(
+        '"""Original docstring."""\n\n'
+        "X = 1\n\n"
+        '"""PORTED from job_finder/x.py @ abc123 (private job-cannon). Ledger L-1."""\n',
+        encoding="utf-8",
+    )
+    (pkg / "comment_form.py").write_text(
+        "# PORTED from job_finder/x.py @ abc123 (private job-cannon). Ledger L-1.\n"
+        '"""Original docstring."""\n\n'
+        "from __future__ import annotations\n",
+        encoding="utf-8",
+    )
+    (pkg / "fused_form.py").write_text(
+        '"""PORTED from job_finder/x.py @ abc123 (private job-cannon). Ledger L-1.\n\n'
+        'Original docstring body."""\n\n'
+        "from __future__ import annotations\n",
+        encoding="utf-8",
+    )
+    (pkg / "fused_with_variable_docstring.py").write_text(
+        '"""PORTED from job_finder/x.py @ abc123 (private job-cannon). Ledger L-1.\n\n'
+        'Original docstring body."""\n\n'
+        "from __future__ import annotations\n\n"
+        "VERSION = 2\n"
+        '"""Docs for VERSION."""\n',
+        encoding="utf-8",
+    )
+
+    flagged = "\n".join(dpp.find_misplaced_provenance_headers(tmp_path))
+
+    for name in (
+        "broken_future.py",
+        "silent_theft.py",
+        "moved_future.py",
+        "dead_marker.py",
+    ):
+        assert name in flagged, f"{name} should be flagged:\n{flagged}"
+    for name in (
+        "comment_form.py",
+        "fused_form.py",
+        "fused_with_variable_docstring.py",
+    ):
+        assert name not in flagged, f"{name} must stay legal:\n{flagged}"
