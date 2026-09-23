@@ -16,9 +16,15 @@ resolve them) is asserted directly below, one test per provider.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
-from jobcannon.engine.model_types import BaseProvider, ModelResult
+from jobcannon.engine.model_types import (
+    BaseProvider,
+    ModelResult,
+    ProviderTruncationExhaustedError,
+)
 from jobcannon.host import model_provider as mp
 
 
@@ -208,6 +214,112 @@ def test_validate_api_key_propagates_adapter_failure(monkeypatch):
 
     with pytest.raises(RuntimeError, match="401"):
         mp.validate_api_key("groq", "sk-bad")
+
+
+def _gemini_sdk_response(*, text, finish_reason):
+    """Minimal stand-in for google.genai's GenerateContentResponse -- the
+    real adapter reads ``.text``, ``.candidates[0].finish_reason`` and
+    ``.usage_metadata.{prompt,candidates}_token_count``."""
+    return SimpleNamespace(
+        text=text,
+        candidates=[SimpleNamespace(finish_reason=finish_reason)],
+        usage_metadata=SimpleNamespace(prompt_token_count=10, candidates_token_count=5),
+    )
+
+
+def _install_fake_genai_client(monkeypatch, responses):
+    """Patch the ``genai.Client`` the REAL GeminiProvider constructor builds,
+    so ``validate_api_key`` exercises the actual adapter code path (config
+    build, truncation retry, JSON parse) against canned SDK responses instead
+    of a stubbed ``_make_adapter``. Returns the list of constructed fake
+    clients (each exposes ``.api_key`` and ``.models.calls`` -- the
+    GenerateContentConfig per generate_content call)."""
+    from jobcannon.engine.providers import gemini_provider as gp
+
+    created = []
+
+    class _Models:
+        def __init__(self):
+            self.calls = []
+
+        def generate_content(self, *, model, contents, config):
+            self.calls.append(config)
+            return responses.pop(0)
+
+    class _Client:
+        def __init__(self, *, api_key):
+            self.api_key = api_key
+            self.models = _Models()
+            created.append(self)
+
+    monkeypatch.setattr(gp, "genai", SimpleNamespace(Client=_Client))
+    return created
+
+
+def test_validate_api_key_real_gemini_adapter_recovers_from_no_text_max_tokens(
+    monkeypatch,
+):
+    """gemini-2.5-flash is a thinking model: a probe whose max_output_tokens
+    is consumed by thought parts returns finish_reason=MAX_TOKENS with
+    response.text=None, which used to escape GeminiProvider.call as a raw
+    TypeError (json.loads(None)) and misreport a VALID key as failing the
+    live check. The adapter must treat it as the truncation-shaped failure
+    it is, retry once at the escalated budget, and let the key validate."""
+    created = _install_fake_genai_client(
+        monkeypatch,
+        [
+            _gemini_sdk_response(text=None, finish_reason="MAX_TOKENS"),
+            _gemini_sdk_response(text='{"ok": true}', finish_reason="STOP"),
+        ],
+    )
+
+    result = mp.validate_api_key("gemini", "sk-valid")
+
+    assert result.data == {"ok": True}
+    assert result.provider == "gemini"
+    # The submitted key reached the real adapter construction path.
+    assert len(created) == 1
+    assert created[0].api_key == "sk-valid"
+    calls = created[0].models.calls
+    # First attempt at the probe budget was cut off; the adapter's own
+    # truncation retry re-ran at the x4-escalated budget and parsed.
+    assert len(calls) == 2
+    assert calls[0].max_output_tokens == mp._KEY_CHECK_MAX_TOKENS
+    assert calls[1].max_output_tokens == mp._KEY_CHECK_MAX_TOKENS * 4
+    # The probe disables thinking through the provider config, so the
+    # budget-eating-thoughts path is not reachable in the first place.
+    assert calls[0].thinking_config.thinking_budget == 0
+    assert calls[1].thinking_config.thinking_budget == 0
+
+
+def test_validate_api_key_real_gemini_adapter_no_text_surfaces_controlled_error(
+    monkeypatch,
+):
+    """When even the escalated retry returns text=None, the failure must
+    surface as the adapter's own ProviderTruncationExhaustedError -- a named,
+    catchable signal the settings route renders as a check failure -- never
+    a raw TypeError leaking out of json.loads."""
+    created = _install_fake_genai_client(
+        monkeypatch,
+        [
+            _gemini_sdk_response(text=None, finish_reason="MAX_TOKENS"),
+            _gemini_sdk_response(text=None, finish_reason="MAX_TOKENS"),
+        ],
+    )
+
+    with pytest.raises(ProviderTruncationExhaustedError):
+        mp.validate_api_key("gemini", "sk-valid")
+
+    # Initial attempt plus exactly one truncation retry -- no third call.
+    assert len(created[0].models.calls) == 2
+
+
+def test_validate_api_key_probe_budget_clears_thinking_overhead():
+    """The probe token budget must sit well above Gemini thinking overhead
+    (the original 32 did not), and thinking is disabled for the probe via the
+    adapter config."""
+    assert mp._KEY_CHECK_MAX_TOKENS >= 256
+    assert mp._KEY_CHECK_ADAPTER_CONFIG["providers"]["gemini"]["thinking_budget"] == 0
 
 
 # ---------------------------------------------------------------------------

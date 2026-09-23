@@ -379,7 +379,22 @@ def _make_adapter(
 # first-paint response without making the settings POST hang on a wedged
 # provider (the caller's own request is what waits on this).
 _KEY_CHECK_TIMEOUT_SECONDS = 20.0
-_KEY_CHECK_MAX_TOKENS = 32
+# The quick-tier Gemini default is a thinking model whose thought parts bill
+# against max_output_tokens, so the budget must clear thinking overhead, not
+# just the {"ok": true} payload: the original 32 could be exhausted before
+# any text part was emitted, returning finish_reason=MAX_TOKENS with
+# response.text=None and rejecting a perfectly valid key. 512 is ample
+# headroom on top of the thinking-disable below, and the Gemini adapter's
+# own truncation retry escalates x4 from here if it ever still trips.
+_KEY_CHECK_MAX_TOKENS = 512
+
+# Adapter config the probe is built with. providers.gemini.thinking_budget=0
+# (honored by GeminiProvider._build_generate_config) switches thinking OFF
+# for the probe: a connectivity check needs no reasoning, thinking is pure
+# latency/cost here, and it is the overhead that could otherwise exhaust
+# _KEY_CHECK_MAX_TOKENS before any text is emitted. Adapters only read their
+# own providers.<name> section, so groq/cerebras ignore the gemini key.
+_KEY_CHECK_ADAPTER_CONFIG: dict = {"providers": {"gemini": {"thinking_budget": 0}}}
 
 # Minimal structured-output probe shape. It is NOT optional decoration: the
 # OpenAI-compatible adapters (groq_provider/cerebras_provider) unconditionally
@@ -439,7 +454,11 @@ def validate_api_key(
             failed round-trip (HTTPError/APIError/timeout/parse failure) --
             deliberately untranslated; the caller decides how to surface it.
     """
-    adapter = _make_adapter(provider_name, {}, _single_key_resolver(provider_name, plaintext_key))
+    adapter = _make_adapter(
+        provider_name,
+        _KEY_CHECK_ADAPTER_CONFIG,
+        _single_key_resolver(provider_name, plaintext_key),
+    )
     model = PROVIDER_DEFAULTS[provider_name]["quick"]
     return adapter.call(
         model,
