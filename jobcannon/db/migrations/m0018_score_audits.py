@@ -57,7 +57,9 @@ equals the latest row's audited_sub_scores_json.
 # even routed through Jsonb() the value would come back out through
 # jsonb's own key-order/whitespace-normalizing round trip -- neither
 # preserves the byte-identical string-snapshot contract this module's
-# fidelity anchors depend on. See _score_audits.py's module docstring for
+# fidelity anchors depend on. This is the snapshot-equality case of the
+# verbatim-JSON `text` convention (jobcannon/db/migrations/types.py's
+# module docstring names it). See _score_audits.py's module docstring for
 # the calling contract this implies for future callers.
 """
 

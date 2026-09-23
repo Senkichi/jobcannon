@@ -28,7 +28,9 @@ axis_sum / is_audit_eligible operate on JSON as an opaque STRING (matching
 private's SQLite TEXT column and this module's own byte-identical fidelity
 requirement -- see m0018's migration docstring for why
 score_audits.audited_sub_scores_json/axis_deltas_json stay `text`, not
-`jsonb`). Host's postings.sub_scores_json (m0015) is `jsonb` -- psycopg
+`jsonb`: the snapshot-equality case of the verbatim-JSON `text` convention
+named in jobcannon/db/migrations/types.py's module docstring). Host's
+postings.sub_scores_json (m0015) is `jsonb` -- psycopg
 decodes it to a native dict on read, not a string. select_audit_candidates
 below casts it at the SQL boundary (`sub_scores_json::text`) so every
 snapshot comparison downstream (Python `!=` in is_audit_eligible, SQL `=` in
@@ -92,7 +94,7 @@ import json
 # PORT-SEAM: sqlite3 import dropped; dispatch goes through psycopg's conn.raw.
 from typing import Any
 
-from jobcannon.db.pool import commit_unless_nested
+from jobcannon.db.pool import commit_unless_nested, unwrap_raw
 from jobcannon.engine.constants import SUB_SCORE_KEYS
 # PORT-SEAM: get_effective_location_fit / utc_now_iso imports dropped -- see
 # module docstring PORT-SEAM (location fields dropped entirely; audited_at
@@ -198,7 +200,7 @@ def record_score_audit(
         raise ValueError(f"verdict must be one of {_VALID_VERDICTS}, got {verdict!r}")
     # PORT-SEAM: ? -> %s; RETURNING id (psycopg) replaces cur.lastrowid
     # (SQLite); audited_at omitted -- DEFAULT now() fills it (see docstring).
-    raw = conn.raw if hasattr(conn, "raw") else conn
+    raw = unwrap_raw(conn)
     with raw.transaction():
         row = raw.execute(
             "INSERT INTO score_audits "
@@ -248,7 +250,7 @@ def select_audit_candidates(
     table name); ``j``/``a`` aliases kept for a minimal diff against the
     private query shape.
     """
-    raw = conn.raw if hasattr(conn, "raw") else conn
+    raw = unwrap_raw(conn)
     rows = raw.execute(
         "SELECT p.dedup_key, p.title, p.company, p.location, p.jd_full, "
         # PORT-SEAM: ::text cast -- see module docstring's calling-contract note.

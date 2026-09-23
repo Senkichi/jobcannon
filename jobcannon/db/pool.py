@@ -528,6 +528,22 @@ def connection_factory(*, synchronous: str = "FULL"):
         yield EngineCompatConnection(conn)
 
 
+def unwrap_raw(conn: Any) -> psycopg.Connection:
+    """The raw-unwrap contract, shared: facade-or-raw in, psycopg conn out.
+
+    Single-writer / host modules accept EITHER an ``EngineCompatConnection``
+    facade (what ``connection_factory()`` yields to engine call sites) OR a
+    bare ``psycopg.Connection`` (direct host call sites, and
+    tests/host/conftest.py's ``db_conn`` fixture). ``.raw`` exists only on
+    the facade, so ``conn.raw`` when present else ``conn`` unwraps either
+    shape to the psycopg connection underneath -- the idiom call sites used
+    to inline as ``conn.raw if hasattr(conn, "raw") else conn``. Duck-typed
+    on purpose rather than ``isinstance``-checked: any object exposing
+    ``.raw`` unwraps, which keeps facade-shaped test doubles working.
+    """
+    return conn.raw if hasattr(conn, "raw") else conn
+
+
 def commit_unless_nested(raw: psycopg.Connection) -> None:
     """Best-effort commit shared by _companies.py / _jobs.py / _jd_full.py.
 
