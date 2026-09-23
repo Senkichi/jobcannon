@@ -369,6 +369,106 @@ def _make_adapter(
 
 
 # ---------------------------------------------------------------------------
+# BYO-key live validation (issue #332) -- NOT ported: BYO-key hosted
+# credentials are new to this host (jobcannon/db/_byo_key_credentials.py's
+# module docstring), so there is no private-repo counterpart to carry.
+# ---------------------------------------------------------------------------
+
+# A live check must stay cheap and bounded: one tiny JSON-mode completion on
+# the provider's quick-tier model under a short deadline. 20s covers a slow
+# first-paint response without making the settings POST hang on a wedged
+# provider (the caller's own request is what waits on this).
+_KEY_CHECK_TIMEOUT_SECONDS = 20.0
+_KEY_CHECK_MAX_TOKENS = 32
+
+# Minimal structured-output probe shape. It is NOT optional decoration: the
+# OpenAI-compatible adapters (groq_provider/cerebras_provider) unconditionally
+# ``json.loads()`` the response content, and both providers' JSON mode is only
+# switched on by a non-None ``output_schema`` (payload["response_format"] =
+# {"type": "json_object"}); a bare-text probe would hand them prose and
+# misreport a perfectly valid key as broken. Gemini maps the same argument to
+# ``response_json_schema`` + ``response_mime_type="application/json"``. The
+# prompt strings in validate_api_key also carry the literal word "json"
+# because the OpenAI-compatible endpoints reject json_object mode when no
+# message mentions it.
+_KEY_CHECK_SCHEMA: dict = {
+    "type": "object",
+    "properties": {"ok": {"type": "boolean"}},
+    "required": ["ok"],
+}
+
+
+def validate_api_key(
+    provider_name: str,
+    plaintext_key: str,
+    *,
+    timeout: float = _KEY_CHECK_TIMEOUT_SECONDS,
+) -> ModelResult:
+    """Round-trip a minimal request through ``provider_name``'s real adapter
+    to prove ``plaintext_key`` works, BEFORE it is stored.
+
+    This is the live "test this key" half of the BYO-key settings UI (issue
+    #332): jobcannon/web/settings.py calls it on the submit path and stores
+    the key only when this returns. It deliberately does NOT go through
+    ``call_model`` -- that dispatcher resolves credentials from
+    byo_key_credentials, which is exactly the row this function exists to
+    gate the creation of; a not-yet-stored key cannot come out of the DB.
+    Instead the submitted plaintext is bound into a throwaway
+    CredentialResolver closure (same arity contract as
+    credentials.build_credential_resolver's product: ``(provider) -> str |
+    None``, answering ONLY for the provider under test) and a fresh adapter
+    is built through the same ``_make_adapter`` seam the cascade uses, so a
+    green check here means the real construction path + the provider's API
+    both accepted the key.
+
+    The plaintext never touches the DB, never logs, and lives only in the
+    closure + adapter instance for the duration of this call.
+
+    Args:
+        provider_name: Must be hosted-eligible -- ``_make_adapter`` raises
+            ValueError for anything outside HOSTED_ELIGIBLE_PROVIDERS.
+        plaintext_key: The tenant-submitted API key, as typed.
+        timeout: Wall-clock budget for the single probe call, in seconds.
+
+    Returns:
+        The probe's ModelResult.
+
+    Raises:
+        ValueError: Unknown or non-hosted-eligible provider_name.
+        Exception: Whatever the adapter raises on a rejected key or a
+            failed round-trip (HTTPError/APIError/timeout/parse failure) --
+            deliberately untranslated; the caller decides how to surface it.
+    """
+    adapter = _make_adapter(provider_name, {}, _single_key_resolver(provider_name, plaintext_key))
+    model = PROVIDER_DEFAULTS[provider_name]["quick"]
+    return adapter.call(
+        model,
+        "You are a connectivity check. Reply with json only.",
+        [
+            {
+                "role": "user",
+                "content": 'Reply with the json object {"ok": true} and nothing else.',
+            }
+        ],
+        _KEY_CHECK_SCHEMA,
+        _KEY_CHECK_MAX_TOKENS,
+        timeout,
+    )
+
+
+def _single_key_resolver(provider_name: str, plaintext_key: str) -> CredentialResolver:
+    """A CredentialResolver that answers ``plaintext_key`` for exactly
+    ``provider_name`` and nothing else -- a resolver that returned the key
+    for ANY name it was asked about would let a buggy adapter construction
+    silently validate the key against the wrong provider."""
+
+    def resolve(provider: str) -> str | None:
+        return plaintext_key if provider == provider_name else None
+
+    return resolve
+
+
+# ---------------------------------------------------------------------------
 # Cost/usage recording -- exposed as its own ScanServices field so callers
 # OTHER than call_model's own cascade loop (e.g. a future SerpAPI-enrichment
 # quota counter) share one seam instead of hand-rolling their own

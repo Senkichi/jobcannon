@@ -136,6 +136,81 @@ def test_make_adapter_never_caches_across_calls(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# validate_api_key -- the settings-UI live key check (issue #332)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_api_key_rejects_non_hosted_eligible_provider():
+    """The eligibility gate is _make_adapter's own ValueError -- an
+    anthropic/openrouter/etc. submission must be refused before any model
+    lookup or network call."""
+    with pytest.raises(ValueError, match="hosted-eligible"):
+        mp.validate_api_key("ollama", "sk-x")
+
+
+def test_validate_api_key_probes_through_make_adapter_with_submitted_key(monkeypatch):
+    """The check must run through the same _make_adapter seam the cascade
+    uses, bound to a resolver that answers the submitted plaintext for
+    exactly the provider under test -- and the probe itself must be the
+    cheap JSON-mode call: quick-tier model, bounded tokens, bounded timeout."""
+    captured = {}
+    probe_result = _ok_result(provider="groq", model="llama-3.1-8b-instant")
+
+    class _ProbeAdapter(BaseProvider):
+        def call(self, model, system, messages, output_schema=None, max_tokens=1024, timeout=None):
+            captured.update(
+                model=model,
+                system=system,
+                messages=messages,
+                output_schema=output_schema,
+                max_tokens=max_tokens,
+                timeout=timeout,
+            )
+            return probe_result
+
+    def fake_make_adapter(provider_name, config, resolve_credential):
+        captured["provider"] = provider_name
+        captured["resolver"] = resolve_credential
+        return _ProbeAdapter()
+
+    monkeypatch.setattr(mp, "_make_adapter", fake_make_adapter)
+
+    result = mp.validate_api_key("groq", "sk-submitted", timeout=7.0)
+
+    assert result is probe_result
+    assert captured["provider"] == "groq"
+    # The resolver answers the submitted key for the provider under test and
+    # nothing else -- a wrong-provider query must resolve None.
+    assert captured["resolver"]("groq") == "sk-submitted"
+    assert captured["resolver"]("gemini") is None
+    # Cheap probe shape: quick-tier default model, small token budget, the
+    # caller's timeout threaded through, and JSON mode (output_schema set --
+    # the OpenAI-compatible adapters json.loads() unconditionally, so a
+    # bare-text probe would misreport a valid key as broken).
+    assert captured["model"] == "llama-3.1-8b-instant"
+    assert captured["output_schema"] is mp._KEY_CHECK_SCHEMA
+    assert captured["max_tokens"] == mp._KEY_CHECK_MAX_TOKENS
+    assert captured["timeout"] == 7.0
+    # OpenAI-compatible json_object mode errors unless a message mentions
+    # "json" -- pin the probe prompt's contract, not its exact wording.
+    assert "json" in (captured["system"] + captured["messages"][0]["content"]).lower()
+
+
+def test_validate_api_key_propagates_adapter_failure(monkeypatch):
+    """A rejected key (or failed round-trip) must propagate untranslated --
+    the settings route, not this function, decides how to surface it."""
+
+    class _FailAdapter(BaseProvider):
+        def call(self, *args, **kwargs):
+            raise RuntimeError("401 Unauthorized")
+
+    monkeypatch.setattr(mp, "_make_adapter", lambda *a, **kw: _FailAdapter())
+
+    with pytest.raises(RuntimeError, match="401"):
+        mp.validate_api_key("groq", "sk-bad")
+
+
+# ---------------------------------------------------------------------------
 # Schema validation / sanitization / degenerate detection -- PORT-SEAM
 # byte-identical to private; regression coverage for the port.
 # ---------------------------------------------------------------------------

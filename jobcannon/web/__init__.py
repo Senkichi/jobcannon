@@ -107,7 +107,10 @@ woff2 URLs; the override serves boot-time-substituted bytes (each
 internal ref gains the referenced font's own `?v=`) while leaving the
 committed `fonts.css` file on disk untouched and keeping the response on
 the `static` endpoint, so `clerk_auth`'s exemption and this new hook both
-still apply to it unchanged."""
+still apply to it unchanged; adds the BYO-key settings surface
+(jobcannon.web.settings, issue #332) — GET /settings plus the authed
+key-save/deactivate POSTs that gate key storage on a live provider
+round-trip."""
 
 from __future__ import annotations
 
@@ -1064,6 +1067,10 @@ def create_app(config: dict | None = None) -> Flask:
     from jobcannon.web.profile import profile_bp
 
     app.register_blueprint(profile_bp)
+
+    from jobcannon.web.settings import settings_bp
+
+    app.register_blueprint(settings_bp)
 
     @app.after_request
     def _vary_and_cache_public_paths(response):
