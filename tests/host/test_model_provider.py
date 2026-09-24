@@ -16,9 +16,15 @@ resolve them) is asserted directly below, one test per provider.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
-from jobcannon.engine.model_types import BaseProvider, ModelResult
+from jobcannon.engine.model_types import (
+    BaseProvider,
+    ModelResult,
+    ProviderTruncationExhaustedError,
+)
 from jobcannon.host import model_provider as mp
 
 
@@ -133,6 +139,187 @@ def test_make_adapter_never_caches_across_calls(monkeypatch):
     mp._make_adapter("gemini", {}, resolver_b)
 
     assert calls == [resolver_a, resolver_b]  # fresh construction, no cache reuse
+
+
+# ---------------------------------------------------------------------------
+# validate_api_key -- the settings-UI live key check (issue #332)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_api_key_rejects_non_hosted_eligible_provider():
+    """The eligibility gate is _make_adapter's own ValueError -- an
+    anthropic/openrouter/etc. submission must be refused before any model
+    lookup or network call."""
+    with pytest.raises(ValueError, match="hosted-eligible"):
+        mp.validate_api_key("ollama", "sk-x")
+
+
+def test_validate_api_key_probes_through_make_adapter_with_submitted_key(monkeypatch):
+    """The check must run through the same _make_adapter seam the cascade
+    uses, bound to a resolver that answers the submitted plaintext for
+    exactly the provider under test -- and the probe itself must be the
+    cheap JSON-mode call: quick-tier model, bounded tokens, bounded timeout."""
+    captured = {}
+    probe_result = _ok_result(provider="groq", model="llama-3.1-8b-instant")
+
+    class _ProbeAdapter(BaseProvider):
+        def call(self, model, system, messages, output_schema=None, max_tokens=1024, timeout=None):
+            captured.update(
+                model=model,
+                system=system,
+                messages=messages,
+                output_schema=output_schema,
+                max_tokens=max_tokens,
+                timeout=timeout,
+            )
+            return probe_result
+
+    def fake_make_adapter(provider_name, config, resolve_credential):
+        captured["provider"] = provider_name
+        captured["resolver"] = resolve_credential
+        return _ProbeAdapter()
+
+    monkeypatch.setattr(mp, "_make_adapter", fake_make_adapter)
+
+    result = mp.validate_api_key("groq", "sk-submitted", timeout=7.0)
+
+    assert result is probe_result
+    assert captured["provider"] == "groq"
+    # The resolver answers the submitted key for the provider under test and
+    # nothing else -- a wrong-provider query must resolve None.
+    assert captured["resolver"]("groq") == "sk-submitted"
+    assert captured["resolver"]("gemini") is None
+    # Cheap probe shape: quick-tier default model, small token budget, the
+    # caller's timeout threaded through, and JSON mode (output_schema set --
+    # the OpenAI-compatible adapters json.loads() unconditionally, so a
+    # bare-text probe would misreport a valid key as broken).
+    assert captured["model"] == "llama-3.1-8b-instant"
+    assert captured["output_schema"] is mp._KEY_CHECK_SCHEMA
+    assert captured["max_tokens"] == mp._KEY_CHECK_MAX_TOKENS
+    assert captured["timeout"] == 7.0
+    # OpenAI-compatible json_object mode errors unless a message mentions
+    # "json" -- pin the probe prompt's contract, not its exact wording.
+    assert "json" in (captured["system"] + captured["messages"][0]["content"]).lower()
+
+
+def test_validate_api_key_propagates_adapter_failure(monkeypatch):
+    """A rejected key (or failed round-trip) must propagate untranslated --
+    the settings route, not this function, decides how to surface it."""
+
+    class _FailAdapter(BaseProvider):
+        def call(self, *args, **kwargs):
+            raise RuntimeError("401 Unauthorized")
+
+    monkeypatch.setattr(mp, "_make_adapter", lambda *a, **kw: _FailAdapter())
+
+    with pytest.raises(RuntimeError, match="401"):
+        mp.validate_api_key("groq", "sk-bad")
+
+
+def _gemini_sdk_response(*, text, finish_reason):
+    """Minimal stand-in for google.genai's GenerateContentResponse -- the
+    real adapter reads ``.text``, ``.candidates[0].finish_reason`` and
+    ``.usage_metadata.{prompt,candidates}_token_count``."""
+    return SimpleNamespace(
+        text=text,
+        candidates=[SimpleNamespace(finish_reason=finish_reason)],
+        usage_metadata=SimpleNamespace(prompt_token_count=10, candidates_token_count=5),
+    )
+
+
+def _install_fake_genai_client(monkeypatch, responses):
+    """Patch the ``genai.Client`` the REAL GeminiProvider constructor builds,
+    so ``validate_api_key`` exercises the actual adapter code path (config
+    build, truncation retry, JSON parse) against canned SDK responses instead
+    of a stubbed ``_make_adapter``. Returns the list of constructed fake
+    clients (each exposes ``.api_key`` and ``.models.calls`` -- the
+    GenerateContentConfig per generate_content call)."""
+    from jobcannon.engine.providers import gemini_provider as gp
+
+    created = []
+
+    class _Models:
+        def __init__(self):
+            self.calls = []
+
+        def generate_content(self, *, model, contents, config):
+            self.calls.append(config)
+            return responses.pop(0)
+
+    class _Client:
+        def __init__(self, *, api_key):
+            self.api_key = api_key
+            self.models = _Models()
+            created.append(self)
+
+    monkeypatch.setattr(gp, "genai", SimpleNamespace(Client=_Client))
+    return created
+
+
+def test_validate_api_key_real_gemini_adapter_recovers_from_no_text_max_tokens(
+    monkeypatch,
+):
+    """gemini-2.5-flash is a thinking model: a probe whose max_output_tokens
+    is consumed by thought parts returns finish_reason=MAX_TOKENS with
+    response.text=None, which used to escape GeminiProvider.call as a raw
+    TypeError (json.loads(None)) and misreport a VALID key as failing the
+    live check. The adapter must treat it as the truncation-shaped failure
+    it is, retry once at the escalated budget, and let the key validate."""
+    created = _install_fake_genai_client(
+        monkeypatch,
+        [
+            _gemini_sdk_response(text=None, finish_reason="MAX_TOKENS"),
+            _gemini_sdk_response(text='{"ok": true}', finish_reason="STOP"),
+        ],
+    )
+
+    result = mp.validate_api_key("gemini", "sk-valid")
+
+    assert result.data == {"ok": True}
+    assert result.provider == "gemini"
+    # The submitted key reached the real adapter construction path.
+    assert len(created) == 1
+    assert created[0].api_key == "sk-valid"
+    calls = created[0].models.calls
+    # First attempt at the probe budget was cut off; the adapter's own
+    # truncation retry re-ran at the x4-escalated budget and parsed.
+    assert len(calls) == 2
+    assert calls[0].max_output_tokens == mp._KEY_CHECK_MAX_TOKENS
+    assert calls[1].max_output_tokens == mp._KEY_CHECK_MAX_TOKENS * 4
+    # The probe disables thinking through the provider config, so the
+    # budget-eating-thoughts path is not reachable in the first place.
+    assert calls[0].thinking_config.thinking_budget == 0
+    assert calls[1].thinking_config.thinking_budget == 0
+
+
+def test_validate_api_key_real_gemini_adapter_no_text_surfaces_controlled_error(
+    monkeypatch,
+):
+    """When even the escalated retry returns text=None, the failure must
+    surface as the adapter's own ProviderTruncationExhaustedError -- a named,
+    catchable signal the settings route renders as a check failure -- never
+    a raw TypeError leaking out of json.loads."""
+    created = _install_fake_genai_client(
+        monkeypatch,
+        [
+            _gemini_sdk_response(text=None, finish_reason="MAX_TOKENS"),
+            _gemini_sdk_response(text=None, finish_reason="MAX_TOKENS"),
+        ],
+    )
+
+    with pytest.raises(ProviderTruncationExhaustedError):
+        mp.validate_api_key("gemini", "sk-valid")
+
+    # Initial attempt plus exactly one truncation retry -- no third call.
+    assert len(created[0].models.calls) == 2
+
+
+def test_validate_api_key_probe_budget_clears_thinking_overhead():
+    """The probe token budget must sit well above Gemini thinking overhead
+    (the original 32 did not), and thinking is disabled for the probe via the
+    adapter config."""
+    assert mp._KEY_CHECK_MAX_TOKENS >= 256
+    assert mp._KEY_CHECK_ADAPTER_CONFIG["providers"]["gemini"]["thinking_budget"] == 0
 
 
 # ---------------------------------------------------------------------------

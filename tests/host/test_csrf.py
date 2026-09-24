@@ -399,6 +399,21 @@ def test_post_account_delete_with_token_calls_clerk(db_app):
     assert calls == [USER_ID]
 
 
+def test_post_settings_keys_without_token_is_400():
+    """Issue #332's BYO-key write routes are plain form POSTs under the
+    app-wide CSRFProtect — a missing token is the 400 CSRF error page before
+    the view (and therefore before any credential write) runs."""
+    client = _stateless_app().test_client()
+    resp = client.post("/settings/keys", data={"provider": "gemini", "api_key": "k"})
+    assert resp.status_code == 400
+
+
+def test_post_settings_keys_deactivate_without_token_is_400():
+    client = _stateless_app().test_client()
+    resp = client.post("/settings/keys/deactivate", data={"provider": "gemini"})
+    assert resp.status_code == 400
+
+
 def test_post_profile_without_token_is_400():
     """Spec 2 §2: /profile is a plain form POST under the app-wide
     CSRFProtect — a missing token is the 400 CSRF error page, same as every

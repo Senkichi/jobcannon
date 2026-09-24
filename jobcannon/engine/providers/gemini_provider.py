@@ -146,7 +146,13 @@ _GEMINI_PRICING: dict[str, dict[str, float]] = {
 #      still parse as valid JSON up to that point -- rare but possible for
 #      a schema with optional trailing fields).
 #   2. A JSONDecodeError on the returned text (catches SDKs/mocks that don't
-#      populate finish_reason, and catches any other truncation shape).
+#      populate finish_reason, and catches any other truncation shape) -- or
+#      a TypeError from json.loads(response.text) when response.text is None:
+#      a thinking model that spent the ENTIRE max_output_tokens budget on
+#      thought parts emits no text part at all, and so does a candidate
+#      blocked before producing text. Same truncation-shaped failure.
+#      Without the TypeError catch that case escaped the adapter raw, which
+#      is how a valid key could fail the BYO-key live check (issue #332).
 # One retry only, at TRUNCATION_RETRY_TOKEN_MULTIPLIER times the caller's
 # original max_tokens -- a single named constant so the budget bump isn't
 # hardcoded independently at each call site that might need it.
@@ -240,6 +246,14 @@ class GeminiProvider(BaseProvider):
             )
         provider_cfg = config.get("providers", {}).get("gemini", {})
         self._retry_sleep: float = provider_cfg.get("retry_sleep_seconds", 15.0)
+        # Optional bound on thinking-model thought tokens, threaded into every
+        # GenerateContentConfig as ThinkingConfig(thinking_budget=...). None
+        # (unset) leaves the model's own dynamic default; 0 disables thinking
+        # outright on models that allow it (gemini-2.5-flash). The BYO-key
+        # live check (host/model_provider.validate_api_key) uses this so a
+        # connectivity probe cannot burn its whole output budget on thought
+        # parts and come back with response.text=None.
+        self._thinking_budget: int | None = provider_cfg.get("thinking_budget")
 
         if client is not None:
             self._client: Any = client
@@ -303,7 +317,7 @@ class GeminiProvider(BaseProvider):
 
         response: Any = None
         data: Any = None
-        parse_error: json.JSONDecodeError | None = None
+        parse_error: json.JSONDecodeError | TypeError | None = None
         current_max_tokens = max_tokens
 
         # Truncation-aware retry (T2.8/D28): up to one retry, at
@@ -320,7 +334,12 @@ class GeminiProvider(BaseProvider):
             if output_schema is not None:
                 try:
                     data = json.loads(response.text)
-                except json.JSONDecodeError as exc:
+                except (json.JSONDecodeError, TypeError) as exc:
+                    # TypeError covers response.text=None -- see the
+                    # truncation-retry comment block above. Treat it as the
+                    # same truncation-shaped failure a mid-JSON cutoff is so
+                    # the retry at the escalated budget engages instead of a
+                    # raw TypeError escaping the adapter.
                     parse_error = exc
                     data = None
             else:
@@ -390,6 +409,10 @@ class GeminiProvider(BaseProvider):
         if output_schema is not None:
             config_kwargs["response_mime_type"] = "application/json"
             config_kwargs["response_json_schema"] = output_schema
+        if self._thinking_budget is not None:
+            config_kwargs["thinking_config"] = genai_types.ThinkingConfig(
+                thinking_budget=self._thinking_budget
+            )
         if timeout is not None:
             config_kwargs["http_options"] = genai_types.HttpOptions(timeout=int(timeout * 1000))
         return genai_types.GenerateContentConfig(**config_kwargs)
