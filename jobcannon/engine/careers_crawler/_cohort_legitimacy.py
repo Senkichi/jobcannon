@@ -141,6 +141,20 @@ samples before flagging; any one is sufficient on its own.
 # `record_legitimacy_flag`'s DB write uses the existing (required)
 # `svc.connection_factory()` seam, same as careers_crawler/_persistence.py
 # (L-0465) -- no new ScanServices field needed.
+#
+# Split tracking (issue #362 item 5): at ~650 lines this module sits over
+# the design note's 200-400-line typical range. The "once more of the
+# crawler cascade lands" precondition is now met (every tier that will
+# exist has landed; ai_nav died with L-0133), and the natural seams are:
+# the ported-inline name-affinity block (`_GENERIC_TOKENS` /
+# `_NOISE_TOKEN_RE` / `_tokens` / `_compressed` / `name_slug_affinity`),
+# the per-signal helpers (`_companies_slug_signal`, `_normalize_title` /
+# `_token_lcs_similarity` / `_cluster_titles` / `_title_template_ratio`,
+# `_fetch_posting_signal` and their constants), and the orchestration +
+# persistence trio (`CohortVerdict`, `evaluate_cohort_legitimacy`,
+# `record_legitimacy_flag`). Still under the 800-line hard cap, so the
+# split stays a deferred candidate for its own unit rather than a
+# drive-by in an adjudication pass.
 """
 
 from __future__ import annotations

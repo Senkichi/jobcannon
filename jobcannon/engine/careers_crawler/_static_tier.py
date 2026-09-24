@@ -18,6 +18,18 @@ This module owns:
 `_extract_jobs_from_soup` is part of the public surface — it's imported
 lazily by `careers_page_interactions.py` and `ai_career_navigator.py` —
 so the parent package re-exports it from `__init__.py`.
+
+Split tracking (issue #362 item 7): at ~520 lines this module sits over
+the design note's 200-400-line typical range (the note authorizes a
+split at ~400). The natural seam is the shared extraction helpers
+(``_location_from_jsonld`` / ``_location_from_url_slug`` /
+``_extract_jsonld_postings`` / ``_extract_candidates`` /
+``_filter_candidates``) versus the ``_try_static_extract`` entry point —
+but the helpers' dependents (``_cohort_legitimacy`` imports the JSON-LD
+pair at module scope; the Playwright tier and
+``careers_page_interactions`` reuse ``_extract_jobs_from_soup``) make the
+split a public-surface move, so it stays deferred to its own unit rather
+than a drive-by in an adjudication pass.
 """
 
 from __future__ import annotations
