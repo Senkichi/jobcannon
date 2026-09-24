@@ -1,11 +1,13 @@
-"""jobcannon.host.ingestion.capture.record_run -- the sole writer of
+"""jobcannon.host.ingestion._parse_log.record_run -- the sole writer of
 email_parse_log_sender (L-0279).
 
-Not a straight port test file (capture.py itself IS a port -- see its own
-module docstring); this suite is new, covering the seam edits capture.py's
-docstring calls out: the PII scrub chokepoint on `last_error`, the D19
-zero-count-row-per-known-sender behavior, the (user_id, run_id, sender_label)
-ON CONFLICT dedup, and the never-raises contract.
+Not a straight port test file (_parse_log.py itself IS a port -- see its
+own module docstring); this suite is new, covering the seam edits
+_parse_log.py's docstring calls out: the PII scrub chokepoint on
+`last_error`, the D19 zero-count-row-per-known-sender behavior, the
+(user_id, run_id, sender_label) ON CONFLICT dedup, and the never-raises
+contract. (Renamed from test_capture.py in issue #358, FU-C --
+capture.py -> _parse_log.py.)
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from jobcannon.engine.email_senders import SENDERS
-from jobcannon.host.ingestion import capture
+from jobcannon.host.ingestion import _parse_log
 
 from tests.host.conftest import requires_postgres
 
@@ -44,7 +46,7 @@ def test_record_run_writes_zero_count_row_for_every_known_sender_with_no_activit
     yields nothing"."""
     _seed_user(db_conn, "cap-u1")
 
-    capture.record_run(
+    _parse_log.record_run(
         db_conn,
         "cap-u1",
         run_id="run-1",
@@ -66,7 +68,7 @@ def test_record_run_writes_zero_count_row_for_every_known_sender_with_no_activit
 def test_record_run_aggregates_counts_per_label(db_conn):
     _seed_user(db_conn, "cap-u2")
 
-    capture.record_run(
+    _parse_log.record_run(
         db_conn,
         "cap-u2",
         run_id="run-2",
@@ -97,7 +99,7 @@ def test_record_run_scrubs_last_error_before_persisting(db_conn):
     verbatim."""
     _seed_user(db_conn, "cap-u3", email="cap-u3@example.org")
 
-    capture.record_run(
+    _parse_log.record_run(
         db_conn,
         "cap-u3",
         run_id="run-3",
@@ -118,7 +120,7 @@ def test_record_run_scrubs_any_embedded_email_even_without_tenant_identifier(db_
     which may carry someone else's address (e.g. a job poster's contact)."""
     _seed_user(db_conn, "cap-u4")
 
-    capture.record_run(
+    _parse_log.record_run(
         db_conn,
         "cap-u4",
         run_id="run-4",
@@ -142,10 +144,10 @@ def test_record_run_on_conflict_dedups_same_user_run_label(db_conn):
         parse_failures=[],
     )
 
-    capture.record_run(db_conn, "cap-u5", **kwargs)
+    _parse_log.record_run(db_conn, "cap-u5", **kwargs)
     # A second call with the SAME (user_id, run_id, sender_label) must not
     # duplicate rows or raise -- ON CONFLICT DO NOTHING.
-    capture.record_run(db_conn, "cap-u5", **kwargs)
+    _parse_log.record_run(db_conn, "cap-u5", **kwargs)
 
     n = db_conn.execute(
         "SELECT count(*) AS n FROM email_parse_log_sender "
@@ -168,8 +170,8 @@ def test_record_run_scopes_rows_to_user_id(db_conn):
         parse_failures=[],
     )
 
-    capture.record_run(db_conn, "cap-u6a", **kwargs)
-    capture.record_run(db_conn, "cap-u6b", **kwargs)
+    _parse_log.record_run(db_conn, "cap-u6a", **kwargs)
+    _parse_log.record_run(db_conn, "cap-u6b", **kwargs)
 
     n = db_conn.execute(
         "SELECT count(*) AS n FROM email_parse_log_sender WHERE run_id = 'shared-run' "
@@ -184,7 +186,7 @@ def test_record_run_never_raises_on_internal_failure(db_conn):
     required "label" key) must be swallowed, not propagated."""
     _seed_user(db_conn, "cap-u7")
 
-    capture.record_run(
+    _parse_log.record_run(
         db_conn,
         "cap-u7",
         run_id="run-7",

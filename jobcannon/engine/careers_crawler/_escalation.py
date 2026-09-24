@@ -420,15 +420,15 @@ def _crawl_companies(
 
                         # === Full escalation chain (if cache miss) ===
                         # A declarative (name, fn, gate) tier-registry was
-                        # considered and deferred (issue #362 item 3). The
-                        # item's precondition -- "once the remaining
-                        # crawler tiers land" -- is now spent (playwright
-                        # and embedded_json have landed; ai_nav was
-                        # deleted by design, L-0133), and the chain is
-                        # still not a set of uniform steps: sitemap
-                        # returns a legitimacy verdict through flag_sink
-                        # that can short-circuit the whole chain;
-                        # url_param is gated on search_keywords;
+                        # considered and deferred (issues #335 and #362
+                        # item 3). The item's precondition -- "once the
+                        # remaining crawler tiers land" -- is now spent
+                        # (playwright and embedded_json have landed;
+                        # ai_nav was deleted by design, L-0133), and the
+                        # chain is still not a set of uniform steps:
+                        # sitemap returns a legitimacy verdict through
+                        # flag_sink that can short-circuit the whole
+                        # chain; url_param is gated on search_keywords;
                         # Playwright picks one of two functions on
                         # interactive_enabled and feeds the rendered_html
                         # / discovered_api side channels; and the

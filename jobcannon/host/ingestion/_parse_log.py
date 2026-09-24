@@ -44,6 +44,12 @@ private function's own contract exactly).
 # last_error, and it is always scrubbed. There is no run-level
 # email_parse_log table in this port (design note §1.7); this per-sender
 # table is the entirety of parse-outcome persistence.
+#
+# Renamed capture.py -> _parse_log.py in issue #358 (FU-C): this module is
+# the ONE writer module behind every email_parse_log* write -- intake lanes
+# call record_run here rather than issuing their own INSERTs, and any
+# future run-level email_parse_log rollup lands in this module too, next
+# to the per-sender writer it shares the chokepoint with.
 
 # PORT-SEAM: multi-tenant widening. `user_id` threads through every row
 # (m0026); the INSERT's ON CONFLICT target widens from

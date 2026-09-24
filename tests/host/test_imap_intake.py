@@ -6,8 +6,8 @@ synthetic fixtures only). Covers the seams this port introduced over the
 private ImapSource: the consent-gate no-op, the \\Seen-removal safety
 contract (readonly select, add_flags never called), the UIDVALIDITY-epoch
 reset, the UID-range Python-side re-filter, sender-parser dispatch +
-parse-failure handling, and the capture.record_run / advance_uid_highwater
-wiring.
+parse-failure handling, and the _parse_log.record_run /
+advance_uid_highwater wiring.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from email.message import EmailMessage
 
 from jobcannon.db import _mailbox_credentials
 from jobcannon.engine.model_types import MailboxCredential
-from jobcannon.host.ingestion import imap_intake
+from jobcannon.host.ingestion import _alert_parse
 from jobcannon.host.ingestion.imap_intake import (
     _build_uid_search_criteria,
     run_imap_intake,
@@ -176,7 +176,7 @@ def test_never_calls_add_flags_and_selects_readonly_exactly_once(db_conn, monkey
         uid_validity=1,
         messages={5: _make_raw_email(from_addr="jobalerts-noreply@linkedin.com")},
     )
-    monkeypatch.setattr(imap_intake, "extract_with_fallback", lambda fn, body, date: [])
+    monkeypatch.setattr(_alert_parse, "extract_with_fallback", lambda fn, body, date: [])
 
     run_imap_intake(
         db_conn, "imap-u3", resolver=lambda: _CREDENTIAL, connection_factory=_factory_for(client)
@@ -196,7 +196,7 @@ def test_uid_validity_mismatch_resets_effective_highwater_to_zero(db_conn, monke
         uid_validity=6,  # folder was recreated -- new epoch
         messages={3: _make_raw_email(from_addr="jobalerts-noreply@linkedin.com")},
     )
-    monkeypatch.setattr(imap_intake, "extract_with_fallback", lambda fn, body, date: [])
+    monkeypatch.setattr(_alert_parse, "extract_with_fallback", lambda fn, body, date: [])
 
     result = run_imap_intake(
         db_conn, "imap-u4", resolver=lambda: _CREDENTIAL, connection_factory=_factory_for(client)
@@ -217,7 +217,7 @@ def test_uid_validity_match_continues_from_stored_highwater(db_conn, monkeypatch
     _seed_user(db_conn, "imap-u5")
     _seed_progress(db_conn, "imap-u5", uid_highwater=10, uid_validity=1)
     client = _FakeImapClient(uid_validity=1, messages={})
-    monkeypatch.setattr(imap_intake, "extract_with_fallback", lambda fn, body, date: [])
+    monkeypatch.setattr(_alert_parse, "extract_with_fallback", lambda fn, body, date: [])
 
     run_imap_intake(
         db_conn, "imap-u5", resolver=lambda: _CREDENTIAL, connection_factory=_factory_for(client)
@@ -242,7 +242,7 @@ def test_stale_uid_below_watermark_is_filtered_out_in_python(db_conn, monkeypatc
             15: _make_raw_email(from_addr="jobalerts-noreply@linkedin.com", body="fresh"),
         },
     )
-    monkeypatch.setattr(imap_intake, "extract_with_fallback", lambda fn, body, date: [])
+    monkeypatch.setattr(_alert_parse, "extract_with_fallback", lambda fn, body, date: [])
 
     result = run_imap_intake(
         db_conn, "imap-u6", resolver=lambda: _CREDENTIAL, connection_factory=_factory_for(client)
@@ -276,7 +276,7 @@ def test_parser_dispatch_and_failure_are_recorded_via_capture(db_conn, monkeypat
             raise ValueError("synthetic parse failure")
         return [{"title": "Fake Job"}]
 
-    monkeypatch.setattr(imap_intake, "extract_with_fallback", fake_extract)
+    monkeypatch.setattr(_alert_parse, "extract_with_fallback", fake_extract)
 
     result = run_imap_intake(
         db_conn,
@@ -312,7 +312,7 @@ def test_unmatched_sender_is_skipped_without_a_parse_failure(db_conn, monkeypatc
         uid_validity=1,
         messages={1: _make_raw_email(from_addr="stranger@unknown-domain.example")},
     )
-    monkeypatch.setattr(imap_intake, "extract_with_fallback", lambda fn, body, date: [])
+    monkeypatch.setattr(_alert_parse, "extract_with_fallback", lambda fn, body, date: [])
 
     result = run_imap_intake(
         db_conn, "imap-u8", resolver=lambda: _CREDENTIAL, connection_factory=_factory_for(client)
@@ -335,7 +335,7 @@ def test_sender_config_override_is_threaded_through(db_conn, monkeypatch):
         uid_validity=1,
         messages={1: _make_raw_email(from_addr="custom-alerts@mycompany.example")},
     )
-    monkeypatch.setattr(imap_intake, "extract_with_fallback", lambda fn, body, date: [{"j": 1}])
+    monkeypatch.setattr(_alert_parse, "extract_with_fallback", lambda fn, body, date: [{"j": 1}])
     sender_config = {
         "sources": {"imap": {"senders": {"linkedin_alerts": "custom-alerts@mycompany.example"}}}
     }
