@@ -63,3 +63,11 @@ yet. `CLA Assistant Lite` is listed in `.aviator/config.yml`'s
   version free against origin/main and every open PR; a CI check
   (`Migration collision guard`) re-verifies at PR time as a backstop. See
   `docs/deploy-runbook.md` §3, "Creating a new migration".
+
+## Module size
+
+A module should typically run 200–400 lines; 800 is the hard maximum —
+anything past that gets split. Split by feature/domain seam (e.g. packet
+assembly vs. verdict guards vs. pure predicates), not by type ("all the
+helpers in one file"), and a good split leaves each module with one clear
+responsibility and a module docstring that names it.

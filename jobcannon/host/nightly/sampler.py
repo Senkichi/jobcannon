@@ -108,6 +108,7 @@ from jobcannon.host.nightly.checkpoint_packet import (
 from jobcannon.host.nightly.checkpoint_verdict import checkpoint_verdict
 from jobcannon.host.nightly.config import nightly_monitor_config, nightly_monitor_enabled
 from jobcannon.host.nightly.signatures import match_signatures
+from jobcannon.host.nightly.watermark import fetch_since_watermark
 
 logger = logging.getLogger(__name__)
 
@@ -152,21 +153,32 @@ def _terminal_jobs_with_duration(
         "MAX(e.at) FILTER (WHERE e.type IN ('succeeded', 'failed')) AS finished_at "
         "FROM procrastinate_jobs j "
         "JOIN procrastinate_events e ON e.job_id = j.id "
-        "WHERE j.status = ANY(%s) AND {filter} "
+        "WHERE j.status = ANY(%(statuses)s) AND {filter} "
         "GROUP BY j.id, j.task_name, j.status "
-        "ORDER BY j.id {order} LIMIT %s"
+        "ORDER BY j.id {order} LIMIT %(limit)s"
     )
     if task_name is None:
-        rows = raw.execute(
-            query.format(filter="j.id > %s", order="ASC"),
-            (list(_TERMINAL_STATUSES), since_id, limit),
-        ).fetchall()
+        # The tick's own checkpoint queue: a watermark-cursor read (issue
+        # #421's shared helper). Its returned high-water id is not consumed
+        # here -- _tick advances procrastinate_watermark_id only through
+        # jobs actually checkpointed on a drained tick, not every row read.
+        rows, _ = fetch_since_watermark(
+            conn,
+            query.format(filter="j.id > %(since_id)s", order="ASC"),
+            since_id=since_id,
+            limit=limit,
+            params={"statuses": list(_TERMINAL_STATUSES)},
+        )
     else:
         rows = list(
             reversed(
                 raw.execute(
-                    query.format(filter="j.task_name = %s", order="DESC"),
-                    (list(_TERMINAL_STATUSES), task_name, limit),
+                    query.format(filter="j.task_name = %(task_name)s", order="DESC"),
+                    {
+                        "statuses": list(_TERMINAL_STATUSES),
+                        "task_name": task_name,
+                        "limit": limit,
+                    },
                 ).fetchall()
             )
         )
@@ -207,20 +219,22 @@ def _new_scan_health_hits(conn: Any, since_id: int, registry: list[dict]) -> tup
     of ``registry`` being empty -- the watermark must still advance so an
     empty registry does not cause the same rows to be re-read forever.
     """
-    raw = unwrap_raw(conn)
-    rows = raw.execute(
-        "SELECT id, payload FROM scan_health_log WHERE id > %s ORDER BY id LIMIT %s",
-        (since_id, _FETCH_CAP),
-    ).fetchall()
+    rows, new_watermark = fetch_since_watermark(
+        conn,
+        "SELECT id, payload FROM scan_health_log "
+        "WHERE id > %(since_id)s ORDER BY id LIMIT %(limit)s",
+        since_id=since_id,
+        limit=_FETCH_CAP,
+    )
     if not rows:
-        return [], since_id
+        return [], new_watermark
     hits: list[dict] = []
     if registry:
         for row in rows:
             payload = row["payload"] if isinstance(row["payload"], dict) else {}
             for hit in match_signatures(payload, registry):
                 hits.append({**hit, "source": payload.get("source")})
-    return hits, rows[-1]["id"]
+    return hits, new_watermark
 
 
 def run_sampler_tick() -> dict | None:
