@@ -68,14 +68,17 @@ def prober_db():
 
 def _insert_company(pool_mod, *, name: str) -> int:
     # scan_enabled defaults to TRUE in m0001 (`scan_enabled boolean NOT NULL
-    # DEFAULT true`) -> seed it FALSE explicitly, so the post-call
-    # `scan_enabled is True` assertions prove the UPDATE actually ran
-    # instead of trivially matching an untouched column default.
+    # DEFAULT true`), and ats_scan_enabled/careers_scan_enabled likewise
+    # default true under m0021 -> seed all three FALSE explicitly, so the
+    # post-call `is True` assertions prove the UPDATE actually ran (and the
+    # `ats_scan_enabled is False` assertion proves the careers-lane co-write
+    # didn't clobber the ATS lane) instead of matching untouched defaults.
     with pool_mod.connection_factory() as conn:
         conn.execute(
             "INSERT INTO companies "
-            "(name, name_raw, ats_probe_status, careers_url, scan_enabled) "
-            "VALUES (?, ?, 'pending', ?, FALSE)",
+            "(name, name_raw, ats_probe_status, careers_url, scan_enabled, "
+            "ats_scan_enabled, careers_scan_enabled) "
+            "VALUES (?, ?, 'pending', ?, FALSE, FALSE, FALSE)",
             (name, name, _CAREERS_URL),
         )
         conn.commit()
@@ -94,7 +97,9 @@ def _no_network_fetch(*_args, **_kwargs):
 def test_tier2_static_extract_sets_scan_enabled_true_on_postgres(prober_db, monkeypatch):
     """Tier 2 (~line 416): static HTML extract finds jobs on a custom
     careers page -> the `SET scan_enabled = TRUE` UPDATE must not raise the
-    Postgres boolean/integer type error the old `= 1` literal caused."""
+    Postgres boolean/integer type error the old `= 1` literal caused. WI-13
+    (#329): the same statement must also set `careers_scan_enabled = TRUE`
+    (the lane this write is about) while leaving `ats_scan_enabled` alone."""
     from jobcannon.engine import ats_prober
 
     company_id = _insert_company(prober_db, name="Tier2Co")
@@ -120,18 +125,22 @@ def test_tier2_static_extract_sets_scan_enabled_true_on_postgres(prober_db, monk
     }
     with prober_db.connection_factory() as conn:
         row = conn.execute(
-            "SELECT ats_probe_status, scan_enabled, miss_reason FROM companies WHERE id = ?",
+            "SELECT ats_probe_status, scan_enabled, careers_scan_enabled, "
+            "ats_scan_enabled, miss_reason FROM companies WHERE id = ?",
             (company_id,),
         ).fetchone()
     assert row["ats_probe_status"] == "miss"
     assert row["scan_enabled"] is True
+    assert row["careers_scan_enabled"] is True
+    assert row["ats_scan_enabled"] is False
     assert row["miss_reason"] == "static_fallthrough_tier2_jobs_persisted"
 
 
 def test_tier3_embedded_json_sets_scan_enabled_true_on_postgres(prober_db, monkeypatch):
     """Tier 3 (~line 495): reached when tier 2's static extract signals
     JS-heavy (returns None) and the embedded-JSON tier finds jobs instead.
-    Same fix, same UPDATE shape, distinct call site."""
+    Same fix, same UPDATE shape, distinct call site — including the WI-13
+    `careers_scan_enabled` co-write (#329)."""
     from jobcannon.engine import ats_prober
 
     company_id = _insert_company(prober_db, name="Tier3Co")
@@ -160,11 +169,14 @@ def test_tier3_embedded_json_sets_scan_enabled_true_on_postgres(prober_db, monke
     }
     with prober_db.connection_factory() as conn:
         row = conn.execute(
-            "SELECT ats_probe_status, scan_enabled, miss_reason FROM companies WHERE id = ?",
+            "SELECT ats_probe_status, scan_enabled, careers_scan_enabled, "
+            "ats_scan_enabled, miss_reason FROM companies WHERE id = ?",
             (company_id,),
         ).fetchone()
     assert row["ats_probe_status"] == "miss"
     assert row["scan_enabled"] is True
+    assert row["careers_scan_enabled"] is True
+    assert row["ats_scan_enabled"] is False
     assert row["miss_reason"] == "static_fallthrough_tier3_jobs_persisted"
 
 

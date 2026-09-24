@@ -64,7 +64,6 @@ def crawler_db_path(tmp_path):
     db_path = tmp_path / "test.db"
     conn = sqlite3.connect(str(db_path))
     create_scan_schema(conn)
-    conn.execute("ALTER TABLE companies ADD COLUMN careers_scan_enabled INTEGER DEFAULT 1")
     conn.execute("ALTER TABLE companies ADD COLUMN merged_into_id INTEGER")
     conn.execute("ALTER TABLE companies ADD COLUMN careers_crawl_flag_reason TEXT")
     conn.execute("ALTER TABLE companies ADD COLUMN careers_api_endpoint TEXT")

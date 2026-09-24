@@ -52,6 +52,8 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from jobcannon.db.pool import unwrap_raw
+
 logger = logging.getLogger(__name__)
 
 # The two scan_health_log payload["level"] values this digest counts.
@@ -61,13 +63,9 @@ logger = logging.getLogger(__name__)
 _LEVELS = ("WARNING", "ERROR")
 
 
-def _raw(conn: Any):
-    return conn.raw if hasattr(conn, "raw") else conn
-
-
 def _level_counts(conn: Any, window_start: datetime, window_end: datetime) -> dict[str, int]:
     rows = (
-        _raw(conn)
+        unwrap_raw(conn)
         .execute(
             """
             SELECT payload->>'level' AS level, count(*) AS n
@@ -85,7 +83,7 @@ def _level_counts(conn: Any, window_start: datetime, window_end: datetime) -> di
 
 def _per_source_counts(conn: Any, window_start: datetime, window_end: datetime) -> dict[str, int]:
     rows = (
-        _raw(conn)
+        unwrap_raw(conn)
         .execute(
             """
             SELECT coalesce(payload->>'source', 'unknown') AS source, count(*) AS n
@@ -111,7 +109,7 @@ def _signature_patterns(conn: Any, window_start: datetime, window_end: datetime)
     signatures.py used, just keyed on a structured field instead of a regex.
     """
     rows = (
-        _raw(conn)
+        unwrap_raw(conn)
         .execute(
             """
             SELECT coalesce(payload->>'source', 'unknown') AS source,

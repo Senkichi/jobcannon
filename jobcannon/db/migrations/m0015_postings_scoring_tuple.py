@@ -37,8 +37,9 @@ literal 5-tuple the ledger names, not the private table's full column set:
 
 ``sub_scores_json`` / ``fit_analysis`` are ``jsonb`` (dominant convention in
 this schema per m0001 -- ``locations_raw``, ``sightings``,
-``salary_observations``, ``unresolved_reasons``, etc. -- not the one legacy
-``comp_data_json text`` exception). ``classification`` / ``scoring_provider``
+``salary_observations``, ``unresolved_reasons``, etc. -- the verbatim-JSON
+``text`` exceptions are the named convention in types.py's module
+docstring). ``classification`` / ``scoring_provider``
 / ``scoring_model`` are plain ``text``, matching ``jd_content_verdict``'s
 precedent (m0009) for a small closed-ish string value.
 
