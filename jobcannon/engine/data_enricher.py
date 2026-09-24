@@ -96,8 +96,11 @@ from jobcannon.engine.primary_source_merge import merge_primary_posting_fields
 # search_duckduckgo, search_serpapi, parse_structured_fields) are landed,
 # split across jobcannon/engine/_enrichment_{jd_fetch,ats_tier,search_tiers,
 # ddg_web_tier,structured_fields}.py; the 8th, scrape_careers (bound as
-# svc.scrape_careers_tier), stays HOLD -- it depends on careers_crawler.py
-# (L-0167, PR #369), not yet merged. All 8 are called via svc.<name>(...)
+# svc.scrape_careers_tier), was never ported -- the careers_crawler.py
+# dependency that blocked it at #371 is gone now that #369 landed
+# careers_scraper.py's find_careers_url / scrape_careers_page, so its port
+# is an unblocked follow-up (see _enrichment_ats_tier.py's PORT-SEAM). All
+# 8 are called via svc.<name>(...)
 # ScanServices hooks instead of a directly-imported module.
 # job_finder.sources._error_envelope is L-0111
 # (HOLD) -- VendorAccountError is exposed as svc.vendor_account_error (an
@@ -391,6 +394,25 @@ def enrich_job(
         # Accumulate fragments across tiers (each tier adds its text/data)
         fragments: dict = {}
 
+        # A declarative (name, fn, gate) tier-registry for this cascade was
+        # considered and deferred (issue #396 item 2). The item ties the
+        # registry to L-0178's five-way _enrichment_* module split, but the
+        # split is file organization, not the call-site shape: the tiers
+        # below are not uniform steps. "free" is three sub-tiers (a
+        # source_urls fetch loop, a conn+company_id-gated ATS query, a
+        # conn+company_id+scrape_careers_tier-gated careers scrape) plus
+        # direct-link capture and primary-posting merge side effects; an
+        # all-fields-below-ddg early exit sits between free and ddg; ddg
+        # calls three seam functions plus apply-url merge and ATS-identity
+        # reconcile; serpapi carries three gates (enabled flag, daily cap,
+        # 429 cooldown), a cost-ledger _record_serpapi_call side effect,
+        # and a bespoke vendor_account_error except clause; and the
+        # agentic tier is deliberately never run per-row. Flat triples
+        # would need per-tier adapter closures re-inlining that same
+        # logic -- the same conclusion recorded for the careers-crawler
+        # escalation chain (careers_crawler/_escalation.py, #335/#362/#373
+        # item 3). TIER_ORDER already holds the ordering-as-data this
+        # cascade actually consumes: the resume index (_start_tier_index).
         # ---------------------------------------------------------------
         # Tier 0: free — URL fetch + ATS API + careers scrape
         # ---------------------------------------------------------------
