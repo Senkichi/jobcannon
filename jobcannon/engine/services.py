@@ -17,12 +17,13 @@ candidate: a ``call_if_wired(name, *a, **kw)``-style dispatch helper was
 considered and rejected (issue #357) because a name-keyed getattr erases
 static checking of both the field name and the callable's signature on
 this frozen dataclass, while a callable-passing variant saves only the
-guard line at the cost of an unfamiliar idiom. Issue #335's accessor
-variant — ``optional(svc, "field_name")`` returning the attribute or
-None so the caller writes ``if optional(svc, "X") is None: skip`` — is
-the same name-keyed getattr in getter form: it erases static checking
-of the field name, widens the returned attribute to Any, and is longer
-than the direct ``svc.X is None`` it replaces. Same rejection.
+guard line at the cost of an unfamiliar idiom. Re-raised as issues #335
+and #362 item 1 in accessor form — ``optional(svc, "field_name")``
+returning the attribute or None so the caller writes ``if optional(svc,
+"X") is None: skip`` — which is the same name-keyed getattr in getter
+form: it erases static checking of the field name, widens the returned
+attribute to Any, and is longer than the direct ``svc.X is None`` it
+replaces. Same rejection.
 
 Host binding convention (issue #357): ScanServices fields are plain
 callables, so a host imports each bound implementation from wherever it
