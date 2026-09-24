@@ -24,7 +24,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 
 class CredentialResolver(Protocol):
@@ -119,7 +119,7 @@ class ProviderUnavailable(RuntimeError):
 # MailboxCredentialResolver mirrors CredentialResolver's bound-per-tenant,
 # arity-enforced shape exactly (same cross-tenant-leakage argument: the
 # resolver's own signature makes passing the wrong user_id unrepresentable)
-# and MailboxConnectionFactory is the injection seam that keeps a concrete
+# and SourceConnectionFactory is the injection seam that keeps a concrete
 # IMAP client library out of jobcannon/engine entirely -- engine must never
 # import psycopg, flask, apscheduler, or (new to this port) imapclient;
 # jobcannon/host/ingestion/imap_intake.py is the only module that imports
@@ -167,19 +167,34 @@ class MailboxCredentialResolver(Protocol):
     def __call__(self) -> MailboxCredential | None: ...
 
 
-class MailboxConnectionFactory(Protocol):
-    """``(MailboxCredential) -> context-managed IMAP client``.
+CredentialT = TypeVar("CredentialT", contravariant=True)
 
-    The injection seam that keeps host/ingestion/imap_intake.py's fetch
-    logic testable without a real mailbox: tests inject a fake factory
-    returning a fake client (no `imapclient` import needed in the test
-    process at all). The host's default binding
+
+class SourceConnectionFactory(Protocol[CredentialT]):
+    """``(credential) -> context-managed client`` for a polled external
+    source.
+
+    Generalized in issue #358 (FU-B) from the IMAP-only shape so any polled
+    intake lane -- a future forwarded-alert intake, another IMAP-like
+    source -- reuses the same injection seam specialized on its own
+    credential type rather than minting a per-source factory Protocol.
+
+    For the IMAP lane (``MailboxConnectionFactory`` below) this is the seam
+    that keeps host/ingestion/imap_intake.py's fetch logic testable without
+    a real mailbox: tests inject a fake factory returning a fake client (no
+    `imapclient` import needed in the test process at all). The host's
+    default binding
     (``host/ingestion/imap_intake.py::_default_connection_factory``) opens
     an ``IMAPClient`` connection in readonly mode and closes it on context
     exit; the return type is intentionally the broad
     ``AbstractContextManager[Any]`` rather than a protocol naming
-    IMAPClient-specific methods, so a fake test double only needs to
-    implement the handful of methods imap_intake.py actually calls.
+    client-specific methods, so a fake test double only needs to implement
+    the handful of methods the calling lane actually calls.
     """
 
-    def __call__(self, credential: MailboxCredential) -> AbstractContextManager[Any]: ...
+    def __call__(self, credential: CredentialT) -> AbstractContextManager[Any]: ...
+
+
+# The IMAP lane's specialization -- kept under its own name so
+# imap_intake.py signatures read as mailbox-typed, not generic.
+MailboxConnectionFactory = SourceConnectionFactory[MailboxCredential]

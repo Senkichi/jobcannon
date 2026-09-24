@@ -129,7 +129,7 @@ def run_user_ingest_task(user_id: str) -> dict:
     (design note §1.8 declines one); `get_services()` is called directly.
 
     Known limitation (inherited, not fixed here -- PR #353's contract):
-    run_imap_intake COMMITS capture.record_run and
+    run_imap_intake COMMITS _parse_log.record_run and
     _mailbox_credentials.advance_uid_highwater internally BEFORE returning
     jobs to this function. If _persist_jobs below fails after that point,
     the UID watermark has already advanced -- those specific parsed jobs
