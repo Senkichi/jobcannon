@@ -440,6 +440,13 @@ def run_audit_stage(
         if result.unavailable:
             summary["unavailable"] = True
             summary["unavailable_reason"] = result.error
+            # Forensic row, deliberately level-less -- NOT an alarm path:
+            # the abort surfaces to the morning review through
+            # summary["unavailable"], and adding level= here would also
+            # count the row in error_budget.py's WARNING/ERROR digest on
+            # top of that. Same for the nightly_audit_batch_failed rows
+            # below (issue #398's alarm-pairing convention, package
+            # docstring).
             record_scan_health(
                 kind="nightly_audit_aborted",
                 reason=result.error,

@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any, Callable
 
 from jobcannon.host.nightly.model_session import SessionResult, run_structured_session
 
@@ -128,7 +129,7 @@ def run_review_stage(
     date_str: str,
     conn,
     config: dict,
-    call_model,
+    call_model: Callable[..., Any] | None,
     audit_summary: dict,
     checkpoint_summary: dict,
     window_coverage: dict,

@@ -169,6 +169,7 @@ def test_tick_fail_escalation_fires_scan_health_once_per_incident(
     assert result["checkpoints"] == ["FAIL"]
     assert len(calls) == 1
     assert calls[0]["source"] == "nightly_sampler"
+    assert calls[0]["level"] == "ERROR"  # alarm-pairing convention (package docstring, #398)
     assert calls[0]["job"] == "nightly_tick_fail"
     assert calls[0]["run_id"] == str(job_id)
     assert calls[0]["verdict"] == "FAIL"

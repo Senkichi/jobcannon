@@ -32,6 +32,29 @@ Model dispatch seam shared by the morning audit and review stages.
 # call_model raises typed exceptions (ProviderCascadeExhaustedError,
 # ProviderCascadeTimeoutError) instead of an exit code plus stdout to
 # pattern-match, so there is nothing left to classify with a regex.
+#
+# Modularity adjudication (issue #398's "standardize the call_model
+# injection seam + record_cost hook across scorer, checkpoint, audit,
+# review"): resolved as ALREADY SATISFIED by construction, verified at
+# each named site. The injected-param shape is already uniform --
+# jobcannon.engine.job_scorer.score_job, checkpoint_verdict.py,
+# audit_stage.run_audit_stage, review_stage.run_review_stage, and this
+# module's run_structured_session all take the dispatcher as an injected
+# Optional[Callable] keyword (call_model), and audit/review dispatch
+# through THIS module rather than carrying their own call path: this file
+# IS the shared injected seam the item asks for. The record_cost half
+# needs no per-stage hook -- model_provider.call_model invokes record_cost
+# inside its own cascade loop on every accepted dispatch, with the
+# caller-supplied purpose=/job_id= attribution ("nightly_checkpoint" /
+# "nightly_audit" / "nightly_review" at the three nightly sites), so cost
+# recording is structurally shared by every caller that resolves to the
+# real dispatcher. The one residual non-uniformity was cosmetic:
+# run_review_stage's call_model parameter lacked the
+# ``Callable[..., Any] | None`` annotation every other site carries;
+# normalized alongside this note. What genuinely remains open is the
+# documented owner-tenant-identity follow-up above -- no production caller
+# wires a user_id-scoped dispatcher yet (call_model=None everywhere in
+# prod), which is a wiring question, not a seam-shape one.
 """
 
 from __future__ import annotations
