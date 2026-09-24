@@ -228,6 +228,46 @@ def _strip_comments(sql: str) -> str:
     )
 
 
+def _sub_outside_quoted(pattern: re.Pattern[str], repl: str, sql: str) -> str:
+    """`pattern.sub(repl, sql)` refusing any match that lies wholly inside a
+    quoted region (a single-quoted string literal or double-quoted
+    identifier): such text is literal data or a name, never SQL syntax a
+    rewrite may touch (#402). A `'... FROM jobs ...'` literal or a
+    `"datetime('now')"` quoted identifier must survive byte-identical —
+    rewriting inside it is silent data corruption, the mirror image of the
+    comment case `_strip_comments` already closes.
+
+    Only FULL containment is refused. `_DATETIME_REWRITES` deliberately
+    match the `'now'`/`' days'` literals of the `datetime('now'...)` shape
+    itself, so every intended match straddles a region boundary — the
+    `datetime(`/`FROM`/`UPDATE`/`INTO`/`JOIN` anchors always sit in `code`
+    — and no legitimate match is ever fully inside a quoted region.
+    """
+    # _iter_sql_regions yields quoted text one character per chunk (except
+    # doubled-quote escapes), so contiguous quoted chunks are merged into
+    # one span — a match is refused only when one merged span covers it
+    # end to end.
+    spans: list[tuple[int, int]] = []
+    pos = 0
+    for chunk, region in _iter_sql_regions(sql):
+        end = pos + len(chunk)
+        if region in ("string", "identifier"):
+            if spans and spans[-1][1] == pos:
+                spans[-1] = (spans[-1][0], end)
+            else:
+                spans.append((pos, end))
+        pos = end
+    if not spans:
+        return pattern.sub(repl, sql)
+
+    def _guarded(m: re.Match[str]) -> str:
+        if any(a <= m.start() and m.end() <= b for a, b in spans):
+            return m.group(0)
+        return m.expand(repl)
+
+    return pattern.sub(_guarded, sql)
+
+
 _TABLE_REWRITES = (
     (re.compile(r"\b(FROM|UPDATE|INTO|JOIN)\s+jobs\b", re.IGNORECASE), r"\1 postings"),
 )
@@ -272,11 +312,30 @@ def engine_sql_to_host(sql: str) -> str:
     comment awareness of their own — can never match text inside a `--` or
     `/* */` comment either; a comment quoting `datetime('now')` or `FROM
     jobs` as documentation would otherwise get silently rewritten too.
+
+    #402 adjudication of #390's two Modularity-note candidates:
+      * a `?`-in-comment authoring lint in the private repo's
+        `port_fidelity_diff.py` hunk classifier — DECLINED as scoped: that
+        tool does not exist in this repo, and the hazard it pre-empted is
+        already closed here. #388's item 3 proposed the in-repo form ("a
+        test that scans engine SQL strings for `?` inside comments")
+        explicitly as a stopgap "until (1) lands"; (1) landed in #390 —
+        comments are stripped outright on this path, and standalone
+        `qmark_to_format` leaves a commented `?` as a literal `?` that
+        psycopg's `%s` scan never counts either. The residual a lint would
+        catch (a commented-out clause desyncing the caller's params tuple)
+        still fails loudly at execute time — `N placeholders but M
+        parameters` — so it is a review-time smell, not a silent defect
+        worth a new scan surface.
+      * the string-literal gap the second candidate named — APPLIED: every
+        rewrite below runs through `_sub_outside_quoted`, which refuses a
+        match lying wholly inside a `'...'`/`"..."` region, so literal
+        data or identifier text can no longer be rewritten as syntax.
     """
     out = _strip_comments(sql)
     for pattern, repl in _DATETIME_REWRITES:
-        out = pattern.sub(repl, out)
+        out = _sub_outside_quoted(pattern, repl, out)
     out = qmark_to_format(out)
     for pattern, repl in _TABLE_REWRITES:
-        out = pattern.sub(repl, out)
+        out = _sub_outside_quoted(pattern, repl, out)
     return out

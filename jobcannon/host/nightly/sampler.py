@@ -68,6 +68,26 @@ sole writer for that table).
 # desktop-toast `notify()` call, which has no meaning on a multi-tenant
 # server, and its issue-filing path, which this dark unit does not carry
 # (see signatures.py's module docstring: "no LLM spend / no issues filed").
+#
+# Watermark-cursor-helper adjudication (issue #398's "extract a reusable
+# DB watermark-cursor helper" over sampler/error_budget/deadman/
+# morning_driver): DECLINED after the four-file census. The premise --
+# that all four "independently re-implement read rows since last
+# id/timestamp" -- does not hold: deadman.py reads no row cursor at all
+# (nightly_monitor_state only, via state.load_state), and error_budget.py
+# / morning_driver.py query CLOSED wall-clock windows
+# (``recorded_at >= %s AND recorded_at < %s``), a different shape with no
+# persisted cursor to advance. The only true watermark reads are this
+# file's two -- _new_scan_health_hits over scan_health_log.id and
+# _terminal_jobs_with_duration over procrastinate_jobs.id -- and they
+# share only the ``id > %s ORDER BY id LIMIT %s`` tail: different tables,
+# projections, a JOIN/GROUP BY in one and not the other, and different
+# post-processing (watermark advance vs duration computation). A shared
+# helper would have to take table/columns/filter/order as parameters -- a
+# query-builder over a two-line WHERE tail, the same name-keyed generality
+# this unit's other adjudications decline -- while the state half of the
+# cursor contract (persist and advance the watermark) is already unified
+# in jobcannon.host.nightly.state.
 """
 
 from __future__ import annotations

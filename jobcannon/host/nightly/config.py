@@ -181,7 +181,13 @@ def nightly_monitor_config() -> dict:
         # block: _int_env/_float_env raise RuntimeError on a malformed
         # value, and each key is range-clamped below (max_jobs >= 0,
         # batch_size >= 1, parallel >= 1 -- the ceiling/batch-size/parallel
-        # env keys the item names).
+        # env keys the item names). Issue #398 re-filed the same item
+        # against the whole ``nightly_monitor`` block; the adjudication is
+        # identical: there is no ``nightly_monitor:`` config block at all
+        # on this host (module docstring), every JC_NIGHTLY_* var in this
+        # function gets the same per-key coercion-plus-clamp treatment, and
+        # a declarative schema table would restate these same rules as data
+        # with no new enforcement power behind it.
         "audit": {
             "score_threshold": _int_env(
                 "JC_NIGHTLY_AUDIT_SCORE_THRESHOLD", DEFAULT_NIGHTLY_AUDIT_SCORE_THRESHOLD
