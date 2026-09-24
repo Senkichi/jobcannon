@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Settings — Job Cannon{% endblock %}
+{% block content %}
+<h1 class="jc-title jc-title--roomy">Settings</h1>
+
+{% if unavailable %}
+  {# Fail-closed read (see jobcannon/web/settings.py's module docstring): no
+     forms at all — a "Not set" list rendered over a failed read would invite
+     a key submission on top of rows that may exist, and hide real
+     deactivate controls. #}
+  <p class="jc-error-note" data-settings-unavailable>
+    Your settings couldn't be loaded right now. Please try again in a moment.
+  </p>
+{% else %}
+
+  {% if saved_label %}
+    <p class="jc-stamp jc-stamp--green" data-settings-saved>
+      <span class="jc-stamp-dot"></span>
+      {{ saved_label }} verified and saved.
+    </p>
+  {% endif %}
+  {% if deactivated_label %}
+    <p class="jc-stamp" data-settings-deactivated>
+      <span class="jc-stamp-dot"></span>
+      {{ deactivated_label }} deactivated.
+    </p>
+  {% endif %}
+  {% if error %}
+    <p class="jc-error-note" data-settings-error>{{ error }}</p>
+  {% endif %}
+
+  <p class="jc-lede">
+    Job Cannon runs its model calls on your own provider keys. A key is
+    checked with a live test call before it is stored, kept encrypted, and
+    never shown again — replace it by entering a new one.
+  </p>
+
+  <div class="jc-stack">
+    {% for p in providers %}
+    <section class="jc-panel" data-settings-provider="{{ p.provider }}">
+      <h2 class="jc-row-title">{{ p.label }}</h2>
+      <p class="jc-row-sub" data-settings-status>
+        {% if p.configured and p.is_active %}
+          Active — added {{ p.created_at.strftime("%Y-%m-%d") if p.created_at else "" }}{% if p.last_used_at %}, last used {{ p.last_used_at.strftime("%Y-%m-%d %H:%M") }} UTC{% endif %}
+        {% elif p.configured %}
+          Deactivated — kept for your records{% if p.last_used_at %}, last used {{ p.last_used_at.strftime("%Y-%m-%d %H:%M") }} UTC{% endif %}
+        {% else %}
+          Not set
+        {% endif %}
+      </p>
+
+      <form method="post" action="{{ url_for('settings.save_key') }}" class="jc-stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="provider" value="{{ p.provider }}">
+        {# The submitted key is never echoed back — this field always renders
+           empty (see settings.py's module docstring, plaintext hygiene). #}
+        <label class="jc-field {{ touch_target() }}">
+          <span class="lj-label">{{ "Replace" if p.configured else "Add" }} {{ p.label }}</span>
+          <input type="password" name="api_key" autocomplete="off" required
+                 class="jc-input {{ touch_target() }}">
+        </label>
+        <button type="submit" class="jc-btn jc-btn--primary {{ touch_target() }}">
+          {{ "Test & replace" if p.configured else "Test & save" }}
+        </button>
+      </form>
+
+      {% if p.configured and p.is_active %}
+      <form method="post" action="{{ url_for('settings.deactivate_key') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="provider" value="{{ p.provider }}">
+        <button type="submit" class="jc-btn {{ touch_target() }}" data-settings-deactivate>
+          Deactivate
+        </button>
+      </form>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

@@ -88,6 +88,12 @@ MIGRATION = Migration(
             CHECK ((posted_date IS NULL) = (posted_date_precision IS NULL))
         )
         """,
+        # comp_data_json stays `text`, not `jsonb` -- the verbatim-JSON
+        # `text` convention's external-payload case (migrations/types.py's
+        # module docstring names it): the column retains the ATS provider's
+        # verbatim API response, parsed on read by
+        # engine.scoring_types.build_comp_context, with no jsonb-operator
+        # consumer and no snapshot-equality need.
         "CREATE INDEX idx_postings_company_source ON postings(company_id, source_id)",
         "CREATE INDEX idx_postings_last_seen ON postings(last_seen)",
         """
