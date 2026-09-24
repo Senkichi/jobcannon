@@ -44,7 +44,16 @@ playwright = [
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0",
+    # pytest 9.1.x has an order-dependent fixture-loss regression: conftest
+    # fixtures are bound to the Directory collector instance that first
+    # collects them (pytest-dev/pytest#14098), and a later file-arg
+    # re-collection of a shared parent directory shadows that node with a
+    # fresh instance, so tests collected afterward lose every conftest fixture
+    # ("fixture 'x' not found"). Upstream: pytest-dev/pytest#14635, fixed by
+    # pytest-dev/pytest#14645 in pytest 9.2. The `!=9.1.*` exclusion lifts
+    # itself automatically once a fixed release exists; it is covered by
+    # tests/test_fixture_scope_collection_order.py.
+    "pytest>=8.0,!=9.1.*",
     "ruff>=0.5",
     "pandas>=2.2",
     "matplotlib>=3.9",
