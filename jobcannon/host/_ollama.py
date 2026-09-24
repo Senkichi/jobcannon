@@ -39,7 +39,7 @@ URL resolution precedence (applied before any probe):
 # (design-providers-byokey.md), a different unit. This module is ported
 # standalone and unwired, matching the row's own "reduced to just the
 # operator-endpoint probe" scope. Re-raised as issues #335, #362 item 4,
-# and #373 item 4; the fold stays deferred — there is no
+# #373 item 4, and #396 item 3; the fold stays deferred — there is no
 # ``providers/ollama_provider`` module in this repo to fold into (the
 # provider catalog's "ollama" entry is a ``cli_binary`` ProviderSpec, not
 # a probe owner, and the upstream provider's tuning constants were
