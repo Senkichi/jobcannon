@@ -38,7 +38,11 @@ URL resolution precedence (applied before any probe):
 # OUT OF SCOPE for this row — owned by the byokey provider design
 # (design-providers-byokey.md), a different unit. This module is ported
 # standalone and unwired, matching the row's own "reduced to just the
-# operator-endpoint probe" scope.
+# operator-endpoint probe" scope. Re-raised as issue #335 item 4; the fold
+# stays deferred — there is no ``providers/ollama_provider`` module in this
+# repo to fold into (the private provider's tuning constants were re-homed
+# into ``jobcannon.engine.job_scorer``), so the item resolves when, and only
+# when, the byokey unit lands a provider that owns an endpoint probe.
 """
 
 from __future__ import annotations
