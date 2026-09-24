@@ -419,6 +419,23 @@ def _crawl_companies(
                                 tier_used = cached_tier
 
                         # === Full escalation chain (if cache miss) ===
+                        # A declarative (name, fn, gate) tier-registry was
+                        # considered and deferred (issue #335): the tiers
+                        # are not uniform steps. Sitemap returns a
+                        # legitimacy verdict through flag_sink that can
+                        # short-circuit the whole chain; url_param is
+                        # gated on search_keywords; Playwright picks one
+                        # of two functions on interactive_enabled and
+                        # feeds the rendered_html / discovered_api side
+                        # channels; and the cohort-legitimacy gate and
+                        # ATS-link discovery interleave between stages
+                        # rather than composing as per-tier gates. Flat
+                        # triples would need per-tier adapter closures
+                        # re-inlining that same logic, and this repo's one
+                        # ordering-as-data precedent (data_enricher's
+                        # TIER_ORDER) exists to serve a resume-index this
+                        # chain does not have. Revisit if a consumer ever
+                        # needs the ordering as data.
                         if not jobs:
                             # Fast path: cached API endpoint
                             if api_endpoint:
