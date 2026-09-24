@@ -22,7 +22,7 @@ those siblings instead).
 Every DB touch in this package enters through ``svc.connection_factory()``
 (zero-arg; the ``synchronous=`` kwarg exists on the seam for the
 ats_scanner hot paths that need it — no careers_crawler site does).
-Verified package-wide for issue #362 item 2: a bespoke lint rule
+Verified package-wide for issues #362 item 2 and #373 item 2: a bespoke lint rule
 enforcing the pattern was considered and declined — this repo has no
 custom-lint precedent (CI runs stock ``ruff check``/``ruff format``) and
 the convention is already uniform, so review stays the enforcement point.
