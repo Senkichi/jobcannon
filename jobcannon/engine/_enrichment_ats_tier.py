@@ -6,12 +6,14 @@ to ``ScanServices.query_ats_api``.
 
 # PORT-SEAM: the private module's sibling ``scrape_careers`` (the HTML
 # careers-page-scrape sub-tier, binds to ``ScanServices.scrape_careers_tier``)
-# is NOT ported in this PR. It imports ``find_careers_url`` /
-# ``scrape_careers_page`` from ``careers_crawler.py`` (L-0167), which lives
-# in this same design-note unit's PR-A (#369) and has not yet merged to
-# main — porting it here would violate the boundary guard (a module absent
-# from this branch). Deferred to a follow-up once #369 lands; the
-# ``scrape_careers_tier`` ScanServices field stays unbound (None) until then.
+# was NOT ported at this row's landing (#371). It imports ``find_careers_url`` /
+# ``scrape_careers_page`` from ``careers_scraper.py`` (L-0167) — that
+# dependency lived in this design-note unit's PR-A (#369), which has since
+# merged, so the port is now an unblocked follow-up rather than a
+# branch-boundary exclusion (issue #396's adjudication record). The
+# ``scrape_careers_tier`` ScanServices field stays unbound (None) until it
+# lands; data_enricher's sub-tier C call site already fail-opens on the
+# None.
 """
 
 from __future__ import annotations
