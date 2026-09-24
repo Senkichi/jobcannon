@@ -30,6 +30,13 @@ combined into one JSON plaintext before encryption (one crypto call site
 per credential; see encrypt_mailbox_secret). Consent
 (jobcannon.db._events.read_mailbox_consent) is checked BEFORE the
 credential row, fail-closed even when an active row exists.
+
+Issue #358 (FU-A): both build_*_resolver functions below are thin typed
+closures over ONE shared pipeline, _resolve_tenant_credential -- gate ->
+KEK check -> row lookup -> decrypt -> best-effort touch_last_used --
+parameterized per credential type by a _CredentialKind spec, so the
+fail-closed ordering cannot drift between kinds and a third per-tenant
+credential type is another spec, not another copy of the pipeline.
 """
 
 from __future__ import annotations
@@ -38,7 +45,8 @@ import base64
 import json
 import logging
 import os
-from typing import Any
+from collections.abc import Callable
+from typing import Any, NamedTuple
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -98,6 +106,114 @@ def _decrypt(blob: bytes, *, kek: bytes) -> str:
     return aesgcm.decrypt(nonce, ciphertext, None).decode("utf-8")
 
 
+class _CredentialKind(NamedTuple):
+    """One per-tenant credential type's resolver-pipeline spec (FU-A).
+
+    Fields:
+        table: Credential table name -- the log-line prefix
+            (``byo_key_credentials`` / ``mailbox_credentials``).
+        display: Human label for the KEK-unset warning
+            (``BYO-key credentials`` / ``mailbox credentials``).
+        gate: ``(conn, user_id) -> bool`` precheck run BEFORE the KEK and
+            row steps -- mailbox consent for the mailbox kind, None for
+            kinds with no gate (BYO-key has no consent concept).
+        fetch_row: ``(conn, user_id, *key) -> row | None``.
+        build_result: ``(row, kek) -> resolved value`` -- decrypts the row's
+            envelope and shapes the value the resolver returns.
+        touch: ``(conn, user_id, *key)`` -- the last_used_at stamp.
+        row_is_usable: extra row predicate beyond presence -- BYO-key checks
+            ``is_active`` in Python because its fetch returns inactive rows
+            too; mailbox's fetch filters ``is_active`` in SQL, so the
+            always-true default suffices.
+    """
+
+    table: str
+    display: str
+    gate: Callable[[Any, str], bool] | None
+    fetch_row: Callable[..., dict | None]
+    build_result: Callable[[dict, bytes], Any]
+    touch: Callable[..., None]
+    row_is_usable: Callable[[dict], bool] = lambda row: True
+
+
+def _resolve_tenant_credential(
+    conn: Any,
+    user_id: str,
+    kind: _CredentialKind,
+    *,
+    key: tuple[Any, ...] = (),
+    key_desc: str = "",
+) -> Any | None:
+    """The one resolver pipeline behind every build_*_resolver (FU-A):
+    consent-style gate -> KEK check -> row lookup -> decrypt -> best-effort
+    touch_last_used.
+
+    Fail-closed throughout: a declined gate, an unset/malformed KEK, an
+    absent/unusable row, or a decrypt failure each resolve to None -- never
+    an exception -- so an unconfigured host degrades to "credential
+    unavailable" instead of crashing. The last_used_at stamp is best-effort,
+    non-fatal.
+
+    `key` holds the positional args narrowing the row within the tenant --
+    BYO-key is keyed by provider (``key=(provider,)``), mailbox is a
+    singleton (``key=()``). `key_desc` is the same values rendered for log
+    lines (``" provider=<name>"`` or ``""``).
+    """
+    if kind.gate is not None and not kind.gate(conn, user_id):
+        return None
+
+    try:
+        kek = _kek()
+    except KekNotConfiguredError:
+        logger.warning(
+            "%s unset -- %s unavailable for user_id=%s%s",
+            _KEK_ENV_VAR,
+            kind.display,
+            user_id,
+            key_desc,
+        )
+        return None
+
+    row = kind.fetch_row(conn, user_id, *key)
+    if row is None or not kind.row_is_usable(row):
+        return None
+
+    try:
+        result = kind.build_result(row, kek)
+    except Exception:
+        logger.warning(
+            "%s decrypt failed for user_id=%s%s "
+            "(corrupt row or KEK mismatch) -- treating as no credential",
+            kind.table,
+            user_id,
+            key_desc,
+        )
+        return None
+
+    try:
+        kind.touch(conn, user_id, *key)
+    except Exception:
+        logger.warning(
+            "%s last_used_at touch failed for user_id=%s%s (non-fatal)",
+            kind.table,
+            user_id,
+            key_desc,
+        )
+
+    return result
+
+
+_BYO_KEY = _CredentialKind(
+    table="byo_key_credentials",
+    display="BYO-key credentials",
+    gate=None,  # no consent gate on LLM API keys -- mailbox_consent is mailbox-only
+    fetch_row=get_credential,
+    build_result=lambda row, kek: _decrypt(row["encrypted_key"], kek=kek),
+    touch=touch_last_used,
+    row_is_usable=lambda row: row["is_active"],
+)
+
+
 def build_credential_resolver(conn: Any, user_id: str) -> CredentialResolver:
     """Return a CredentialResolver bound to `user_id`.
 
@@ -113,43 +229,13 @@ def build_credential_resolver(conn: Any, user_id: str) -> CredentialResolver:
     """
 
     def resolve_credential(provider: str) -> str | None:
-        try:
-            kek = _kek()
-        except KekNotConfiguredError:
-            logger.warning(
-                "%s unset -- BYO-key credentials unavailable for user_id=%s provider=%s",
-                _KEK_ENV_VAR,
-                user_id,
-                provider,
-            )
-            return None
-
-        row = get_credential(conn, user_id, provider)
-        if row is None or not row["is_active"]:
-            return None
-
-        try:
-            plaintext = _decrypt(row["encrypted_key"], kek=kek)
-        except Exception:
-            logger.warning(
-                "byo_key_credentials decrypt failed for user_id=%s provider=%s "
-                "(corrupt row or KEK mismatch) -- treating as no credential",
-                user_id,
-                provider,
-            )
-            return None
-
-        try:
-            touch_last_used(conn, user_id, provider)
-        except Exception:
-            logger.warning(
-                "byo_key_credentials last_used_at touch failed for user_id=%s "
-                "provider=%s (non-fatal)",
-                user_id,
-                provider,
-            )
-
-        return plaintext
+        return _resolve_tenant_credential(
+            conn,
+            user_id,
+            _BYO_KEY,
+            key=(provider,),
+            key_desc=f" provider={provider}",
+        )
 
     return resolve_credential
 
@@ -180,6 +266,31 @@ def _decrypt_mailbox_secret(blob: bytes, *, kek: bytes) -> tuple[str, str]:
     return data["address"], data["secret"]
 
 
+def _mailbox_credential_from_row(row: dict, kek: bytes) -> MailboxCredential:
+    address, secret = _decrypt_mailbox_secret(row["encrypted_secret"], kek=kek)
+    return MailboxCredential(
+        address=address,
+        secret=secret,
+        imap_host=row["imap_host"],
+        imap_port=row["imap_port"],
+        folder=row["folder"],
+    )
+
+
+_MAILBOX = _CredentialKind(
+    table="mailbox_credentials",
+    display="mailbox credentials",
+    # Consent gate FIRST, before the KEK/row steps -- fail-closed on absent
+    # consent even when an active row exists, so revoking consent makes a
+    # tenant intake-ineligible immediately.
+    gate=read_mailbox_consent,
+    fetch_row=_mailbox_credentials.get_active_for_user,
+    build_result=_mailbox_credential_from_row,
+    touch=_mailbox_credentials.touch_last_used,
+    # row_is_usable default: get_active_for_user filters is_active in SQL.
+)
+
+
 def build_mailbox_resolver(conn: Any, user_id: str) -> MailboxCredentialResolver:
     """Return a MailboxCredentialResolver bound to `user_id`.
 
@@ -195,47 +306,6 @@ def build_mailbox_resolver(conn: Any, user_id: str) -> MailboxCredentialResolver
     """
 
     def resolve_mailbox_credential() -> MailboxCredential | None:
-        if not read_mailbox_consent(conn, user_id):
-            return None
-
-        try:
-            kek = _kek()
-        except KekNotConfiguredError:
-            logger.warning(
-                "%s unset -- mailbox credentials unavailable for user_id=%s",
-                _KEK_ENV_VAR,
-                user_id,
-            )
-            return None
-
-        row = _mailbox_credentials.get_active_for_user(conn, user_id)
-        if row is None:
-            return None
-
-        try:
-            address, secret = _decrypt_mailbox_secret(row["encrypted_secret"], kek=kek)
-        except Exception:
-            logger.warning(
-                "mailbox_credentials decrypt failed for user_id=%s "
-                "(corrupt row or KEK mismatch) -- treating as no credential",
-                user_id,
-            )
-            return None
-
-        try:
-            _mailbox_credentials.touch_last_used(conn, user_id)
-        except Exception:
-            logger.warning(
-                "mailbox_credentials last_used_at touch failed for user_id=%s (non-fatal)",
-                user_id,
-            )
-
-        return MailboxCredential(
-            address=address,
-            secret=secret,
-            imap_host=row["imap_host"],
-            imap_port=row["imap_port"],
-            folder=row["folder"],
-        )
+        return _resolve_tenant_credential(conn, user_id, _MAILBOX)
 
     return resolve_mailbox_credential

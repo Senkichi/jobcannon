@@ -18,6 +18,14 @@ convention for the same two modules (private's own rationale -- "not
 needed when the crawler runs in TESTING mode" -- doesn't apply to the
 engine, which has no such mode; the lazy import is kept for parity with
 those siblings instead).
+
+Every DB touch in this package enters through ``svc.connection_factory()``
+(zero-arg; the ``synchronous=`` kwarg exists on the seam for the
+ats_scanner hot paths that need it — no careers_crawler site does).
+Verified package-wide for issue #362 item 2: a bespoke lint rule
+enforcing the pattern was considered and declined — this repo has no
+custom-lint precedent (CI runs stock ``ruff check``/``ruff format``) and
+the convention is already uniform, so review stays the enforcement point.
 """
 
 from __future__ import annotations
