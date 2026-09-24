@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS companies (
     ats_slug TEXT,
     ats_probe_status TEXT,
     scan_enabled INTEGER DEFAULT 1,
+    ats_scan_enabled INTEGER DEFAULT 1,
+    careers_scan_enabled INTEGER DEFAULT 1,
     last_scanned_at TEXT,
     consecutive_empty_scans INTEGER DEFAULT 0,
     jobs_found_total INTEGER DEFAULT 0,

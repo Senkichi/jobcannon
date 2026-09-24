@@ -755,11 +755,16 @@ def _scan_one_company_worker(
                 slug,
             )
             try:
+                # WI-13 (#329): clear the ATS lane in the same statement so the
+                # split flag can't drift stale vs. scan_enabled.
+                # careers_scan_enabled is deliberately untouched — an ATS
+                # demotion must not disable careers-page discovery.
                 worker_conn.execute(
                     """UPDATE companies
                        SET ats_probe_status = 'miss',
                            miss_reason = 'platform_slug_gone',
                            scan_enabled = FALSE,
+                           ats_scan_enabled = FALSE,
                            last_scanned_at = ?,
                            updated_at = ?
                        WHERE id = ?""",
@@ -1159,10 +1164,13 @@ def _scan_one_company_via_ats_api(
 
     except BoardGoneError as gone:
         # The board's slug 404/410'd — it no longer resolves. Demote the stale
-        # hit (clear scan_enabled + record miss_reason) so we stop firing a dead
-        # request at it every scan and the UI reflects reality. Promotion back to
-        # hit happens via the loosened /companies/<id>/retry route or a future
-        # probe if the slug ever resolves again.
+        # hit (clear scan_enabled + ats_scan_enabled + record miss_reason) so we
+        # stop firing a dead request at it every scan and the UI reflects
+        # reality. careers_scan_enabled is deliberately untouched (WI-13, #329):
+        # an ATS demotion must not disable careers-page discovery for the same
+        # company. Promotion back to hit happens via the loosened
+        # /companies/<id>/retry route or a future probe if the slug ever
+        # resolves again.
         logger.warning(
             "ATS scan: '%s' board gone (HTTP %d) — demoting %s/%s to miss/platform_slug_gone",
             company_name,
@@ -1176,6 +1184,7 @@ def _scan_one_company_via_ats_api(
                    SET ats_probe_status = 'miss',
                        miss_reason = 'platform_slug_gone',
                        scan_enabled = FALSE,
+                       ats_scan_enabled = FALSE,
                        last_scanned_at = ?,
                        updated_at = ?
                    WHERE id = ?""",

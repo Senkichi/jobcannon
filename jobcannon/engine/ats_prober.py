@@ -253,7 +253,8 @@ def _try_static_first_fallthrough(
     On success, promotes the company to the detected ATS or persists jobs from
     custom careers pages. Custom pages are NOT marked as 'hit' (that state
     requires a real ATS platform with platform+slug); instead they are marked
-    as 'miss' with scan_enabled=TRUE and jobs persisted, so the careers_crawler (# PORT-SEAM: Postgres TRUE literal.)
+    as 'miss' with scan_enabled=TRUE + careers_scan_enabled=TRUE (WI-13
+    careers-lane co-write, #329) and jobs persisted, so the careers_crawler (# PORT-SEAM: Postgres TRUE literal.)
     picks them up for ongoing extraction. Sets specific miss_reason on failure.
 
     Args:
@@ -440,11 +441,12 @@ def _try_static_first_fallthrough(
                         len(static_jobs),
                     )
 
-                conn.execute(  # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented, no migration backs it); Postgres TRUE literal
+                conn.execute(  # PORT-SEAM: careers_scan_enabled co-write wired (m0021 backs the split, #329); Postgres TRUE literal
                     """UPDATE companies
                        SET ats_probe_status = 'miss',
                            scan_enabled = TRUE,
-                           -- # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented column, no migration backs it)
+                           careers_scan_enabled = TRUE,
+                           -- # PORT-SEAM: WI-13 careers-lane co-write (m0021, #329) -- ats_scan_enabled stays untouched, this write marks a custom careers page, not a resurrected ATS board
                            miss_reason = 'static_fallthrough_tier2_jobs_persisted',
                            updated_at = ?
                        WHERE id = ?""",
@@ -522,11 +524,12 @@ def _try_static_first_fallthrough(
                         len(json_jobs),
                     )
 
-                conn.execute(  # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented, no migration backs it); Postgres TRUE literal
+                conn.execute(  # PORT-SEAM: careers_scan_enabled co-write wired (m0021 backs the split, #329); Postgres TRUE literal
                     """UPDATE companies
                        SET ats_probe_status = 'miss',
                            scan_enabled = TRUE,
-                           -- # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented column, no migration backs it)
+                           careers_scan_enabled = TRUE,
+                           -- # PORT-SEAM: WI-13 careers-lane co-write (m0021, #329) -- ats_scan_enabled stays untouched, this write marks a custom careers page, not a resurrected ATS board
                            miss_reason = 'static_fallthrough_tier3_jobs_persisted',
                            updated_at = ?
                        WHERE id = ?""",
@@ -612,11 +615,12 @@ def _try_static_first_fallthrough(
                                 len(playwright_jobs),
                             )
 
-                        conn.execute(  # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented, no migration backs it); Postgres TRUE literal
+                        conn.execute(  # PORT-SEAM: careers_scan_enabled co-write wired (m0021 backs the split, #329); Postgres TRUE literal
                             """UPDATE companies
                                SET ats_probe_status = 'miss',
                                    scan_enabled = TRUE,
-                                   -- # PORT-SEAM: ats_scan_enabled/careers_scan_enabled split reverted (invented column, no migration backs it)
+                                   careers_scan_enabled = TRUE,
+                                   -- # PORT-SEAM: WI-13 careers-lane co-write (m0021, #329) -- ats_scan_enabled stays untouched, this write marks a custom careers page, not a resurrected ATS board
                                    miss_reason = 'static_fallthrough_tier4_jobs_persisted',
                                    updated_at = ?
                                WHERE id = ?""",
