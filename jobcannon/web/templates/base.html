@@ -124,6 +124,10 @@
          tests/host/test_profile_route.py pins url_for('profile.edit') to
          exactly "/profile" so this literal cannot drift. #}
       <a href="/profile" class="jc-nav-link {{ touch_target() }}" data-profile-nav-link>Profile</a>
+      {# Issue #332: the BYO-key settings page (jobcannon/web/settings.py).
+         Same visitor_is_authed gate and literal-href convention as Profile
+         above; tests/host/test_settings_route.py pins url_for to "/settings". #}
+      <a href="/settings" class="jc-nav-link {{ touch_target() }}" data-settings-nav-link>Settings</a>
       {% endif %}
     </nav>
     {% if not visitor_is_authed %}

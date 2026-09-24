@@ -32,7 +32,12 @@ PR #286 round 2 adds ``test_scanner_exception_recorded_as_error_row`` below
 (WI-06 carry, adapted to the minimal schema's error/jobs_found-only
 company_scan_log columns).
 
-19 of the private repo's other tests are intentionally NOT carried — each
+The private repo's WI-13 test ``test_ats_demotion_does_not_disable_careers_scan``
+was dropped at port time (no split columns existed then) and is carried below
+as of #329 — m0021 backs ``ats_scan_enabled``/``careers_scan_enabled`` now and
+the demotion writes are instrumented to co-write the ATS lane.
+
+18 of the private repo's other tests are intentionally NOT carried — each
 exercises a feature genuinely absent from this engine-native port (not a
 copy-paste omission):
 
@@ -60,10 +65,6 @@ copy-paste omission):
   ``test_title_outcomes_serial_path_records_all_dispositions``. WI-09's
   ``prune_title_outcomes``/title-outcome persistence has no engine
   equivalent (verified by grep: zero references).
-- **ats_scan_enabled split (1 test)**: ``test_ats_demotion_does_not_disable_careers_scan``.
-  Needs the WI-13 (#1869) ``ats_scan_enabled``/``scan_enabled`` dual-write
-  split column; the minimal companies schema (create_scan_schema) only has
-  the single legacy ``scan_enabled`` column.
 - **careers_scraper blocklist gate (1 test)**: ``test_scrape_careers_page_rejects_blocklisted_aggregator_host``.
   Needs ``careers_scraper.py``'s ``_is_blocklisted_scrape_host``, a module
   with no engine port — ``scrape_careers_page`` itself is a host-injected
@@ -85,10 +86,12 @@ from unittest.mock import patch
 import pytest
 
 from jobcannon.engine import services
+from jobcannon.engine.ats_platforms._registry import BoardGoneError
 from jobcannon.engine.ats_scanner._run import (
     _cache_scan_result,
     _run_ats_api_scan,
     _scan_one_company_via_ats_api,
+    _scan_one_company_worker,
     _upsert_one_ats_api_job,
 )
 from jobcannon.engine.ats_scanner._run_html import _run_html_fallback_scan
@@ -841,3 +844,77 @@ def test_scanner_exception_recorded_as_error_row(ats_scan_db_path):
     assert len(rows) == 1, f"expected exactly one scan-log row, got {len(rows)}"
     assert rows[0]["jobs_found"] == 0
     assert rows[0]["error"] and "boom: scanner blew up" in rows[0]["error"]
+
+
+def _assert_demotion_row(conn, company_id):
+    row = conn.execute(
+        "SELECT ats_probe_status, miss_reason, scan_enabled, ats_scan_enabled, "
+        "careers_scan_enabled FROM companies WHERE id = ?",
+        (company_id,),
+    ).fetchone()
+    assert row["ats_probe_status"] == "miss"
+    assert row["miss_reason"] == "platform_slug_gone"
+    assert row["scan_enabled"] == 0
+    assert row["ats_scan_enabled"] == 0
+    assert row["careers_scan_enabled"] == 1
+
+
+def test_ats_demotion_does_not_disable_careers_scan(ats_scan_db_path):
+    """WI-13 (#1869 / m0021), carried as of #329: a board-gone demotion clears
+    scan_enabled AND ats_scan_enabled in the same UPDATE but must leave
+    careers_scan_enabled alone — the split exists precisely so an ATS demotion
+    does not silently disable careers-page discovery for the same company.
+    Serial path: _scan_one_company_via_ats_api's except-BoardGoneError block."""
+    company_id = _insert_company(ats_scan_db_path)
+    company = {
+        "id": company_id,
+        "name_raw": "AshbyCo",
+        "ats_platform": "ashby",
+        "ats_slug": "AshbyCo",
+    }
+    summary = {"companies_scanned": 0, "jobs_discovered": 0, "jobs_new": 0, "errors": []}
+    all_new_keys: list[str] = []
+
+    with (
+        open_connection(ats_scan_db_path) as conn,
+        patch(
+            "jobcannon.engine.ats_scanner._run.run_platform_scan",
+            side_effect=BoardGoneError(404, "AshbyCo"),
+        ),
+    ):
+        _scan_one_company_via_ats_api(
+            conn,
+            ats_scan_db_path,
+            company,
+            ["Engineer"],
+            [],
+            summary,
+            all_new_keys,
+        )
+        _assert_demotion_row(conn, company_id)
+
+    assert summary["boards_demoted"] == 1
+    assert summary["errors"] == []
+
+
+def test_ats_demotion_does_not_disable_careers_scan_concurrent_worker(ats_scan_db_path):
+    """Same WI-13 assertion against the concurrent worker path:
+    _scan_one_company_worker carries its own copy of the demotion UPDATE
+    (the except-BoardGoneError block under svc.connection_factory)."""
+    company_id = _insert_company(ats_scan_db_path)
+    with open_connection(ats_scan_db_path) as conn:
+        company = conn.execute(
+            "SELECT id, name_raw, ats_platform, ats_slug FROM companies WHERE id = ?",
+            (company_id,),
+        ).fetchone()
+
+    with patch(
+        "jobcannon.engine.ats_scanner._run.run_platform_scan",
+        side_effect=BoardGoneError(404, "AshbyCo"),
+    ):
+        result = _scan_one_company_worker(company, ats_scan_db_path, ["Engineer"], [], None)
+
+    assert result.board_demoted is True
+    assert result.error is None
+    with open_connection(ats_scan_db_path) as conn:
+        _assert_demotion_row(conn, company_id)

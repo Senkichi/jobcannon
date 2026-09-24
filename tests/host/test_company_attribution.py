@@ -35,7 +35,7 @@ def _row(db_conn, cid):
     return db_conn.execute(
         "SELECT ats_platform, ats_slug, careers_url, ats_probe_status, "
         "consecutive_empty_scans, retry_count, retry_after, miss_reason, scan_enabled, "
-        "careers_crawl_flag_reason "
+        "ats_scan_enabled, careers_scan_enabled, careers_crawl_flag_reason "
         "FROM companies WHERE id = %s",
         (cid,),
     ).fetchone()
@@ -66,7 +66,14 @@ def test_resets_invariant_bundle(db_conn):
 
 def test_unset_fields_left_untouched(db_conn):
     conn = _svc_conn(db_conn)
-    cid = _insert_company(db_conn, "Only Careers", ats_platform="greenhouse", ats_slug="only")
+    cid = _insert_company(
+        db_conn,
+        "Only Careers",
+        ats_platform="greenhouse",
+        ats_slug="only",
+        ats_scan_enabled=False,
+        careers_scan_enabled=False,
+    )
     set_company_attribution(conn, cid, careers_url="https://example.com/careers")
 
     row = _row(db_conn, cid)
@@ -75,6 +82,9 @@ def test_unset_fields_left_untouched(db_conn):
     assert row["ats_platform"] == "greenhouse"
     assert row["ats_slug"] == "only"
     assert row["scan_enabled"] is True
+    # WI-13 (#329): the careers_url branch co-writes the careers lane only.
+    assert row["careers_scan_enabled"] is True
+    assert row["ats_scan_enabled"] is False
 
 
 def test_careers_url_clears_crawl_flag_reason(db_conn):

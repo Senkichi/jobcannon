@@ -175,10 +175,11 @@ class TestBestAtsCandidate:
 # tmp_path, matching tests/engine/helpers/ats_scan_services.py + the m0023
 # columns test_careers_crawler_persistence.py already ALTER TABLEs in, plus
 # the additional columns crawl_careers_batch's two-lane selection query and
-# the ATS-link cooldown/promotion path read (careers_scan_enabled,
-# merged_into_id, careers_crawl_flag_reason, careers_api_endpoint,
+# the ATS-link cooldown/promotion path read (merged_into_id,
+# careers_crawl_flag_reason, careers_api_endpoint,
 # careers_crawl_tier, careers_nav_recipe, ats_link_discovery_last_at,
 # ats_evidence_trigger, jobs.classification, company_scan_log.jobs_matched).
+# careers_scan_enabled lives in the base create_scan_schema as of #329.
 # PORT-SEAM: private's bare `sqlite3.connect(migrated_db)` calls become
 # `svc.connection_factory()` throughout (L-0461/L-0463's zero-arg seam).
 # ---------------------------------------------------------------------------
@@ -189,7 +190,6 @@ def crawler_db_path(tmp_path):
     db_path = tmp_path / "test.db"
     conn = sqlite3.connect(str(db_path))
     create_scan_schema(conn)
-    conn.execute("ALTER TABLE companies ADD COLUMN careers_scan_enabled INTEGER DEFAULT 1")
     conn.execute("ALTER TABLE companies ADD COLUMN merged_into_id INTEGER")
     conn.execute("ALTER TABLE companies ADD COLUMN careers_crawl_flag_reason TEXT")
     conn.execute("ALTER TABLE companies ADD COLUMN careers_api_endpoint TEXT")
