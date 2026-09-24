@@ -27,6 +27,26 @@ ATS URL redirect detection (Research Pitfall 6):
 # parameter, mirroring the existing conn/config optionality in this module:
 # the low-tier fallback only fires when conn, config, AND call_model are all
 # supplied.
+#
+# Split tracking (issue #373 item 5): the minimal ``_scraper_extract.py``
+# split landed with the port (#369); at ~610 lines this remainder sits over
+# the design note's 200-400-line typical band but under its 800-line hard
+# cap, so the deeper split stays a deferred candidate for its own unit
+# rather than a drive-by in an adjudication pass. The natural seams, for
+# that unit: the host/URL classification block (``_host_matches_any``,
+# ``_is_blocklisted_scrape_host``, ``_is_ats_redirect_host``,
+# ``_is_disqualified_careers_host``, ``_is_careers_subdomain``,
+# ``_extract_base_domain`` and the ``_BLOCKLISTED_SCRAPE_HOSTS`` /
+# ``_CAREERS_SUBDOMAINS`` constants) versus the two public entry points
+# (``find_careers_url`` + ``_find_careers_url_raw`` discovery, and
+# ``scrape_careers_page``). Two couplings make it a public-surface move,
+# not a local one: ``_is_blocklisted_scrape_host`` is imported lazily by
+# ``careers_crawler/_escalation.py`` (function-scoped there because this
+# module imports ``careers_crawler._title_filters`` at module scope), and
+# ``find_careers_url`` / ``scrape_careers_page`` are the documented binding
+# targets of the same-named ScanServices fields (services.py), so the pair
+# must stay importable from this module path or the field docs and host
+# wiring move with them.
 """
 
 from __future__ import annotations
