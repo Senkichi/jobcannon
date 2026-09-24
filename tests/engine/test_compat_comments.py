@@ -1,7 +1,10 @@
 """DB-free regression tests for #388 (qmark_to_format must not translate a
-`?` that lives inside a SQL comment) and #391 (the same scanner must track
+`?` that lives inside a SQL comment), #391 (the same scanner must track
 double-quoted identifiers, so comment-like text inside `"..."` cannot open
-a comment and a `?` inside one is never counted).
+a comment and a `?` inside one is never counted), and #402 (the
+`_DATETIME_REWRITES`/`_TABLE_REWRITES` regex passes must likewise refuse a
+match that lies wholly inside a `'...'`/`"..."` quoted region — literal
+data and identifier text are not SQL syntax).
 
 SQLite (and every other SQL dialect) treats a `?` inside a `--` line comment
 or `/* */` block comment as inert text, never a placeholder. Before this
@@ -145,3 +148,51 @@ def test_engine_sql_to_host_strips_comments_before_table_rewrite():
     out = engine_sql_to_host(sql)
     assert "FROM jobs" not in out
     assert out.count("%s") == 1
+
+
+def test_table_rewrite_skips_string_literal():
+    # #402: 'FROM jobs' inside a '...' string literal is stored data, not a
+    # table reference — the rewrite must leave it byte-identical while still
+    # rewriting the real FROM-clause occurrence.
+    sql = "SELECT note FROM jobs WHERE note = 'legacy rows FROM jobs' AND id = ?"
+    out = engine_sql_to_host(sql)
+    assert out == "SELECT note FROM postings WHERE note = 'legacy rows FROM jobs' AND id = %s"
+
+
+def test_table_rewrite_skips_quoted_identifier():
+    # #402: 'FROM jobs' inside a "..." quoted identifier is a name, not a
+    # table reference.
+    sql = 'SELECT id AS "rows FROM jobs" FROM jobs WHERE id = ?'
+    out = engine_sql_to_host(sql)
+    assert '"rows FROM jobs"' in out
+    assert "FROM postings WHERE id = %s" in out
+
+
+def test_datetime_rewrite_skips_quoted_identifier():
+    # #402: `datetime('now')` appearing inside a "..." identifier is
+    # identifier text, not a function call — only the code-region occurrence
+    # may be rewritten. This is the sharpest case for the full-containment
+    # rule: the real match's own `'now'` literal IS a quoted region, so a
+    # naive "any overlap" guard would refuse legitimate rewrites too.
+    sql = "SELECT datetime('now') AS \"datetime('now')\" FROM jobs WHERE id = ?"
+    out = engine_sql_to_host(sql)
+    assert out == "SELECT now() AS \"datetime('now')\" FROM postings WHERE id = %s"
+
+
+def test_sabotage_mixed_quoted_regions_end_to_end():
+    # Sabotage-style assertion for #402, mirroring the #388/#391 mixed-count
+    # tests above: literal 'FROM jobs' data, a "datetime('now')" identifier,
+    # a block comment, and the real rewritable shapes must all survive in
+    # one pass — exactly 2 real placeholders, one table rewrite, one
+    # datetime rewrite.
+    sql = (
+        "UPDATE jobs SET note = 'copied: FROM jobs WHERE x = ?', flag = ? "
+        "/* see \"datetime('now')\" */ WHERE \"datetime('now')\" IS NULL "
+        "AND at < datetime('now', '-' || ? || ' days')"
+    )
+    out = engine_sql_to_host(sql)
+    assert out.count("%s") == 2
+    assert "'copied: FROM jobs WHERE x = ?'" in out  # literal survives untouched
+    assert "\"datetime('now')\" IS NULL" in out  # identifier survives untouched
+    assert "UPDATE postings" in out and "UPDATE jobs SET" not in out
+    assert "now() - make_interval(days => %s)" in out
