@@ -6,7 +6,9 @@ L-0387.
 Morning driver: the once-daily orchestrator that ties together audit_stage,
 error_budget, review_stage, issue_filer and report into one run -- the host
 equivalent of private's single 2400-line run_nightly_morning_review, split
-across five files per the design note's "Files touched" section.
+across five files per the design note's "Files touched" section (issue
+#398's item 1 records this driver/audit/review/issue_filer/report split as
+already satisfied by this layout; nothing left to apply).
 
 # PORT-SEAM: private computed window_coverage / checkpoint_summary by
 # scanning local files -- ticks.jsonl for observed_ticks, checkpoint_*.json
