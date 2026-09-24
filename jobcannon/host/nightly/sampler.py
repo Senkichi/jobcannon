@@ -76,6 +76,7 @@ import logging
 import time
 from typing import Any
 
+from jobcannon.db.pool import unwrap_raw
 from jobcannon.host.health_recorder import record_scan_health
 from jobcannon.host.nightly import state as _state
 from jobcannon.host.nightly.baselines import duration_band
@@ -104,10 +105,6 @@ _FETCH_CAP = 200
 _SIGNATURE_REGISTRY: list[dict] = []
 
 
-def _raw(conn: Any):
-    return conn.raw if hasattr(conn, "raw") else conn
-
-
 def _terminal_jobs_with_duration(
     conn: Any, *, task_name: str | None, since_id: int, limit: int
 ) -> list[dict]:
@@ -128,7 +125,7 @@ def _terminal_jobs_with_duration(
     ``duration_s: None``; ``duration_band`` already treats a non-numeric
     duration as unusable for banding.
     """
-    raw = _raw(conn)
+    raw = unwrap_raw(conn)
     query = (
         "SELECT j.id, j.task_name, j.status, "
         "MIN(e.at) FILTER (WHERE e.type = 'started') AS started_at, "
@@ -190,7 +187,7 @@ def _new_scan_health_hits(conn: Any, since_id: int, registry: list[dict]) -> tup
     of ``registry`` being empty -- the watermark must still advance so an
     empty registry does not cause the same rows to be re-read forever.
     """
-    raw = _raw(conn)
+    raw = unwrap_raw(conn)
     rows = raw.execute(
         "SELECT id, payload FROM scan_health_log WHERE id > %s ORDER BY id LIMIT %s",
         (since_id, _FETCH_CAP),
