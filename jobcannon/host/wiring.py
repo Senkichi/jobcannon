@@ -210,9 +210,26 @@ def build_scan_services(host_config: HostConfig) -> services.ScanServices:
         # above -- takes call_model as its own injected keyword-only param,
         # so the host binds a partial pre-applying the same call_model this
         # ScanServices instance already carries. scrape_careers_tier stays
-        # unbound (None): its source module depends on careers_crawler.py
-        # (L-0167, PR #369), not yet on this branch -- see
+        # unbound (None): the 8th private function, scrape_careers, was
+        # never ported -- the careers_crawler.py dependency that blocked it
+        # at #371 is gone now that #369 landed careers_scraper.py's
+        # find_careers_url / scrape_careers_page, so its port is an
+        # unblocked follow-up. See
         # jobcannon/engine/_enrichment_ats_tier.py's module PORT-SEAM.
+        #
+        # A helper collapsing these partial bindings (e.g.
+        # bind_call_model(*fns) returning a dict for **-splatting into this
+        # constructor) was considered and declined (issue #396 item 1): the
+        # item's premise -- "9 near-identical functools.partial(fn,
+        # call_model=...) bindings" -- does not match what #371 merged.
+        # Exactly two call_model partials exist (tiebreak_primary_posting
+        # above, parse_structured_fields below); the six other L-0178 hooks
+        # take no call_model parameter and bind as plain references. A
+        # two-site helper would not shorten anything (each site carries its
+        # own explanatory comment) and a field-name-keyed dict return would
+        # reintroduce name-keyed plumbing on the frozen ScanServices
+        # dataclass -- the same objection family as the rejected
+        # optional(svc, "X") accessor (services.py's module docstring).
         fetch_direct_jd=_enrichment_jd_fetch.fetch_direct_jd,
         query_ats_api=_enrichment_ats_tier.query_ats_api,
         search_ddg_web=_enrichment_ddg_web_tier.search_ddg_web,

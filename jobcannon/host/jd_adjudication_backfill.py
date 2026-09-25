@@ -21,7 +21,7 @@ guard's ``writer_exists`` half true, via ``stamp_adjudicated``.
 # addendum's §7 Q-1 Rec (b), the content-side heal lives in
 # ``_jd_full.py::clear_jd_full`` instead; the score-retraction half stays with
 # its own owner, ``_assessment_writer.invalidate_job_score``. This driver
-# composes the two under ONE ambient ``raw.transaction()`` per healed row, so
+# composes the two under ONE ambient ``with_write_txn`` per healed row, so
 # a REJECT verdict (deterministic or LLM "no") is applied atomically: body
 # cleared + verdict columns nulled + quarantine reason appended + scoring
 # tuple retracted, or nothing at all.
@@ -35,7 +35,7 @@ from typing import Any, Callable
 from jobcannon.db._assessment_writer import invalidate_job_score
 from jobcannon.db._jd_adjudication import select_adjudication_candidates, stamp_adjudicated
 from jobcannon.db._jd_full import clear_jd_full
-from jobcannon.db.pool import commit_unless_nested
+from jobcannon.db.pool import with_write_txn
 from jobcannon.engine.jd_adjudicator import adjudicate_jd
 from jobcannon.engine.jd_content_contract import JD_OFFSITE, JdVerdict, classify_jd_content
 
@@ -67,8 +67,8 @@ def run_jd_adjudication_backfill(
     held across an LLM call -- all decisions are collected in memory first
     (zero writes during the classification loop), then each stamp decision is
     applied and committed (via ``stamp_adjudicated``'s own
-    ``commit_unless_nested``) immediately after that loop completes, and each
-    heal decision is applied under ONE ambient ``raw.transaction()`` that
+    ``with_write_txn``) immediately after that loop completes, and each
+    heal decision is applied under ONE ambient ``with_write_txn`` that
     commits once -- ``clear_jd_full``'s content-side heal and
     ``invalidate_job_score``'s score retraction land together or not at all
     (see the module docstring PORT-SEAM for why the two writes live in
@@ -148,7 +148,7 @@ def run_jd_adjudication_backfill(
             rejected += 1
 
     # Apply decisions (no LLM calls here). Each stamp is applied and committed
-    # via stamp_adjudicated's own commit_unless_nested.
+    # via stamp_adjudicated's own with_write_txn.
     skipped_stale = 0
     for dedup_key, expected_jd_full in decisions:
         applied = stamp_adjudicated(conn, dedup_key, expected_jd_full)
@@ -166,19 +166,17 @@ def run_jd_adjudication_backfill(
     # retraction is skipped too, so a concurrently-rewritten row keeps
     # whatever (fresh, valid) score its new content earned. On a hit the
     # scoring tuple is retracted in the same commit so the stale score
-    # cannot outlive the body it was computed against. The trailing
-    # commit_unless_nested is what actually commits on a bare pooled
-    # connection (the `with raw.transaction():` block degrades to a savepoint
-    # inside the implicit transaction the SELECTs opened -- same convention
-    # as _jd_full.py / nightly/state.py); under tests' ambient transaction it
-    # is a no-op and the fixture rollback covers everything.
-    raw = conn.raw if hasattr(conn, "raw") else conn
+    # cannot outlive the body it was computed against. with_write_txn's
+    # trailing commit_unless_nested is what actually commits on a bare
+    # pooled connection (its `raw.transaction()` block degrades to a
+    # savepoint inside the implicit transaction the SELECTs opened -- same
+    # convention as _jd_full.py / nightly/state.py); under tests' ambient
+    # transaction it is a no-op and the fixture rollback covers everything.
     for dedup_key, expected_jd_full, reason in heals:
-        with raw.transaction():
+        with with_write_txn(conn):
             healed = clear_jd_full(conn, dedup_key, expected_jd_full, reason=reason)
             if healed:
                 invalidate_job_score(conn, dedup_key)
-        commit_unless_nested(raw)
         if not healed:
             skipped_stale += 1
             logger.info(

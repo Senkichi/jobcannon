@@ -117,6 +117,22 @@ def build_candidate_context(profile: Mapping) -> str:
 
     Pure: accepts any Mapping (a DB row or a plain dict); missing keys and
     None values render as "Not specified". Non-empty by construction.
+
+    Divergence note (issue #364): a second, richer candidate-context
+    renderer exists at ``jobcannon/host/scoring_orchestrator.py::
+    build_candidate_context`` (plus its ``_render_location_targeting``
+    helper), keyed on ``config["profile"]`` targeting fields rather than
+    a ``profiles`` row. The divergence is deliberate: the ``profiles``
+    table this renderer reads
+    (``db/migrations/m0001_initial_schema.py``'s ``CREATE TABLE
+    profiles``, lines 108-117, plus m0008/m0012) has no location
+    preference hierarchy (``target_locations`` is a flat list;
+    ``workplace_type`` is a single scalar), no structured resume
+    positions or education (only free-text ``experience_summary``), no
+    ``industries``, and no ``exclusions`` — so the config-shaped path
+    cannot delegate to this renderer without silently dropping those
+    prompt inputs. Unification waits on a ``profiles`` schema expansion,
+    tracked in issue #420.
     """
     return "\n".join(
         [

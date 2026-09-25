@@ -34,12 +34,11 @@ When ``careers_url`` is explicitly provided (not ``_UNSET``):
 # that re-admits a flagged company to crawl_careers_batch's
 # `careers_crawl_flag_reason IS NULL` lanes (m0028's docstring: excluded
 # "until a human clears the flag" -- this function is that clearing
-# write). `careers_scan_enabled` also exists now (m0021, WI-13) but no
-# writer co-writes the split columns yet -- per m0021's docstring that
-# per-writer co-write instrumentation is a separate tracked follow-up, so
-# this port keeps setting only the host's merged `scan_enabled = true` as
-# the re-enable signal rather than half-starting the cutover in one
-# writer.
+# write). The `careers_scan_enabled = true` co-write is wired too as of
+# #329 (m0021, WI-13): it rides alongside the merged `scan_enabled = true`
+# the legacy readers still consume. Only the careers lane is written --
+# `ats_scan_enabled` stays untouched, so a prior ATS demotion is not
+# silently resurrected by a careers_url write.
 
 # PORT-SEAM: private also calls snapshot_tracked/record_state_diff
 # (job_finder/db/_company_state.py, WI-08) to record the transition in
@@ -70,7 +69,7 @@ from typing import Any
 
 import psycopg
 
-from jobcannon.db.pool import commit_unless_nested
+from jobcannon.db.pool import with_write_txn
 
 logger = logging.getLogger(
     __name__
@@ -148,9 +147,9 @@ def set_company_attribution(
     Always resets ``ats_probe_status='pending'``,
     ``consecutive_empty_scans=0``, ``retry_count=0``, ``retry_after=NULL``,
     ``miss_reason=NULL``. When ``careers_url`` is explicitly provided, also
-    sets ``scan_enabled=true`` and clears ``careers_crawl_flag_reason``
-    (see module docstring's PORT-SEAM for why the re-enable still differs
-    from private's split careers_scan_enabled write). (# PORT-SEAM:
+    sets ``scan_enabled=true`` and ``careers_scan_enabled=true`` (WI-13
+    co-write, #329 -- careers lane only; ``ats_scan_enabled`` untouched) and
+    clears ``careers_crawl_flag_reason``. (# PORT-SEAM:
     private's Args also
     documented Records the tracked-field transition via record_state_diff
     -- dropped, see module docstring.)
@@ -203,7 +202,10 @@ def set_company_attribution(
         params.append(careers_url)
         set_parts.append(
             "scan_enabled = true"
-        )  # PORT-SEAM: replaces private's careers_scan_enabled=1, see module docstring
+        )  # PORT-SEAM: merged bit still dual-written until legacy readers migrate off it, see module docstring
+        set_parts.append(
+            "careers_scan_enabled = true"
+        )  # PORT-SEAM: private's WI-13 co-write restored now that m0021 backs the column (#329)
         set_parts.append(
             "careers_crawl_flag_reason = NULL"
         )  # PORT-SEAM: restored private's flag clear now that m0028 backs the column (#397)
@@ -212,7 +214,7 @@ def set_company_attribution(
     sql = f"UPDATE companies SET {', '.join(set_parts)} WHERE id = %s"  # PORT-SEAM: %s placeholder; private's before=snapshot_tracked(...) dropped, see module docstring
 
     try:
-        with raw.transaction():
+        with with_write_txn(raw):
             raw.execute(sql, params)
     except psycopg.errors.UniqueViolation:  # PORT-SEAM: replaces sqlite3.IntegrityError
         # m0001's UNIQUE(ats_platform, ats_slug) gate. The inner
@@ -238,7 +240,6 @@ def set_company_attribution(
             ats_platform=plat,
             ats_slug=slug,
         ) from None
-
-    commit_unless_nested(
-        raw
-    )  # PORT-SEAM: replaces private's after=snapshot_tracked/record_state_diff/conn.commit() -- see module docstring
+    # PORT-SEAM: private's after=snapshot_tracked/record_state_diff/conn.commit()
+    # tail is replaced by with_write_txn's commit_unless_nested on block exit --
+    # see module docstring.

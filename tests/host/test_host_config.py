@@ -166,3 +166,18 @@ def test_load_host_config_reads_posthog_admin_env(monkeypatch):
     assert cfg.posthog_personal_api_key == "pk_pers_abc"
     assert cfg.posthog_project_id == "42"
     assert cfg.posthog_admin_api_host == "https://eu.posthog.com"
+
+
+def test_imap_ingest_field_is_named_raw_not_confusable_with_function():
+    """Issue #419: the raw env-backed field must be imap_ingest_enabled_raw,
+    not imap_ingest_enabled — a dataclass field and the module-level
+    imap_ingest_enabled() parsing function are allowed to share a name with
+    no error, and a caller reaching for config.imap_ingest_enabled would get
+    a truthy raw string ("false" is truthy) instead of a parsed bool."""
+    import dataclasses
+
+    from jobcannon.host.config import HostConfig
+
+    field_names = {f.name for f in dataclasses.fields(HostConfig)}
+    assert "imap_ingest_enabled_raw" in field_names
+    assert "imap_ingest_enabled" not in field_names

@@ -144,7 +144,7 @@ def advance_uid_highwater(
     """Persist this run's ending UID watermark + the folder's UIDVALIDITY it
     was computed against. Called ONLY after a run's parsed jobs have been
     durably handed off (host/ingestion/imap_intake.py calls this last, after
-    capture.py's writes commit) -- a crash or exception between fetching
+    _parse_log.py's writes commit) -- a crash or exception between fetching
     mail and this call leaves uid_highwater at its prior value, so the next
     run re-fetches and re-parses the same UID range rather than silently
     skipping it (at-least-once, never at-most-once, for this watermark).

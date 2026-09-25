@@ -23,7 +23,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from jobcannon.engine.model_types import BaseProvider, ModelResult
+from jobcannon.engine.model_types import (
+    BaseProvider,
+    ModelResult,
+    ProviderTruncationExhaustedError,
+)
 from jobcannon.engine.providers.gemini_provider import (
     _GEMINI_PRICING,
     GeminiProvider,
@@ -627,3 +631,73 @@ def test_finish_reason_detects_real_sdk_enum_value():
     resp.candidates = [candidate]
 
     assert _response_was_truncated(resp) is True
+
+
+def test_call_retries_once_when_response_text_is_none():
+    """response.text=None -- a thinking model that spent the whole
+    max_output_tokens budget on thought parts emits no text part
+    (finish_reason=MAX_TOKENS) -- is the same truncation-shaped failure as
+    a mid-JSON cutoff: json.loads(None) raises TypeError, not
+    JSONDecodeError, and it must engage the retry rather than escape the
+    adapter raw (the BYO-key live check misreported valid keys this way)."""
+    no_text = _make_truncated_response(text=None)
+    clean_resp = _make_response(text=json.dumps({"score": 1}))
+    client = _make_mock_client()
+    client.models.generate_content.side_effect = [no_text, clean_resp]
+
+    result = _make_provider(client).call(
+        "gemini-2.5-flash",
+        "sys",
+        [{"role": "user", "content": "q"}],
+        output_schema=_SCHEMA,
+        max_tokens=64,
+    )
+
+    assert result.data == {"score": 1}
+    assert client.models.generate_content.call_count == 2
+
+
+def test_call_no_text_on_both_attempts_raises_truncation_exhausted():
+    """text=None on the escalated retry too -> the adapter's own
+    ProviderTruncationExhaustedError (a ValueError), never a raw TypeError
+    leaking out of json.loads."""
+    client = _make_mock_client()
+    client.models.generate_content.side_effect = [
+        _make_truncated_response(text=None),
+        _make_truncated_response(text=None),
+    ]
+
+    with pytest.raises(ProviderTruncationExhaustedError):
+        _make_provider(client).call(
+            "gemini-2.5-flash",
+            "sys",
+            [{"role": "user", "content": "q"}],
+            output_schema=_SCHEMA,
+            max_tokens=64,
+        )
+
+    assert client.models.generate_content.call_count == 2
+
+
+def test_init_reads_thinking_budget_from_config():
+    """providers.gemini.thinking_budget lands on every GenerateContentConfig
+    as a ThinkingConfig -- the BYO-key live check relies on this knob to
+    disable thinking for its connectivity probe."""
+    provider = GeminiProvider(
+        config={"providers": {"gemini": {"thinking_budget": 0}}},
+        client=_make_mock_client(),
+        resolve_credential=lambda provider: None,
+    )
+
+    config = provider._build_generate_config("sys", 512, None, None)
+
+    assert config.thinking_config.thinking_budget == 0
+
+
+def test_build_generate_config_omits_thinking_config_when_unset():
+    """No providers.gemini.thinking_budget -> no thinking_config on the wire,
+    so the model's own dynamic default applies and cascade calls are
+    unchanged."""
+    config = _make_provider()._build_generate_config("sys", 512, None, None)
+
+    assert config.thinking_config is None

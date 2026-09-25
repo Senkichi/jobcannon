@@ -44,11 +44,19 @@ port):
 # ``recipe_extractor`` (the Phase C/D recipe-fallback + shadow-guard block)
 # and ``_archive_parse_failure`` / ``_should_archive_failure`` (filesystem
 # parse-failure archival) -- both dropped: autoheal is HOLD, and archival is
-# replaced by the per-sender parse-log row (host/ingestion/capture.py,
-# L-0279). extraction_records / parse_failures are still accumulated in the
-# same shape private used (label/job_count and label/error respectively) so
-# capture.record_run's aggregation logic -- itself ported from private's
+# replaced by the per-sender parse-log row (host/ingestion/_parse_log.py,
+# L-0279 -- renamed from capture.py in issue #358, FU-C). extraction_records
+# / parse_failures are still accumulated in the same shape private used
+# (label/job_count and label/error respectively) so _parse_log.record_run's
+# aggregation logic -- itself ported from private's
 # ``_log_per_sender_email_parse`` -- needs no reshaping at the call site.
+#
+# PORT-SEAM: per-message parse-dispatch loop extracted to
+# host/ingestion/_alert_parse.py::parse_alert_batch (issue #358, FU-D) --
+# the From/body/date extraction helpers went with it. This module keeps the
+# IMAP-specific half: readonly folder selection, the UID search criteria,
+# and the uid_highwater/UIDVALIDITY watermark; a future forwarded-alert
+# intake lane reuses parse_alert_batch on its own message batch.
 
 # PORT-SEAM: postings persistence NOT ported here. Private's
 # ``fetch_jobs`` never called a DB upsert either (it returns
@@ -74,8 +82,6 @@ port):
 
 from __future__ import annotations
 
-import email
-import email.policy
 import logging
 import uuid
 from contextlib import contextmanager
@@ -83,14 +89,13 @@ from datetime import UTC, datetime
 from typing import Any, NamedTuple
 
 from jobcannon.db import _mailbox_credentials
-from jobcannon.engine.email_parsers import extract_with_fallback
 from jobcannon.engine.email_senders import resolve_sender_label, resolve_sender_parsers
 from jobcannon.engine.model_types import (
     MailboxConnectionFactory,
     MailboxCredential,
     MailboxCredentialResolver,
 )
-from jobcannon.host.ingestion import capture
+from jobcannon.host.ingestion import _alert_parse, _parse_log
 
 logger = logging.getLogger(__name__)
 
@@ -136,64 +141,21 @@ def _build_uid_search_criteria(senders: list[str], uid_start: int) -> list[Any]:
 
 @contextmanager
 def _default_connection_factory(credential: MailboxCredential):
-    """Default MailboxConnectionFactory: opens and logs into a real IMAP
-    connection. `imapclient` is imported HERE, inside the function body, not
-    at module scope -- jobcannon/engine/model_types.py's MailboxConnectionFactory
-    docstring and this PR's Modularity note explain why: it keeps `imapclient`
-    out of the web import graph (jobcannon/web's Sync-Now route, if one is
-    ever wired, must never pull in an IMAP client library just by importing
-    this module), and lets tests inject a fake factory with imapclient absent
-    from the test process entirely.
+    """Default MailboxConnectionFactory (model_types.py's
+    SourceConnectionFactory[MailboxCredential]): opens and logs into a real
+    IMAP connection. `imapclient` is imported HERE, inside the function
+    body, not at module scope -- model_types.py's SourceConnectionFactory
+    docstring and this PR's Modularity note explain why: it keeps
+    `imapclient` out of the web import graph (jobcannon/web's Sync-Now
+    route, if one is ever wired, must never pull in an IMAP client library
+    just by importing this module), and lets tests inject a fake factory
+    with imapclient absent from the test process entirely.
     """
     from imapclient import IMAPClient
 
     with IMAPClient(credential.imap_host, port=credential.imap_port, ssl=True) as client:
         client.login(credential.address, credential.secret)
         yield client
-
-
-def _extract_sender(message: email.message.Message) -> str:
-    from_header = message.get("From", "")
-    if "<" in from_header and ">" in from_header:
-        return from_header.split("<")[1].split(">")[0].strip()
-    return from_header.strip()
-
-
-def _extract_body(message: email.message.Message) -> str | None:
-    body = None
-    for part in message.walk():
-        content_type = part.get_content_type()
-        content_disposition = str(part.get("Content-Disposition", ""))
-        if "attachment" in content_disposition:
-            continue
-        if content_type == "text/plain" and body is None:
-            try:
-                payload = part.get_payload(decode=True)
-                if payload:
-                    body = payload.decode(part.get_content_charset() or "utf-8", errors="ignore")
-            except Exception:
-                continue
-        elif content_type == "text/html" and body is None:
-            try:
-                payload = part.get_payload(decode=True)
-                if payload:
-                    body = payload.decode(part.get_content_charset() or "utf-8", errors="ignore")
-            except Exception:
-                continue
-    return body
-
-
-def _extract_date(message: email.message.Message) -> datetime | None:
-    date_header = message.get("Date")
-    if not date_header:
-        return None
-    try:
-        from email.utils import parsedate_to_datetime
-
-        dt = parsedate_to_datetime(date_header)
-        return dt.astimezone(UTC).replace(tzinfo=None)
-    except Exception:
-        return None
 
 
 class ImapIntakeResult(NamedTuple):
@@ -232,7 +194,7 @@ def run_imap_intake(
     already guarantee.
 
     `run_id`: shared identifier attributed to every email_parse_log_sender
-    row this run writes (capture.record_run). Defaults to a fresh uuid4
+    row this run writes (_parse_log.record_run). Defaults to a fresh uuid4
     hex when omitted.
     """
     credential = resolver()
@@ -282,75 +244,31 @@ def run_imap_intake(
             candidate_uids = sorted(u for u in raw_uids if u > effective_highwater)
 
             if candidate_uids:
-                messages = client.fetch(candidate_uids, ["BODY.PEEK[]"])
-
+                fetched = client.fetch(candidate_uids, ["BODY.PEEK[]"])
+                batch: list[tuple[str, bytes]] = []
                 for uid in candidate_uids:
-                    msg_data = messages.get(uid)
+                    msg_data = fetched.get(uid)
                     if msg_data is None:
                         continue
-                    max_uid_seen = max(max_uid_seen, uid)
+                    # candidate_uids is sorted ascending, so the last uid
+                    # with fetch data IS this run's observed highwater.
+                    max_uid_seen = uid
+                    batch.append((str(uid), msg_data[b"BODY[]"]))
 
-                    raw_bytes = msg_data[b"BODY[]"]
-                    message = email.message_from_bytes(raw_bytes, policy=email.policy.default)
-
-                    sender = _extract_sender(message)
-                    body = _extract_body(message)
-                    email_date = _extract_date(message)
-
-                    if not sender or not body:
-                        logger.warning(
-                            "run_imap_intake: skipping message with missing sender or body: UID %s",
-                            uid,
-                        )
-                        processed_uids.append(str(uid))
-                        continue
-
-                    sender_lower = sender.lower()
-                    parser_fn = None
-                    sender_key = None
-                    for candidate_key, parser in sender_parsers.items():
-                        if candidate_key in sender_lower:
-                            parser_fn = parser
-                            sender_key = candidate_key
-                            break
-
-                    if parser_fn is None:
-                        logger.info(
-                            "run_imap_intake: no parser found for sender: %s (skipping)", sender
-                        )
-                        continue
-
-                    label = sender_label.get(sender_key, sender_key)
-                    try:
-                        jobs = extract_with_fallback(parser_fn, body, email_date)
-                        all_jobs.extend(jobs)
-                        extraction_records.append({"label": label, "job_count": len(jobs)})
-                    except Exception as e:
-                        logger.error(
-                            "run_imap_intake: parser error for sender %s (UID %s): %s",
-                            sender,
-                            uid,
-                            e,
-                            exc_info=True,
-                        )
-                        parse_failures.append(
-                            {
-                                "sender": sender,
-                                "label": label,
-                                "message_id": str(uid),
-                                "error": str(e),
-                            }
-                        )
-                        extraction_records.append({"label": label, "job_count": 0})
-
-                    processed_uids.append(str(uid))
+                batch_result = _alert_parse.parse_alert_batch(
+                    batch, sender_parsers=sender_parsers, sender_label=sender_label
+                )
+                all_jobs = batch_result.jobs
+                processed_uids = batch_result.processed_ids
+                extraction_records = batch_result.extraction_records
+                parse_failures = batch_result.parse_failures
     except Exception as e:
         logger.error(
             "run_imap_intake: IMAP fetch error for user_id=%s: %s", user_id, e, exc_info=True
         )
         raise
 
-    capture.record_run(
+    _parse_log.record_run(
         conn,
         user_id,
         run_id=run_id,

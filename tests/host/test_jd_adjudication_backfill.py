@@ -550,8 +550,8 @@ def test_backfill_heal_commits_durably_on_bare_connection(postgres_test_dsn):
     """Production durability path for the heal leg: every other test here runs
     under db_conn's ambient transaction (nested-savepoint + rollback), but the
     scheduled task runs on a bare pooled connection where the driver's
-    `with raw.transaction():` block degrades to a savepoint over the implicit
-    transaction the SELECTs opened and the trailing commit_unless_nested does
+    `with_write_txn` block degrades to a savepoint over the implicit
+    transaction the SELECTs opened and its trailing commit_unless_nested does
     the real commit. A second connection must observe the heal as committed."""
     import psycopg
     from psycopg.rows import dict_row

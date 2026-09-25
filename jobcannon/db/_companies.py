@@ -80,7 +80,7 @@ from typing import Any
 import psycopg
 
 from jobcannon.db._company_state import record_state_diff, snapshot_tracked
-from jobcannon.db.pool import commit_unless_nested
+from jobcannon.db.pool import commit_unless_nested, with_write_txn
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +218,7 @@ def upsert_company(
         ).fetchone()
         if existing is None:
             try:
-                with raw.transaction():
+                with with_write_txn(raw):
                     row = raw.execute(
                         "INSERT INTO companies (name, name_raw, ats_platform, ats_slug, ats_probe_status, homepage_url) "
                         "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
@@ -268,13 +268,12 @@ def upsert_company(
                     ats_platform,
                     ats_slug,
                 )
-                with raw.transaction():
+                with with_write_txn(raw):
                     row = raw.execute(
                         "INSERT INTO companies (name, name_raw, homepage_url) "
                         "VALUES (%s, %s, %s) RETURNING id",
                         (normalized, normalized, homepage_url),
                     ).fetchone()
-            commit_unless_nested(raw)
             return row["id"]
 
         company_id, current_status = existing["id"], existing["ats_probe_status"] or "pending"

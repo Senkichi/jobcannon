@@ -6,7 +6,9 @@ L-0387.
 Morning driver: the once-daily orchestrator that ties together audit_stage,
 error_budget, review_stage, issue_filer and report into one run -- the host
 equivalent of private's single 2400-line run_nightly_morning_review, split
-across five files per the design note's "Files touched" section.
+across five files per the design note's "Files touched" section (issue
+#398's item 1 records this driver/audit/review/issue_filer/report split as
+already satisfied by this layout; nothing left to apply).
 
 # PORT-SEAM: private computed window_coverage / checkpoint_summary by
 # scanning local files -- ticks.jsonl for observed_ticks, checkpoint_*.json
@@ -68,6 +70,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from jobcannon.db.pool import unwrap_raw
 from jobcannon.host.health_recorder import record_scan_health
 from jobcannon.host.nightly import state as _state
 from jobcannon.host.nightly.audit_stage import run_audit_stage
@@ -112,15 +115,11 @@ def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _raw(conn: Any):
-    return conn.raw if hasattr(conn, "raw") else conn
-
-
 def _sampler_tick_timestamps(
     conn: Any, window_start: datetime, window_end: datetime
 ) -> list[datetime]:
     rows = (
-        _raw(conn)
+        unwrap_raw(conn)
         .execute(
             """
             SELECT MAX(e.at) AS finished_at
@@ -153,7 +152,7 @@ def _sampler_tick_timestamps(
 
 def _fail_count(conn: Any, window_start: datetime, window_end: datetime) -> int:
     row = (
-        _raw(conn)
+        unwrap_raw(conn)
         .execute(
             """
             SELECT count(*) AS n

@@ -17,7 +17,13 @@ candidate: a ``call_if_wired(name, *a, **kw)``-style dispatch helper was
 considered and rejected (issue #357) because a name-keyed getattr erases
 static checking of both the field name and the callable's signature on
 this frozen dataclass, while a callable-passing variant saves only the
-guard line at the cost of an unfamiliar idiom.
+guard line at the cost of an unfamiliar idiom. Re-raised as issues #335,
+#362 item 1, #373 item 1, and #396 item 4 in accessor form — ``optional(svc,
+"field_name")`` returning the attribute or None so the caller writes ``if
+optional(svc, "X") is None: skip`` — which is the same name-keyed getattr
+in getter form: it erases static checking of the field name, widens the
+returned attribute to Any, and is longer than the direct ``svc.X is None``
+it replaces. Same rejection.
 
 Host binding convention (issue #357): ScanServices fields are plain
 callables, so a host imports each bound implementation from wherever it
@@ -139,8 +145,10 @@ class ScanServices:
     # is intentionally distinct from the existing `scrape_careers_page`
     # field -- that one matches careers_scraper.scrape_careers_page (a
     # different private module); this one matches
-    # enrichment_tiers.scrape_careers, and stays unbound (None) until #369
-    # (careers_crawler.py, L-0167) merges -- see
+    # enrichment_tiers.scrape_careers, and stays unbound (None): #369 has
+    # landed (careers_scraper.py provides find_careers_url /
+    # scrape_careers_page), so the scrape_careers port is now an unblocked
+    # follow-up rather than a branch-boundary HOLD -- see
     # jobcannon/engine/_enrichment_ats_tier.py's module PORT-SEAM.
     fetch_direct_jd: Callable[..., Any] | None = None
     query_ats_api: Callable[..., Any] | None = None

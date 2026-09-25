@@ -167,7 +167,7 @@ import logging
 import re
 from typing import Any
 
-from jobcannon.db.pool import commit_unless_nested
+from jobcannon.db.pool import with_write_txn
 from jobcannon.engine.description_formatter import html_to_plain_text
 from jobcannon.engine.jd_content_contract import (
     JD_CONTENT_REASON_CODES,
@@ -294,7 +294,7 @@ def set_jd_full(
     # result is actually applied. See the module docstring for why an
     # external CAS guard is unnecessary once the write is a single statement.
     jd_result = classify_jd_content(text, title, existing["company"], config)
-    with raw.transaction():
+    with with_write_txn(raw):
         cur = raw.execute(
             "UPDATE postings SET "
             "jd_full = %(text)s, "
@@ -335,7 +335,6 @@ def set_jd_full(
                 "dedup_key": dedup_key,
             },
         )
-    commit_unless_nested(raw)
     if cur.rowcount == 0:
         # The SELECT above found a row, but a concurrent DELETE / re-upsert
         # removed it before this UPDATE ran -- the write matched nothing.
@@ -373,7 +372,7 @@ def _record_jd_content_reject(raw: Any, dedup_key: str, reason: str) -> None:
     """
     if reason not in JD_CONTENT_REASON_CODES:
         return
-    with raw.transaction():
+    with with_write_txn(raw):
         raw.execute(
             "UPDATE postings SET unresolved_reasons = "
             "(CASE WHEN jsonb_typeof(unresolved_reasons) = 'array' "
@@ -386,7 +385,6 @@ def _record_jd_content_reject(raw: Any, dedup_key: str, reason: str) -> None:
             "WHERE dedup_key = %(dedup_key)s",
             {"reason": reason, "dedup_key": dedup_key},
         )
-    commit_unless_nested(raw)
 
 
 def clear_jd_full(
@@ -455,8 +453,7 @@ def clear_jd_full(
             "row would re-enter the adjudication cohort and re-pay the decision "
             "every tick"
         )
-    raw = conn.raw if hasattr(conn, "raw") else conn
-    with raw.transaction():
+    with with_write_txn(conn) as raw:
         cur = raw.execute(
             "UPDATE postings SET "
             "jd_full = NULL, "
@@ -478,5 +475,4 @@ def clear_jd_full(
                 "expected_jd_full": expected_jd_full,
             },
         )
-    commit_unless_nested(raw)
     return cur.rowcount > 0

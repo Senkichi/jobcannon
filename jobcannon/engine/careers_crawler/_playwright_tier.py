@@ -18,6 +18,25 @@ search-form submission) and capture API endpoints discovered along the
 way. Returns both the matched jobs AND a discovered API endpoint URL
 when one was the source of the matches, so the caller can persist it
 for fast-path access on the next crawl.
+
+Issue #373 item 6 (a single tier-base signature to one-source the
+``db_path``-removal edit this module and its siblings each carried):
+considered and declined. The crawler's tier signatures are not uniform
+enough to unify — the static and embedded-json tiers take
+``(url, target_titles, exclusions)`` and return ``list | None``; this
+module's pair prepend ``browser`` and add ``search_keywords`` /
+``config`` / ``html_sink``, with the active path returning a
+``(jobs, discovered_api)`` tuple; the sitemap tier adds
+``company_name`` / ``config`` / ``flag_sink``; ``_try_cached_tier``
+carries eleven parameters. A shared signature would have to be a
+superset params object every tier partially ignores — the same
+non-uniformity that keeps the ``(name, fn, gate)`` tier-registry
+deferred in ``_escalation.py`` — and it would not have removed the
+edits this item counts: the ``db_path`` drop was a one-shot migration,
+already complete package-wide, and its per-file PORT-SEAM notes plus
+call-site kwarg removals would still have been required under a params
+object. Revisit only if a second cross-cutting parameter ever needs
+threading through every tier.
 """
 
 from __future__ import annotations

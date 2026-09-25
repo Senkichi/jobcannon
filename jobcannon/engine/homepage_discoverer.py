@@ -254,6 +254,19 @@ def _validate_url(url: str) -> str | None:
 # would need as-is, matching this unit's "port standalone, unwired"
 # precedent (L-0054, run_description_reformat_pass).
 #
+# Promoting this block into its own host-legitimacy module was considered
+# and deferred (issue #396 item 5): the item's own precondition is "once a
+# second caller exists," and none does -- the gate has zero wired callers
+# (identity_evidence.py only *mirrors* this acceptance logic, a deliberate
+# parallel implementation documented at its own call site, not a
+# consumer). A move now would be a public-surface change with no consumer,
+# and the natural second caller (a provider-pinned Tier 2.5 port) is
+# blocked on the same missing provider-pin that keeps the _ollama.py fold
+# deferred (that item's record lives in jobcannon/host/_ollama.py). If a
+# second caller ever lands, the extraction boundary is already drawn: this
+# whole section, HostCheckResult through _validate_guessed_homepage, plus
+# the _MULTI_TENANT_THRESHOLD constant.
+#
 # _validate_url() (above) only checks live-and-not-parked — no identity
 # check. That is fine for Tiers 1/2 (candidates mechanically derived from the
 # company's own name). It is NOT fine for a bare parametric-knowledge guess:

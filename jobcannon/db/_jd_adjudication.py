@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from jobcannon.db.pool import commit_unless_nested
+from jobcannon.db.pool import with_write_txn
 from jobcannon.engine.jd_content_contract import (
     JD_CONTENT_REASON_CODES,
     JD_CONTENT_VERSION,
@@ -68,8 +68,7 @@ def stamp_adjudicated(conn: Any, dedup_key: str, expected_jd_full: str) -> bool:
     (and re-classified against its now-current content) on the next scheduled
     tick.
     """
-    raw = conn.raw if hasattr(conn, "raw") else conn
-    with raw.transaction():
+    with with_write_txn(conn) as raw:
         cur = raw.execute(
             "UPDATE postings SET jd_adjudicated_version = %(version)s "
             "WHERE dedup_key = %(dedup_key)s AND jd_full = %(expected_jd_full)s",
@@ -79,7 +78,6 @@ def stamp_adjudicated(conn: Any, dedup_key: str, expected_jd_full: str) -> bool:
                 "expected_jd_full": expected_jd_full,
             },
         )
-    commit_unless_nested(raw)
     return cur.rowcount > 0
 
 

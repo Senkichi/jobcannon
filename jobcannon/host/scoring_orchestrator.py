@@ -415,6 +415,13 @@ def _render_location_targeting(
     e.g. a Boston-hybrid posting scored a flat 3 for a candidate targeting
     only San Francisco / remote, the same score a truly-commutable local
     hybrid role would get (CarGurus Principal Data Analyst, 2026-07-11).
+
+    Renderer-divergence note (issue #364): this helper renders the
+    location-targeting section of the config-shaped candidate-context
+    renderer — see ``build_candidate_context``'s docstring below for why
+    that renderer deliberately does not delegate to the ``profiles``-row
+    renderer in ``jobcannon/host/candidate_context.py`` (unification
+    tracked in issue #420).
     """
     wa = (work_arrangement or "remote").strip().lower()
     # Keep only real places: drop blanks/None AND the "remote" modality token.
@@ -489,6 +496,21 @@ def build_candidate_context(config: dict, profile: dict) -> str:
     the scoring system prompt between FIELD_REINFORCEMENT and FEWSHOT_EXAMPLES
     per spec D-2.1. Output stays under ~600 tokens (~2400 chars) via top-30
     skills + first-6 positions truncation.
+
+    Divergence note (issue #364): a second, slimmer candidate-context
+    renderer exists at ``jobcannon/host/candidate_context.py::
+    build_candidate_context``, keyed on a ``profiles`` DB row rather than
+    ``config["profile"]``. This config-shaped renderer (together with
+    ``_render_location_targeting`` above) is deliberately richer and does
+    NOT delegate to that one: the ``profiles`` table
+    (``db/migrations/m0001_initial_schema.py``'s ``CREATE TABLE
+    profiles``, lines 108-117, plus m0008/m0012) has no location
+    preference hierarchy (``target_locations`` is a flat list and
+    ``workplace_type`` a single scalar), no structured resume positions
+    or education (only free-text ``experience_summary``), no
+    ``industries``, and no ``exclusions``. Delegating from this path
+    would silently drop those prompt inputs. Unification waits on a
+    ``profiles`` schema expansion, tracked in issue #420.
 
     Args:
         config: Application config dict. Reads ``config["profile"]`` for

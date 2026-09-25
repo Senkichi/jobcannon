@@ -26,19 +26,20 @@ it.
 # host has no separate issue tracker entry for the split); private's
 # WI-13/D16 "no production reads of the legacy column" CI guard
 # (tests/test_scan_enabled_split.py) has no host counterpart -- not ported,
-# no ledger row covers it. Most importantly: private's "every instrumented
-# writer that sets scan_enabled = 0 sets ats_scan_enabled = 0 in the same
-# statement" is NOT yet true on this host -- see
-# jobcannon/db/migrations/m0021_wi13_scan_lane_columns.py's own "Stragglers:"
-# section. m0021's backfill sets the split flags ONCE, at migration time;
-# no writer here (jobcannon/db/_company_attribution.py,
-# jobcannon/engine/ats_prober.py, jobcannon/engine/ats_scanner/_run.py) has
-# been instrumented to co-write them yet, unlike private's per-writer
-# discipline. This module still excludes ``scan_enabled`` from
-# ``_TRACKED_FIELDS`` (reading it would defeat the split's whole point), but
-# until that follow-up lands the split columns can drift stale relative to
-# ``scan_enabled`` between writer-instrumentation PRs -- tracked as
-# follow-up, not fixed inline here (out of this row's scope).
+# no ledger row covers it. Private's per-writer discipline IS now true on
+# this host as of #329: every ``scan_enabled`` writer
+# (jobcannon/db/_company_attribution.py,
+# jobcannon/engine/ats_prober.py, jobcannon/engine/ats_scanner/_run.py)
+# co-writes the lane its write is about in the same statement --
+# board-gone demotions co-write ``ats_scan_enabled = FALSE`` while leaving
+# ``careers_scan_enabled`` alone (an ATS demotion must not disable careers
+# discovery), and careers-lane re-enables co-write
+# ``careers_scan_enabled = true`` while leaving ``ats_scan_enabled`` alone
+# (a careers_url write must not resurrect a demoted ATS board). This module
+# still excludes ``scan_enabled`` from ``_TRACKED_FIELDS`` (reading it
+# would defeat the split's whole point). Rows last written before that
+# instrumentation can still carry drifted split values -- m0021's backfill
+# ran once at migration time and is never re-reconciled.
 **Tracked fields.** Six columns: the four ATS-identity/state fields
 (``ats_platform``, ``ats_slug``, ``ats_probe_status``, ``miss_reason``) plus the
 ``ats_scan_enabled`` / ``careers_scan_enabled`` scan-lane flags from the WI-13

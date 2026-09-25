@@ -177,7 +177,7 @@ class HostConfig:
     # Declared here purely so test_render_config.py's declare_on derivation
     # covers it in render.yaml on both services. Default OFF (design note
     # §3: "periodic tick and on-demand route both ship behind the flag").
-    imap_ingest_enabled: str | None = field(
+    imap_ingest_enabled_raw: str | None = field(
         default=None, metadata={"env": "IMAP_INGEST_ENABLED", "declare_on": ("web", "worker")}
     )
 
@@ -188,7 +188,7 @@ def imap_ingest_enabled() -> bool:
     The ONE place IMAP_INGEST_ENABLED's boolean-parsing rule lives --
     jobcannon.host.ingestion_tasks.enqueue_imap_ingest and
     jobcannon.web.sync's Sync-Now route both call this directly (not
-    HostConfig.imap_ingest_enabled above; see that field's comment for why).
+    HostConfig.imap_ingest_enabled_raw above; see that field's comment for why).
     Fail-closed: unset, blank, or anything other than "true"
     (case-insensitive) is False -- an operator must opt in explicitly.
     """
@@ -256,5 +256,5 @@ def load_host_config() -> HostConfig:
         clerk_webhook_signing_secret=os.environ.get("CLERK_WEBHOOK_SIGNING_SECRET", ""),
         render_git_commit=os.environ.get("RENDER_GIT_COMMIT", ""),
         byo_key_kek=(os.environ.get("JC_BYO_KEY_KEK") or "").strip() or None,
-        imap_ingest_enabled=(os.environ.get("IMAP_INGEST_ENABLED") or "").strip() or None,
+        imap_ingest_enabled_raw=(os.environ.get("IMAP_INGEST_ENABLED") or "").strip() or None,
     )

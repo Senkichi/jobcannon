@@ -16,7 +16,7 @@ from pathlib import Path
 
 from jobcannon.engine.email_parsers import extract_with_fallback
 from jobcannon.engine.email_parsers.jobright_parser import parse_jobright_alert
-from jobcannon.host.ingestion.imap_intake import _extract_body, _extract_date
+from jobcannon.host.ingestion._alert_parse import _extract_body, _extract_date
 
 FIXTURE = Path(__file__).parent / "fixtures" / "emails" / "jobright.eml"
 

@@ -28,16 +28,16 @@ analogue here, so this port keeps only the per-sender table.
 # ingest task invocation but is not itself guaranteed globally unique
 # across tenants. No RLS on this table (design note §1.7/§3 name only the
 # cascade FK, not a second RLS policy convention) -- jobcannon/host/
-# ingestion/capture.py is this table's sole writer and always executes with
+# ingestion/_parse_log.py is this table's sole writer and always executes with
 # the caller's authenticated user_id, matching the single-writer-per-table
 # convention (tests/host/test_events_single_writer.py-style AST guard is
-# out of scope for this table; capture.py's docstring states the contract).
+# out of scope for this table; _parse_log.py's docstring states the contract).
 
 # PORT-SEAM: type translation for Postgres (SQLite -> Postgres). INTEGER
 # PRIMARY KEY AUTOINCREMENT -> bigserial PRIMARY KEY. TEXT -> text.
 # processed_at TEXT (ISO8601 string) -> timestamptz (this repo's uniform
 # timestamp convention, see m0001 CREATE TABLE users.created_at and every
-# other migration in this directory) -- capture.py passes an explicit
+# other migration in this directory) -- _parse_log.py passes an explicit
 # aware UTC datetime, mirroring the private column's semantics (recorded
 # at write time, not a DEFAULT now() -- the private code passes it
 # explicitly too, since it wants the recorded time attributable to the
