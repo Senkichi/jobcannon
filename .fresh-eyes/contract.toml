@@ -1,0 +1,21 @@
+# fresh-eyes consumer contract. Spec: fresh-eyes docs/superpowers/specs/2026-09-18-see-and-judge-design.md §6.1
+[app]
+name = "jobcannon"
+platform = "web"
+audience = ".fresh-eyes/audience.md"
+
+[render]
+run = "uv run --no-sync python -m scripts.design_review_shots --bundle {out}"
+# Cache-key hint only (what CAN change a rendered page). Over-matching is safe; under-matching is
+# caught by the scheduled full audit. Docs-, tests- and CI-only commits short-circuit to 0 cost.
+inputs = [
+    "jobcannon/**",
+    "scripts/design_review_shots.py",
+    "scripts/seed_guest_demo.py",
+    "pyproject.toml",
+    "uv.lock",
+    ".fresh-eyes/**",
+]
+content_roots = []
+supports_units_filter = false
+timeout_s = 900
