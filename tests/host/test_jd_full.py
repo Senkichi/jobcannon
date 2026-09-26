@@ -1047,3 +1047,155 @@ def test_record_jd_content_reject_concurrent_appends_both_survive(postgres_test_
                 conn_a.close()
         finally:
             conn_b.close()
+
+
+# --- clear_jd_full: the adjudication heal leg (#360) ------------------------
+
+
+def test_clear_jd_full_heals_and_quarantines(db_conn, posting):
+    """The heal write: stored body and all three verdict columns go NULL in
+    one statement (a previously-stamped adjudication watermark is reset too --
+    a healed row that is re-fetched must be re-judged), and the quarantine
+    reason is appended to unresolved_reasons."""
+    from jobcannon.db._jd_full import clear_jd_full, set_jd_full
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    db_conn.execute(
+        "UPDATE postings SET jd_adjudicated_version = 8 WHERE dedup_key = %s", (posting,)
+    )
+
+    assert clear_jd_full(_svc_conn(db_conn), posting, CLEAN_JD, reason="jd_full_offsite") is True
+    row = db_conn.execute(
+        "SELECT jd_full, jd_content_verdict, jd_content_signal, jd_adjudicated_version, "
+        "unresolved_reasons FROM postings WHERE dedup_key = %s",
+        (posting,),
+    ).fetchone()
+    assert row["jd_full"] is None
+    assert row["jd_content_verdict"] is None
+    assert row["jd_content_signal"] is None
+    assert row["jd_adjudicated_version"] is None
+    assert row["unresolved_reasons"] == ["jd_full_offsite"]
+
+
+def test_clear_jd_full_stale_premise_leaves_row_untouched(db_conn, posting):
+    """CAS premise guard (private issue #1060 Blocker 1, same shape as
+    stamp_adjudicated): if a concurrent writer rewrote jd_full after
+    classification, the heal must NOT delete content the classifier never
+    saw -- the WHERE misses and the row is left completely intact."""
+    from jobcannon.db._jd_full import clear_jd_full, set_jd_full
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    assert (
+        clear_jd_full(
+            _svc_conn(db_conn),
+            posting,
+            "the OLD body the classifier judged, now rewritten",
+            reason="jd_full_offsite",
+        )
+        is False
+    )
+    row = db_conn.execute(
+        "SELECT jd_full, jd_content_verdict, unresolved_reasons FROM postings WHERE dedup_key = %s",
+        (posting,),
+    ).fetchone()
+    assert row["jd_full"] == CLEAN_JD
+    assert row["jd_content_verdict"] == "clean"
+    assert row["unresolved_reasons"] == []
+
+
+def test_clear_jd_full_appends_reason_once_preserving_others(db_conn, posting):
+    """The append shares _record_jd_content_reject's dedupe/malformed-tolerant
+    SQL idiom: an already-present jd-content code is not duplicated and an
+    unrelated reason (e.g. location_missing) survives the heal."""
+    from jobcannon.db._jd_full import clear_jd_full, set_jd_full
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    db_conn.execute(
+        "UPDATE postings SET unresolved_reasons = %s WHERE dedup_key = %s",
+        (Jsonb(["location_missing", "jd_full_offsite"]), posting),
+    )
+    assert clear_jd_full(_svc_conn(db_conn), posting, CLEAN_JD, reason="jd_full_offsite") is True
+    row = db_conn.execute(
+        "SELECT unresolved_reasons FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["unresolved_reasons"] == ["location_missing", "jd_full_offsite"]
+
+
+def test_clear_jd_full_rejects_non_contract_reason(db_conn, posting):
+    """reason is load-bearing quarantine marking: an out-of-contract code
+    would leave a cleared row that still re-selects for adjudication (the
+    eligibility filter only excludes JD_CONTENT_REASON_CODES members) -- a
+    silent re-select/re-pay-forever loop. Fail loud instead of healing."""
+    from jobcannon.db._jd_full import clear_jd_full, set_jd_full
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    with pytest.raises(ValueError, match="not a jd-content reason code"):
+        clear_jd_full(_svc_conn(db_conn), posting, CLEAN_JD, reason="location_missing")
+    row = db_conn.execute(
+        "SELECT jd_full, unresolved_reasons FROM postings WHERE dedup_key = %s", (posting,)
+    ).fetchone()
+    assert row["jd_full"] == CLEAN_JD
+    assert row["unresolved_reasons"] == []
+
+
+def test_clear_jd_full_missing_row_returns_false(db_conn):
+    """A dedup_key with no postings row misses the WHERE like a stale
+    premise -- same honest 'not applied' signal."""
+    from jobcannon.db._jd_full import clear_jd_full
+
+    assert (
+        clear_jd_full(_svc_conn(db_conn), "no-such-dedup-key", "any body", reason="jd_full_offsite")
+        is False
+    )
+
+
+def test_clear_jd_full_then_refetch_self_reverses(db_conn, posting):
+    """A healed row that is later re-fetched with good content is fully
+    restored through the normal write path: set_jd_full stores the body,
+    re-stamps the verdict, and clears the quarantine reason in the same
+    UPDATE -- the heal is a never-fetched-plus-marker state, not a
+    tombstone."""
+    from jobcannon.db._jd_full import clear_jd_full, set_jd_full
+
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    assert clear_jd_full(_svc_conn(db_conn), posting, CLEAN_JD, reason="jd_full_offsite") is True
+    assert (
+        set_jd_full(
+            _svc_conn(db_conn), posting, CLEAN_JD_V2, source="test", title="Staff Data Engineer"
+        )
+        is True
+    )
+    row = db_conn.execute(
+        "SELECT jd_full, jd_content_verdict, jd_adjudicated_version, unresolved_reasons "
+        "FROM postings WHERE dedup_key = %s",
+        (posting,),
+    ).fetchone()
+    assert row["jd_full"] == CLEAN_JD_V2
+    assert row["jd_content_verdict"] == "clean"
+    assert row["jd_adjudicated_version"] is None
+    assert row["unresolved_reasons"] == []

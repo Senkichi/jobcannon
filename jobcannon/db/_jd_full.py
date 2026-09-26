@@ -141,6 +141,24 @@ if the write raises, that block's __exit__ rolls back to the savepoint and
 re-raises, leaving the connection usable for the caller's next statement
 instead of stuck in Postgres's aborted-transaction state. commit_unless_nested()
 still runs immediately after the block, unchanged.
+
+``clear_jd_full`` (added for the L-0189 heal fast-follow, issue #360): the
+adjudication heal leg — the private original's ``_heal_offsite`` — is the OTHER
+half of this module's column ownership. The design addendum's §1a.3 literal
+port would have inlined the ``jd_content_verdict`` / ``jd_content_signal`` /
+``jd_adjudicated_version`` NULL-invalidation into the backfill driver itself,
+creating a second writer of exactly the columns this module owns; §7 Q-1's
+sanctioned fix (its Rec (b)) is this function, which keeps the NULL path in
+the same module as the write path. It also folds in the quarantine-reason
+``unresolved_reasons`` append (the column's other jd-content writer,
+``_record_jd_content_reject``, lives here too) so the whole content-side heal
+is ONE atomic statement — no reader can observe a half-healed row (cleared
+body but stale verdict, or cleared verdict but missing quarantine marker).
+The scoring-tuple half of the private heal (its ``scoring_model`` NULL) is
+NOT folded in: those columns are owned by
+``_assessment_writer.invalidate_job_score``, so the backfill driver composes
+the two writers under one ambient transaction rather than this function
+reaching across the ownership boundary.
 """
 
 from __future__ import annotations
@@ -367,3 +385,94 @@ def _record_jd_content_reject(raw: Any, dedup_key: str, reason: str) -> None:
             "WHERE dedup_key = %(dedup_key)s",
             {"reason": reason, "dedup_key": dedup_key},
         )
+
+
+def clear_jd_full(
+    conn: Any,
+    dedup_key: str,
+    expected_jd_full: str,
+    *,
+    reason: str,
+) -> bool:
+    """Remove a stored jd_full the adjudicator rejected, quarantining the row.
+
+    The content-side half of the private original's ``_heal_offsite``
+    (jd_adjudicator.py:149-202), folded into this module per the design
+    addendum's §7 Q-1 Rec (b) so the ``jd_content_verdict`` /
+    ``jd_content_signal`` / ``jd_adjudicated_version`` NULL-invalidation path
+    stays single-writer-owned here (see this module's docstring). One atomic
+    UPDATE: ``jd_full`` and all three verdict columns go NULL together and the
+    quarantine ``reason`` is appended to ``unresolved_reasons`` via the same
+    dedupe/malformed-tolerant SQL idiom as ``_record_jd_content_reject`` above
+    — no reader can observe the row half-healed.
+
+    A healed row is a *never-fetched* row plus a quarantine marker: a later
+    re-fetch through ``set_jd_full`` stores the new body, re-stamps the verdict,
+    and clears the reason code in its own UPDATE, so the heal self-reverses the
+    moment good content arrives. Until then the row is ineligible for
+    re-adjudication twice over — ``select_adjudication_candidates`` requires a
+    non-blank ``jd_full`` AND no ``JD_CONTENT_REASON_CODES`` member — which is
+    what stops the count-but-don't-apply loop (re-selecting and re-paying an
+    LLM call for the same REJECT row every tick) that this function exists to
+    close (issue #360).
+
+    Premise-guarded exactly like ``_jd_adjudication.stamp_adjudicated``
+    (private issue #1060, Blocker 1): the UPDATE only fires while ``jd_full``
+    still equals ``expected_jd_full`` — the exact body the classifier judged.
+    A concurrent ``set_jd_full`` that rewrote the body between classification
+    and this write-back makes the WHERE miss; deleting unseen content would be
+    worse than not healing, so the caller counts the miss as ``skipped_stale``
+    and the row is re-classified against its current content next tick.
+
+    Args:
+        conn: pooled connection (``.raw`` unwrapped) or a bare psycopg
+            connection, matching ``set_jd_full``'s dispatch.
+        dedup_key: the posting's dedup key.
+        expected_jd_full: the body text the classifier evaluated — the CAS
+            premise this write is conditioned on.
+        reason: the ``unresolved_reasons`` quarantine code to append. Must be
+            a ``JD_CONTENT_REASON_CODES`` member — it is what keeps the healed
+            row out of the eligibility SELECT, and an out-of-contract value
+            would leave a cleared row that silently re-selects (and re-pays an
+            LLM call) forever.
+
+    Returns:
+        True if the row was healed; False if the premise guard missed (stale
+        content) or ``dedup_key`` matched no row.
+
+    Raises:
+        ValueError: if ``reason`` is not a ``JD_CONTENT_REASON_CODES`` member.
+            Loud rather than ``_record_jd_content_reject``-style silent-return:
+            skipping the whole heal on a bad code would re-create the
+            re-select-forever loop this function exists to close, invisibly.
+    """
+    if reason not in JD_CONTENT_REASON_CODES:
+        raise ValueError(
+            f"clear_jd_full: reason {reason!r} is not a jd-content reason code "
+            f"({sorted(JD_CONTENT_REASON_CODES)}) -- a healed-but-unquarantined "
+            "row would re-enter the adjudication cohort and re-pay the decision "
+            "every tick"
+        )
+    with with_write_txn(conn) as raw:
+        cur = raw.execute(
+            "UPDATE postings SET "
+            "jd_full = NULL, "
+            "unresolved_reasons = "
+            "(CASE WHEN jsonb_typeof(unresolved_reasons) = 'array' "
+            "THEN unresolved_reasons ELSE '[]'::jsonb END) "
+            "|| (CASE WHEN "
+            "(CASE WHEN jsonb_typeof(unresolved_reasons) = 'array' "
+            "THEN unresolved_reasons ELSE '[]'::jsonb END) "
+            "@> jsonb_build_array(%(reason)s::text) "
+            "THEN '[]'::jsonb ELSE jsonb_build_array(%(reason)s::text) END), "
+            "jd_content_verdict = NULL, "
+            "jd_content_signal = NULL, "
+            "jd_adjudicated_version = NULL "
+            "WHERE dedup_key = %(dedup_key)s AND jd_full = %(expected_jd_full)s",
+            {
+                "reason": reason,
+                "dedup_key": dedup_key,
+                "expected_jd_full": expected_jd_full,
+            },
+        )
+    return cur.rowcount > 0

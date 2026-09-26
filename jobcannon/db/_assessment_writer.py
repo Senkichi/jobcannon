@@ -72,10 +72,11 @@ Classification is ALWAYS derived here at persist time via
 # (#1742 instrumentation) and stamped ``classification_rule_version`` /
 # ``sub_score_sum`` / ``classification_rank`` on every call.
 # ``jd_content_verdict`` / ``jd_content_signal`` are already owned by
-# ``jobcannon/db/_jd_full.py::set_jd_full`` on this host (grep-confirmed:
-# the only writer of those two columns in this tree) -- writing them here
-# too would create the second-writer hazard the private CI grep gate
-# exists to catch, so this port leaves them alone entirely.
+# ``jobcannon/db/_jd_full.py`` on this host (grep-confirmed: the only writer
+# of those two columns in this tree -- ``set_jd_full`` on the write path,
+# ``clear_jd_full`` on the adjudication-heal NULL path, #360) -- writing
+# them here too would create the second-writer hazard the private CI grep
+# gate exists to catch, so this port leaves them alone entirely.
 # ``classification_rule_version`` has no host column (this migration does
 # not add one -- see m0015's docstring); ``sub_score_sum`` /
 # ``classification_rank`` are private-side sort-path materialization with
@@ -300,9 +301,10 @@ def invalidate_job_score(conn: Any, dedup_key: str) -> bool:
     # ``jd_content_signal`` / ``jd_adjudicated_version`` /
     # ``classification_rule_version`` / ``sub_score_sum`` /
     # ``classification_rank`` here. The first three are owned by
-    # ``_jd_full.py::set_jd_full`` on this host (see module docstring) --
-    # touching them here would be a second writer. The last three have no
-    # host column (see module docstring). None are referenced.
+    # ``_jd_full.py`` on this host (``set_jd_full`` / ``clear_jd_full`` --
+    # see module docstring) -- touching them here would be a second writer.
+    # The last three have no host column (see module docstring). None are
+    # referenced.
 
     Returns:
         True if a row was matched and its scoring tuple cleared; False if
