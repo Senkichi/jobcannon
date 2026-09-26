@@ -9,24 +9,27 @@ writer. ``select_adjudication_candidates`` is the batched eligibility SELECT the
 backfill driver (``jobcannon/host/jd_adjudication_backfill.py``) uses to build its
 work batch.
 
-# PORT-SEAM: private ``_heal_offsite`` (jd_adjudicator.py:149-202) is NOT ported in
-# this unit. It is not a jd_adjudicated_version writer (it only NULLs jd_full,
-# which cascades the watermark to NULL, never sets a value) so it does not gate
-# the #183 guard. Porting it as the design addendum's §1a.3 inline UPDATE would
-# NULL jd_content_verdict/jd_content_signal/jd_adjudicated_version from a second
-# module -- exactly the second-writer condition _jd_full.py's own module
+# PORT-SEAM: private ``_heal_offsite`` (jd_adjudicator.py:149-202) is NOT ported
+# in this module -- it lives in ``_jd_full.py::clear_jd_full`` (issue #360, the
+# fast-follow the PR body's Modularity note scheduled). It is not a
+# jd_adjudicated_version writer (it only NULLs jd_full, which cascades the
+# watermark to NULL, never sets a value) so it did not gate the #183 guard.
+# Porting it as the design addendum's §1a.3 literal inline UPDATE would have
+# NULLed jd_content_verdict/jd_content_signal/jd_adjudicated_version from a
+# second module -- exactly the second-writer condition _jd_full.py's own module
 # docstring and _assessment_writer.py's `invalidate_job_score` PORT-SEAM (see
-# that module) exist to prevent; the addendum's own §7 Q-1 leaves the correct
-# surface (fold into a new `_jd_full.py::clear_jd_full`, its Rec (b)) as an open,
-# undesigned question. §7 Q-2 explicitly sanctions peeling `heal_offsite` + the
-# driver's heal leg into a fast-follow once Q-1 lands, confirming this still
-# unblocks L-0259 (the scoring wiring this writer exists for). See the PR body's
-# Modularity note.
+# that module) exist to prevent. §7 Q-1's fix (its Rec (b)) is what landed: the
+# content-side heal is folded into `_jd_full.py::clear_jd_full`, keeping the
+# NULL path in the same module as the write path; the score-retraction half is
+# composed by the driver calling `_assessment_writer.invalidate_job_score`,
+# that tuple's own single writer. §7 Q-2 sanctioned the peel precisely because
+# this landing shape was the intended end state.
 
 column-ownership amendment (over ``_assessment_writer.py``'s existing note): that
 module's ``invalidate_job_score`` declines to touch ``jd_content_verdict`` /
-``jd_content_signal`` / ``jd_adjudicated_version`` because ``_jd_full.py::set_jd_full``
-owns them -- but only the NULL-invalidation path. Nothing in the repo stamped a
+``jd_content_signal`` / ``jd_adjudicated_version`` because ``_jd_full.py``
+owns them -- the stamp/conditional-NULL path via ``set_jd_full`` and the heal
+NULL path via ``clear_jd_full``. Nothing in the repo stamped a
 NON-NULL ``jd_adjudicated_version`` before this module; ``stamp_adjudicated`` is the
 first and sole writer of that value, so it does not create a second writer of the
 column, it creates the FIRST one. Reader of either module: see this note and
