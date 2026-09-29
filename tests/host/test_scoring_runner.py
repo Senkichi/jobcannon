@@ -208,10 +208,11 @@ def test_run_scoring_scores_a_stamped_job_and_reads_classification_back(scoring_
 
 def test_run_scoring_skips_excluded_job_without_touching_pipeline_status(scoring_pool, monkeypatch):
     """Proves the dropped update_pipeline_status auto-dismiss leg (design
-    note L-0263 seam #4, gated per the note's own authorized alternative):
-    an excluded job is skipped, never scored, and never reaches
-    score_and_persist_job -- no pipeline_status write is attempted at all
-    (jobcannon.db._user_actions remains the sole writer of that table)."""
+    note L-0263 seam #4 -- the settled owner ruling of 2026-09-29,
+    docs/design/design-hooks-scoring.md): an excluded job is skipped,
+    never scored, and never reaches score_and_persist_job -- no
+    pipeline_status write is attempted at all (jobcannon.db._user_actions
+    remains the sole writer of that table)."""
     with scoring_pool.connection_factory() as conn:
         raw = conn.raw
         cid = _insert_company(raw, name="exclude-co")

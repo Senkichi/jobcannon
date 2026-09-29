@@ -73,8 +73,11 @@ _LIVENESS_PREFETCH_BOUND = 4
 # job_finder.web.vram_query (rated DIES -- no local GPU to probe on a
 # hosted worker). Unparseable/non-positive values fall back to 1 (serial)
 # rather than raising -- a config typo must degrade the scoring path, never
-# crash it. Keeps the in-process thread pool for this port; decomposing
-# into per-job procrastinate tasks is filed as FU-3, not applied here.
+# crash it. Keeps the in-process thread pool for this port; decomposing it
+# into per-job procrastinate tasks was ruled DEFERRED by the owner
+# (2026-09-29, docs/design/design-hooks-scoring.md §4/§5 Q-B entry) --
+# revisit only if scoring throughput or retry behavior becomes an observed
+# problem.
 def _worker_count() -> int:
     raw = os.environ.get("JC_SCORE_WORKERS", "1")
     try:
@@ -270,14 +273,17 @@ def _process_one_job(
             if excluded:
                 # PORT-SEAM: private's auto-dismiss update_pipeline_status(...)
                 # call (using rule_tag/detailed_text as the evidence string)
-                # is dropped here -- update_pipeline_status has no public
-                # target. jobcannon.db._persistence excludes it by name;
-                # jobcannon.db._user_actions is the sole writer of
-                # pipeline_status (per-user, closed {dismissed, applied}
-                # vocabulary) -- structurally incompatible with private's
-                # global, open-vocabulary usage here. This is the design
-                # note's own authorized alternative ("...or gate that leg",
-                # L-0263 seam #4): excluded jobs are simply skipped, not
+                # is dropped here -- a settled ruling, not a provisional
+                # gate: the owner ruled 2026-09-29 (docs/design/
+                # design-hooks-scoring.md, L-0263 seam #4 entry) that
+                # auto-dismiss stays host-side only. The exclusion verdict
+                # is recomputed deterministically by should_exclude from
+                # profiles.exclusions, so no per-posting exclusion row is
+                # written and no user-facing pipeline_status transition
+                # occurs -- jobcannon.db._user_actions remains the sole
+                # writer of pipeline_status (per-user, closed
+                # {dismissed, applied} vocabulary) and no system-authored
+                # writer is added. Excluded jobs are simply skipped, not
                 # persisted as 'dismissed'.
                 _increment_summary(summary, "skipped_no_jd", summary_lock)
                 return
@@ -357,9 +363,12 @@ def _process_one_job(
                     )
                     # PORT-SEAM: private's auto-archive update_pipeline_status(
                     # ..., "archived", ...) call is dropped here -- same
-                    # no-public-target rationale as the auto-dismiss drop
-                    # above. persist_job_expiry_state (just above) already
-                    # wrote expiry_status='expired', which is the shared-
+                    # settled ruling as the auto-dismiss drop above (owner
+                    # ruling 2026-09-29, docs/design/design-hooks-scoring.md,
+                    # L-0263 seam #4 entry): auto-archive stays host-side
+                    # only, never a user-facing pipeline_status transition.
+                    # persist_job_expiry_state (just above) already wrote
+                    # expiry_status='expired', which is the shared-
                     # corpus signal downstream freshness/ranking consumers
                     # key on to suppress dead postings.
                     _increment_summary(summary, "skipped_dead", summary_lock)
