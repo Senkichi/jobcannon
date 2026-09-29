@@ -230,6 +230,58 @@ def test_check_rate_limit_noop_when_both_caps_disabled(db_conn):
     )
 
 
+# --- rolling windows anchor to real time (PR #461 review) --------------
+
+
+def test_check_quota_window_anchors_to_real_time_not_tx_start(db_conn):
+    """Regression for the #461 review finding: the quota window was
+    ``created_at >= now() - interval '24 hours'``, and Postgres freezes
+    now() at TRANSACTION start. check_quota runs on the caller's conn
+    inside its ambient transaction, which stays open across dispatches --
+    an old transaction stretched its "24h" window and counted spend long
+    since outside it.
+
+    db_conn's transaction opened at fixture setup; the row below is
+    planted inside it at exactly ``now() - 24h`` -- i.e. this
+    transaction's own start minus the window. That instant is INSIDE the
+    window only when measured from the frozen transaction clock (the
+    boundary is inclusive, so the old SQL counted it and raised); real
+    time at check time is strictly later, so a real-time boundary
+    excludes it and the $1 cap clears. Fails on the now() implementation;
+    impl-agnostic about the replacement (clock_timestamp() or a Python
+    boundary both pass).
+    """
+    _seed_user(db_conn, "tu-rt-quota")
+    tu.record_usage(db_conn, user_id="tu-rt-quota", provider="groq", model="m", cost_usd=5.0)
+    _age_rows(db_conn, "tu-rt-quota", "interval '24 hours'")
+
+    tu.check_quota(
+        db_conn, "tu-rt-quota", limits=tu.TenantUsageLimits(rolling_day_spend_cap_usd=1.0)
+    )
+
+
+def test_check_rate_limit_minute_window_anchors_to_real_time_not_tx_start(db_conn):
+    """Same regression on the 60-second rate window: the row is planted
+    at exactly ``now() - 60s`` inside db_conn's open transaction --
+    inside the per-minute window only under the frozen transaction
+    clock, outside it under real time. A cap of 1 must therefore clear;
+    the old now() SQL counted the row and raised
+    TenantRateLimitExceededError.
+    """
+    _seed_user(db_conn, "tu-rt-rate")
+    tu.record_usage(db_conn, user_id="tu-rt-rate", provider="groq", model="m", cost_usd=0.0)
+    _age_rows(db_conn, "tu-rt-rate", "interval '60 seconds'")
+
+    tu.check_rate_limit(
+        db_conn,
+        "tu-rt-rate",
+        "groq",
+        limits=tu.TenantUsageLimits(
+            per_provider_calls_per_minute=1, per_provider_calls_per_day=None
+        ),
+    )
+
+
 # --- limits_from_config ------------------------------------------------
 
 

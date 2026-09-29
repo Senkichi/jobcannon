@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, fields
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from jobcannon.db.pool import commit_unless_nested, unwrap_raw
@@ -73,8 +74,25 @@ class TenantRateLimitExceededError(RuntimeError):
 # timezone choice the deployment does not otherwise make. A trailing
 # window is monotonic, unambiguous, and cannot be gamed by scheduling
 # calls around midnight.
-_SPEND_WINDOW_SQL = "interval '24 hours'"
-_RATE_MINUTE_WINDOW_SQL = "interval '60 seconds'"
+_SPEND_WINDOW = timedelta(hours=24)
+_RATE_MINUTE_WINDOW = timedelta(seconds=60)
+
+
+def _utcnow() -> datetime:
+    """Seam for tests; UTC wall clock, aware so psycopg binds it as an
+    exact timestamptz regardless of the session TimeZone setting.
+
+    The gates' rolling windows MUST anchor here -- real time at check
+    time -- not to SQL ``now()``/``CURRENT_TIMESTAMP``, which Postgres
+    freezes at TRANSACTION start. Both gates run on the caller's conn
+    inside its ambient transaction, and that transaction can stay open
+    across many dispatches: anchoring to ``now()`` would stretch every
+    window by the transaction's age and spuriously count rows long since
+    outside the window (``clock_timestamp()`` is the SQL-side equivalent;
+    a Python boundary additionally keeps both FILTER anchors pinned to
+    one instant and injectable for tests).
+    """
+    return datetime.now(UTC)
 
 
 @dataclass(frozen=True)
@@ -230,10 +248,11 @@ def check_quota(
         return
     raw = unwrap_raw(conn)
     _set_tenant(raw, user_id)
+    day_start = _utcnow() - _SPEND_WINDOW
     row = raw.execute(
         "SELECT COALESCE(SUM(cost_usd), 0) AS spend FROM model_usage_ledger "
-        f"WHERE user_id = %s AND created_at >= now() - {_SPEND_WINDOW_SQL}",
-        (user_id,),
+        "WHERE user_id = %s AND created_at >= %s",
+        (user_id, day_start),
     ).fetchone()
     spend = float(row["spend"])
     if spend >= cap:
@@ -263,12 +282,13 @@ def check_rate_limit(
         return
     raw = unwrap_raw(conn)
     _set_tenant(raw, user_id)
+    now = _utcnow()
     row = raw.execute(
-        "SELECT COUNT(*) FILTER (WHERE created_at >= now() - "
-        f"{_RATE_MINUTE_WINDOW_SQL}) AS per_minute, COUNT(*) AS per_day "
+        "SELECT COUNT(*) FILTER (WHERE created_at >= %s) AS per_minute, "
+        "COUNT(*) AS per_day "
         "FROM model_usage_ledger "
-        f"WHERE user_id = %s AND provider = %s AND created_at >= now() - {_SPEND_WINDOW_SQL}",
-        (user_id, provider),
+        "WHERE user_id = %s AND provider = %s AND created_at >= %s",
+        (now - _RATE_MINUTE_WINDOW, user_id, provider, now - _SPEND_WINDOW),
     ).fetchone()
     if minute_cap is not None and row["per_minute"] >= minute_cap:
         raise TenantRateLimitExceededError(
