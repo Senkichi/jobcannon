@@ -42,24 +42,29 @@
 #     tenant A's decrypted API key in a closure/attribute -- to tenant B's
 #     call). A fresh adapter is constructed every call, bound to a
 #     freshly-built per-call CredentialResolver.
-#   - cost_gate / BudgetExceededError / FREE_PROVIDERS (private:
-#     claude_client.py) do not carry: those gate an OWNER's daily spend
-#     budget, which has no meaning under BYO-key (every REST call bills the
-#     TENANT's own key). Dropped entirely rather than ported-and-unused.
+#   - cost_gate / BudgetExceededError (private: claude_client.py) do not
+#     carry AS OWNER-BUDGET semantics: an owner's daily spend budget has no
+#     meaning under BYO-key (every REST call bills the TENANT's own key).
+#     Issue #333 replaced them with a per-TENANT quota gate --
+#     jobcannon/host/tenant_usage.py's check_quota, enforced in call_model
+#     below (TenantQuotaExceededError). FREE_PROVIDER_NAMES's free-provider
+#     zeroing DOES carry -- via tenant_usage.recorded_cost_usd, applied at
+#     the record_cost/record_usage boundary so a ledger row never stores a
+#     free provider's notional cost.
 #   - _daily_usage / _check_daily_limit / _increment_usage /
 #     _init_usage_from_db / _ensure_usage_current (private's in-process
 #     daily-request-cap tracker) do not carry: private bootstraps from a
-#     `scoring_costs` table this host does not have (grepped: no migration
-#     creates it), so a verbatim port would crash on first call. daily_limits
-#     is always {} hosted (no owner config.yaml source for it), which made
-#     private's own _check_daily_limit a no-op in that case anyway. Rate-limit
-#     ownership is deferred (Modularity note item 4: per-(user_id, provider)
-#     limits from a real per-tenant ledger, filed as a follow-up, not
-#     invented here).
+#     `scoring_costs` table this host did not have, AND a process-global
+#     counter would leak across tenants and across gunicorn workers. Issue
+#     #333 landed the intended replacement: per-(user_id, provider) rate
+#     limits read from the model_usage_ledger table --
+#     tenant_usage.check_rate_limit, enforced per chain entry in call_model
+#     below.
 #   - _maybe_record_cost is replaced by the module-level record_cost() below:
-#     same free/paid cost_usd-zeroing semantics, but a structured-log sink
-#     instead of an INSERT into `scoring_costs` (which does not exist on this
-#     host -- see the modularity note on record_cost's own docstring).
+#     same free/paid cost_usd-zeroing semantics (real since issue #333 via
+#     tenant_usage.recorded_cost_usd), a structured-log sink on every call,
+#     plus -- for a tenant-scoped event -- an INSERT into model_usage_ledger
+#     via tenant_usage.record_usage.
 #   - privacy_sensitive / consented_providers filtering does not carry:
 #     that gates the OWNER's single-user config.yaml consent list; a hosted,
 #     per-tenant consent model is a separate, undesigned feature.
@@ -83,6 +88,7 @@ from jobcannon.engine.model_types import (
     ProviderTruncationExhaustedError,
 )
 from jobcannon.host import credentials as _credentials
+from jobcannon.host import tenant_usage as _tenant_usage
 from jobcannon.host.provider_catalog import PROVIDER_DEFAULTS
 
 logger = logging.getLogger(__name__)
@@ -509,19 +515,27 @@ def record_cost(
 ) -> None:
     """Record one cost/usage event.
 
-    ADAPTED from private's _maybe_record_cost: this host has no
-    `scoring_costs` table (grepped: no migration creates it; the two
-    references in jobcannon/engine/data_enricher.py -- _serpapi_daily_calls_used
-    / _record_serpapi_call -- query one that does not exist on this host and
-    are themselves pre-existing, out-of-scope dead code, unrelated to this
-    port). The shape of a real per-tenant cost table (user_id column?
-    per-tenant or per-provider granularity?) is not yet decided, so this is
-    a structured-log sink only.
+    ADAPTED from private's _maybe_record_cost. Issue #333 landed the
+    per-tenant accounting follow-up its docstring used to defer: this is
+    a structured-log sink on every call (the always-on audit trail), PLUS
+    a ``model_usage_ledger`` row via jobcannon.host.tenant_usage.record_usage
+    whenever the event is tenant-scoped (``user_id`` present) and the DB
+    pool is open.
 
-    Modularity follow-up (item 4, HIGH-ish): factor a real
-    per-tenant spend/rate-accounting module once that shape is decided, and
-    wire it in here without changing this function's signature or any
-    caller.
+    Deliberately STILL no ``conn`` parameter: ScanServices.record_cost
+    callers (e.g. a future SerpAPI-enrichment quota counter) share this
+    one seam without each supplying DB access. The ledger write instead
+    checks out its own pooled connection, which also makes it durable
+    independent of the caller's transaction -- a rollback on the caller's
+    conn can never silently erase a call the tenant's provider key was
+    already billed for. Any write failure (pool closed, DB error) degrades
+    to the log line with a WARNING: cost recording must never break a
+    dispatch, the same contract the call sites' own try/except documents.
+
+    ``cost_usd`` is normalized through tenant_usage.recorded_cost_usd
+    BEFORE the log line, so the logged figure is the recorded figure --
+    0.0 for free providers, never a notional amount charged to a tenant
+    whose calls cost nothing.
 
     Raises:
         ValueError: provider is empty (U6 guard, ported from private --
@@ -531,6 +545,7 @@ def record_cost(
         raise ValueError(
             f"record_cost: provider must be non-empty (job_id={job_id}, purpose={purpose}, model={model})"
         )
+    cost_usd = _tenant_usage.recorded_cost_usd(provider, cost_usd)
     logger.info(
         "record_cost: provider=%s model=%s cost_usd=%.6f input_tokens=%d "
         "output_tokens=%d job_id=%s purpose=%s user_id=%s schema_valid=%s",
@@ -544,6 +559,40 @@ def record_cost(
         user_id,
         schema_valid,
     )
+    if not user_id:
+        return  # no tenant to scope a ledger row to -- the log line is the record
+    try:
+        from jobcannon.db import pool as _pool
+
+        if not _pool.is_open():
+            logger.warning(
+                "record_cost: model_usage_ledger write skipped -- DB pool is not "
+                "open in this process (user_id=%s provider=%s)",
+                user_id,
+                provider,
+            )
+            return
+        # Bounded checkout: a wedged pool must not stall a dispatch on
+        # accounting (the same fail-open reasoning as the except below).
+        with _pool.get_pool().connection(timeout=5.0) as ledger_conn:
+            _tenant_usage.record_usage(
+                ledger_conn,
+                user_id=user_id,
+                provider=provider,
+                model=model,
+                cost_usd=cost_usd,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                job_id=job_id,
+                purpose=purpose,
+                schema_valid=schema_valid,
+            )
+    except Exception:
+        logger.warning(
+            "record_cost: model_usage_ledger write failed (non-fatal) -- the "
+            "event is preserved in the log line above",
+            exc_info=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +656,15 @@ def call_model(
         ProviderCascadeTimeoutError: The cascade's monotonic deadline was
             exceeded before an attempt, sleep, or retry that would
             otherwise proceed.
+        jobcannon.host.tenant_usage.TenantQuotaExceededError: The tenant's
+            rolling-24h ledger spend reached the configured per-tenant cap
+            before any provider attempt -- issue #333's per-tenant quota
+            gate, replacing the private repo's owner-budget cost_gate.
+        jobcannon.host.tenant_usage.TenantRateLimitExceededError: EVERY
+            provider in the resolved chain was skipped because the tenant's
+            per-(user_id, provider) ledger rate reached its limit. A single
+            rate-limited provider does not raise -- the cascade skips it
+            and falls through to the next entry.
     """
     available_providers: list[str] = []
     if user_id:
@@ -644,6 +702,16 @@ def call_model(
     # populated when user_id is truthy -- so user_id is guaranteed truthy here.
     resolve_credential = _credentials.build_credential_resolver(conn, user_id)
 
+    # Issue #333: per-tenant accounting over model_usage_ledger. check_quota
+    # is the per-tenant quota gate that replaces the private repo's
+    # owner-budget cost_gate -- one ledger read per dispatch, raising
+    # TenantQuotaExceededError before any provider attempt when the
+    # tenant's rolling-24h spend is capped. Per-(user_id, provider) rate
+    # limits fire inside the loop below via check_rate_limit -- read from
+    # the ledger, never a process-global counter.
+    _tenant_limits = _tenant_usage.limits_from_config(config)
+    _tenant_usage.check_quota(conn, user_id, limits=_tenant_limits)
+
     chain: list[dict] = [{"provider": provider_name, "model": model}] + list(fallback_chain)
 
     logger.info(
@@ -657,10 +725,18 @@ def call_model(
 
     degenerate_fallback: ModelResult | None = None
     _degenerate_rejections: dict[str, int] = {}
+    rate_limited_providers: list[str] = []
 
     for entry in chain:
         entry_provider = entry["provider"]
         entry_model = entry["model"]
+
+        try:
+            _tenant_usage.check_rate_limit(conn, user_id, entry_provider, limits=_tenant_limits)
+        except _tenant_usage.TenantRateLimitExceededError as exc:
+            rate_limited_providers.append(entry_provider)
+            logger.warning("Cascade: %s skipped: %s", entry_provider, exc)
+            continue
 
         try:
             adapter = _make_adapter(entry_provider, config, resolve_credential)
@@ -794,7 +870,18 @@ def call_model(
             )
         return degenerate_fallback
 
+    if len(rate_limited_providers) == len(chain):
+        # Every entry was skipped for rate limiting -- nothing was even
+        # attempted, so "exhausted" would misdescribe the failure. Raise
+        # the tenant-scoped signal the caller can distinguish from a
+        # provider outage.
+        raise _tenant_usage.TenantRateLimitExceededError(
+            f"call_model: every provider in cascade is rate-limited for this "
+            f"tenant (tier={tier!r}, providers={rate_limited_providers})"
+        )
+
     raise ProviderCascadeExhaustedError(
         f"All providers in cascade exhausted or unavailable for tier: {tier!r}. "
         f"Providers tried: {[e['provider'] for e in chain]}"
+        + (f"; skipped (rate-limited): {rate_limited_providers}" if rate_limited_providers else "")
     )

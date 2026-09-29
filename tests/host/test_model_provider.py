@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import psycopg
 import pytest
 
 from jobcannon.engine.model_types import (
@@ -26,6 +27,8 @@ from jobcannon.engine.model_types import (
     ProviderTruncationExhaustedError,
 )
 from jobcannon.host import model_provider as mp
+
+from tests.host.conftest import requires_postgres
 
 
 # ---------------------------------------------------------------------------
@@ -435,9 +438,11 @@ def _ok_result(provider="gemini", model="gemini-2.5-flash", data=None) -> ModelR
 
 @pytest.fixture()
 def _no_db_credentials(monkeypatch):
-    """Stub the two DB-touching seams call_model reaches for: DB access
-    itself is out of scope for these orchestration tests (covered by
-    tests/host/test_credentials.py and test_byo_key_credentials.py)."""
+    """Stub the DB-touching seams call_model reaches for: credential lookup,
+    resolver build, and (issue #333) the tenant_usage quota/rate gates --
+    DB access itself is out of scope for these orchestration tests (covered
+    by tests/host/test_credentials.py, test_byo_key_credentials.py, and the
+    gates' own ledger reads by test_tenant_usage.py against real Postgres)."""
 
     def fake_get_active_providers(conn, user_id):
         return conn["available_providers"]
@@ -450,6 +455,9 @@ def _no_db_credentials(monkeypatch):
         return lambda provider: "fake-api-key"
 
     monkeypatch.setattr(mp._credentials, "build_credential_resolver", fake_build_resolver)
+
+    monkeypatch.setattr(mp._tenant_usage, "check_quota", lambda *a, **kw: None)
+    monkeypatch.setattr(mp._tenant_usage, "check_rate_limit", lambda *a, **kw: None)
 
 
 def test_call_model_happy_path_returns_result_and_records_cost(monkeypatch, _no_db_credentials):
@@ -555,3 +563,201 @@ def test_call_model_timeout_raises_cascade_timeout_error(monkeypatch, _no_db_cre
         mp.call_model(
             "quick", "sys", [{"role": "user", "content": "hi"}], conn, {}, user_id="u1", timeout=5.0
         )
+
+
+# ---------------------------------------------------------------------------
+# Per-tenant quota + rate gates (issue #333) -- gate wiring is exercised
+# here with the ledger SQL monkeypatched out; the SQL itself is covered
+# against real Postgres by tests/host/test_tenant_usage.py.
+# ---------------------------------------------------------------------------
+
+
+def test_call_model_quota_gate_propagates_and_no_provider_attempted(
+    monkeypatch, _no_db_credentials
+):
+    """A capped tenant must be refused BEFORE any adapter is built -- the
+    per-tenant replacement for the private repo's owner-budget cost_gate."""
+
+    def over_quota(conn, user_id, *, limits=None):
+        raise mp._tenant_usage.TenantQuotaExceededError("over cap")
+
+    monkeypatch.setattr(mp._tenant_usage, "check_quota", over_quota)
+    adapter = _FakeAdapter(result=_ok_result())
+    monkeypatch.setattr(mp, "_make_adapter", lambda *a: adapter)
+
+    conn = {"available_providers": ["gemini"]}
+    with pytest.raises(mp._tenant_usage.TenantQuotaExceededError):
+        mp.call_model("quick", "sys", [{"role": "user", "content": "hi"}], conn, {}, user_id="u1")
+    assert adapter.calls == 0
+
+
+def test_call_model_skips_rate_limited_provider_and_routes_next(monkeypatch, _no_db_credentials):
+    """A rate-limited provider is unavailable, not failed: the cascade
+    falls through to the next chain entry instead of raising."""
+
+    def limited_only_gemini(conn, user_id, provider, *, limits=None):
+        if provider == "gemini":
+            raise mp._tenant_usage.TenantRateLimitExceededError("limited")
+
+    monkeypatch.setattr(mp._tenant_usage, "check_rate_limit", limited_only_gemini)
+    succeeding = _FakeAdapter(result=_ok_result(provider="groq", model="llama-3.1-8b-instant"))
+    monkeypatch.setattr(
+        mp, "_make_adapter", lambda provider, config, resolve_credential: succeeding
+    )
+    monkeypatch.setattr(mp, "record_cost", lambda **kw: None)
+
+    conn = {"available_providers": ["gemini", "groq"]}
+    result = mp.call_model(
+        "quick", "sys", [{"role": "user", "content": "hi"}], conn, {}, user_id="u1"
+    )
+
+    assert result.provider == "groq"
+    assert succeeding.calls == 1
+
+
+def test_call_model_all_providers_rate_limited_raises_rate_limit_error(
+    monkeypatch, _no_db_credentials
+):
+    """When every chain entry was skipped for rate limiting -- nothing was
+    even attempted -- the tenant-scoped signal propagates instead of the
+    generic ProviderCascadeExhaustedError."""
+
+    def always_limited(conn, user_id, provider, *, limits=None):
+        raise mp._tenant_usage.TenantRateLimitExceededError("limited")
+
+    monkeypatch.setattr(mp._tenant_usage, "check_rate_limit", always_limited)
+    adapter = _FakeAdapter(result=_ok_result())
+    monkeypatch.setattr(mp, "_make_adapter", lambda *a: adapter)
+
+    conn = {"available_providers": ["gemini", "groq"]}
+    with pytest.raises(mp._tenant_usage.TenantRateLimitExceededError):
+        mp.call_model("quick", "sys", [{"role": "user", "content": "hi"}], conn, {}, user_id="u1")
+    assert adapter.calls == 0
+
+
+def test_call_model_mixed_rate_limit_and_failure_still_exhausts(monkeypatch, _no_db_credentials):
+    """One rate-limited skip + one real provider failure is generic
+    exhaustion -- the rate-limit signal only replaces exhaustion when
+    NOTHING else went wrong."""
+    failing = _FakeAdapter(error=RuntimeError("boom"))
+
+    def limited_only_gemini(conn, user_id, provider, *, limits=None):
+        if provider == "gemini":
+            raise mp._tenant_usage.TenantRateLimitExceededError("limited")
+
+    monkeypatch.setattr(mp._tenant_usage, "check_rate_limit", limited_only_gemini)
+    monkeypatch.setattr(mp, "_make_adapter", lambda provider, config, resolve_credential: failing)
+
+    conn = {"available_providers": ["gemini", "groq"]}
+    with pytest.raises(mp.ProviderCascadeExhaustedError):
+        mp.call_model("quick", "sys", [{"role": "user", "content": "hi"}], conn, {}, user_id="u1")
+
+
+def test_call_model_threads_config_limits_into_gates(monkeypatch, _no_db_credentials):
+    """config['tenant_usage'] resolves via limits_from_config and reaches
+    both gates -- the operator-facing tuning/kill-switch seam."""
+    seen: dict = {}
+    monkeypatch.setattr(
+        mp._tenant_usage,
+        "check_quota",
+        lambda conn, user_id, *, limits=None: seen.update(quota=limits),
+    )
+    monkeypatch.setattr(
+        mp._tenant_usage,
+        "check_rate_limit",
+        lambda conn, user_id, provider, *, limits=None: seen.update(rate=limits),
+    )
+    adapter = _FakeAdapter(result=_ok_result())
+    monkeypatch.setattr(mp, "_make_adapter", lambda *a: adapter)
+    monkeypatch.setattr(mp, "record_cost", lambda **kw: None)
+
+    conn = {"available_providers": ["gemini"]}
+    mp.call_model(
+        "quick",
+        "sys",
+        [{"role": "user", "content": "hi"}],
+        conn,
+        {"tenant_usage": {"rolling_day_spend_cap_usd": 2.5, "per_provider_calls_per_minute": 7}},
+        user_id="u1",
+    )
+
+    assert seen["quota"].rolling_day_spend_cap_usd == 2.5
+    assert seen["quota"] is seen["rate"]
+    assert seen["rate"].per_provider_calls_per_minute == 7
+
+
+# ---------------------------------------------------------------------------
+# record_cost -> model_usage_ledger (issue #333): real pool + real Postgres,
+# on an isolated throwaway database since the ledger write COMMITS
+# (test_scan_services_contract's wired_services precedent -- committed rows
+# must not leak into the shared session DB).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def ledger_pool():
+    from tests.host.conftest import create_throwaway_db, drop_throwaway_db
+
+    from jobcannon.db import pool as pool_mod
+    from jobcannon.db.migrate import run_migrations
+
+    dsn, db_name = create_throwaway_db("jobcannon_ledger")
+    try:
+        run_migrations(dsn)
+        pool_mod.open_pool(dsn)
+        with psycopg.connect(dsn, autocommit=True) as c:
+            c.execute("INSERT INTO users (id) VALUES ('ledger-u1')")
+        yield dsn
+    finally:
+        pool_mod.close_pool()
+        drop_throwaway_db(db_name)
+
+
+def _ledger_rows(dsn):
+    with psycopg.connect(dsn, autocommit=True) as c:
+        return c.execute(
+            "SELECT user_id, provider, model, cost_usd, input_tokens, output_tokens, "
+            "job_id, purpose, schema_valid FROM model_usage_ledger"
+        ).fetchall()
+
+
+@requires_postgres
+def test_record_cost_writes_ledger_row_when_user_scoped(ledger_pool):
+    mp.record_cost(
+        provider="groq",
+        model="llama-3.1-8b-instant",
+        cost_usd=0.004,
+        input_tokens=3,
+        output_tokens=2,
+        job_id="j|9",
+        purpose="quick",
+        user_id="ledger-u1",
+        schema_valid=True,
+    )
+
+    rows = _ledger_rows(ledger_pool)
+    assert len(rows) == 1
+    (user_id, provider, model, cost_usd, in_tok, out_tok, job_id, purpose, schema_valid) = rows[0]
+    assert (user_id, provider, model) == ("ledger-u1", "groq", "llama-3.1-8b-instant")
+    assert cost_usd == pytest.approx(0.004)
+    assert (in_tok, out_tok, job_id, purpose, schema_valid) == (3, 2, "j|9", "quick", True)
+
+
+@requires_postgres
+def test_record_cost_ledger_row_zeroes_free_provider_cost(ledger_pool):
+    """gemini is is_free -- the notional adapter cost must record as 0.0
+    (FREE_PROVIDER_NAMES normalization at the ledger-write boundary)."""
+    mp.record_cost(provider="gemini", model="gemini-2.5-flash", cost_usd=0.777, user_id="ledger-u1")
+
+    rows = _ledger_rows(ledger_pool)
+    assert len(rows) == 1
+    assert rows[0][3] == 0.0
+
+
+@requires_postgres
+def test_record_cost_ledger_write_failure_is_nonfatal(ledger_pool):
+    """A user_id with no users row violates the FK -- the write must warn
+    and swallow, never raise into the caller (cost recording is best-effort)."""
+    mp.record_cost(provider="groq", model="m", cost_usd=0.001, user_id="ghost-user")
+
+    assert _ledger_rows(ledger_pool) == []
