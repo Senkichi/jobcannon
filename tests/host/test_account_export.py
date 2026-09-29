@@ -56,6 +56,17 @@ _PROFILE_EXPORT_COLUMNS = frozenset(
         # the columns already exported.
         "target_companies",
         "workplace_type",
+        # #420 (m0030): the config-shaped candidate-context fields —
+        # self-reported career/preference data (scoring-preference token,
+        # industries, company/title exclusions, structured resume
+        # positions/education), same minimization class as
+        # experience_summary. Exported even though no writer populates them
+        # yet, so the document is already correct when one lands.
+        "work_arrangement",
+        "industries",
+        "exclusions",
+        "positions",
+        "education",
         "updated_at",
     }
 )
@@ -299,6 +310,11 @@ def test_export_document_pins_expected_key_sets(app):
         "comp_floor_usd",
         "target_companies",
         "workplace_type",
+        "work_arrangement",
+        "industries",
+        "exclusions",
+        "positions",
+        "education",
         "updated_at",
     }
 

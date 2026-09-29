@@ -14,8 +14,9 @@ that drops one side's note leaves a reader of the other renderer believing
 it is the sole candidate-context implementation — and either could then
 "clean up" the apparent duplication by delegating, silently dropping the
 config-shaped path's location hierarchy, structured positions/education,
-industries, and exclusions prompt inputs (the ``profiles`` table has none
-of them until the schema expansion tracked in issue #420 lands).
+industries, and exclusions prompt inputs (the ``profiles`` table gained
+those columns in issue #420's m0030, but the row renderer does not read
+them and no writer populates them yet).
 
 This guard pins the three properties that keep the documentation honest:
 

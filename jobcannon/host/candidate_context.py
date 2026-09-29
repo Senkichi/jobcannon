@@ -122,17 +122,17 @@ def build_candidate_context(profile: Mapping) -> str:
     renderer exists at ``jobcannon/host/scoring_orchestrator.py::
     build_candidate_context`` (plus its ``_render_location_targeting``
     helper), keyed on ``config["profile"]`` targeting fields rather than
-    a ``profiles`` row. The divergence is deliberate: the ``profiles``
-    table this renderer reads
-    (``db/migrations/m0001_initial_schema.py``'s ``CREATE TABLE
-    profiles``, lines 108-117, plus m0008/m0012) has no location
-    preference hierarchy (``target_locations`` is a flat list;
-    ``workplace_type`` is a single scalar), no structured resume
-    positions or education (only free-text ``experience_summary``), no
-    ``industries``, and no ``exclusions`` — so the config-shaped path
-    cannot delegate to this renderer without silently dropping those
-    prompt inputs. Unification waits on a ``profiles`` schema expansion,
-    tracked in issue #420.
+    a ``profiles`` row. The divergence is deliberate. m0030 (issue #420)
+    added the missing columns — ``work_arrangement`` for the location
+    preference hierarchy the flat ``target_locations`` list cannot
+    express, ``industries``, ``exclusions``, and structured
+    ``positions``/``education`` (previously only free-text
+    ``experience_summary`` existed) — but this renderer does not read
+    them and no writer populates them yet, so the config-shaped path
+    still cannot delegate to this renderer without silently dropping
+    those prompt inputs (they would render "Not specified" even where
+    the config holds real values). Renderer unification is the #364
+    follow-up; the schema half landed in issue #420.
     """
     return "\n".join(
         [

@@ -91,7 +91,18 @@ created for a `profile is None` visitor — see its own docstring) and whose
 UPDATE's SET clause never names `workplace_type`, so there is no read to
 go stale and no window for a concurrent write to land in. This is narrower
 than `upsert_profile`, not a loosening of it — the required-kwarg contract
-above is untouched for every caller that still goes through it."""
+above is untouched for every caller that still goes through it.
+
+m0030 (#420) added five config-shaped columns — `work_arrangement`,
+`industries`, `exclusions`, `positions`, `education` — with NO writer
+kwargs anywhere in this module: which writer populates them (picker UI vs.
+config import) is the issue's deliberately-open question, so neither
+`upsert_profile` nor `replace_profile` accepts them and no SET clause names
+them. They appear only in the two READ column lists below (`get_profile`'s
+SELECT and `clear_profile_targets`'s RETURNING, which mirrors it) — the
+#105 export-classification contract requires every `profiles` column to be
+accounted for there, and these are user self-reported career/preference
+data in the same minimization class as `skills`/`target_titles`."""
 
 from __future__ import annotations
 
@@ -242,7 +253,8 @@ def clear_profile_targets(conn: Any, user_id: str) -> Any:
         "WHERE user_id = %s "
         "RETURNING user_id, skills, experience_summary, target_titles, target_locations, "
         "seniority_level, years_of_experience, comp_floor_usd, target_companies, "
-        "workplace_type, updated_at",
+        "workplace_type, work_arrangement, industries, exclusions, positions, "
+        "education, updated_at",
         (Jsonb([]), Jsonb([]), user_id),
     ).fetchone()
     commit_unless_nested(raw)
@@ -262,7 +274,8 @@ def get_profile(conn: Any, user_id: str) -> Any:
     return raw.execute(
         "SELECT user_id, skills, experience_summary, target_titles, target_locations, "
         "seniority_level, years_of_experience, comp_floor_usd, target_companies, "
-        "workplace_type, updated_at "
+        "workplace_type, work_arrangement, industries, exclusions, positions, "
+        "education, updated_at "
         "FROM profiles WHERE user_id = %s",
         (user_id,),
     ).fetchone()
