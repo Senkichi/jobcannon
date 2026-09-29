@@ -244,7 +244,7 @@ class ScanServices:
     # Exposed as its OWN field, not only used internally by call_model's own
     # cascade loop, so other cost/usage call sites (e.g. a future per-call
     # quota counter) share one seam instead of each hand-rolling a write
-    # against a cost ledger.
+    # against the model_usage_ledger cost ledger (issue #333).
     record_cost: Callable[..., Any] | None = None
 
     # L-0465. Matches the already-landed
