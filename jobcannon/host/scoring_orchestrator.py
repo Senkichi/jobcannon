@@ -420,8 +420,8 @@ def _render_location_targeting(
     location-targeting section of the config-shaped candidate-context
     renderer — see ``build_candidate_context``'s docstring below for why
     that renderer deliberately does not delegate to the ``profiles``-row
-    renderer in ``jobcannon/host/candidate_context.py`` (unification
-    tracked in issue #420).
+    renderer in ``jobcannon/host/candidate_context.py`` (schema expansion
+    landed in issue #420; renderer unification is #364's follow-up).
     """
     wa = (work_arrangement or "remote").strip().lower()
     # Keep only real places: drop blanks/None AND the "remote" modality token.
@@ -502,15 +502,13 @@ def build_candidate_context(config: dict, profile: dict) -> str:
     build_candidate_context``, keyed on a ``profiles`` DB row rather than
     ``config["profile"]``. This config-shaped renderer (together with
     ``_render_location_targeting`` above) is deliberately richer and does
-    NOT delegate to that one: the ``profiles`` table
-    (``db/migrations/m0001_initial_schema.py``'s ``CREATE TABLE
-    profiles``, lines 108-117, plus m0008/m0012) has no location
-    preference hierarchy (``target_locations`` is a flat list and
-    ``workplace_type`` a single scalar), no structured resume positions
-    or education (only free-text ``experience_summary``), no
-    ``industries``, and no ``exclusions``. Delegating from this path
-    would silently drop those prompt inputs. Unification waits on a
-    ``profiles`` schema expansion, tracked in issue #420.
+    NOT delegate to that one: although m0030 (issue #420) added the
+    ``profiles`` columns for every field this renderer reads
+    (``work_arrangement``, ``industries``, ``exclusions``, ``positions``,
+    ``education``), that renderer does not read them and no writer
+    populates them yet, so delegating from this path would still
+    silently drop those prompt inputs. Renderer unification is the #364
+    follow-up; the schema half landed in issue #420.
 
     Args:
         config: Application config dict. Reads ``config["profile"]`` for
