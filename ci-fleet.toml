@@ -1,0 +1,7 @@
+# Test impact selection for jobcannon (ci-fleet >= 0.7.0). Defaults are on;
+# `full_triggers` and `inert` only append to the built-in lists. A shadow miss
+# is fixed here with a `path_rules` entry (or in ci-fleet's classifier), and
+# the shadow window restarts. `enabled = false` is the per-repo kill switch;
+# the repo variable `CI_FLEET_SELECT=off` is the per-run one.
+[test_selection]
+enabled = true

@@ -3,6 +3,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual dispatch runs the nightly's map mode on demand.
+  workflow_dispatch:
+  # The repo's one nightly, 09:00 UTC: the test job runs the suite in map
+  # mode for test impact selection.
+  schedule:
+    - cron: "0 9 * * *"
 
 # Cancel superseded PR runs; pushes to main keep one run per commit (the
 # group keys on the unique SHA, so nothing groups or cancels).
@@ -12,6 +18,9 @@ concurrency:
 
 permissions:
   contents: read
+  # `ci-fleet test` finds the newest `ci-fleet-map` artifact through the
+  # Actions API with this job's token (read-only, also on fork PRs).
+  actions: read
 
 jobs:
   test:
@@ -28,7 +37,9 @@ jobs:
     # See the `tests-passed` job's own comment for the fork-PR flow this
     # repo uses instead, and the PR body for the full rationale.
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The nightly runs the suite in map mode, bounded at 3.0x the plain run,
+    # so its cap is 3x.
+    timeout-minutes: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 60 || 20 }}
     services:
       postgres:
         # pg17, not pg18: render.yaml pins `postgresMajorVersion: "17"` for
@@ -67,7 +78,10 @@ jobs:
       # service is the only instance that DSN could ever point at.
       POSTGRES_ADMIN_DSN: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
+      # fetch-depth: 0 -- the test selector diffs the PR head against its base.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
@@ -92,8 +106,69 @@ jobs:
       # "deleting the opt-out is all it takes for these tests to start
       # proving #132 again for real." The `fork-proof` job below still
       # runs the same pair again on purpose -- see its own comment.
+      # Pushes to main: the whole suite, as before.
       - name: Run tests
+        if: github.event_name == 'push'
         run: uv run pytest -q --tb=short
+
+      # Test impact selection, in shadow: the full suite runs unchanged and
+      # the selection it would have made is recorded (TIS-JCP-2 drops --shadow
+      # once the shadow window is met). Aviator's draft-PR queue builds take
+      # this step too. The selector comes from PyPI, never from this checkout.
+      - name: Run tests (selection)
+        if: github.event_name == 'pull_request'
+        env:
+          CI_FLEET_SELECT_LEVEL: ${{ vars.CI_FLEET_SELECT_LEVEL }}
+          GH_TOKEN: ${{ github.token }}
+        run: uvx --from "ci-fleet~=0.7.0" ci-fleet test --repo ${{ github.repository }} --base ${{ github.event.pull_request.base.sha }} --context ci --shadow -- uv run pytest -q --tb=short
+
+      # The nightly's map mode needs ci-fleet 0.7's `map` extra. Job-only: the
+      # lock is untouched, and every later nightly command uses --no-sync so
+      # `uv run` does not re-sync over it.
+      - name: Install ci-fleet[map]
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        run: uv pip install "ci-fleet[map]~=0.7.0"
+
+      # The nightly: the same suite, once, in map mode. The map-mode variables
+      # live in this step's env only. The assignment on its own line lets
+      # `bash -e` fail the step when `prepare` fails.
+      - name: Run tests (map mode)
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        env:
+          CI_FLEET_MAP: "1"
+          COVERAGE_CORE: ctrace
+          CI_FLEET_LEDGER_CONTEXT: nightly
+        run: |
+          map_args=$(uv run --no-sync ci-fleet map prepare)
+          mapfile -t map_args <<< "$map_args"
+          uv run --no-sync pytest -q --tb=short "${map_args[@]}"
+
+      # A failing nightly still maps every test that ran, and its failures
+      # become the map's `known_failing`.
+      - name: Build the map
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled()
+        run: uv run --no-sync ci-fleet map build --repo ${{ github.repository }} --map-sha ${{ github.sha }}
+
+      - name: Upload the map
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-fleet-map
+          path: .ci-fleet-map/ci-fleet-map.json.gz
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: warn
+
+      # Not `ci-fleet-map-*`: artifacts are routed by name prefix.
+      - name: Upload the coverage data
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: map-coverage-data
+          path: .ci-fleet-map/.coverage
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
       # The test ledger (ci-fleet): the recorder wrote this run's per-test
       # durations under RUNNER_TEMP; the workstation collector downloads them.
       # Never allowed to change the job's result.
