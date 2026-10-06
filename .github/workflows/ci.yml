@@ -94,6 +94,18 @@ jobs:
       # runs the same pair again on purpose -- see its own comment.
       - name: Run tests
         run: uv run pytest -q --tb=short
+      # The test ledger (ci-fleet): the recorder wrote this run's per-test
+      # durations under RUNNER_TEMP; the workstation collector downloads them.
+      # Never allowed to change the job's result.
+      - name: Upload test-ledger spool
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-fleet-ledger-${{ github.job }}-${{ strategy.job-index }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-fleet-ledger/
+          retention-days: 3
+          if-no-files-found: ignore
 
   fork-proof:
     name: Fork/atexit proof
@@ -127,6 +139,18 @@ jobs:
       - run: uv sync --dev
       - name: Run fork/atexit proof (real os.fork())
         run: uv run pytest tests/host/test_posthog_fork_atexit.py -n0 -p no:cacheprovider --tb=short
+      # The test ledger (ci-fleet): the recorder wrote this run's per-test
+      # durations under RUNNER_TEMP; the workstation collector downloads them.
+      # Never allowed to change the job's result.
+      - name: Upload test-ledger spool
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-fleet-ledger-${{ github.job }}-${{ strategy.job-index }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-fleet-ledger/
+          retention-days: 3
+          if-no-files-found: ignore
 
   migration-collision-guard:
     name: Migration collision guard
