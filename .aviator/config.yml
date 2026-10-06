@@ -1,6 +1,9 @@
 merge_rules:
   labels:
     trigger: "mergequeue"
+    # The fleet's dispatcher labels a PR whose issue carries `priority:critical` (a
+    # nightly-break fix or revert) with this; Aviator moves it to the front.
+    skip_line: "mergequeue-skip-line"
   preconditions:
     number_of_approvals: 0
     required_checks:

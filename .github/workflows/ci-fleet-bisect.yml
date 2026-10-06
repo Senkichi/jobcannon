@@ -1,0 +1,101 @@
+name: ci-fleet bisect
+
+# Dispatched by ci-fleet's hourly nightly triage for a nightly break:
+# classifies it (isolation / environment / culprit) and finds the culprit
+# commit. workflow_dispatch only, so this is never a second nightly. The run
+# name and the artifact name carry the break id: the triage poller finds this
+# run by its name and downloads its result by artifact name.
+run-name: ci-fleet-bisect break-${{ inputs.break_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      good:
+        description: last green nightly sha
+        required: true
+        type: string
+      bad:
+        description: the failing nightly's sha
+        required: true
+        type: string
+      nodeids:
+        description: failing test ids, space-separated (at most 50)
+        required: true
+        type: string
+      seed:
+        description: the nightly's pytest-randomly seed, if any
+        required: false
+        default: ''
+        type: string
+      break_id:
+        description: nightly_breaks.break_id
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-fleet-bisect-${{ inputs.break_id }}
+  cancel-in-progress: false
+
+jobs:
+  Bisect:
+    name: Bisect
+    # Where the suite runs: ci.yml's test job, with the same database.
+    runs-on: ubuntu-latest
+    # ci-fleet's own bound is 4 h (BISECT_TIMEOUT_S); this one only frees the
+    # runner if that bound fails.
+    timeout-minutes: 270
+    services:
+      postgres:
+        # Same image and digest as ci.yml's test job; bump both together.
+        image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      POSTGRES_ADMIN_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+      UV_PROJECT_ENVIRONMENT: '.venv'
+      # A bisect step's pytest run is not a ledger run.
+      CI_FLEET_LEDGER: 'off'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # The driver comes from PyPI: bisect checks out commits whose venv may
+      # hold no ci-fleet at all. Each step runs `uv sync --frozen`, which
+      # includes the dev group. Inputs reach the shell only through env,
+      # never by template expansion.
+      - name: Bisect
+        env:
+          GOOD: ${{ inputs.good }}
+          BAD: ${{ inputs.bad }}
+          NODEIDS: ${{ inputs.nodeids }}
+          SEED: ${{ inputs.seed }}
+        run: |
+          read -ra nodeids <<< "$NODEIDS"
+          seed=()
+          if [ -n "$SEED" ]; then seed=(--seed "$SEED"); fi
+          uvx --from "ci-fleet~=0.7.0" ci-fleet nightly bisect --good "$GOOD" --bad "$BAD" --nodeids "${nodeids[@]}" "${seed[@]}" --out ci-fleet-bisect
+
+      - name: Upload the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-fleet-bisect-${{ inputs.break_id }}
+          path: ci-fleet-bisect/
+          retention-days: 30
