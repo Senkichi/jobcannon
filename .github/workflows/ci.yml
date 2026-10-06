@@ -111,16 +111,19 @@ jobs:
         if: github.event_name == 'push'
         run: uv run pytest -q --tb=short
 
-      # Test impact selection, in shadow: the full suite runs unchanged and
-      # the selection it would have made is recorded (TIS-JCP-2 drops --shadow
-      # once the shadow window is met). Aviator's draft-PR queue builds take
-      # this step too. The selector comes from PyPI, never from this checkout.
+      # Test impact selection, enforced: runs only the selected tests, or
+      # everything when the selector says `full`. Aviator's draft-PR queue
+      # builds take this step too. Enforced once the shadow window showed no
+      # misses (`ci-fleet nightly shadow-status`). Kill switch: the repo
+      # variable CI_FLEET_SELECT=off, or `enabled = false` in ci-fleet.toml.
+      # The selector comes from PyPI, never from this checkout.
       - name: Run tests (selection)
         if: github.event_name == 'pull_request'
         env:
           CI_FLEET_SELECT_LEVEL: ${{ vars.CI_FLEET_SELECT_LEVEL }}
+          CI_FLEET_SELECT: ${{ vars.CI_FLEET_SELECT }}
           GH_TOKEN: ${{ github.token }}
-        run: uvx --from "ci-fleet~=0.7.0" ci-fleet test --repo ${{ github.repository }} --base ${{ github.event.pull_request.base.sha }} --context ci --shadow -- uv run pytest -q --tb=short
+        run: uvx --from "ci-fleet~=0.7.0" ci-fleet test --repo ${{ github.repository }} --base ${{ github.event.pull_request.base.sha }} --context ci -- uv run pytest -q --tb=short
 
       # The nightly's map mode needs ci-fleet 0.7's `map` extra. Job-only: the
       # lock is untouched, and every later nightly command uses --no-sync so

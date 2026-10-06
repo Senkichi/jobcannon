@@ -106,7 +106,7 @@ def test_map_mode_never_leaves_its_step(ci) -> None:
     assert holders == [("test", "Run tests (map mode)")]
 
 
-def test_pull_requests_record_a_shadow_selection(ci) -> None:
+def test_pull_requests_run_the_selection(ci) -> None:
     assert ci["permissions"]["actions"] == "read"  # the selector lists map artifacts
     job = ci["jobs"]["test"]
     [checkout] = _uses(job, "actions/checkout@")
@@ -115,12 +115,14 @@ def test_pull_requests_record_a_shadow_selection(ci) -> None:
     assert step["if"] == "github.event_name == 'pull_request'"
     assert step["env"] == {
         "CI_FLEET_SELECT_LEVEL": "${{ vars.CI_FLEET_SELECT_LEVEL }}",
+        "CI_FLEET_SELECT": "${{ vars.CI_FLEET_SELECT }}",
         "GH_TOKEN": "${{ github.token }}",
     }
+    # Enforced since the shadow window was met (TIS-JCP-2): no `--shadow`.
     assert step["run"] == (
         f"{SELECTOR} test --repo ${{{{ github.repository }}}} "
         "--base ${{ github.event.pull_request.base.sha }} "
-        f"--context ci --shadow -- {PYTEST}"
+        f"--context ci -- {PYTEST}"
     )
     plain = _step(job, "Run tests")
     assert plain["if"] == "github.event_name == 'push'"
